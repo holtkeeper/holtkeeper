@@ -20,8 +20,8 @@ import {
 const NOW = new Date('2026-10-30T12:00:00.000Z')
 const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000).toISOString()
 
-const circle: RepoTarget = { forge: 'work', path: 'shapes/circle', groups: ['shapes'] }
-const square: RepoTarget = { forge: 'work', path: 'shapes/square', groups: ['shapes'] }
+const circle: RepoTarget = { forge: 'work', path: 'shapes/circle', teams: ['shapes'] }
+const square: RepoTarget = { forge: 'work', path: 'shapes/square', teams: ['shapes'] }
 
 const head = (kind: string, metrics?: object, patch: Partial<AnalysisHead> = {}): AnalysisHead => ({
   id: `${kind}-${Math.random().toString(36).slice(2)}`,
@@ -183,7 +183,7 @@ describe('repoHealth cells', () => {
     ]
     expect(cellOf('coverage', { heads })).toEqual({ value: '58%', sub: 'below 60%', tone: 'bad' })
     const settings = [
-      setting('analyzers.coverage', { groups: ['shapes'] }, { target: 70 }),
+      setting('analyzers.coverage', { teams: ['shapes'] }, { target: 70 }),
       setting('analyzers.coverage', { repos: ['work:shapes/circle'] }, { target: 50 }),
     ]
     expect(cellOf('coverage', { heads, settings })).toEqual({
@@ -206,7 +206,7 @@ describe('repoHealth cells', () => {
   test('a repository with no tests by design gets a neutral coverage cell', () => {
     const heads = [head('coverage', { percent: 12, delta: -4, target: 60, files: 3, untested: 2 })]
     const settings = [
-      setting('repo.tests', { groups: ['shapes'] }, { expected: false, reason: 'Config only' }),
+      setting('repo.tests', { teams: ['shapes'] }, { expected: false, reason: 'Config only' }),
     ]
     expect(cellOf('coverage', { heads, settings })).toEqual({
       value: 'No tests',
@@ -216,7 +216,7 @@ describe('repoHealth cells', () => {
     expect(classify({ heads, settings }).health).not.toBe('failing')
     expect(
       cellOf('coverage', {
-        settings: [setting('repo.tests', { groups: ['shapes'] }, { expected: false })],
+        settings: [setting('repo.tests', { teams: ['shapes'] }, { expected: false })],
       }),
     ).toEqual({ value: 'No tests', sub: 'by design', tone: 'none' })
   })
@@ -224,7 +224,7 @@ describe('repoHealth cells', () => {
   test('a cell whose analyzer is turned off is a neutral Off with the reason', () => {
     const heads = [audit()]
     const settings = [
-      setting('repo.analyzers', { groups: ['shapes'] }, { off: ['audit'], reason: 'Values only' }),
+      setting('repo.analyzers', { teams: ['shapes'] }, { off: ['audit'], reason: 'Values only' }),
     ]
     expect(cellOf('security', { heads, settings })).toEqual({
       value: 'Off',
@@ -234,7 +234,7 @@ describe('repoHealth cells', () => {
     expect(classify({ heads, settings }).health).not.toBe('failing')
     expect(
       cellOf('bundles', {
-        settings: [setting('repo.analyzers', { groups: ['shapes'] }, { off: ['bundle'] })],
+        settings: [setting('repo.analyzers', { teams: ['shapes'] }, { off: ['bundle'] })],
       }),
     ).toEqual({ value: 'Off', sub: 'turned off for this repository', tone: 'none' })
   })
@@ -306,7 +306,7 @@ describe('repoHealth cells', () => {
     expect(
       cellOf('bundles', {
         sweep: skipped,
-        settings: [setting('repo.analyzers', { groups: ['shapes'] }, { off: ['bundle'] })],
+        settings: [setting('repo.analyzers', { teams: ['shapes'] }, { off: ['bundle'] })],
       }),
     ).toMatchObject({ value: 'Off' })
 
@@ -550,7 +550,7 @@ describe('repoHealth', () => {
         },
       ),
     ]
-    const settings = [setting('repo.tests', { groups: ['shapes'] }, { expected: false })]
+    const settings = [setting('repo.tests', { teams: ['shapes'] }, { expected: false })]
     expect(classify({ heads, settings }).freshness).toEqual({ current: 1, total: 1 })
     expect(classify({ heads }).freshness).toEqual({ current: 1, total: 2 })
   })
@@ -560,7 +560,7 @@ describe('repoHealth', () => {
       head('audit', undefined, { createdAt: hoursAgo(30 * 24) }),
       head('ci-jobs', { status: 'idle' }),
     ]
-    const settings = [setting('repo.analyzers', { groups: ['shapes'] }, { off: ['audit'] })]
+    const settings = [setting('repo.analyzers', { teams: ['shapes'] }, { off: ['audit'] })]
     expect(classify({ heads, settings }).freshness).toEqual({ current: 1, total: 1 })
     expect(classify({ heads }).freshness).toEqual({ current: 1, total: 2 })
   })

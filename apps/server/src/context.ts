@@ -1,11 +1,12 @@
 import type { Action, Principal, RepoTarget, Target } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
+import { teamGrants } from '@holtkeeper/access/teams'
 import type { Agent, AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@holtkeeper/agent'
 import { ToolError } from '@holtkeeper/agent-tools'
 import type { ForbiddenError, JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
-import { type HoltkeeperConfig, groupPathLabel, resolveRepo } from '@holtkeeper/core'
+import { type HoltkeeperConfig, resolveRepo, teamLabel } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
@@ -24,8 +25,10 @@ import type { z } from 'zod'
 
 import type { AuditEnrichment } from './audit.ts'
 import type { ChatAgentFor } from './chat-threads.ts'
+import type { KnowledgeEmbeddings } from './embeddings.ts'
 import type { MediaEngine } from './media/engine.ts'
 import type { MergeRequestStatusSink } from './mr-status.ts'
+import type { NeighbourIndex } from './neighbours.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 import type { SlackApi, SlackPoster } from './slack/client.ts'
 import type { SlackReviews } from './slack/service.ts'
@@ -54,6 +57,16 @@ export interface ServerDeps {
   store: Store
   vault: Vault
   credentials: CredentialService
+  /**
+   * Vectors of knowledge notes (`knowledge.embeddings`): status and reindex routes, search and
+   * duplicate checks by meaning. Without it the routes report `off` and everything is full text.
+   */
+  embeddings?: KnowledgeEmbeddings
+  /**
+   * Repositories like each other (`createNeighbourIndex`), for the Guide's block of knowledge of
+   * similar repositories; routes build their own when absent.
+   */
+  neighbours?: NeighbourIndex
   settings: SettingDefinition[]
   /** Analysis kinds the server accepts and renders. */
   // oxlint-disable-next-line typescript/no-explicit-any -- kinds differ in their data type
@@ -170,7 +183,7 @@ export const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
 /**
  * A 403 answered with a `ForbiddenError` body: the missing `action` and, for a repository, its key
- * as the client sent it. Callers never pass groups, and pass the same target whether the
+ * as the client sent it. Callers never pass owner teams, and pass the same target whether the
  * repository exists or not.
  */
 export class ForbiddenException extends HTTPException {
@@ -222,20 +235,41 @@ export function authorizeRecord(c: AppContext, action: Action, target: Target): 
 }
 
 /**
- * Names group keys in chat, agent and MCP text: `Title (key)` when the group has a title, else the
- * key; a subgroup shows its parent first (`Shapes › Round (shapes.round)`). Reads `config` on every
- * call, so a live config stays current.
+ * Names team keys in chat, agent and MCP text: `Title (key)` when the team has a title, else the
+ * key. Reads `config` on every call, so a live config stays current.
  */
-export const groupLabeler =
-  (config: Pick<HoltkeeperConfig, 'groups'>) =>
+export const teamLabeler =
+  (config: Pick<HoltkeeperConfig, 'teams'>) =>
   (key: string): string =>
-    groupPathLabel(config.groups, key)
+    teamLabel(config.teams, key)
 
-/** A repository with the groups the config assigns to it. */
+/** A repository with the owner teams the config assigns to it. */
 export const repoTarget = (config: HoltkeeperConfig, repo: RepoRef): RepoTarget => ({
   ...repo,
-  groups: resolveRepo(config, repo).groups,
+  teams: resolveRepo(config, repo).teams,
 })
+
+/**
+ * The principal as access checks see it: its own grants plus the grants its team memberships give
+ * (`teamGrants`), and the configured teams' ownership patterns (`teamDefs`) so team grants also
+ * cover path-scoped objects. Reads `config` on every call, so a live config stays current.
+ */
+export function withTeams(
+  config: Pick<HoltkeeperConfig, 'teams'>,
+  principal: Principal,
+): Principal {
+  const teamDefs = Object.fromEntries(
+    Object.entries(config.teams).map(([key, team]) => [
+      key,
+      { owns: team.owns, exclude: team.exclude },
+    ]),
+  )
+  return {
+    ...principal,
+    grants: [...principal.grants, ...teamGrants(config.teams, principal)],
+    teamDefs,
+  }
+}
 
 /** Parses `forge:path` from a query parameter. */
 export function parseRepo(value: string | undefined): RepoRef | undefined {

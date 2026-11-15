@@ -35,7 +35,7 @@ function rowOf(
   const branches = metrics.branches ?? []
   return {
     repo: head.repo,
-    groups: target.groups,
+    teams: target.teams,
     analysisId: head.id,
     createdAt: head.createdAt,
     defaultBranch: metrics.defaultBranch ?? '',

@@ -19,6 +19,7 @@ interface KnowledgeRow {
   source: KnowledgeEntry['source']
   author: string
   scope: string
+  matches: string | null
   topics: string
   applies_to: string
   packages: string | null
@@ -55,6 +56,7 @@ const toEntry = (r: KnowledgeRow): KnowledgeEntry => ({
   body: r.body,
   kind: r.kind,
   scope: JSON.parse(r.scope),
+  ...(r.matches !== null && { match: JSON.parse(r.matches) }),
   topics: JSON.parse(r.topics),
   appliesTo: JSON.parse(r.applies_to),
   ...(r.packages !== null && { packages: JSON.parse(r.packages) }),
@@ -76,6 +78,7 @@ const content = (entry: KnowledgeEntry): KnowledgeContent => ({
   body: entry.body,
   kind: entry.kind,
   scope: entry.scope,
+  ...(entry.match !== undefined && { match: entry.match }),
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   ...(entry.packages !== undefined && { packages: entry.packages }),
@@ -109,7 +112,7 @@ const filterSql = `
   AND (?3 IS NULL OR EXISTS (SELECT 1 FROM json_each(k.topics) WHERE lower(value) = lower(?3)))
   AND (?4 IS NULL
     OR (lower(?4) = 'all' AND json_extract(k.scope, '$.all') = 1)
-    OR EXISTS (SELECT 1 FROM json_each(k.scope, '$.groups') WHERE instr(lower(value), lower(?4)) > 0)
+    OR EXISTS (SELECT 1 FROM json_each(k.scope, '$.teams') WHERE instr(lower(value), lower(?4)) > 0)
     OR EXISTS (SELECT 1 FROM json_each(k.scope, '$.repos') WHERE instr(lower(value), lower(?4)) > 0))
   AND (?5 IS NULL OR EXISTS (
     SELECT 1 FROM json_each(k.packages)
@@ -158,17 +161,18 @@ export function sqliteKnowledge(db: Database): KnowledgeStore {
         string,
         string | null,
         number,
+        string | null,
       ]
     >(
       `INSERT INTO knowledge (id, title, body, kind, status, source, author, scope, topics, applies_to, packages,
-         visibility, subject, evidence, supersedes, tags, created_at, updated_at, updated_by, version)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+         visibility, subject, evidence, supersedes, tags, created_at, updated_at, updated_by, version, matches)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
        ON CONFLICT (id) DO UPDATE SET title = excluded.title, body = excluded.body, kind = excluded.kind,
          status = excluded.status, source = excluded.source, author = excluded.author, scope = excluded.scope,
          topics = excluded.topics, applies_to = excluded.applies_to, packages = excluded.packages,
          visibility = excluded.visibility, subject = excluded.subject, evidence = excluded.evidence, supersedes = excluded.supersedes, tags = excluded.tags,
          created_at = excluded.created_at, updated_at = excluded.updated_at, updated_by = excluded.updated_by,
-         version = excluded.version
+         version = excluded.version, matches = excluded.matches
        RETURNING *`,
     ),
     addRevision: db.prepare(
@@ -222,6 +226,7 @@ export function sqliteKnowledge(db: Database): KnowledgeStore {
       input.updatedAt,
       input.updatedBy ?? null,
       (previous?.version ?? 0) + 1,
+      input.match ? JSON.stringify(input.match) : null,
     )
     if (!stored) throw new Error('knowledge upsert returned nothing')
     return toEntry(stored)

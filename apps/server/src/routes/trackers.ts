@@ -24,7 +24,8 @@ export function trackerRoutes(deps: TrackerRouteDeps) {
       throw new HTTPException(404, { message: 'tracker analysis not found' })
     const principal = authorize(c, 'analyses:run', {
       kind: 'scope',
-      scope: { groups: [record.repo.path] },
+      // Tracker records are group-scope: the record's path is the team key.
+      scope: { teams: [record.repo.path] },
     })
     const input = await readBody(c, publishSchema)
     const parsed = trackerDataSchema.safeParse(record.data)

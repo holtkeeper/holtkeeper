@@ -1,6 +1,6 @@
 # @holtkeeper/analyzer
 
-The contract between analyzers and the runner that runs them (the task engine of `@holtkeeper/jobs`). An `Analyzer` declares its kind, scope (`repo` or `group`), options schema and what it `needs` (checkout, forge, agent, history); runners provide exactly that in an `AnalyzerContext` (plus `jobId`, the id of the job inside the task engine) and store what `run` returns. `run` returns `{ data, ref?, sha?, at?, artifacts? }`: `sha` is the commit the data describes; runners fall back to the commit of the job's checkout, so analyzers without one set it to the forge head they read.
+The contract between analyzers and the runner that runs them (the task engine of `@holtkeeper/jobs`). An `Analyzer` declares its kind, scope (`repo`, or `group`: every repository of one team at once), options schema and what it `needs` (checkout, forge, agent, history); runners provide exactly that in an `AnalyzerContext` (plus `jobId`, the id of the job inside the task engine) and store what `run` returns. `run` returns `{ data, ref?, sha?, at?, artifacts? }`: `sha` is the commit the data describes; runners fall back to the commit of the job's checkout, so analyzers without one set it to the forge head they read.
 
 `keepRecords: n` makes runners delete the analyzer's older records of a repository after storing a new one, keeping the newest `n`; for snapshot analyzers whose history lives elsewhere (`ci-jobs` keeps 3).
 
@@ -34,7 +34,7 @@ Analyzers without a checkout report the commit they read: `defaultBranchHead(for
 
 ## Applicability
 
-`appliesTo?: Applicability` says whether a repository uses what the analyzer works on. Schedules and freshness ask it before queueing a repository job, so an analyzer in a schedule over every group runs only where it has something to do, and repositories that start or stop using it join or leave on the next run. It reads the default branch through the forge (`ApplicabilityContext`: `repo`, `forge.readFile`), never a checkout, so keep it to a few small files. A check that throws counts as applying; manual runs skip the check, so `run` must still handle a repository it does not apply to.
+`appliesTo?: Applicability` says whether a repository uses what the analyzer works on. Schedules and freshness ask it before queueing a repository job, so an analyzer in a schedule over the whole fleet runs only where it has something to do, and repositories that start or stop using it join or leave on the next run. It reads the default branch through the forge (`ApplicabilityContext`: `repo`, `forge.readFile`), never a checkout, so keep it to a few small files. A check that throws counts as applying; manual runs skip the check, so `run` must still handle a repository it does not apply to.
 
 Building blocks, combinable:
 

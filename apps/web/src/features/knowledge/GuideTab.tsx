@@ -2,7 +2,7 @@ import type { Family, GuideSectionName, RepoRef, RepoSummary } from '@holtkeeper
 import { Link } from '@tanstack/react-router'
 import { ChevronRight } from 'lucide-react'
 
-import { useGroupTitles, useGuide, useGuideChain } from '../../api/queries.ts'
+import { useTeamTitles, useGuide, useGuideChain } from '../../api/queries.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import {
   type Space,
@@ -20,7 +20,8 @@ import { SectionDetail } from './SectionDetail.tsx'
 
 const spaceKindLabel: Record<Space['kind'], string> = {
   all: 'Organization',
-  group: 'Team',
+  team: 'Team',
+  path: 'Folder',
   family: 'Family',
   repo: 'Repository',
 }
@@ -49,7 +50,7 @@ export function GuideTab({
   const guide = useGuide(scope)
   const repo: RepoRef | undefined = space.kind === 'repo' ? space.repo : undefined
   const chain = useGuideChain(repo)
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const members =
     space.kind === 'family' ? (families.find((f) => f.id === space.family)?.members ?? []) : []
 

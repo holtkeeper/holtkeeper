@@ -1,6 +1,6 @@
 ---
 title: Invite your team
-description: Switch from the shared admin password to personal accounts with passkeys, then invite people with a role on their team's groups.
+description: Switch from the shared admin password to personal accounts with passkeys, then invite people to their team or with a role on the folders they work on.
 panel: Settings › People & access
 route: /settings/people
 permission: users:invite
@@ -10,7 +10,7 @@ sidebar:
 
 import { Button, Field, Fields, Screen, Scroll, Segmented, Strip, Tag, Toolbar, Ui } from '@ui'
 
-The quickstart signs in one `root` admin with a password. To give people their own accounts, switch the instance to **users** sign-in: everyone signs in with a passkey (optionally also through single sign-on), and you invite each person with a single-use link and a role on the groups they work on.
+The quickstart signs in one `root` admin with a password. To give people their own accounts, switch the instance to **users** sign-in: everyone signs in with a passkey (optionally also through single sign-on), and you invite each person with a single-use link and a role on the teams or folders they work on, or add them as members on Repos › Teams.
 
 ## Switch to accounts with passkeys
 
@@ -65,7 +65,7 @@ The config file picks the sign-in. The Helm chart's config, `deploy/helm/holtkee
 
 1. Open **Settings › People & access** and choose <Ui>Invite people</Ui>.
 2. Enter a name and email.
-3. Pick a **role** and the scope it applies to, usually the person's team group (`web`). Admin always covers everything. For anything unusual, switch on **Exact grants instead of a role**.
+3. Pick a **role** and the scope it applies to, usually the person's team (`widgets`) or a folder (`acme/round/**`). Adding someone as a member of their team on [Repos › Teams](/guide/repos/teams/) gives the same day-to-day access without a role. Admin always covers everything. For anything unusual, switch on **Exact grants instead of a role**.
 4. Choose **Create invite link** and copy the link. It is shown once and is valid for 72 hours.
 5. Send it to the person yourself, by chat or email. Holtkeeper does not send messages.
 
@@ -75,12 +75,12 @@ The config file picks the sign-in. The Helm chart's config, `deploy/helm/holtkee
     <Field label="Name" value="Jonah P." />
     <Field label="Email" value="jonah@example.com" />
     <Field label="Role" value="Developer" />
-    <Field label="Applies to" value="Group web" />
+    <Field label="Applies to" value="Team Widgets" />
   </Fields>
   <Button primary>Create invite link</Button>
 </Screen>
 
-You can only hand out access you hold yourself: an admin of `web` can invite people to `web` or `web.payments`, not to `tools`. See [Roles and permissions](/start/concepts/permissions/).
+You can only hand out access you hold yourself: an admin of team `widgets` can invite people to `widgets` or to a folder inside what it owns, such as `acme/round/web`, not to team `gizmo`. See [Roles and permissions](/start/concepts/permissions/).
 
 ## Which role to give
 

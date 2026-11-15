@@ -4,7 +4,7 @@ import type { FindingsResponse, LicensePolicySummary, LicensesOverview } from '@
 import { z } from 'zod'
 
 import type { RepoFilter } from '../api-surface/catalog.ts'
-import { type ServerDeps, groupLabeler, repoTarget } from '../context.ts'
+import { type ServerDeps, repoTarget, teamLabeler } from '../context.ts'
 import { type FindingsFilter, readFindings } from '../findings.ts'
 import { createFleetCache } from '../fleet-cache.ts'
 import { licensesOverview } from '../licenses.ts'
@@ -28,8 +28,8 @@ export function readableRepo(canRead: RepoFilter, repo: string | undefined): str
 export interface SupplyToolsAccess {
   findings(filter?: FindingsFilter): Promise<FindingsResponse>
   licenses(): Promise<LicensesOverview>
-  /** How a group key is named in tool output; default the key itself. */
-  groupLabel?: (key: string) => string
+  /** How a team key is named in tool output; default the key itself. */
+  teamLabel?: (key: string) => string
 }
 
 /**
@@ -71,7 +71,7 @@ export function supplyToolsAccess(
         (target) => canSee(principal, 'analyses:read', target),
         can(principal, 'settings:read', { kind: 'scope', scope: { all: true } }),
       ),
-    groupLabel: groupLabeler(config),
+    teamLabel: teamLabeler(config),
   })
 }
 
@@ -82,12 +82,12 @@ const code = (values: readonly string[]) => values.map((value) => `\`${value}\``
 const findingStatuses = ['open', 'fixing', 'allowlisted'] as const
 const severities = ['critical', 'high', 'medium', 'low', 'unknown'] as const
 
-type GroupLabel = (key: string) => string
+type TeamLabel = (key: string) => string
 
 function renderFindings(
   response: FindingsResponse,
   options: { severity?: string; status?: string; limit: number },
-  label: GroupLabel,
+  label: TeamLabel,
 ): string {
   const { severities: counts } = response
   const groups = response.groups.filter(
@@ -108,7 +108,7 @@ function renderFindings(
       `- **${group.advisory}**${group.aliases.length ? ` (${list(group.aliases)})` : ''} ${group.package} (${group.ecosystem}) — ${group.severity}, ${group.status}${group.taskId ? ` by task ${group.taskId}` : ''}${group.summary ? `: ${group.summary}` : ''}. ${group.fixedIn.length ? `Fixed in ${list(group.fixedIn)}` : 'No fix'}; first seen ${day(group.firstSeenAt)}${group.url ? `; ${group.url}` : ''}`,
       ...group.repos.map(
         (repo) =>
-          `  - \`${repo.repo}\`${repo.groups.length ? ` (${list(repo.groups.map(label))})` : ''}: ${list(repo.versions)} in ${code(repo.sources)}, ${repo.status}${repo.taskId ? ` by task ${repo.taskId}` : ''}`,
+          `  - \`${repo.repo}\`${repo.teams.length ? ` (${list(repo.teams.map(label))})` : ''}: ${list(repo.versions)} in ${code(repo.sources)}, ${repo.status}${repo.taskId ? ` by task ${repo.taskId}` : ''}`,
       ),
     ]),
     ...(groups.length > shown.length
@@ -128,7 +128,7 @@ function renderPolicy(policy: LicensePolicySummary): string {
 function renderLicenses(
   overview: LicensesOverview,
   repo: string | undefined,
-  label: GroupLabel,
+  label: TeamLabel,
 ): string {
   const rows = repo ? overview.repos.filter((row) => row.repo === repo) : overview.repos
   const violations = repo
@@ -164,7 +164,7 @@ function renderLicenses(
     '## Repositories',
     ...rows.map(
       (row) =>
-        `- \`${row.repo}\`${row.groups.length ? ` (${list(row.groups.map(label))})` : ''}: ${row.packages} packages — ${row.verdicts.denied} denied, ${row.verdicts.unlisted} need review, ${row.verdicts.unknown} unknown, ${row.verdicts.allowed} allowed, ${row.verdicts.ignored} ignored, ${row.verdicts.internal} internal${row.verdicts.excepted ? `, ${row.verdicts.excepted} excepted` : ''}${row.licenseFile === 'missing' ? '; license file missing' : ''}; scanned ${day(row.createdAt)}`,
+        `- \`${row.repo}\`${row.teams.length ? ` (${list(row.teams.map(label))})` : ''}: ${row.packages} packages — ${row.verdicts.denied} denied, ${row.verdicts.unlisted} need review, ${row.verdicts.unknown} unknown, ${row.verdicts.allowed} allowed, ${row.verdicts.ignored} ignored, ${row.verdicts.internal} internal${row.verdicts.excepted ? `, ${row.verdicts.excepted} excepted` : ''}${row.licenseFile === 'missing' ? '; license file missing' : ''}; scanned ${day(row.createdAt)}`,
     ),
     ...(repo
       ? []
@@ -181,7 +181,7 @@ function renderLicenses(
  * as `GET /api/audits/findings` and `GET /api/licenses`, as text.
  */
 export function supplyTools(access: SupplyToolsAccess): RegistryTool[] {
-  const label = access.groupLabel ?? ((key: string) => key)
+  const label = access.teamLabel ?? ((key: string) => key)
   return [
     defineTool({
       name: 'security_findings',

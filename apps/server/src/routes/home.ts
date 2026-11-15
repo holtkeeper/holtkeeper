@@ -2,7 +2,7 @@ import { type Action, type Principal, type Scope, can } from '@holtkeeper/access
 import { broadestBudget, budgetKey, budgetStatuses } from '@holtkeeper/ai-usage'
 import type { HomeSpend, HomeView } from '@holtkeeper/api'
 import { summarizeRun } from '@holtkeeper/api'
-import { rootGroups } from '@holtkeeper/core'
+import { fleetPatterns } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import { staticPrefix } from '@holtkeeper/jobs'
 import { analyzerOff, repoAnalyzersKey } from '@holtkeeper/settings'
@@ -107,9 +107,9 @@ async function eventsOf(deps: ServerDeps, principal: Principal): Promise<AuditEv
 async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSources> {
   const { store, config } = deps
   const now = deps.now()
-  const groupsOf = (key: string) => {
+  const teamsOf = (key: string) => {
     const ref = parseRepo(key)
-    return ref ? repoTarget(config, ref).groups : []
+    return ref ? repoTarget(config, ref).teams : []
   }
   const sees = (action: Action, repo: RepoRef) =>
     canSee(principal, action, repoTarget(config, repo))
@@ -182,16 +182,16 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
   for (const key of audits.keys()) repos.add(key)
   for (const card of cards) repos.add(keyOf(card.repo))
   for (const head of analyses) repos.add(keyOf(head.repo))
-  for (const group of rootGroups(config).flatMap((key) => config.groups[key] ?? []))
-    for (const path of group.include) {
+  for (const forge of Object.keys(config.forges))
+    for (const path of fleetPatterns(config, forge).include) {
       if (staticPrefix(path) !== path) continue
-      const ref = { forge: group.forge, path }
+      const ref = { forge, path }
       if (sees('repos:read', ref)) repos.add(keyOf(ref))
     }
 
   return {
     now,
-    groupsOf,
+    teamsOf,
     analyzerLabel,
     failedJobs: failedJobs.filter((job) => (job.finishedAt ?? job.createdAt) >= since),
     blockedJobs: blockedJobs.filter((job) => (job.finishedAt ?? job.createdAt) >= since),
@@ -229,7 +229,7 @@ async function buildHome(deps: ServerDeps, principal: Principal): Promise<HomeVi
     eventsOf(deps, principal),
     spendOf(deps, principal),
   ])
-  const changes = summarizeChanges(events, sources.groupsOf)
+  const changes = summarizeChanges(events, sources.teamsOf)
   return {
     generatedAt: sources.now.toISOString(),
     attention: attentionItems(sources),

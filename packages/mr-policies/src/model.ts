@@ -27,8 +27,8 @@ export const mergeRequestEventActions = [
  */
 export interface MergeRequestEvent {
   repo: RepoRef
-  /** Groups the config puts the repository in; scopes match against them. */
-  groups: string[]
+  /** Teams owning the repository (`resolveRepo(...).teams`); team scopes match against them. */
+  teams: string[]
   mr: MergeRequest & { headSha?: string }
   action: MergeRequestEventAction
   /** Labels added by this event (for `label` events). */
@@ -162,5 +162,5 @@ export interface PolicyMemory {
 /** The repository of an event as scopes see it. */
 export const eventRepo = (event: MergeRequestEvent): RepoTarget => ({
   ...event.repo,
-  groups: event.groups,
+  teams: event.teams,
 })

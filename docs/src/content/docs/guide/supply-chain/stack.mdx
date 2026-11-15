@@ -1,6 +1,6 @@
 ---
 title: Stack
-description: See which runtimes, package managers, services and base images every repository uses, which release lines reach end of life, and whether each repository still matches its group's convention files.
+description: See which runtimes, package managers, services and base images every repository uses, which release lines reach end of life, and whether each repository still matches its team's convention files.
 panel: Supply chain › Stack
 route: /supply/stack
 permission: catalog:read
@@ -26,12 +26,12 @@ import {
   Ui,
 } from '@ui'
 
-See which runtimes, package managers, services and base images every repository uses, which release lines reach end of life, and whether each repository still matches its group's convention files.
+See which runtimes, package managers, services and base images every repository uses, which release lines reach end of life, and whether each repository still matches its team's convention files.
 
 <Screen title="Supply chain › Stack" caption="Each cell is the version a repository uses, toned by its support.">
   <Toolbar title="Stack">
     <Segmented slot="start" items={['My teams:6', 'All I can see:21']} />
-    <Tag>Group: Any ▾</Tag>
+    <Tag>Team: Any ▾</Tag>
     <Button primary>Run stack scan</Button>
   </Toolbar>
   <Strip
@@ -62,7 +62,7 @@ See which runtimes, package managers, services and base images every repository 
 
 ## What the page shows
 
-The stack is analyzed per group: once a day, every repository of the group is read through the forge, without a clone, and the versions found are compared with the latest releases and their end-of-life dates. The page shows the current state.
+The stack is analyzed per team: once a day, every repository the team owns is read through the forge, without a clone, and the versions found are compared with the latest releases and their end-of-life dates. The page shows the current state.
 
 | Kind            | Examples                  | Read from                                                                              |
 | --------------- | ------------------------- | -------------------------------------------------------------------------------------- |
@@ -75,11 +75,11 @@ The stack is analyzed per group: once a day, every repository of the group is re
 
 Support reads the same everywhere: **end of life**, **ends soon** (within 180 days by default), **LTS**, **active** or unknown. A floating version such as `22` counts as current while the latest is any `22.x`.
 
-A line under the tabs sums each group's changes over the past week.
+A line under the tabs sums each team's changes over the past week.
 
 ## Runtimes
 
-**Runtimes** is a repository × tool matrix. Narrow it with the support segment (all, ends soon, end of life) and the **Kind** filter; the scope switch narrows groups. Below the matrix, **Version lines** lists each tool with its latest version and the lines in use as chips with their repository count.
+**Runtimes** is a repository × tool matrix. Narrow it with the support segment (all, ends soon, end of life) and the **Kind** filter; the scope switch narrows teams. Below the matrix, **Version lines** lists each tool with its latest version and the lines in use as chips with their repository count.
 
 <Screen title="Supply chain › Stack › Version lines">
   <Scroll>
@@ -128,7 +128,7 @@ A line chip or a matrix cell opens the line sheet.
 
 ## Conventions
 
-Conventions are golden files every repository of a group should match: an `.nvmrc`, a shared lint config, a CI include. **Conventions** is a repository × file grid.
+Conventions are golden files every repository of a team should match: an `.nvmrc`, a shared lint config, a CI include. **Conventions** is a repository × file grid.
 
 <Screen title="Supply chain › Stack › Conventions">
   <Tabs items={['Runtimes', 'Conventions:2']} active={1} />
@@ -170,7 +170,7 @@ there are.
 
 ### Define a convention
 
-Conventions are set per group in the `analyzers.stack` setting, which the panel edits as a form under [Settings › Analyzers](/guide/settings/analyzers/).
+Conventions are set per team or folder in the `analyzers.stack` setting, which the panel edits as a form under [Settings › Analyzers](/guide/settings/analyzers/).
 
 <Screen title="Settings › Analyzers › stack › Conventions">
   <Fields>
@@ -203,13 +203,13 @@ repositories use, without latest versions).
 Helm templates and Kustomize overlays are not rendered, image tags that are code names (`bookworm`) count as unpinned, and unquoted YAML versions like `3.10` read as `3.1`. Quote them.
 :::
 
-## In a group
+## In a team
 
-A group page's **Stack & conventions** tab shows the same view for one group. The repository hub's stack link opens that tab for the repository's group, or this page when the repository is in no group.
+A team page's **Stack & conventions** tab shows the same view for one team. The repository hub's stack link opens that tab for the repository's owner team (a home team when one of its owners is), or this page when no team owns the repository.
 
 ## Related
 
-- [Groups](/guide/repos/groups/) — where a group's stack and conventions live.
+- [Teams](/guide/repos/teams/) — where a team's stack and conventions live.
 - [Libraries](/guide/supply-chain/libraries/) — package dependencies rather than tools.
 - [Stack analyzer](/modules/stack/) — what is read and how versions are judged.
 - [Agents › Tools](/agents/tools/) — `stack_usage` and `repo_stack` for agents writing Dockerfiles and CI.

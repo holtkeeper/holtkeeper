@@ -1,6 +1,6 @@
 ---
 title: AI
-description: Connect the AI provider agents run on, see which model each tier resolves to, and set the weekly budget with caps for groups and repositories.
+description: Connect the AI provider agents run on, see which model each tier resolves to, and set the weekly budget with caps for teams, folders and repositories.
 panel: Settings › AI
 route: /settings/ai
 permission: settings:read
@@ -25,7 +25,7 @@ import {
   Ui,
 } from '@ui'
 
-Connect the AI provider agents run on, see which model each tier resolves to, and set the weekly budget with caps for groups and repositories.
+Connect the AI provider agents run on, see which model each tier resolves to, and set the weekly budget with caps for teams, folders and repositories.
 
 <Screen title="Settings › AI" caption="The summary line leaves out figures you may not read.">
   <Toolbar title="AI" crumbs={['Settings']}>
@@ -75,7 +75,7 @@ An AI provider is a credential: a key for an API, plus where it lives. Agents ru
    - **anthropic** for the Anthropic API,
    - **anthropic-compatible** for a gateway that speaks the Anthropic Messages API,
    - **ai-sdk** for any other API, OpenAI-compatible ones included.
-3. Enter a name, the endpoint URL and the key, and who may use it (everything, some groups or some repositories). Optionally an expiry date.
+3. Enter a name, the endpoint URL and the key, and who may use it (everything, some teams or path patterns). Optionally an expiry date.
 4. Save, then click <Ui>Test</Ui> on the card to check the key works and the provider can call tools.
 5. Set the **AI provider** setting (below the budgets) to the new credential. It has one value for the whole instance.
 
@@ -167,28 +167,42 @@ The **Budgets** block (needs `ai:read`) shows the broadest budget you may read: 
 
 With `settings:write` over everything the same editor as on AI spend sits here: weekly limit, amount kept for people, **Warn at** and _Block runs_ or _Warn_. How the limit and the reserve apply is on [AI spend](/guide/ops/ai-spend/#how-the-weekly-budget-works). Past **Warn at**, people who may change the budget get one Inbox item that week.
 
-### Cap a group or a repository
+### Cap a team, a folder or a repository
 
-A budget entry scoped to groups or repositories is a **cap**: a weekly limit for those repositories on top of the instance's. It never lifts them out of the broader budget.
+A budget entry scoped to teams or path patterns is a **cap**: a weekly limit for those repositories on top of the instance's. It never lifts them out of the broader budget.
 
 <Screen title="Settings › AI · Caps">
   <Scroll>
 
-| Scope             | Kind       | Cap | Spend  | Used                 | Status                        |
-| ----------------- | ---------- | --- | ------ | -------------------- | ----------------------------- |
-| Payments          | Group      | $60 | $31.10 | <Meter value={52} /> | <Tag tone="ok">On track</Tag> |
-| `acme/widget-kit` | Repository | $10 | $9.80  | <Meter value={98} /> | <Tag tone="warn">Close</Tag>  |
-| Reviews           | Feature    | —   | $31.20 | 49% of the budget    | —                             |
-| Agent tasks       | Feature    | —   | $14.80 | 23% of the budget    | —                             |
+| Scope         | Kind    | Cap | Spend  | Used                 | Status                        |
+| ------------- | ------- | --- | ------ | -------------------- | ----------------------------- |
+| Gizmo         | Team    | $60 | $31.10 | <Meter value={52} /> | <Tag tone="ok">On track</Tag> |
+| `acme/kit/**` | Paths   | $10 | $9.80  | <Meter value={98} /> | <Tag tone="warn">Close</Tag>  |
+| Reviews       | Feature | —   | $31.20 | 49% of the budget    | —                             |
+| Agent tasks   | Feature | —   | $14.80 | 23% of the budget    | —                             |
 
   </Scroll>
 </Screen>
 
 1. Click <Ui>Add cap</Ui>. It jumps to the budget setting's entries.
-2. Add an entry, pick the groups or repositories and set its weekly limit, reserve, warning share and mode.
+2. Add an entry, pick the teams or path patterns and set its weekly limit, reserve, warning share and mode.
 3. Save. The cap shows in the table with its spend.
 
 Features have no caps of their own; their rows show spend and share only. A **Preset** picker offers ready-made budgets (_default_, _learn_, _small team_).
+
+## Semantic search
+
+**Semantic search** stores a vector of every knowledge note, so agents find notes by meaning, the Guide ranks notes by meaning and differently worded duplicates are caught (see [Notes](/guide/knowledge/notes/#semantic-search)). It is off by default and applies to the whole instance.
+
+1. Turn on the switch.
+2. Pick the credential. By default it is the AI provider agents use. It has to be of kind `ai-sdk`, an endpoint that speaks the OpenAI Embeddings format.
+3. Pick the model. The list comes from the credential's endpoint and shows the price per million tokens when the endpoint gives it. The default is `openai/text-embedding-3-small`.
+4. Set **Dimensions** only for models that can shorten their vectors; leave it empty otherwise.
+5. Save. Notes are embedded in the background.
+
+The status line shows the state (Off, Indexing, Ready, Error), how many notes are indexed, the model, the last run and the last error. While it shows an error, search and the Guide use words only. <Ui>Reindex</Ui> drops every vector and embeds all notes again, for example after the endpoint changed how it embeds.
+
+Embedding calls count against the weekly budget as automatic work, task kind `embedding`. When automatic work has used up the budget, nothing is embedded and search uses words only until the week resets. Changing the switch, the model or the credential needs `settings:write` over everything; the status shows to anyone who reads knowledge.
 
 ## Agent tools
 

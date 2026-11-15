@@ -1,9 +1,4 @@
-import {
-  type RepoTarget,
-  groupLineage,
-  scopeCoversRepo,
-  scopeSpecificity,
-} from '@holtkeeper/access'
+import { type RepoTarget, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import { confluenceFromCredential } from '@holtkeeper/confluence'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
@@ -26,13 +21,12 @@ interface DocumentDeps {
 }
 
 /**
- * Group analyses use `{ forge, path: <group> }`; such a target belongs to that group and, for a
- * subgroup, to its parent.
+ * Group-scope analyses use `{ forge, path: <team key> }`; such a target belongs to that team.
  */
 function targetOf(config: HoltkeeperConfig, repo: RepoRef): RepoTarget {
   const target = repoTarget(config, repo)
-  return repo.path in config.groups
-    ? { ...target, groups: [...new Set([...target.groups, ...groupLineage(repo.path)])] }
+  return repo.path in config.teams && !target.teams.includes(repo.path)
+    ? { ...target, teams: [...target.teams, repo.path] }
     : target
 }
 
@@ -47,7 +41,7 @@ async function confluenceFor({ config, store, credentials }: DocumentDeps, repo:
 }
 
 /**
- * Document providers for a repository or group, from `confluence` credentials whose scope covers
+ * Document providers for a repository or team, from `confluence` credentials whose scope covers
  * it (the most specific one wins). More providers are added here as they appear.
  */
 export const documentSourcesFor =

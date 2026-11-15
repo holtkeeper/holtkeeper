@@ -44,7 +44,7 @@ const candidate = (
   createdAt: '2026-11-01T00:00:00.000Z',
   updatedAt: '2026-11-01T00:00:00.000Z',
   canDecide: true,
-  scopes: ['repo:gitlab:acme/widget-kit', 'group:web'],
+  scopes: ['repo:gitlab:acme/widget-kit', 'team:web'],
   sourceKind: 'review-reply',
   confidence: 1,
   ...overrides,
@@ -110,7 +110,7 @@ describe('space and selection', () => {
   test('a space keeps candidates of the repositories it covers', () => {
     expect(learningsInSpace(list, { kind: 'all' }, [])).toHaveLength(4)
     expect(
-      learningsInSpace(list, { kind: 'group', group: 'web' }, ['gitlab:acme/storefront']).map(
+      learningsInSpace(list, { kind: 'team', team: 'web' }, ['gitlab:acme/storefront']).map(
         (c) => c.id,
       ),
     ).toEqual(['b'])
@@ -134,7 +134,7 @@ describe('space and selection', () => {
   })
 
   test('the suggested scope wins among the scopes the caller may pick', () => {
-    expect(suggestedScopeOf(candidate('x', { suggestedScope: 'group' }))).toBe('group:web')
+    expect(suggestedScopeOf(candidate('x', { suggestedScope: 'team' }))).toBe('team:web')
     expect(suggestedScopeOf(candidate('x', { suggestedScope: 'family' }))).toBe(
       'repo:gitlab:acme/widget-kit',
     )
@@ -142,12 +142,12 @@ describe('space and selection', () => {
     expect(
       suggestedScopeOf(
         candidate('x', {
-          suggestedScope: 'group',
-          targetScope: 'group:web',
-          scopes: ['repo:gitlab:acme/widget-kit', 'group:web.forms', 'group:web'],
+          suggestedScope: 'team',
+          targetScope: 'team:web',
+          scopes: ['repo:gitlab:acme/widget-kit', 'team:web.forms', 'team:web'],
         }),
       ),
-    ).toBe('group:web')
+    ).toBe('team:web')
   })
 
   test('auto-accepted means accepted by the policy and not confirmed by a person', () => {

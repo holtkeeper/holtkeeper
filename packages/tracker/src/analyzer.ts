@@ -24,18 +24,18 @@ type MaybePromise<T> = T | Promise<T>
 
 /** What the host provides; all optional, so a bare analyzer reads only repositories. */
 export interface TrackerAnalyzerDependencies {
-  /** Document sources by provider for a group (e.g. Confluence with the group's credentials). */
+  /** Document sources by provider for a team (e.g. Confluence with the team's credentials). */
   documentsFor?: (repo: RepoRef) => MaybePromise<Record<string, DocumentSource>>
   /** Sinks by provider; used only to report outputs that could not be published. */
   sinksFor?: (repo: RepoRef) => MaybePromise<Record<string, DocumentSink>>
-  /** Tracker definitions in effect for a group: the `trackers` setting and config. */
+  /** Tracker definitions in effect for a team: the `trackers` setting and config. */
   definitionsFor?: (repo: RepoRef) => MaybePromise<readonly TrackerDefinitionInput[]>
-  /** Repositories of a config group, for sources that name `groups`. */
-  groupRepos?: (group: string) => RepoRef[] | undefined
+  /** Repositories of a team, for sources that name `teams`. */
+  teamRepos?: (team: string) => RepoRef[] | undefined
   now?: () => Date
 }
 
-/** The `tracker` analyzer (group scope, forge API only) with injected document access. */
+/** The `tracker` analyzer (group scope: one team, forge API only) with injected document access. */
 export function createTrackerAnalyzer(dependencies: TrackerAnalyzerDependencies = {}) {
   return defineAnalyzer<TrackerData, TrackerOptions>({
     kind: 'tracker',
@@ -61,8 +61,8 @@ export function createTrackerAnalyzer(dependencies: TrackerAnalyzerDependencies 
         ...(forge ? { forge } : {}),
         forgeId: repo.forge,
         repos: repos ?? [],
-        group: repo.path,
-        ...(dependencies.groupRepos ? { groupRepos: dependencies.groupRepos } : {}),
+        team: repo.path,
+        ...(dependencies.teamRepos ? { teamRepos: dependencies.teamRepos } : {}),
         documents,
         ...(sinks ? { sinkProviders: Object.keys(sinks) } : {}),
         now: dependencies.now ?? (() => new Date()),

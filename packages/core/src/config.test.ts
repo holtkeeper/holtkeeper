@@ -4,17 +4,14 @@ import type { ForgeDefinition } from '@holtkeeper/forge'
 
 import {
   ConfigError,
-  groupLabel,
-  groupPathLabel,
-  groupTitle,
   loadConfig,
   looksLikeCron,
   parseConfig,
+  fleetPatterns,
   parseConfigFile,
-  rootGroups,
-  subgroupsOf,
+  teamLabel,
+  teamTitle,
 } from './config.ts'
-import { resolveRepo } from './resolve.ts'
 
 const forge: ForgeDefinition = {
   kind: 'fake',
@@ -26,9 +23,9 @@ const forge: ForgeDefinition = {
 
 const base = {
   forges: { work: forge },
-  groups: {
-    games: { forge: 'work', include: ['games/*'], exclude: ['games/legacy-*'] },
-    tools: { forge: 'work', include: ['tools/**'] },
+  teams: {
+    games: { owns: ['work:games/*'], exclude: ['games/legacy-*'] },
+    tools: { owns: ['tools/**'] },
   },
 }
 
@@ -45,62 +42,62 @@ const errorOf = (input: unknown) => {
 describe('parseConfig', () => {
   test('applies defaults', () => {
     const config = parseConfig({ forges: { work: forge } })
-    expect(config).toMatchObject({ dryRun: false, groups: {}, repos: {} })
+    expect(config).toMatchObject({ dryRun: false, teams: {}, repos: {} })
     expect(config.jobs.schedules).toEqual([])
     expect(parseConfig({}).forges).toEqual({})
   })
 
-  test('trims group titles and rejects empty or long ones', () => {
-    const group = { forge: 'work', include: ['games/*'] }
+  test('trims team titles and rejects empty or long ones', () => {
+    const team = { owns: ['games/*'] }
     const config = parseConfig({
       forges: { work: forge },
-      groups: { games: { ...group, title: '  Game studio ' } },
+      teams: { games: { ...team, title: '  Game studio ' } },
     })
-    expect(config.groups.games?.title).toBe('Game studio')
+    expect(config.teams.games?.title).toBe('Game studio')
+    expect(config.teams.games).toMatchObject({ exclude: [], consumes: [], members: [] })
     expect(
-      errorOf({ forges: { work: forge }, groups: { games: { ...group, title: ' ' } } }),
-    ).toContain('groups.games.title')
+      errorOf({ forges: { work: forge }, teams: { games: { ...team, title: ' ' } } }),
+    ).toContain('teams.games.title')
     expect(
-      errorOf({ forges: { work: forge }, groups: { games: { ...group, title: 'x'.repeat(61) } } }),
-    ).toContain('groups.games.title')
+      errorOf({ forges: { work: forge }, teams: { games: { ...team, title: 'x'.repeat(61) } } }),
+    ).toContain('teams.games.title')
   })
 
-  test('rejects unknown forge in a group', () => {
+  test('rejects unknown forges in team patterns, bad keys and empty teams', () => {
     expect(
-      errorOf({ forges: { work: forge }, groups: { games: { forge: 'nope', include: ['*'] } } }),
+      errorOf({ forges: { work: forge }, teams: { games: { owns: ['nope:games/*'] } } }),
     ).toContain('unknown forge "nope"')
+    expect(
+      errorOf({ forges: { work: forge }, teams: { games: { owns: ['a/*'], consumes: ['zz:b'] } } }),
+    ).toContain('unknown forge "zz"')
+    expect(errorOf({ teams: { 'games.round': { owns: ['a/*'] } } })).toContain('teams')
+    expect(errorOf({ teams: { games: { owns: [] } } })).toContain('teams.games.owns')
+    expect(errorOf({ teams: { games: { owns: ['**/web'] } } })).toContain(
+      'must start with a namespace',
+    )
+    expect(errorOf({ teams: { games: { owns: ['a/*'], consumes: ['*'] } } })).toContain(
+      'teams.games.consumes',
+    )
+    expect(
+      errorOf({ forges: { work: forge }, fleet: { work: { include: ['work:*/web'] } } }),
+    ).toContain('fleet.work.include')
   })
 
-  test('rejects values that are not forges and unknown groups', () => {
+  test('validates members', () => {
+    const config = parseConfig({
+      teams: { games: { owns: ['a/*'], members: [{ id: 'ada', role: 'maintainer' }] } },
+    })
+    expect(config.teams.games?.members).toEqual([{ id: 'ada', role: 'maintainer' }])
+    expect(
+      errorOf({ teams: { games: { owns: ['a/*'], members: [{ id: 'ada', role: 'owner' }] } } }),
+    ).toContain('teams.games.members')
+  })
+
+  test('rejects values that are not forges and unknown teams', () => {
     expect(errorOf({ forges: { work: {} } })).toContain('expected a forge')
     expect(
-      errorOf({ ...base, jobs: { onTag: { analyzers: ['x'], groups: [['games', 'gone']] } } }),
-    ).toContain('unknown group "gone"')
-  })
-
-  test('accepts subgroups one level deep under a configured parent', () => {
-    const round = { forge: 'work', include: ['games/round-*'] }
-    const config = parseConfig({ ...base, groups: { ...base.groups, 'games.round': round } })
-    expect(rootGroups(config)).toEqual(['games', 'tools'])
-    expect(subgroupsOf(config, 'games')).toEqual(['games.round'])
-    expect(subgroupsOf(config, 'tools')).toEqual([])
-    expect(errorOf({ ...base, groups: { ...base.groups, 'games.round.small': round } })).toContain(
-      'groups["games.round.small"]',
-    )
-    expect(errorOf({ ...base, groups: { ...base.groups, Games: round } })).toContain('groups.Games')
-  })
-
-  test('rejects a subgroup without its parent or on another forge', () => {
-    const round = { forge: 'work', include: ['shapes/round-*'] }
-    expect(errorOf({ ...base, groups: { ...base.groups, 'shapes.round': round } })).toContain(
-      'parent group "shapes" is not configured',
-    )
-    expect(
-      errorOf({
-        forges: { work: forge, other: forge },
-        groups: { ...base.groups, 'games.round': { ...round, forge: 'other' } },
-      }),
-    ).toContain('forge must match parent "games"')
+      errorOf({ ...base, jobs: { onTag: { analyzers: ['x'], teams: ['games', 'gone'] } } }),
+    ).toContain('unknown team "gone"')
   })
 
   test('accepts AI provider plugins once each', () => {
@@ -111,38 +108,6 @@ describe('parseConfig', () => {
     expect(errorOf({ ...base, ai: { providers: [{}] } })).toContain(
       'expected an AI provider plugin',
     )
-  })
-})
-
-describe('resolveRepo', () => {
-  const config = parseConfig({
-    ...base,
-    repos: {
-      'games/*': { traits: { ssr: false, runtime: 'browser' } },
-      'games/app-x': { traits: { ssr: true } },
-    },
-  })
-
-  test('collects groups and traits', () => {
-    const resolved = resolveRepo(config, { forge: 'work', path: 'games/app-x' })
-    expect(resolved.groups).toEqual(['games'])
-    expect(resolved.traits).toEqual({ ssr: true, runtime: 'browser' })
-  })
-
-  test('respects group excludes', () => {
-    expect(resolveRepo(config, { forge: 'work', path: 'games/legacy-a' }).groups).toEqual([])
-  })
-
-  test('matches nested paths only with globstar', () => {
-    expect(resolveRepo(config, { forge: 'work', path: 'games/a/b' }).groups).toEqual([])
-    expect(resolveRepo(config, { forge: 'work', path: 'tools/a/b' }).groups).toEqual(['tools'])
-  })
-
-  test('ignores repositories from other forges', () => {
-    expect(resolveRepo(config, { forge: 'other', path: 'games/app-x' })).toMatchObject({
-      groups: [],
-      traits: {},
-    })
   })
 })
 
@@ -168,6 +133,7 @@ describe('parseConfigFile', () => {
       {
         forges: { work: forge },
         groups: {},
+        teams: {},
         jobs: {
           concurrency: 3,
           schedules: [],
@@ -178,7 +144,7 @@ describe('parseConfigFile', () => {
       },
       { warn: (line) => warnings.push(line) },
     )
-    expect(warnings).toHaveLength(5)
+    expect(warnings).toHaveLength(6)
     expect(warnings[0]).toContain('`forges` is no longer read from the config file')
     expect(warnings.some((line) => line.includes('`jobs.botUsername`'))).toBeTrue()
     expect(config).not.toHaveProperty('forges')
@@ -217,35 +183,36 @@ describe('jobs config', () => {
             name: 'nightly',
             cron: '0 3 * * 1-5',
             analyzers: ['depgraph'],
-            groups: ['games'],
+            teams: ['games'],
             repos: ['work:games/*'],
             options: { depgraph: { depth: 2 } },
           },
           { name: 'weekly', cron: '@weekly', analyzers: ['quality'] },
         ],
-        onTag: { analyzers: ['changelog'], groups: ['games'] },
+        onTag: { analyzers: ['changelog'], teams: ['games'], repos: ['tools/*'] },
         webhookSecret: { env: 'HOOK_SECRET' },
       },
     })
     expect(config.jobs?.schedules.map((s) => s.name)).toEqual(['nightly', 'weekly'])
   })
 
-  test('rejects bad cron, unknown groups and forges, duplicate names', () => {
+  test('rejects bad cron, unknown teams and forges, duplicate names', () => {
     const message = errorOf({
       ...base,
       jobs: {
         schedules: [
           { name: 'a', cron: 'every day', analyzers: ['x'] },
-          { name: 'a', cron: '* * * * *', analyzers: ['x'], groups: ['nope'], repos: ['zz:a/*'] },
+          { name: 'a', cron: '* * * * *', analyzers: ['x'], teams: ['nope'], repos: ['zz:a/*'] },
         ],
-        onTag: { analyzers: ['x'], groups: ['missing'] },
+        onTag: { analyzers: ['x'], teams: ['missing'], repos: ['yy:b/*'] },
       },
     })
     expect(message).toContain('expected a cron expression')
     expect(message).toContain('schedule "a" is defined twice')
-    expect(message).toContain('unknown group "nope"')
+    expect(message).toContain('unknown team "nope"')
     expect(message).toContain('unknown forge "zz"')
-    expect(message).toContain('unknown group "missing"')
+    expect(message).toContain('unknown team "missing"')
+    expect(message).toContain('unknown forge "yy"')
   })
 
   test('smart schedules: every or cron, windows, time zone', () => {
@@ -300,32 +267,37 @@ describe('jobs config', () => {
   })
 })
 
-describe('group titles', () => {
-  const groups = { games: { title: 'Game studio' }, tools: {}, same: { title: 'same' } }
+describe('fleetPatterns', () => {
+  test('joins the forge includes with the patterns teams own and consume there', () => {
+    const config = parseConfig({
+      forges: { work: forge, home: forge },
+      fleet: { work: { include: ['misc/*'], exclude: ['misc/old'] } },
+      teams: {
+        games: { owns: ['work:games/*', 'shared/**'], consumes: ['home:lib/*'] },
+      },
+    })
+    expect(fleetPatterns(config, 'work')).toEqual({
+      include: ['misc/*', 'games/*', 'shared/**'],
+      exclude: ['misc/old'],
+    })
+    expect(fleetPatterns(config, 'home')).toEqual({ include: ['shared/**', 'lib/*'], exclude: [] })
+    expect(errorOf({ fleet: { gone: { include: ['a/*'] } } })).toContain('unknown forge "gone"')
+  })
+})
 
-  test('groupTitle shows the title, else the key', () => {
-    expect(groupTitle(groups, 'games')).toBe('Game studio')
-    expect(groupTitle(groups, 'tools')).toBe('tools')
-    expect(groupTitle(groups, 'gone')).toBe('gone')
+describe('team titles', () => {
+  const teams = { games: { title: 'Game studio' }, tools: {}, same: { title: 'same' } }
+
+  test('teamTitle shows the title, else the key', () => {
+    expect(teamTitle(teams, 'games')).toBe('Game studio')
+    expect(teamTitle(teams, 'tools')).toBe('tools')
+    expect(teamTitle(teams, 'gone')).toBe('gone')
   })
 
-  test('groupLabel keeps the key next to the title', () => {
-    expect(groupLabel(groups, 'games')).toBe('Game studio (games)')
-    expect(groupLabel(groups, 'tools')).toBe('tools')
-    expect(groupLabel(groups, 'same')).toBe('same')
-    expect(groupLabel(groups, 'gone')).toBe('gone')
-  })
-
-  test('groupPathLabel shows a subgroup under its parent', () => {
-    const titled = {
-      shapes: { title: 'Shapes' },
-      'shapes.round': { title: 'Round' },
-      'shapes.flat': {},
-    }
-    expect(groupPathLabel(titled, 'shapes.round')).toBe('Shapes › Round (shapes.round)')
-    expect(groupPathLabel(titled, 'shapes.flat')).toBe('Shapes › shapes.flat (shapes.flat)')
-    expect(groupPathLabel(titled, 'shapes')).toBe('Shapes (shapes)')
-    expect(groupPathLabel({}, 'tools')).toBe('tools')
-    expect(groupLabel(titled, 'shapes.round')).toBe('Shapes › Round (shapes.round)')
+  test('teamLabel keeps the key next to the title', () => {
+    expect(teamLabel(teams, 'games')).toBe('Game studio (games)')
+    expect(teamLabel(teams, 'tools')).toBe('tools')
+    expect(teamLabel(teams, 'same')).toBe('same')
+    expect(teamLabel(teams, 'gone')).toBe('gone')
   })
 })

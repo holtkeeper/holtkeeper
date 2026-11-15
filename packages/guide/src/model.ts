@@ -1,4 +1,5 @@
-import { type RepoTarget, groupLineage } from '@holtkeeper/access'
+import type { RepoTarget } from '@holtkeeper/access'
+import { pathAncestors } from '@holtkeeper/access/paths'
 import type { GuideScopeKey, GuideSectionName } from '@holtkeeper/store'
 
 export type {
@@ -42,16 +43,28 @@ export const isGuideSection = (value: unknown): value is GuideSectionName =>
 /** A scope parsed from its key. */
 export type GuideScope =
   | { kind: 'all' }
-  | { kind: 'group'; group: string }
+  | { kind: 'team'; team: string }
+  /** A folder of the forge's path tree and every repository under it. */
+  | { kind: 'path'; forge: string; folder: string }
   | { kind: 'family'; family: string }
   | { kind: 'repo'; forge: string; path: string }
 
-/** The key of a scope: `all`, `group:<name>`, `family:<id>` or `repo:<forge>:<path>`. */
+/**
+ * The key of a scope: `all`, `team:<key>`, `path:<forge>:<folder>`, `family:<id>` or
+ * `repo:<forge>:<path>`.
+ */
 export function guideScopeKey(scope: GuideScope): GuideScopeKey {
-  if (scope.kind === 'group') return `group:${scope.group}`
+  if (scope.kind === 'team') return `team:${scope.team}`
+  if (scope.kind === 'path') return `path:${scope.forge}:${scope.folder}`
   if (scope.kind === 'family') return `family:${scope.family}`
   if (scope.kind === 'repo') return `repo:${scope.forge}:${scope.path}`
   return 'all'
+}
+
+const forgeAndPath = (rest: string): [forge: string, path: string] | undefined => {
+  const split = rest.indexOf(':')
+  if (split < 1 || split === rest.length - 1) return undefined
+  return [rest.slice(0, split), rest.slice(split + 1)]
 }
 
 /** The scope of a key, or `undefined` when the key is malformed. */
@@ -62,12 +75,13 @@ export function parseGuideScope(key: string): GuideScope | undefined {
   const kind = key.slice(0, separator)
   const rest = key.slice(separator + 1)
   if (!rest) return undefined
-  if (kind === 'group') return { kind: 'group', group: rest }
+  if (kind === 'team') return { kind: 'team', team: rest }
   if (kind === 'family') return { kind: 'family', family: rest }
-  if (kind !== 'repo') return undefined
-  const split = rest.indexOf(':')
-  if (split < 1 || split === rest.length - 1) return undefined
-  return { kind: 'repo', forge: rest.slice(0, split), path: rest.slice(split + 1) }
+  if (kind !== 'repo' && kind !== 'path') return undefined
+  const parts = forgeAndPath(rest)
+  if (!parts) return undefined
+  const [forge, path] = parts
+  return kind === 'repo' ? { kind, forge, path } : { kind, forge, folder: path }
 }
 
 /** `forge:path` of a repository, the form families list members in. */
@@ -75,15 +89,17 @@ export const repoKey = (repo: { forge: string; path: string }) => `${repo.forge}
 
 /**
  * The scope keys whose sections apply to `repo`, most specific first: the repository, its family,
- * its groups deepest first (subgroups before their parents, config order among equals), then
- * `all`.
+ * every folder holding it (deepest first, `path:work:acme/round` before `path:work:acme`), its
+ * owner teams (`repo.teams`, in their given order), then `all`.
  */
 export function scopesFor(repo: RepoTarget, family?: string): GuideScopeKey[] {
-  const groups = repo.groups.toSorted((a, b) => groupLineage(b).length - groupLineage(a).length)
   return [
     guideScopeKey({ kind: 'repo', forge: repo.forge, path: repo.path }),
     ...(family ? [guideScopeKey({ kind: 'family', family })] : []),
-    ...groups.map((group) => guideScopeKey({ kind: 'group', group })),
+    ...pathAncestors(repo.path).map((folder) =>
+      guideScopeKey({ kind: 'path', forge: repo.forge, folder }),
+    ),
+    ...repo.teams.map((team) => guideScopeKey({ kind: 'team', team })),
     'all',
   ]
 }

@@ -135,8 +135,8 @@ const AnalysisPage = lazyRouteComponent(
   'AnalysisPage',
 )
 const RepoPage = lazyRouteComponent(() => import('./features/repos/RepoPage.tsx'), 'RepoPage')
-const GroupsPage = lazyRouteComponent(() => import('./features/repos/GroupsPage.tsx'), 'GroupsPage')
-const GroupPage = lazyRouteComponent(() => import('./features/repos/GroupPage.tsx'), 'GroupPage')
+const TeamsPage = lazyRouteComponent(() => import('./features/repos/TeamsPage.tsx'), 'TeamsPage')
+const TeamPage = lazyRouteComponent(() => import('./features/repos/TeamPage.tsx'), 'TeamPage')
 const KnowledgePage = lazyRouteComponent(
   () => import('./features/knowledge/KnowledgePage.tsx'),
   'KnowledgePage',
@@ -207,16 +207,16 @@ const repoRoute = createRoute({
   validateSearch: parseRepoHubSearch,
 })
 
-const groupsRoute = createRoute({
+const teamsRoute = createRoute({
   getParentRoute: () => reposLayout,
-  path: 'groups',
-  component: GroupsPage,
+  path: 'teams',
+  component: TeamsPage,
 })
 
-const groupRoute = createRoute({
+const teamRoute = createRoute({
   getParentRoute: () => reposLayout,
-  path: 'groups/$groupId',
-  component: GroupPage,
+  path: 'teams/$teamId',
+  component: TeamPage,
   validateSearch: (search: Record<string, unknown>): { tab?: string; view?: StackTab } => {
     const view = parseStackTab(search.view)
     return { ...tabSearch(search), ...(view === 'runtimes' ? {} : { view }) }
@@ -354,7 +354,7 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     page('/', HomePage),
     inboxRoute,
-    reposLayout.addChildren([reposRoute, groupsRoute, groupRoute, repoRoute]),
+    reposLayout.addChildren([reposRoute, teamsRoute, teamRoute, repoRoute]),
     chatRoute,
     librariesRoute,
     libraryRoute,

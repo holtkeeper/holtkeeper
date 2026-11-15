@@ -46,7 +46,7 @@ const toAnyConfigDocument = (row: AnyConfigDocumentRow): AnyConfigDocument => {
   switch (row.type) {
     case 'forge':
       return toConfigDocument(row)
-    case 'group':
+    case 'team':
       return toConfigDocument(row)
     case 'repoTraits':
       return toConfigDocument(row)

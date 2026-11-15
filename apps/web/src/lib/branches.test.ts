@@ -22,7 +22,7 @@ import { sortRows } from './table-sort.ts'
 
 const repoRow = (path: string, patch: Partial<BranchesRepoRow>): BranchesRepoRow => ({
   repo: { forge: 'acme', path },
-  groups: [],
+  teams: [],
   analysisId: `rec-${path}`,
   createdAt: '2026-01-05T00:00:00Z',
   defaultBranch: 'main',
@@ -42,7 +42,7 @@ const repoRow = (path: string, patch: Partial<BranchesRepoRow>): BranchesRepoRow
 const overview: BranchesOverview = {
   repos: [
     repoRow('acme/storefront', {
-      groups: ['Web'],
+      teams: ['Web'],
       total: 20,
       open: 4,
       cleanup: 3,
@@ -83,7 +83,7 @@ const overview: BranchesOverview = {
       ],
     }),
     repoRow('acme/ledger-api', {
-      groups: ['Payments'],
+      teams: ['Payments'],
       staleDays: 60,
       total: 5,
       open: 1,
@@ -109,14 +109,14 @@ const overview: BranchesOverview = {
 
 const rows = branchListRows(overview)
 
-test('rows carry their repository and groups', () => {
+test('rows carry their repository and teams', () => {
   expect(rows.map((row) => row.key)).toEqual([
     'acme:acme/storefront#feat/old-widget',
     'acme:acme/storefront#fix/ABC-123',
     'acme:acme/storefront#feat/widgets',
     'acme:acme/ledger-api#chore/deps',
   ])
-  expect(rows[3]).toMatchObject({ repoKey: 'acme:acme/ledger-api', groups: ['Payments'] })
+  expect(rows[3]).toMatchObject({ repoKey: 'acme:acme/ledger-api', teams: ['Payments'] })
 })
 
 test('rows go oldest first and sort by any column with empty values last', () => {

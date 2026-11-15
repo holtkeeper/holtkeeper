@@ -122,15 +122,15 @@ export function releaseRoutes(deps: ServerDeps) {
 
   app.get('/releases/overview', async (c) => {
     const principal = principalOf(c)
-    const group = c.req.query('group')
-    if (group && !config.groups[group])
-      throw new HTTPException(400, { message: `unknown group ${group}` })
+    const team = c.req.query('team')
+    if (team && !config.teams[team])
+      throw new HTTPException(400, { message: `unknown team ${team}` })
     const filter = c.req.query('filter') ?? 'all'
     if (filter !== 'all' && filter !== 'action')
       throw new HTTPException(400, { message: 'filter is action or all' })
     return c.json<ReleaseOverview>(
       await releases.overview(principal, {
-        ...(group ? { group } : {}),
+        ...(team ? { team } : {}),
         refresh: c.req.query('refresh') === '1',
         action: filter === 'action',
       }),

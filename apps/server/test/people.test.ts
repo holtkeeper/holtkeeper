@@ -15,9 +15,9 @@ const origin = 'https://keeper.test'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    widgets: { forge: 'work', include: ['widgets/*'] },
-    gadgets: { forge: 'work', include: ['gadgets/*'] },
+  teams: {
+    widgets: { owns: ['work:widgets/*'] },
+    gadgets: { owns: ['work:gadgets/*'] },
   },
 })
 
@@ -78,7 +78,7 @@ const send = (
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
 
-const widgetGrant = { scope: { groups: ['widgets'] }, actions: ['repos:read' as const] }
+const widgetGrant = { scope: { teams: ['widgets'] }, actions: ['repos:read' as const] }
 
 async function adminSession(app: ReturnType<typeof setup>) {
   const admin = await createUser(
@@ -111,7 +111,7 @@ describe('people endpoints', () => {
     expect(pending?.teams).toEqual(['widgets'])
   })
 
-  test('teams follow the home groups a person picks in their preferences', async () => {
+  test('teams follow the home teams a person picks in their preferences', async () => {
     const app = setup()
     const { cookie } = await adminSession(app)
     const dev = await createUser(
@@ -120,7 +120,7 @@ describe('people endpoints', () => {
     )
     const devCookie = await signIn(app, dev)
     const saved = await send(app, devCookie, 'PUT', '/api/me/preferences', {
-      homeGroups: ['gadgets'],
+      homeTeams: ['gadgets'],
     })
     expect(saved.status).toBe(200)
     const { users } = await json<UserList>(
@@ -193,7 +193,7 @@ describe('people endpoints', () => {
     const person = (name: string, group: string, actions: Action[]) =>
       createUser(manage, {
         name,
-        grants: [{ scope: { groups: [group] }, actions }],
+        grants: [{ scope: { teams: [group] }, actions }],
       })
     const widgetDev = await person('Widget Dev', 'widgets', ['repos:read'])
     const gadgetDev = await person('Gadget Dev', 'gadgets', ['repos:read'])

@@ -1,4 +1,3 @@
-import type { GroupMatch } from '@holtkeeper/api'
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -47,14 +46,14 @@ const fromControl = (target: EventTarget | null) =>
  * The fleet list every workspace shares: a toolbar with the scope switch ("My teams | All I can
  * see"), the caller's filters and a legend; a summary `Strip` over the rows in scope; a sortable
  * table; and, in *My teams*, other teams' rows folded into one "Other teams · N" row that opens
- * them in place. A group position shows that group's rows, nothing folded; *My teams* waits for
- * preferences, and without home groups keeps only rows in no group and links to choosing them. `rows` arrive filtered and sorted; the table only
- * splits them by scope.
+ * them in place. A team position shows that team's rows, nothing folded; *My teams* waits for
+ * preferences, and without home teams keeps only rows no team owns and links to choosing them.
+ * `rows` arrive filtered and sorted; the table only splits them by scope.
  * With `onOpen`, J and K select the next and previous row, Enter and a click open it.
  *
  * @public
  */
-export function FleetTable<T extends { groups: readonly string[] }, K extends string = string>({
+export function FleetTable<T extends { teams: readonly string[] }, K extends string = string>({
   label,
   rows,
   rowKey,
@@ -83,7 +82,7 @@ export function FleetTable<T extends { groups: readonly string[] }, K extends st
   scope?: {
     value: ScopeView
     onChange: (view: ScopeView) => void
-    homeGroups: readonly GroupMatch[]
+    homeTeams: readonly string[]
   }
   /** Figures over the rows in scope, e.g. per health state. */
   strip?: (shown: readonly T[], view: ScopeView) => readonly StripCell[]
@@ -103,13 +102,13 @@ export function FleetTable<T extends { groups: readonly string[] }, K extends st
   caption?: ReactNode
 }) {
   const view = scope?.value ?? 'all'
-  const homeGroups = scope?.homeGroups ?? []
-  const folded = foldScope(rows, view, homeGroups, (row) => row.groups)
+  const homeTeams = scope?.homeTeams ?? []
+  const folded = foldScope(rows, view, homeTeams, (row) => row.teams)
   const { shown, others } = folded
   const preferences = usePreferences()
   const mineScope = scope !== undefined && view === 'mine'
   const pending = mineScope && preferences.isPending
-  const noTeams = mineScope && preferences.isSuccess && !homeGroups.length
+  const noTeams = mineScope && preferences.isSuccess && !homeTeams.length
   const [othersOpen, setOthersOpen] = useState(false)
   const [selected, setSelected] = useState<string>()
   const body = useRef<HTMLTableSectionElement>(null)

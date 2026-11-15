@@ -24,7 +24,7 @@ export { Tabs } from './Tabs.tsx'
 export { LinkLine, type LinkEdge } from './FlowEdge.tsx'
 export { SegmentedTabs } from './SegmentedTabs.tsx'
 export { NoTeamsState, ScopeSwitch } from './ScopeSwitch.tsx'
-export { GroupName } from './GroupName.tsx'
+export { TeamName } from './TeamName.tsx'
 /** @public */
 export { SideSheet, quietActionsOf } from './SideSheet.tsx'
 export { SegmentBar } from './SegmentBar.tsx'

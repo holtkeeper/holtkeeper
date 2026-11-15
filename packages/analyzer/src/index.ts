@@ -54,7 +54,7 @@ export interface ForgeAccess {
 
 /** Everything an analyzer may use; what is present depends on its `needs`. */
 export interface AnalyzerContext<Options> {
-  /** Repository analyzed; for group analyzers `{ forge, path: <group name> }`. */
+  /** Repository analyzed; for group-scope analyzers `{ forge, path: <team key> }`. */
   repo: RepoRef
   /** Local checkout of `repo` at `ref`, for analyzers that need one. */
   dir?: string
@@ -64,7 +64,7 @@ export interface AnalyzerContext<Options> {
    */
   checkouts?: Record<string, string>
   /**
-   * Checks out any repository on demand, e.g. each repository of a group. Every call returns a
+   * Checks out any repository on demand, e.g. each repository of a team. Every call returns a
    * private temporary working tree at `ref` (default branch when omitted); `writable` ones are
    * meant to be modified by the analyzer, read-only ones must not be. Call `cleanup` when done;
    * the runner also removes every checkout still left after the run. `runner`, when present, runs
@@ -89,7 +89,7 @@ export interface AnalyzerContext<Options> {
       push(input: { branch: string }): Promise<{ pushed: boolean; sha: string }>
     }
   }>
-  /** Repositories of the group, for group analyzers. */
+  /** The team's repositories on `repo.forge`, for group-scope analyzers. */
   repos?: RepoRef[]
   /** Forge client of `repo`'s forge. */
   forge?: GitForge
@@ -179,7 +179,10 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   kind: string
   // oxlint-disable-next-line typescript/no-explicit-any -- the kind may be shared with other analyzers
   analysis: AnalysisKind<any>
-  /** `repo`: one repository at a time. `group`: all repositories of a config group at once. */
+  /**
+   * `repo`: one repository at a time. `group`: all repositories of one team at once (the job's
+   * `group` holds the team key).
+   */
   scope: 'repo' | 'group'
   /**
    * `true`: the runner must provide it. `'optional'`: provided when the runner can, and `run`
@@ -195,7 +198,7 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   }
   /**
    * The run changes repositories: pushes branches, commits, opens or updates merge requests. The
-   * queue runs such a job alone on its `repo` (the group for group analyzers); jobs of other
+   * queue runs such a job alone on its `repo` (the team for group-scope analyzers); jobs of other
    * analyzers of one repository run side by side.
    */
   exclusive?: boolean

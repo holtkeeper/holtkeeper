@@ -18,10 +18,10 @@ const schema = z.object({
   kind: z.literal('files'),
   id: z.string().min(1).optional(),
   role: z.string().min(1).meta({ 'x-role': 'provides' }),
-  /** Repository paths or globs; literal paths are read even outside the analyzed group. */
+  /** Repository paths or globs; literal paths are read even outside the analyzed team. */
   repos: z.array(z.string().min(1)).optional(),
-  /** Config groups whose repositories are read. */
-  groups: z.array(z.string().min(1)).optional(),
+  /** Teams whose repositories are read. */
+  teams: z.array(z.string().min(1)).optional(),
   /** File paths or globs inside each repository. */
   paths: z.array(z.string().min(1)).min(1),
   /** Globs of files to leave out. */
@@ -47,19 +47,18 @@ const stripForge = (pattern: string) => {
   return colon > 0 && !pattern.slice(0, colon).includes('/') ? pattern.slice(colon + 1) : pattern
 }
 
-/** Repositories a `files` source reads, in a stable order; unknown groups become errors. */
+/** Repositories a `files` source reads, in a stable order; unknown teams become errors. */
 export function selectRepos(
-  config: Pick<FilesSourceConfig, 'repos' | 'groups'>,
-  context: Pick<SourceContext, 'repos' | 'group' | 'groupRepos' | 'id'>,
+  config: Pick<FilesSourceConfig, 'repos' | 'teams'>,
+  context: Pick<SourceContext, 'repos' | 'team' | 'teamRepos' | 'id'>,
   errors: TrackerError[],
 ): RepoRef[] {
   const forge = context.repos[0]?.forge ?? ''
   let pool = context.repos
-  if (config.groups?.length) {
-    pool = config.groups.flatMap((group) => {
-      const repos =
-        context.groupRepos?.(group) ?? (group === context.group ? context.repos : undefined)
-      if (!repos) errors.push({ source: context.id, message: `group ${group} is unknown` })
+  if (config.teams?.length) {
+    pool = config.teams.flatMap((team) => {
+      const repos = context.teamRepos?.(team) ?? (team === context.team ? context.repos : undefined)
+      if (!repos) errors.push({ source: context.id, message: `team ${team} is unknown` })
       return repos ?? []
     })
   }

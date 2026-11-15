@@ -6,9 +6,9 @@ import { evaluatePolicies } from './engine.ts'
 import { createMemory } from './memory.ts'
 import { combinePolicies } from './settings.ts'
 
-const repo = { forge: 'work', path: 'games/app', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app', teams: ['games'] }
 const { policies, invalid } = combinePolicies(
-  [{ scope: { groups: ['games'] }, value: examplePolicies }],
+  [{ scope: { teams: ['games'] }, value: examplePolicies }],
   repo,
 )
 

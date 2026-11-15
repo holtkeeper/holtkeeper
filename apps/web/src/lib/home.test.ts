@@ -18,7 +18,7 @@ const attention = (id: string, extra: Partial<HomeAttentionItem> = {}): HomeAtte
   kind: 'job-failures',
   severity: 'high',
   title: 'Widgets failed',
-  repos: [{ repo: 'work:shapes/circle', groups: ['shapes'] }],
+  repos: [{ repo: 'work:shapes/circle', teams: ['shapes'] }],
   count: 1,
   at: '2026-10-30T11:00:00.000Z',
   href: '/ops/runs',
@@ -45,7 +45,7 @@ const home: Pick<HomeView, 'attention' | 'changes'> = {
       href: '/releases/timeline?repo=work%3Acolors%2Fred',
       at: '2026-10-30T10:00:00.000Z',
       actor: 'user:1',
-      repo: { repo: 'work:colors/red', groups: ['colors'] },
+      repo: { repo: 'work:colors/red', teams: ['colors'] },
     },
   ],
 }
@@ -57,7 +57,7 @@ const summary = (
   freshness?: RepoSummary['freshness'],
 ): RepoSummary => ({
   repo: { forge: 'work', path },
-  groups: ['shapes'],
+  teams: ['shapes'],
   health,
   cells,
   ...(freshness && { freshness }),
@@ -78,8 +78,8 @@ describe('scopeHome', () => {
 
   test('a row about several repositories belongs where any of them does', () => {
     const refs = [
-      { repo: 'work:shapes/circle', groups: ['shapes'] },
-      { repo: 'work:colors/red', groups: ['colors'] },
+      { repo: 'work:shapes/circle', teams: ['shapes'] },
+      { repo: 'work:colors/red', teams: ['colors'] },
     ]
     expect(inScope(refs, 'mine', ['shapes'])).toBe(true)
     expect(inScope([refs[1]!], 'mine', ['shapes'])).toBe(false)
@@ -195,7 +195,7 @@ describe('spendSegments', () => {
 
 describe('groupAttention', () => {
   const items = [
-    attention('a', { severity: 'medium', repos: [{ repo: 'work:shapes/square', groups: [] }] }),
+    attention('a', { severity: 'medium', repos: [{ repo: 'work:shapes/square', teams: [] }] }),
     attention('b', { severity: 'critical', kind: 'vulnerabilities' }),
     attention('c', { severity: 'low', kind: 'knowledge', repos: [] }),
     attention('d', { severity: 'critical', snoozed: true }),

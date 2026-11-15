@@ -5,8 +5,8 @@ import { useState } from 'react'
 import {
   useConfigEntries,
   useFreshnessOverview,
-  useGroups,
-  useGroupTitles,
+  useKnownTeams,
+  useTeamTitles,
   useJobAnalyzers,
   useScheduleRuns,
   useSettings,
@@ -33,7 +33,7 @@ import { PolicyForm } from './PolicyForm.tsx'
 import { ScheduleForm } from './ScheduleForm.tsx'
 import { TriggerForm } from './TriggerForm.tsx'
 
-type Creating = { kind: 'trigger' | 'schedule' } | { kind: 'policy'; group?: string }
+type Creating = { kind: 'trigger' | 'schedule' } | { kind: 'policy'; team?: string }
 
 const newRuleTabs = [
   { id: 'trigger', label: 'Event trigger' },
@@ -53,7 +53,7 @@ const views = [
  * Settings › Analyzers.
  */
 export function AutomationPage() {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { canGlobal } = useSession()
   const writable = canGlobal('settings:write')
   const search = useSearch({ from: '/app/ops/automation' })
@@ -66,7 +66,7 @@ export function AutomationPage() {
     })
   const triggers = useConfigEntries('triggers')
   const schedules = useConfigEntries('schedules')
-  const groups = useGroups()
+  const known = useKnownTeams()
   const settings = useSettings()
   const analyzers = useJobAnalyzers()
   const freshness = useFreshnessOverview()
@@ -120,7 +120,7 @@ export function AutomationPage() {
   const entries = settings.data.settings
   const policySchema = settings.data.definitions.find((d) => d.key === POLICIES_KEY)?.schema
   const input = {
-    groups: (groups.data?.entries ?? []).map((group) => group.id),
+    teams: known,
     triggers: triggers.data.entries,
     schedules: schedules.data.entries,
     settings: entries,
@@ -133,7 +133,7 @@ export function AutomationPage() {
     settings: entries,
     policySchema,
     analyzers: input.analyzers,
-    groups: input.groups,
+    teams: input.teams,
     rules: automationRules(input),
     lanes: automationLanes(input),
     history: new Map(
@@ -150,9 +150,7 @@ export function AutomationPage() {
     .filter((entry) => entry.key === POLICIES_KEY)
     .flatMap((entry) => normalizePolicies(entry.value).map((policy) => policy.id))
   const newPolicyEntry =
-    creating?.kind === 'policy'
-      ? policiesEntryFor(entries, POLICIES_KEY, creating.group)
-      : undefined
+    creating?.kind === 'policy' ? policiesEntryFor(entries, POLICIES_KEY, creating.team) : undefined
   const done = () => setCreating(undefined)
 
   return (
@@ -166,8 +164,8 @@ export function AutomationPage() {
         open={creating !== undefined}
         onClose={done}
         title={
-          creating?.kind === 'policy' && creating.group
-            ? `New rule for ${titleOf(creating.group)}`
+          creating?.kind === 'policy' && creating.team
+            ? `New rule for ${titleOf(creating.team)}`
             : 'New rule'
         }
         tabs={{
@@ -179,7 +177,7 @@ export function AutomationPage() {
                 ? { kind: id }
                 : {
                     kind: 'policy',
-                    ...(view === 'map' && search.lane !== undefined && { group: search.lane }),
+                    ...(view === 'map' && search.lane !== undefined && { team: search.lane }),
                   },
             ),
           'aria-label': 'Kind of rule',
@@ -195,8 +193,8 @@ export function AutomationPage() {
           />
         ) : creating?.kind === 'policy' ? (
           <PolicyForm
-            key={creating.group ?? ALL_LANE}
-            {...(creating.group !== undefined && { group: creating.group })}
+            key={creating.team ?? ALL_LANE}
+            {...(creating.team !== undefined && { team: creating.team })}
             {...(newPolicyEntry && { entry: newPolicyEntry })}
             taken={policyIds}
             schema={policySchema}

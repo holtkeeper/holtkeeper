@@ -350,6 +350,62 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     await store.close()
   })
 
+  test('migration 29 renames ai usage groups to teams and adds knowledge match', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((step) => step.version <= 28),
+    )
+    await admin!.unsafe(
+      `
+      INSERT INTO ${schema}.ai_usage (id, at, repo_forge, repo_path, groups, task_kind, actor, provider,
+        model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
+        cost_source, duration_ms, turns, outcome)
+      VALUES ('u1', $1, 'work', 'shapes/a', '["widgets"]', 'review', 'system', 'anthropic', 'm', 1,
+        1, 0, 0, 0.5, 'reported', 10, 1, 'ok')`,
+      ['2026-10-01T00:00:00.000Z'],
+    )
+    expect(await migrate(admin!, schema)).toContain(29)
+    const indexes =
+      (await admin!`SELECT indexname FROM pg_indexes WHERE schemaname = ${schema}`) as {
+        indexname: string
+      }[]
+    expect(indexes.map((row) => row.indexname)).toContain('ai_usage_teams')
+    const store = postgresStore({ url: url!, schema })
+    expect((await store.aiUsage.list({ team: 'widgets' }))[0]).toMatchObject({
+      id: 'u1',
+      teams: ['widgets'],
+    })
+    await store.close()
+  })
+
+  test('migration 30 adds embeddings stored as bytea', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((step) => step.version <= 29),
+    )
+    expect(await migrate(admin!, schema)).toContain(30)
+    const [column] = (await admin!`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_schema = ${schema} AND table_name = 'embeddings' AND column_name = 'vector'`) as {
+      data_type: string
+    }[]
+    expect(column?.data_type).toBe('bytea')
+    const store = postgresStore({ url: url!, schema })
+    const vector = Float32Array.of(0.5, -2, 1e-20)
+    await store.embeddings.put([{ subject: 'knowledge:k1', model: 'fake:m@3', hash: 'h', vector }])
+    const [bytes] = (await admin!.unsafe(
+      `SELECT encode(vector, 'hex') AS hex FROM ${schema}.embeddings`,
+    )) as { hex: string }[]
+    // Little-endian float32: 0.5 is 0x3f000000, stored low byte first.
+    expect(bytes?.hex.slice(0, 8)).toBe('0000003f')
+    expect((await store.embeddings.list({ model: 'fake:m@3' }))[0]?.vector).toEqual(vector)
+    await store.close()
+  })
+
   test('foreign keys reject passkeys of unknown users', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema() })
     const outcome = await store.users

@@ -60,7 +60,7 @@ export interface CatalogToolsContext {
   auditOff?: () => Promise<RepoFilter>
   /** Repositories whose `bundle` analyzer `repo.analyzers` turns off; `evaluate_dependency` leaves them out. */
   bundleOff?: () => Promise<RepoFilter>
-  /** The teams of a repository (innermost config groups), named on results; without it no team is named. */
+  /** The owner teams of a repository, named on results; without it no team is named. */
   ownerOf?: (repo: RepoRef) => string[]
   /** Latest registry versions, for how far behind a repository is. */
   latest?: Pick<LatestVersions, 'all'>

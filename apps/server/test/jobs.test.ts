@@ -35,15 +35,15 @@ const forge = { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) a
 
 const baseConfig = {
   forges: { work: forge },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*'] },
   },
 }
 const config = parseConfig({
   ...baseConfig,
   jobs: {
-    onTag: { analyzers: ['changelog', 'fleet', 'unknown'], groups: ['games'] },
+    onTag: { analyzers: ['changelog', 'fleet', 'unknown'], teams: ['games'] },
     webhookSecret: 'hook-secret',
   },
 })
@@ -55,8 +55,8 @@ const analyzers: JobAnalyzerInfo[] = [
 
 const games = headerAuth({
   roles: {
-    games: [{ scope: { groups: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
-    reader: [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
+    reader: [{ scope: { teams: ['games'] }, actions: ['analyses:read'] }],
   },
 })
 const asGames = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'games' }
@@ -143,7 +143,7 @@ describe('job routes', () => {
     })
 
     const group = (await (
-      await send(app, 'POST', '/api/jobs', { analyzer: 'fleet', group: 'games' })
+      await send(app, 'POST', '/api/jobs', { analyzer: 'fleet', team: 'games' })
     ).json()) as Job
     expect(group).toMatchObject({ repo: { forge: 'work', path: 'games' }, group: 'games' })
 
@@ -195,9 +195,9 @@ describe('job routes', () => {
       return ((await response.json()) as { error: string }).error
     }
     expect(await error({ analyzer: 'nope', repo: 'work:games/a' })).toContain('unknown analyzer')
-    expect(await error({ analyzer: 'changelog', group: 'games' })).toContain('pass repo')
-    expect(await error({ analyzer: 'fleet', repo: 'work:games/a' })).toContain('pass group')
-    expect(await error({ analyzer: 'fleet', group: 'nope' })).toContain('unknown group')
+    expect(await error({ analyzer: 'changelog', team: 'games' })).toContain('pass repo')
+    expect(await error({ analyzer: 'fleet', repo: 'work:games/a' })).toContain('pass team')
+    expect(await error({ analyzer: 'fleet', team: 'nope' })).toContain('unknown team')
     expect(await error({ analyzer: 'changelog', repo: 'other:games/a' })).toContain(
       'not configured',
     )
@@ -220,7 +220,7 @@ describe('job routes', () => {
       await store.aiUsage.append({
         at: '2026-10-30T10:05:00.000Z',
         repo: { forge: 'work', path: 'games/a' },
-        groups: ['games'],
+        teams: ['games'],
         taskKind: 'review',
         jobId,
         actor: 'system',
@@ -330,14 +330,14 @@ describe('job routes', () => {
     expect((await setup().request('/api/jobs/failures?days=x')).status).toBe(400)
   })
 
-  test('lists visible job targets with their groups and narrows lists to requested ones', async () => {
+  test('lists visible job targets with their teams and narrows lists to requested ones', async () => {
     await enqueueChangelog('games/a')
     await enqueueChangelog('tools/x')
     const app = setup(games)
     const targets = (await (
       await app.request('/api/jobs/targets', { headers: asGames })
     ).json()) as JobTargetList
-    expect(targets.targets).toEqual([{ repo: 'work:games/a', groups: ['games'] }])
+    expect(targets.targets).toEqual([{ repo: 'work:games/a', teams: ['games'] }])
     const hidden = (await (
       await app.request('/api/jobs?repos=work:tools/x', { headers: asGames })
     ).json()) as JobList
@@ -515,7 +515,7 @@ describe('job routes', () => {
         store.aiUsage.append({
           at: '2026-10-30T11:30:00.000Z',
           repo: { forge: 'work', path },
-          groups: [path.split('/')[0]!],
+          teams: [path.split('/')[0]!],
           taskKind: 'review',
           actor: 'system',
           provider: 'anthropic',
@@ -544,7 +544,7 @@ describe('job routes', () => {
     const gamesAi = headerAuth({
       roles: {
         games: [
-          { scope: { groups: ['games'] }, actions: ['analyses:read', 'analyses:run', 'ai:read'] },
+          { scope: { teams: ['games'] }, actions: ['analyses:read', 'analyses:run', 'ai:read'] },
         ],
       },
     })
@@ -649,7 +649,7 @@ describe('job routes', () => {
       ).status,
     ).toBe(403)
     expect(
-      (await send(app, 'POST', '/api/jobs', { analyzer: 'fleet', group: 'games' }, asGames)).status,
+      (await send(app, 'POST', '/api/jobs', { analyzer: 'fleet', team: 'games' }, asGames)).status,
     ).toBe(201)
   })
 })
@@ -740,7 +740,7 @@ describe('gitlab webhook', () => {
     expect((await hook(disabled, tagPush('games/a', 'v1'))).status).toBe(404)
   })
 
-  test('ignores unconfigured pushes, deleted tags and repositories outside onTag groups', async () => {
+  test('ignores unconfigured pushes, deleted tags and repositories outside onTag teams', async () => {
     const app = setup()
     expect(
       await ignored(await hook(app, branchPush('games/a', 'main'), 'hook-secret', 'Push Hook')),
@@ -748,7 +748,7 @@ describe('gitlab webhook', () => {
     expect(await ignored(await hook(app, tagPush('games/a', 'v1', '0'.repeat(40))))).toContain(
       'deleted',
     )
-    expect(await ignored(await hook(app, tagPush('tools/x', 'v1')))).toContain('onTag.groups')
+    expect(await ignored(await hook(app, tagPush('tools/x', 'v1')))).toContain('onTag.teams')
     expect((await hook(app, { object_kind: 'tag_push' })).status).toBe(400)
     expect(await store.jobs.list()).toEqual([])
   })

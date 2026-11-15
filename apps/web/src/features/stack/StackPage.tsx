@@ -1,4 +1,4 @@
-import type { GroupMatch, RepoRef, StackComponentKind, StackGroupView } from '@holtkeeper/api'
+import type { RepoRef, StackComponentKind, StackTeamView } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Bot, FileCheck2, GitPullRequest, Layers } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
@@ -6,7 +6,7 @@ import { type ReactNode, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import {
   useApplyChanges,
-  useGroupTitles,
+  useTeamTitles,
   useStack,
   useTaskGroupMutations,
   useWriteTasks,
@@ -64,7 +64,7 @@ import {
   FilterButton,
   type FleetColumn,
   FleetTable,
-  GroupName,
+  TeamName,
   KeyValue,
   notify,
   Page,
@@ -101,49 +101,47 @@ const withoutSheet = ({ line: _line, repo: _repo, pane: _pane, ...rest }: StackS
 
 /**
  * The stack of the readable repositories: a repository × tool matrix with a support segment, the
- * version lines in use, and each group's conventions. `group` limits it to one config group, as
- * the group page shows it. Filters and the open line live in `search` when the caller keeps them
+ * version lines in use, and each team's conventions. `team` limits it to one team, as
+ * the team page shows it. Filters and the open line live in `search` when the caller keeps them
  * (the Stack page keeps them in the URL), else in local state.
  */
 export function StackView({
-  group,
+  team,
   tab,
   onTab,
   search,
   onSearch,
 }: {
-  group?: string
+  team?: string
   tab: StackTab
   onTab: (tab: StackTab) => void
   search?: StackState
   onSearch?: (next: StackState) => void
 }) {
   const stack = useStack()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const [local, setLocal] = useState<StackState>({})
   const state = search ?? local
   const setState = onSearch ?? setLocal
 
   if (stack.isPending) return <Placeholder className="h-96" />
   if (stack.isError) return <ErrorState error={stack.error} />
-  const picked = group
-    ? stack.data.groups.filter((entry) => entry.group === group)
-    : stack.data.groups
+  const picked = team ? stack.data.teams.filter((entry) => entry.team === team) : stack.data.teams
   if (!picked.length)
     return (
       <EmptyState
         icon={<Layers />}
         title="No stack yet"
-        description="The stack analysis reads each group's version files, images and CI through the forge. Run it once; it then stays fresh on its own."
+        description="The stack analysis reads each team's version files, images and CI through the forge. Run it once; it then stays fresh on its own."
         action={
-          <RunJobButton analyzer="stack" label="Run now" size="sm" {...(group ? { group } : {})} />
+          <RunJobButton analyzer="stack" label="Run now" size="sm" {...(team ? { team } : {})} />
         }
       />
     )
 
   const kinds = [...new Set(picked.flatMap((entry) => entry.tools.map((tool) => tool.kind)))]
   const filtered = narrowStack(picked, state.kind ? { kind: state.kind } : {})
-  const scoped = scopeStack(filtered, group ? 'all' : view, homeGroups)
+  const scoped = scopeStack(filtered, team ? 'all' : view, homeTeams)
   const grid = conventionGrid(filtered)
   const failing = grid.counts.drifts + grid.counts.missing
 
@@ -188,16 +186,16 @@ export function StackView({
       {tab === 'conventions' ? (
         <Conventions
           grid={grid}
-          scope={group ? undefined : { value: view, onChange: setView, homeGroups }}
+          scope={team ? undefined : { value: view, onChange: setView, homeTeams }}
           toolbar={filters}
         />
       ) : (
         <Runtimes
-          groups={filtered}
-          scopedGroups={scoped.groups}
+          teams={filtered}
+          scopedTeams={scoped.teams}
           state={state}
           setState={setState}
-          scope={group ? undefined : { value: view, onChange: setView, homeGroups }}
+          scope={team ? undefined : { value: view, onChange: setView, homeTeams }}
           toolbar={filters}
           conventions={grid}
           onConventions={() => onTab('conventions')}
@@ -208,7 +206,7 @@ export function StackView({
 }
 
 type Scope =
-  | { value: ScopeView; onChange: (view: ScopeView) => void; homeGroups: readonly GroupMatch[] }
+  | { value: ScopeView; onChange: (view: ScopeView) => void; homeTeams: readonly string[] }
   | undefined
 
 const segmentLabel = (label: string, count: number) => (
@@ -219,8 +217,8 @@ const segmentLabel = (label: string, count: number) => (
 )
 
 function Runtimes({
-  groups,
-  scopedGroups,
+  teams,
+  scopedTeams,
   state,
   setState,
   scope,
@@ -228,8 +226,8 @@ function Runtimes({
   conventions,
   onConventions,
 }: {
-  groups: StackGroupView[]
-  scopedGroups: StackGroupView[]
+  teams: StackTeamView[]
+  scopedTeams: StackTeamView[]
   state: StackState
   setState: (next: StackState) => void
   scope: Scope
@@ -237,14 +235,14 @@ function Runtimes({
   conventions: ConventionGrid
   onConventions: () => void
 }) {
-  const everything = repoMatrix(groups)
+  const everything = repoMatrix(teams)
   const totals = matrixCounts(everything)
-  const matrix = state.segment ? repoMatrix(groups, state.segment) : everything
-  const lines = versionLines(scopedGroups)
-  const allLines = versionLines(groups)
-  const changes = weeklyChanges(scopedGroups)
-  const checkedAt = groups.map((entry) => entry.checkedAt).toSorted()[0]
-  const soonDays = groups[0]?.soonDays ?? 180
+  const matrix = state.segment ? repoMatrix(teams, state.segment) : everything
+  const lines = versionLines(scopedTeams)
+  const allLines = versionLines(teams)
+  const changes = weeklyChanges(scopedTeams)
+  const checkedAt = teams.map((entry) => entry.checkedAt).toSorted()[0]
+  const soonDays = teams[0]?.soonDays ?? 180
 
   const open = (item: StackSheetItem, pane?: StackPane) =>
     setState({
@@ -256,7 +254,7 @@ function Runtimes({
   const opened: StackSheetItem | undefined = state.line
     ? { line: state.line, ...(state.repo ? { repo: state.repo } : {}) }
     : undefined
-  const items = sheetItems(repoMatrix(scopedGroups, state.segment), lines, Boolean(state.repo))
+  const items = sheetItems(repoMatrix(scopedTeams, state.segment), lines, Boolean(state.repo))
   const step = neighbours(items.map(sheetKey), opened ? sheetKey(opened) : undefined)
 
   const strip = (shown: readonly MatrixRow[]): StripCell[] => {
@@ -384,7 +382,7 @@ function Runtimes({
       />
       <VersionLines lines={lines} opened={opened} onOpen={(item) => open(item, 'where')} />
       <LineSheet
-        groups={groups}
+        teams={teams}
         lines={allLines}
         item={opened}
         pane={state.pane ?? (state.repo ? 'cell' : 'where')}
@@ -416,12 +414,12 @@ function RepoLink({ forge, path }: { forge: string; path: string }) {
 }
 
 function RepoCell({ row }: { row: MatrixRow }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   return (
     <div className="flex min-w-0 flex-col">
       <RepoLink forge={row.forge} path={row.repo} />
       <span className="truncate text-[11px] text-dim">
-        {row.error ? `Not read: ${row.error}` : row.groups.map(titleOf).join(', ')}
+        {row.error ? `Not read: ${row.error}` : row.teams.map(titleOf).join(', ')}
       </span>
     </div>
   )
@@ -591,7 +589,7 @@ function useMergeRequestAction(result: PlacedConvention | undefined) {
  * against.
  */
 function LineSheet({
-  groups,
+  teams,
   lines,
   item,
   pane,
@@ -602,7 +600,7 @@ function LineSheet({
   onPrevious,
   onNext,
 }: {
-  groups: readonly StackGroupView[]
+  teams: readonly StackTeamView[]
   lines: readonly ToolRow[]
   item: StackSheetItem | undefined
   pane: StackPane
@@ -620,7 +618,7 @@ function LineSheet({
   const convention =
     item?.repo && repoUses.length
       ? matchingConvention(
-          groups,
+          teams,
           item.repo,
           repoUses.map((use) => use.file),
         )
@@ -634,7 +632,7 @@ function LineSheet({
   const cycle = tool?.cycles?.find((entry) => entry.cycle === cell?.version)
   const step =
     tool && cell
-      ? suggestedSteps(tool, cell.version, new Date(), groups[0]?.soonDays ?? 180)[0]
+      ? suggestedSteps(tool, cell.version, new Date(), teams[0]?.soonDays ?? 180)[0]
       : undefined
   const quiet = quietActionsOf([
     ...(step && can('tasks:run')
@@ -694,7 +692,7 @@ function LineSheet({
               line={cell.version}
               uses={repoUses}
               convention={convention}
-              soonDays={groups[0]?.soonDays ?? 180}
+              soonDays={teams[0]?.soonDays ?? 180}
             />
           ) : (
             <Table label={`Where ${tool.name} ${cell.version} is declared`}>
@@ -767,7 +765,7 @@ function UseRepoLink({ repoKey: key }: { repoKey: string }) {
 
 /**
  * Starts an `upgrade` task group that moves every repository on `line` of `tool` to `to`, one
- * draft merge request per repository; says when write tasks are off or the group is too big.
+ * draft merge request per repository; says when write tasks are off or the team is too big.
  */
 function PlanUpgradeDialog({
   tool,
@@ -922,7 +920,7 @@ function SelectedCell({
                   </Tag>
                   <span className="mono text-muted">{convention.file}</span>
                   <span className="text-muted">
-                    <GroupName group={convention.group} />
+                    <TeamName team={convention.team} />
                   </span>
                 </>
               ) : undefined,
@@ -963,7 +961,7 @@ function Conventions({
       <EmptyState
         icon={<FileCheck2 />}
         title="No conventions yet"
-        description="Conventions are golden files every repository of a group should match: a path, a match mode and the content. Add them to the Tech stack analyzer settings of a group."
+        description="Conventions are golden files every repository of a team should match: a path, a match mode and the content. Add them to the Tech stack analyzer settings of a team."
         action={edit}
       />
     )
@@ -1082,7 +1080,7 @@ function ConventionDetail({ result }: { result: PlacedConvention }) {
         </Tag>
         <Tag mono>{result.mode}</Tag>
         <span className="text-xs text-muted">
-          group <GroupName group={result.group} />
+          team <TeamName team={result.team} />
         </span>
       </div>
       {result.problems.length ? (
@@ -1129,23 +1127,23 @@ export function RepoStack({ repo }: { repo: RepoRef }) {
   if (stack.isPending) return <Placeholder className="h-48" />
   if (stack.isError) return <ErrorState error={stack.error} />
   const key = repoKey(repo)
-  const groups = narrowStack(stack.data.groups, { repo: key })
-  const matrix = repoMatrix(groups)
+  const teams = narrowStack(stack.data.teams, { repo: key })
+  const matrix = repoMatrix(teams)
   const row = matrix.rows[0]
-  const lines = versionLines(groups)
-  const grid = conventionGrid(groups)
+  const lines = versionLines(teams)
+  const grid = conventionGrid(teams)
   const conventions = grid.rows[0]
   if (!row || !Object.keys(row.cells).length)
     return (
       <EmptyState
         icon={<Layers />}
         title="No stack for this repository"
-        description="The stack analysis of its group has not found runtimes, images or tools here yet."
+        description="The stack analysis of its team has not found runtimes, images or tools here yet."
         action={<RunJobButton analyzer="stack" label="Run stack scan" size="sm" repo={repo} />}
       />
     )
   const now = new Date()
-  const soonDays = groups[0]?.soonDays ?? 180
+  const soonDays = teams[0]?.soonDays ?? 180
   const items = sheetItems(matrix, lines, true)
   const opened: StackSheetItem | undefined = state.line
     ? { line: state.line, repo: key }
@@ -1212,7 +1210,7 @@ export function RepoStack({ repo }: { repo: RepoRef }) {
         ) : null}
       </section>
       <LineSheet
-        groups={groups}
+        teams={teams}
         lines={lines}
         item={opened}
         pane={state.pane ?? 'cell'}
@@ -1227,7 +1225,7 @@ export function RepoStack({ repo }: { repo: RepoRef }) {
   )
 }
 
-/** The Stack page: the repository × tool matrix, version lines and conventions across the readable groups. */
+/** The Stack page: the repository × tool matrix, version lines and conventions across the readable teams. */
 export function StackPage() {
   const search = useSearch({ from: '/app/supply/stack' })
   const navigate = useNavigate()
@@ -1238,7 +1236,7 @@ export function StackPage() {
   return (
     <Page
       crumbs={[{ label: 'Stack' }]}
-      description="Runtimes, images and tools per repository and version line, their support, and how repositories match their group's conventions"
+      description="Runtimes, images and tools per repository and version line, their support, and how repositories match their team's conventions"
       {...(configure ? { configure } : {})}
       primary={run.action}
     >

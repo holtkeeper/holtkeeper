@@ -13,7 +13,7 @@ const spend = (
 ): NewAiUsageRecord => ({
   at,
   repo: { forge: 'work', path: 'games/app' },
-  groups: ['games'],
+  teams: ['games'],
   taskKind: 'review',
   actor: 'system',
   provider: 'anthropic',

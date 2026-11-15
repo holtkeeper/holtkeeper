@@ -35,7 +35,7 @@ const forge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => forge } },
-  groups: { shapes: { forge: 'work', include: ['shapes/*'] } },
+  teams: { shapes: { owns: ['work:shapes/*'] } },
   jobs: {
     webhookSecret: 'hook-secret',
     botUsernames: { work: 'holtkeeper' },
@@ -136,13 +136,13 @@ beforeEach(() => {
 
 describe('mergeRequests.comments', () => {
   test('off: the review is not queued, other analyzers are', async () => {
-    await commentsOff({ groups: ['shapes'] })
+    await commentsOff({ teams: ['shapes'] })
     expect((await opened('shapes/widget')).status).toBe(202)
     expect(await jobs()).toEqual(['lint'])
   })
 
   test('a repository entry turns reviews back on inside a group that has them off', async () => {
-    await commentsOff({ groups: ['shapes'] })
+    await commentsOff({ teams: ['shapes'] })
     await setting(
       'on',
       'mergeRequests.comments',

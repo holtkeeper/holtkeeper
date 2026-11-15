@@ -2,7 +2,7 @@ import type { Scope, SettingDefinitionView, SettingList, SettingView } from '@ho
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentials, useRepos, useSettingMutations } from '../../api/queries.ts'
+import { useCredentials, useSettingMutations } from '../../api/queries.ts'
 import { scopeOrder } from '../../lib/scope.ts'
 import { ConfirmDialog, notify } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
@@ -25,12 +25,10 @@ export function SettingEntries({
   empty?: string
 }) {
   const { can } = useSession()
-  const repos = useRepos(can('repos:read'))
   const credentials = useCredentials(can('credentials:read'))
   const { remove } = useSettingMutations()
   const [editing, setEditing] = useState<SettingView | 'new' | null>(null)
   const [deleting, setDeleting] = useState<SettingView | null>(null)
-  const groups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
 
   return (
     <>
@@ -50,7 +48,6 @@ export function SettingEntries({
           key={editing === 'new' ? 'new' : editing.id}
           definition={definition}
           {...(editing === 'new' ? (initialScope ? { initialScope } : {}) : { entry: editing })}
-          groups={groups}
           onClose={() => setEditing(null)}
         />
       ) : null}

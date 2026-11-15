@@ -20,10 +20,10 @@ const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['releases:read', 'releases:run'] }],
     viewer: [{ scope: { all: true }, actions: ['releases:read'] }],
-    games: [{ scope: { groups: ['games'] }, actions: ['releases:read', 'releases:run'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['releases:read', 'releases:run'] }],
     elsewhere: [
       { scope: { all: true }, actions: ['releases:read'] },
-      { scope: { groups: ['tools'] }, actions: ['releases:run'] },
+      { scope: { teams: ['tools'] }, actions: ['releases:run'] },
     ],
   },
 })
@@ -49,7 +49,7 @@ beforeEach(async () => {
   deps = {
     config: parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fake.forge } },
-      groups: { games: { forge: 'work', include: ['g/app'] } },
+      teams: { games: { owns: ['work:g/app'] } },
     }),
     auth,
     store,
@@ -134,7 +134,7 @@ describe('release card permissions', () => {
       id: 'header:kim',
       name: 'Kim',
       provider: 'header',
-      grants: [{ scope: { groups: ['tools'] }, actions: ['releases:run'] }],
+      grants: [{ scope: { teams: ['tools'] }, actions: ['releases:run'] }],
     }
     const wide: Principal = {
       ...narrow,

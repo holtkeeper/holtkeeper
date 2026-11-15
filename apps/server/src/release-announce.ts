@@ -216,9 +216,9 @@ const bare = (version: string | undefined) => version?.replace(/^v(?=\d)/, '')
 
 const retryDelayMs = (attempts: number) => Math.min(2 ** Math.max(attempts - 1, 0), 60) * 60_000
 
-/** Whether two repositories share a team: a config group, or neither has one. */
+/** Whether two repositories share a team: an owner team, or neither has one. */
 const sameTeam = (a: readonly string[], b: readonly string[]) =>
-  (a.length === 0 && b.length === 0) || a.some((group) => b.includes(group))
+  (a.length === 0 && b.length === 0) || a.some((team) => b.includes(team))
 
 /** Release announcements in Slack; see `createReleaseAnnouncer`. */
 export interface ReleaseAnnouncer {
@@ -662,7 +662,8 @@ export function createReleaseAnnouncer(
   /** What the channel may learn about other teams' repositories (`access.crossTeam`). */
   interface Reach {
     policy: Awaited<ReturnType<typeof crossTeamPolicy>>
-    groups: string[]
+    /** Owner teams of the released repository. */
+    teams: string[]
   }
 
   /**
@@ -712,7 +713,7 @@ export function createReleaseAnnouncer(
     const affected: AffectedRepository[] = []
     let hidden = 0
     for (const [origin, entry] of byOrigin) {
-      const own = sameTeam(reach.groups, repoTarget(config, originRepo(origin)).groups ?? [])
+      const own = sameTeam(reach.teams, repoTarget(config, originRepo(origin)).teams)
       if (!own && reach.policy === 'off') {
         hidden++
         continue
@@ -845,7 +846,7 @@ export function createReleaseAnnouncer(
         : undefined
     const reach: Reach = {
       policy: await crossTeamPolicy(store.settings),
-      groups: repoTarget(config, repo).groups ?? [],
+      teams: repoTarget(config, repo).teams,
     }
     const titles = batch.tags.map((tag) => tag.package ?? repo.path)
     const keyOf = (title: string, version: string) =>

@@ -83,7 +83,7 @@ function cardOf(
   const change = round(newest.delta)
   return {
     repo: { forge: target.forge, path: target.path },
-    groups: [...target.groups],
+    teams: [...target.teams],
     analysisId: record.id,
     createdAt: record.createdAt,
     ...(record.ref ? { ref: record.ref } : {}),

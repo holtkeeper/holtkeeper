@@ -89,7 +89,7 @@ const run = (
   options: Partial<GuideGeneratorOptions> = {},
   extra: { forge?: ConventionsForge; jobId?: string } = {},
 ) =>
-  createGuideAnalyzer({ store, groupsOf: () => ['shapes'] }).run({
+  createGuideAnalyzer({ store, teamsOf: () => ['shapes'] }).run({
     repo,
     dir,
     runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
@@ -136,7 +136,7 @@ test('a repository with no tests by design skips testing without asking the mode
   const { agent, tasks } = fakeAgent()
   const { data } = await createGuideAnalyzer({
     store,
-    groupsOf: () => ['shapes'],
+    teamsOf: () => ['shapes'],
     testsExpected: async () => false,
   }).run({
     repo,
@@ -198,7 +198,7 @@ test('changed steering regenerates only that section, on the fast tier when gene
   await run(fakeAgent().agent)
   const testing = await store.guides.get(repoScope, 'testing')
   await store.guides.put({
-    scope: 'group:shapes',
+    scope: 'team:shapes',
     section: 'testing',
     rules: 'Table-driven tests only.',
     steering: 'Mention the race detector.',
@@ -271,7 +271,7 @@ test('sections the policy lists are stored accepted by auto-accept and audited; 
   const asked: string[] = []
   await createGuideAnalyzer({
     store,
-    groupsOf: () => ['shapes'],
+    teamsOf: () => ['shapes'],
     autoAccept: async (target) => {
       asked.push(target.path)
       return ['general']

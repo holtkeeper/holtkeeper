@@ -41,7 +41,7 @@ A person may reject the waiting text instead (`POST /api/guide/section/reject`).
 
 ## Analyzer
 
-`createGuideAnalyzer({ store, groupsOf, testsExpected?, autoAccept? })` returns the `guide` analyzer (repository scope, needs a checkout; forge, agent and history optional; runs `after` `coverage` and `testids`). The server builds it with its store; the copy in `builtinAnalyzers` has none and refuses to run. Options:
+`createGuideAnalyzer({ store, teamsOf, testsExpected?, autoAccept? })` returns the `guide` analyzer (repository scope, needs a checkout; forge, agent and history optional; runs `after` `coverage` and `testids`). The server builds it with its store; the copy in `builtinAnalyzers` has none and refuses to run. Options:
 
 - `sections` — the sections to consider (default all four);
 - `prompt` — a one-off extra prompt, stored with what the run writes;

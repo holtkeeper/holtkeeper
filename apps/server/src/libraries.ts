@@ -135,7 +135,7 @@ export const librariesSetting = defineSetting({
 - **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. They run on the fast tier: the newest Haiku the provider lists.
 - **concurrency** (default 3, at most 8): libraries indexed at the same time; a run mostly waits for the network, so a few at once make it several times faster while the GitHub limit lasts.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
-- **goPrivate**: Go module path patterns in \`GOPRIVATE\` syntax (\`git.example.com\`, \`github.com/acme-private/*\`) that are private. Modules under the host of a forge are private already (on github.com, gitlab.com and bitbucket.org only the top-level groups the forge's groups include and the namespaces of analyzed repositories); private modules are never asked on proxy.golang.org, by the index or by \`go\` in jobs, and count as the organization's own.
+- **goPrivate**: Go module path patterns in \`GOPRIVATE\` syntax (\`git.example.com\`, \`github.com/acme-private/*\`) that are private. Modules under the host of a forge are private already (on github.com, gitlab.com and bitbucket.org only the top-level namespaces the forge's fleet includes and the namespaces of analyzed repositories); private modules are never asked on proxy.golang.org, by the index or by \`go\` in jobs, and count as the organization's own.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
   default: { ...defaultLibraryIndexSettings, interval: DEFAULT_INTERVAL, digests: false },
   schema: librariesSchema,
@@ -452,10 +452,10 @@ export interface LibraryIndexDeps {
     analyses: AnalysisStore
     settings: SettingStore
     kv?: KvStore
-    /** Panel forges and groups, whose hosts hold private Go modules. */
+    /** Panel forges and teams, whose hosts and fleet hold private Go modules. */
     config?: Pick<ConfigStore, 'list'>
   }
-  /** Forges and groups of the config file, for the private Go module patterns. */
+  /** Forges, fleet and teams of the config file, for the private Go module patterns. */
   config?: GoPrivateConfig
   artifacts?: ArtifactStore
   credentials: CredentialSource

@@ -40,7 +40,7 @@ const forge = {
 const configWith = (execution?: object) =>
   parseConfig({
     forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => forge } },
-    groups: { games: { forge: 'work', include: ['games/*'] } },
+    teams: { games: { owns: ['work:games/*'] } },
     jobs: execution ? { execution } : {},
   })
 

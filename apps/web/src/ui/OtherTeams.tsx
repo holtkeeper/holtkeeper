@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
-import { useGroupTitles } from '../api/queries.ts'
+import { useTeamTitles } from '../api/queries.ts'
 import { otherTeamsText } from '../lib/other-teams.ts'
 
 /**
@@ -39,7 +39,7 @@ export function OtherTeams({
   summary?: ReactNode
 }) {
   const [own, setOwn] = useState(defaultOpen)
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const open = controlled ?? own
   const setOpen = (next: boolean) => {
     setOwn(next)

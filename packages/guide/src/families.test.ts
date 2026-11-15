@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
-import { familyOf, frameworkOf, jaccard, suggestFamilies, suggestionKey } from './families.ts'
+import {
+  familyOf,
+  frameworkOf,
+  jaccard,
+  repoNeighbours,
+  repoSimilarity,
+  suggestFamilies,
+  suggestionKey,
+} from './families.ts'
 
 const shop = ['react', 'react-dom', 'widget-kit', 'shape-utils', 'foo-router', 'bar-state']
 
@@ -40,6 +48,17 @@ describe('suggestFamilies', () => {
     expect(names.toSorted()).toEqual(['games/front (react)', 'media'])
   })
 
+  test('alike repositories in different folders are suggested together, named by their shape', () => {
+    const suggestions = suggestFamilies([
+      { repo: 'work:acme/round/web', dependencies: shop, toolchain: ['node', 'pnpm'] },
+      { repo: 'work:acme/square/web', dependencies: shop, toolchain: ['node', 'pnpm'] },
+      { repo: 'work:acme/round/api', dependencies: ['fastify', 'some-lib'], toolchain: ['node'] },
+    ])
+    expect(suggestions.map((s) => [s.name, s.members])).toEqual([
+      ['acme/*/web (react)', ['work:acme/round/web', 'work:acme/square/web']],
+    ])
+  })
+
   test('suggestions that would share a name are told apart by a dependency only they share', () => {
     const left = ['react', 'widget-kit', 'left-lib', 'left-ui', 'left-state']
     const right = ['react', 'widget-kit', 'right-lib', 'right-ui', 'right-state']
@@ -51,8 +70,8 @@ describe('suggestFamilies', () => {
     ]).map((suggestion) => suggestion.name)
     expect(new Set(names).size).toBe(names.length)
     expect(names.toSorted()).toEqual([
-      'acme/app (react) · left-lib',
-      'acme/app (react) · right-lib',
+      'acme/*/app (react) · left-lib',
+      'acme/*/app (react) · right-lib',
     ])
   })
 
@@ -115,4 +134,66 @@ describe('helpers', () => {
 test('a suggestion key ignores member order and duplicates', () => {
   expect(suggestionKey(['w:b', 'w:a', 'w:b'])).toBe('w:a,w:b')
   expect(suggestionKey(['w:a', 'w:b'])).toBe(suggestionKey(['w:b', 'w:a']))
+})
+
+describe('repoSimilarity', () => {
+  test('is the dependency Jaccard within one framework and toolchain, else 0', () => {
+    const a = { repo: 'work:acme/round/web', dependencies: shop, toolchain: ['node', 'pnpm'] }
+    const b = {
+      repo: 'work:acme/square/web',
+      dependencies: [...shop, 'extra-lib'],
+      toolchain: ['pnpm', 'node'],
+    }
+    expect(repoSimilarity(a, b)).toBeCloseTo(6 / 7)
+    expect(repoSimilarity(b, a)).toBe(repoSimilarity(a, b))
+    expect(repoSimilarity(a, { ...b, toolchain: ['node', 'npm'] })).toBe(0)
+    expect(repoSimilarity(a, { ...b, dependencies: ['vue', ...shop.slice(2)] })).toBe(0)
+  })
+})
+
+describe('repoNeighbours', () => {
+  const signals = [
+    { repo: 'work:acme/round/web', dependencies: shop },
+    { repo: 'work:acme/square/web', dependencies: [...shop, 'extra-lib'] },
+    { repo: 'work:acme/oval/web', dependencies: shop.slice(0, 4) },
+    { repo: 'work:acme/hex/web', dependencies: shop.slice(0, 3) },
+    { repo: 'work:acme/round/api', dependencies: ['express', 'some-lib'] },
+    { repo: 'work:acme/blank/web', dependencies: [] },
+  ]
+
+  test('lists the most alike repositories above the minimum, best first', () => {
+    expect(repoNeighbours(signals, 'work:acme/round/web')).toEqual([
+      { repo: 'work:acme/square/web', similarity: 0.857 },
+      { repo: 'work:acme/oval/web', similarity: 0.667 },
+      { repo: 'work:acme/hex/web', similarity: 0.5 },
+    ])
+    expect(repoNeighbours(signals, 'work:acme/round/web', { limit: 1, min: 0.6 })).toEqual([
+      { repo: 'work:acme/square/web', similarity: 0.857 },
+    ])
+  })
+
+  test('is the same for signals in any order', () => {
+    expect(repoNeighbours(signals.toReversed(), 'work:acme/round/web')).toEqual(
+      repoNeighbours(signals, 'work:acme/round/web'),
+    )
+  })
+
+  test('leaves out the family, unknown repositories and repositories without dependencies', () => {
+    const families = [
+      {
+        id: 'f-web',
+        name: 'Web',
+        members: ['work:acme/round/web', 'work:acme/square/web'],
+        createdBy: 'someone',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]
+    expect(repoNeighbours(signals, 'work:acme/round/web', { families }).map((n) => n.repo)).toEqual(
+      ['work:acme/oval/web', 'work:acme/hex/web'],
+    )
+    expect(repoNeighbours(signals, 'work:acme/blank/web')).toEqual([])
+    expect(repoNeighbours(signals, 'work:acme/unknown')).toEqual([])
+    expect(repoNeighbours(signals, 'work:acme/round/api')).toEqual([])
+  })
 })

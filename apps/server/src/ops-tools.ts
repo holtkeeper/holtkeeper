@@ -8,10 +8,10 @@ import {
 import { budgetKey, budgetStatuses, weekBreakdown, weekRange } from '@holtkeeper/ai-usage'
 import type { ReleaseCard } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import { readJobLog } from '@holtkeeper/jobs'
+import { readJobLog, teamForges } from '@holtkeeper/jobs'
 import type { AiUsageFilter, Job } from '@holtkeeper/store'
 
-import { type ServerDeps, groupLabeler, parseRepo, repoKey, repoTarget } from './context.ts'
+import { type ServerDeps, parseRepo, repoKey, repoTarget, teamLabeler } from './context.ts'
 import { freshnessStatus } from './freshness.ts'
 import { type CostReader, jobStats } from './job-stats.ts'
 import { explainJob } from './job-why.ts'
@@ -30,7 +30,7 @@ import { canSee } from './visibility.ts'
 
 /** Options of `opsToolsAccess`. */
 interface OpsToolsAccessOptions {
-  /** Whether the caller may read the jobs of a repository (group jobs count as their group). */
+  /** Whether the caller may read the jobs of a repository (group-scope jobs count as their team). */
   canRead: (target: RepoTarget) => boolean
   /** Skips the per-repository filter: the caller reads every job. */
   readAll?: boolean
@@ -81,13 +81,15 @@ function opsToolsAccess(deps: OpsDeps, options: OpsToolsAccessOptions): OpsTools
   const visibleRepos = async (): Promise<RepoRef[] | undefined> =>
     options.readAll ? undefined : (await store.jobs.targets()).filter(readable).map((t) => t.repo)
 
+  // Group-scope analyses store `{ forge, path: <team key> }`.
+  const teamJob = (repo: RepoRef) =>
+    config.teams[repo.path] !== undefined && teamForges(config, repo.path).includes(repo.forge)
   const { canReadBudget } = options
   return {
     repoOf: (value) => {
       const repo = parseRepo(value)
       if (!repo) return undefined
-      const group = config.groups[repo.path]
-      const target = group && group.forge === repo.forge ? { repo, group: repo.path } : { repo }
+      const target = teamJob(repo) ? { repo, group: repo.path } : { repo }
       return readable(target) ? repo : undefined
     },
     jobs: async (query) => {
@@ -109,8 +111,7 @@ function opsToolsAccess(deps: OpsDeps, options: OpsToolsAccessOptions): OpsTools
       return why
     },
     health: async (repo) => {
-      const group = config.groups[repo.path]
-      if (group && group.forge === repo.forge) return undefined
+      if (teamJob(repo)) return undefined
       const target = repoTarget(config, repo)
       const allowed = options.cells(target)
       const { releaseCards } = options
@@ -135,11 +136,7 @@ function opsToolsAccess(deps: OpsDeps, options: OpsToolsAccessOptions): OpsTools
         ...(options.releaseCards && { releases: options.releaseCards }),
       }),
     freshness: async (repo) => {
-      const group = config.groups[repo.path]
-      return freshnessStatus(
-        deps,
-        group && group.forge === repo.forge ? { repo, group: repo.path } : { repo },
-      )
+      return freshnessStatus(deps, teamJob(repo) ? { repo, group: repo.path } : { repo })
     },
     ...(canReadBudget && {
       budgets: async () =>
@@ -154,7 +151,7 @@ function opsToolsAccess(deps: OpsDeps, options: OpsToolsAccessOptions): OpsTools
         return weekBreakdown(store.aiUsage, weekRange(at), options.usage ?? { scopes: [] })
       },
     }),
-    groupLabel: groupLabeler(config),
+    teamLabel: teamLabeler(config),
   }
 }
 
@@ -187,9 +184,9 @@ export function principalOpsAccess(
 
 /**
  * The `ops` access of an internal agent working on `repo` (team chat): jobs and health of that
- * repository and of repositories sharing a group with it, the budgets that cover the
- * repository, the default one included, and the week's AI usage of its groups (of the repository
- * alone without groups). When a person asked, jobs also need their
+ * repository and of repositories sharing an owner team with it, the budgets that cover the
+ * repository, the default one included, and the week's AI usage of its owner teams (of the repository
+ * alone without owner teams). When a person asked, jobs also need their
  * `analyses:read`, each health cell its own permission of theirs and budgets their `ai:read` or
  * `ai:admin` (the default budget only instance-wide). The release cell needs `releaseCards`. Who
  * asked for a job is never part of what the tools return.
@@ -206,7 +203,7 @@ export function agentOpsAccess(
     can(requester, 'ai:read', { kind: 'scope', scope }) ||
     can(requester, 'ai:admin', { kind: 'scope', scope })
   const reach = (other: RepoTarget) =>
-    repoKey(other) === own || other.groups.some((group) => repo.groups.includes(group))
+    repoKey(other) === own || other.teams.some((team) => repo.teams.includes(team))
   return opsToolsAccess(deps, {
     canRead: (other) => reach(other) && (!requester || canSee(requester, 'analyses:read', other)),
     cells: (other) => (action) => reach(other) && (!requester || canSee(requester, action, other)),
@@ -216,8 +213,8 @@ export function agentOpsAccess(
         (scope.all === true || scopeCoversRepo(scope, repo)) && readsBudget(scope),
       includeDefaultBudget: readsBudget({ all: true }),
       usage: {
-        ...(repo.groups.length
-          ? { groups: repo.groups }
+        ...(repo.teams.length
+          ? { teams: repo.teams }
           : { repo: { forge: repo.forge, path: repo.path } }),
         ...(requester && usageOf(requester)),
       },

@@ -41,9 +41,9 @@ const forge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => forge } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/a', 'shapes/b', 'shapes/vendored'] },
-    tools: { forge: 'work', include: ['tools/x', 'tools/y'] },
+  teams: {
+    shapes: { owns: ['work:shapes/a', 'work:shapes/b', 'work:shapes/vendored'] },
+    tools: { owns: ['work:tools/x', 'work:tools/y'] },
   },
   jobs: {},
 })
@@ -51,13 +51,13 @@ const config = parseConfig({
 const auth = headerAuth({
   roles: {
     shapes: [
-      { scope: { groups: ['shapes'] }, actions: ['tasks:run', 'repos:read', 'analyses:read'] },
+      { scope: { teams: ['shapes'] }, actions: ['tasks:run', 'repos:read', 'analyses:read'] },
     ],
     helper: [
-      { scope: { groups: ['shapes'] }, actions: ['tasks:run', 'repos:read'] },
+      { scope: { teams: ['shapes'] }, actions: ['tasks:run', 'repos:read'] },
       { scope: { repos: ['work:tools/x'] }, actions: ['tasks:run'] },
     ],
-    reader: [{ scope: { groups: ['shapes'] }, actions: ['repos:read'] }],
+    reader: [{ scope: { teams: ['shapes'] }, actions: ['repos:read'] }],
   },
 })
 const asShapes = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'shapes' }
@@ -68,9 +68,7 @@ const jane: Principal = {
   id: 'header:jane',
   name: 'jane',
   provider: 'header',
-  grants: [
-    { scope: { groups: ['shapes'] }, actions: ['tasks:run', 'repos:read', 'analyses:read'] },
-  ],
+  grants: [{ scope: { teams: ['shapes'] }, actions: ['tasks:run', 'repos:read', 'analyses:read'] }],
 }
 
 const now = new Date('2026-11-11T12:00:00.000Z')
@@ -146,7 +144,7 @@ const spend = (costUsd: number, jobId?: string) =>
   store.aiUsage.append({
     at: '2026-11-10T09:00:00.000Z',
     repo: { forge: 'work', path: 'shapes/a' },
-    groups: ['shapes'],
+    teams: ['shapes'],
     taskKind: WRITE_TASK_KIND,
     actor: 'header:jane',
     provider: 'anthropic',
@@ -833,7 +831,7 @@ describe('task lifecycle', () => {
     })
     const options = { task: group.tasks[0]!.id }
     expect(await relatedRepos(deps(), { forge: 'work', path: 'shapes/a' }, options)).toEqual([
-      { repo: 'work:shapes/b', relation: 'same group shapes' },
+      { repo: 'work:shapes/b', relation: 'same team shapes' },
     ])
     expect(
       await requestRepository(deps(), { options, target: 'work:shapes/b', reason: 'shares it' }),
@@ -982,7 +980,7 @@ describe('writeTaskPolicy', () => {
       executionMode: () => 'mise',
       now: () => now,
     })
-    await setting('repo.tests', { expected: false, reason: 'Config only' }, { groups: ['shapes'] })
+    await setting('repo.tests', { expected: false, reason: 'Config only' }, { teams: ['shapes'] })
     expect((await policy({ forge: 'work', path: 'shapes/a' })).noTests).toEqual({
       reason: 'Config only',
     })

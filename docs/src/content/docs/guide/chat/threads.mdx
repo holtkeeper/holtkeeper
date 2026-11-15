@@ -1,6 +1,6 @@
 ---
 title: Threads
-description: Talk with your team and Holtkeeper in threads scoped to the team, a group or a repository, run commands, and approve the tasks Holtkeeper proposes right in the conversation.
+description: Talk with your team and Holtkeeper in threads about everything, one team or one repository, run commands, and approve the tasks Holtkeeper proposes right in the conversation.
 panel: Chat
 route: /chat
 permission: repos:read
@@ -26,7 +26,7 @@ import {
   Ui,
 } from '@ui'
 
-Talk with your team and Holtkeeper in threads scoped to the team, a group or a repository, run commands, and approve the tasks Holtkeeper proposes right in the conversation. Chat fills the screen in three columns: the thread list, the open thread and, on wide screens, its context.
+Talk with your team and Holtkeeper in threads about everything, one team or one repository, run commands, and approve the tasks Holtkeeper proposes right in the conversation. Chat fills the screen in three columns: the thread list, the open thread and, on wide screens, its context.
 
 <Screen title="Chat" caption="Holtkeeper replies when mentioned, or to every message in a thread with Auto reply on.">
   <Split>
@@ -39,7 +39,7 @@ Talk with your team and Holtkeeper in threads scoped to the team, a group or a r
         <Row title="Why did the bundle grow?" sub="acme/checkout-web · 4 min" selected>
           <Tag tone="acc">2</Tag>
         </Row>
-        <Row title="Upgrade some-lib across widgets" sub="group widgets · 1 h" />
+        <Row title="Upgrade some-lib across widgets" sub="team widgets · 1 h" />
         <Row title="Naming…" sub="whole team · just now" />
         <Row title="Release checklist" sub="acme/admin-ui · 2 d · muted" />
         <Row title="Other teams · 3 threads ▸" />
@@ -81,7 +81,7 @@ calls · $0.06
 
 1. Click <Ui>New</Ui> above the thread list.
 2. Give it a title, or leave it blank: Holtkeeper names the thread from its first message, and the list shows _Naming…_ until then.
-3. Pick the scope: the whole team, one repository or one of the groups you may use.
+3. Pick what it is about: <Ui>Everyone</Ui>, one <Ui>Repository</Ui> or one <Ui>Team</Ui> you may use. The team option appears when you can use at least one team.
 4. Choose whether Holtkeeper replies to every message.
 5. Create the thread and write the first message.
 
@@ -92,13 +92,13 @@ calls · $0.06
     </Button>
     <Fields columns={1}>
       <Field label="Title" placeholder="Named from the first message" hint="Optional." />
-      <Field label="Scope" value="Repository · acme/checkout-web" />
+      <Field label="About" value="Repository · acme/checkout-web" />
       <Field label="Holtkeeper replies to every message" toggle />
     </Fields>
   </Sheet>
 </Screen>
 
-The scope decides who sees the thread: a repository or group thread is visible to everyone who may read that repository or group, a team-wide thread to everyone who can use chat. It also decides what Holtkeeper knows when it answers: the repository's or group's Guide and notes.
+The scope decides who sees the thread: a repository thread is visible to everyone who may read that repository, a team thread to everyone who may read the team's repositories, and a thread for everyone to everyone who can use chat. It also decides what Holtkeeper knows when it answers: the repository's or team's Guide and notes.
 
 :::tip
 **Ask in chat** on a Knowledge page starts a new thread with that repository as context.
@@ -140,7 +140,7 @@ Start a message with `/` to run a command about the thread's repository, or anot
 | `/release deploy <environment>` | `releases:run`  | Asks first; add `--yes` to start the deploy. The card follows it as it runs. |
 
 :::note
-Commands run in repository and group threads only. In a team-wide thread the composer says so and does not send.
+Commands run in repository and team threads only. In a thread for everyone the composer says so and does not send.
 :::
 
 ## Read Holtkeeper's answers

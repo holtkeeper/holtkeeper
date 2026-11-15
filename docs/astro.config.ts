@@ -21,6 +21,10 @@ const group = (label: string, directory: string, collapsed = false) => ({
 export default defineConfig({
   site: 'https://holtkeeper.github.io',
   outDir: './dist',
+  // Old links to renamed pages keep working: the static build writes a page that forwards.
+  redirects: {
+    '/guide/repos/groups': '/guide/repos/teams/',
+  },
   vite: {
     resolve: {
       alias: { '@ui': fileURLToPath(new URL('./src/components/ui/index.ts', import.meta.url)) },

@@ -1,5 +1,5 @@
 /**
- * The tab whose `to` the pathname is at or under; the longest match wins, so `/repos/groups`
+ * The tab whose `to` the pathname is at or under; the longest match wins, so `/repos/teams`
  * beats `/repos`. `/` only matches itself. `undefined` when no tab matches.
  */
 export function currentTab<T extends { to: string }>(

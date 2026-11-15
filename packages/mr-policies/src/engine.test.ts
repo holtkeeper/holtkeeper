@@ -134,7 +134,7 @@ describe('evaluatePolicies', () => {
     const { forge } = fakeForge()
     const policies = [
       policy('global', { scope: { all: true } }),
-      policy('group', { scope: { groups: ['games'] } }),
+      policy('team', { scope: { teams: ['games'] } }),
       policy('exact', { scope: { repos: ['games/app'] } }),
       policy('glob-1', { scope: { repos: ['games/*'] } }),
       policy('glob-2', { scope: { repos: ['games/**'] }, stop: true }),
@@ -145,7 +145,7 @@ describe('evaluatePolicies', () => {
       'exact',
       'glob-1',
       'glob-2',
-      'group',
+      'team',
       'global',
     ])
     const result = await evaluatePolicies({ policies, event: mrEvent(), forge })
@@ -153,7 +153,7 @@ describe('evaluatePolicies', () => {
     expect(result.unmatched).toEqual([
       { policyId: 'off', reason: 'disabled' },
       { policyId: 'global', reason: 'an earlier policy stopped evaluation' },
-      { policyId: 'group', reason: 'an earlier policy stopped evaluation' },
+      { policyId: 'team', reason: 'an earlier policy stopped evaluation' },
       { policyId: 'elsewhere', reason: 'scope does not cover the repository' },
     ])
   })

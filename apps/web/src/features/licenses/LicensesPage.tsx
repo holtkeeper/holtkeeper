@@ -1,14 +1,9 @@
-import {
-  type LicensesOverview,
-  type LicensesRepoRow,
-  type RepoRef,
-  leafGroups,
-} from '@holtkeeper/api'
+import { type LicensesOverview, type LicensesRepoRow, type RepoRef } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, Scale, X } from 'lucide-react'
 import { useState } from 'react'
 
-import { useGroupTitles, useLicenses } from '../../api/queries.ts'
+import { useTeamTitles, useLicenses } from '../../api/queries.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
 import { foldScope, scopeSuffix } from '../../lib/home-scope.ts'
@@ -41,7 +36,7 @@ import {
   FilterButton,
   type FleetColumn,
   FleetTable,
-  GroupName,
+  TeamName,
   KeyValue,
   Page,
   Placeholder,
@@ -285,13 +280,13 @@ const repoColumns: readonly FleetColumn<LicensesRepoRow>[] = [
     cell: (row) => <RepoLink repo={row.repo} section="licenses" />,
   },
   {
-    id: 'group',
-    header: 'Group',
+    id: 'teams',
+    header: 'Teams',
     cell: (row) => (
       <span className="flex flex-wrap gap-1">
-        {leafGroups(row.groups).map((group) => (
-          <Tag key={group}>
-            <GroupName group={group} path />
+        {row.teams.map((team) => (
+          <Tag key={team}>
+            <TeamName team={team} />
           </Tag>
         ))}
       </span>
@@ -453,10 +448,10 @@ function LicensesBody({
   update: (patch: Partial<LicensesSearch>) => void
   onEditPolicy?: () => void
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const licenses = useLicenses()
   const navigate = useNavigate()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   if (licenses.isPending) return <Placeholder className="h-72" />
   if (licenses.isError) return <ErrorState error={licenses.error} />
 
@@ -470,7 +465,7 @@ function LicensesBody({
   const ecosystems = [...new Set(overview.violations.map((v) => v.ecosystem))].toSorted()
   const scoped = !narrowed
   const mine = scoped && view !== 'all'
-  const keys = (scoped ? foldScope(rows, view, homeGroups, (row) => row.groups).shown : rows).map(
+  const keys = (scoped ? foldScope(rows, view, homeTeams, (row) => row.teams).shown : rows).map(
     (row) => row.key,
   )
   const step = neighbours(keys, search.package)
@@ -480,13 +475,13 @@ function LicensesBody({
     : mine
       ? licenseKpis(
           overview,
-          foldScope(overview.repos, view, homeGroups, (row) => row.groups).shown.map(
+          foldScope(overview.repos, view, homeTeams, (row) => row.teams).shown.map(
             (row) => row.repo,
           ),
         )
       : licenseKpis(overview)
   const filtered = Boolean(search.q || search.verdict?.length || search.ecosystem?.length)
-  const scope = narrowed ? {} : { scope: { value: view, onChange: setView, homeGroups } }
+  const scope = narrowed ? {} : { scope: { value: view, onChange: setView, homeTeams } }
 
   if (!overview.repos.length)
     return (

@@ -4,30 +4,37 @@ import { entry, repo } from '../test/entries.ts'
 import {
   type LessonDraft,
   type Placement,
+  type PlacementInput,
   type RepoId,
   bootstrapMarker,
   describeScope,
-  entriesInRoots,
+  entriesNearRepo,
+  entryTeams,
+  nearRepo,
   placeLessons,
+  reachesRepoTeams,
 } from './placement.ts'
 
-const membership: Record<string, string[]> = {
-  'work:acme/widget-api': ['shapes.round', 'shapes'],
-  'work:acme/widget-web': ['shapes.round', 'shapes'],
-  'work:acme/gadget-api': ['shapes.square', 'shapes'],
-  'work:acme/loose-tool': ['shapes'],
-  'work:acme/widget-cli': ['shapes.round', 'shapes'],
-  'work:acme/kit': ['tools'],
-  'work:other/thing': ['tools'],
+const fleet: Record<string, { teams: string[]; family?: string }> = {
+  'work:acme/round/web': { teams: ['widgets'], family: 'f-web' },
+  'work:acme/square/web': { teams: ['widgets'], family: 'f-web' },
+  'work:acme/tri/web': { teams: ['gizmo'], family: 'f-web' },
+  'work:other/zone/web-app': { teams: ['gizmo'], family: 'f-web' },
+  'work:acme/round/api': { teams: ['widgets'] },
+  'work:acme/round/cli': { teams: ['widgets'] },
+  'work:acme/square/api': { teams: ['gizmo'] },
+  'work:other/kit': { teams: ['tools'] },
+  'work:misc/loose/one': { teams: [] },
 }
-const groupsOf = (target: RepoId) => membership[`${target.forge}:${target.path}`] ?? []
-const web = repo('acme/widget-web', ['shapes.round', 'shapes'])
+const teamsOf = (target: RepoId) => fleet[`${target.forge}:${target.path}`]?.teams ?? []
+const familyOf = (target: RepoId) => fleet[`${target.forge}:${target.path}`]?.family
+const web = repo('acme/round/web', ['widgets'])
 
 const lesson = (overrides: Partial<LessonDraft> = {}): LessonDraft => ({
   title: 'Run code generators through make gen',
   body: 'Generated mocks and protobuf stubs come from `make gen`; never edit files under `gen/` by hand.',
   kind: 'convention',
-  evidence: [{ label: '!12 Regenerate mocks', url: 'https://forge.test/acme/widget-web/mr/12' }],
+  evidence: [{ label: '!12 Regenerate mocks', url: 'https://forge.test/acme/round/web/mr/12' }],
   level: 'repo',
   repoSpecific: false,
   ...overrides,
@@ -45,14 +52,30 @@ const siblingEntry = (path: string, overrides: Parameters<typeof entry>[0] = {})
 
 const place = (
   lessons: LessonDraft[],
-  entries: Parameters<typeof placeLessons>[0]['entries'] = [],
-  extra: Partial<Parameters<typeof placeLessons>[0]> = {},
-) => placeLessons({ repo: web, lessons, entries, groupsOf, promote: true, ...extra })
+  entries: PlacementInput['entries'] = [],
+  extra: Partial<PlacementInput> = {},
+) => placeLessons({ repo: web, lessons, entries, teamsOf, familyOf, promote: true, ...extra })
 
 const only = (placements: Placement[]) => {
   expect(placements).toHaveLength(1)
   return placements[0]!
 }
+
+const created = (placement: Placement) => {
+  if (placement.action !== 'create') throw new Error('expected create')
+  return placement
+}
+
+const loose = (path: string, entries: PlacementInput['entries']) =>
+  only(
+    placeLessons({
+      repo: repo(path, []),
+      lessons: [lesson()],
+      entries,
+      teamsOf,
+      promote: true,
+    }),
+  )
 
 describe('placeLessons', () => {
   test('a lesson without matches stays at the repository', () => {
@@ -61,17 +84,18 @@ describe('placeLessons', () => {
       action: 'create',
       level: 'repo',
       input: {
-        scope: { repos: ['work:acme/widget-web'] },
+        scope: { repos: ['work:acme/round/web'] },
         kind: 'convention',
-        evidence: [{ url: 'https://forge.test/acme/widget-web/mr/12' }],
+        evidence: [{ url: 'https://forge.test/acme/round/web/mr/12' }],
       },
       matches: [],
     })
-    expect(placed.action === 'create' && placed.input.supersedes).toBeFalsy()
+    expect(created(placed).input.supersedes).toBeUndefined()
+    expect(created(placed).input.match).toBeUndefined()
   })
 
   test('repo-specific lessons and promote off stay at the repository even with a sibling match', () => {
-    const entries = [siblingEntry('acme/widget-api')]
+    const entries = [siblingEntry('acme/square/web')]
     expect(only(place([lesson({ repoSpecific: true })], entries))).toMatchObject({
       level: 'repo',
       why: 'specific to this repository',
@@ -82,112 +106,231 @@ describe('placeLessons', () => {
     })
   })
 
-  test('a sibling repo entry in the same subgroup gives a subgroup proposal that supersedes it', () => {
-    const sibling = siblingEntry('acme/widget-api')
-    const placed = only(
-      place(
-        [
-          lesson({
-            general: {
-              title: 'Generate code with make gen',
-              body: 'Every service of the team generates mocks and stubs with `make gen`.',
-            },
-          }),
-        ],
-        [sibling],
+  test('a sibling of the same family gives a family proposal scoped to their shape', () => {
+    const sibling = siblingEntry('acme/square/web')
+    const placed = created(
+      only(
+        place(
+          [
+            lesson({
+              general: {
+                title: 'Generate code with make gen',
+                body: 'Every web app generates mocks and stubs with `make gen`.',
+              },
+            }),
+          ],
+          [sibling],
+        ),
       ),
     )
     expect(placed).toMatchObject({
-      action: 'create',
-      level: 'subgroup',
+      level: 'family',
       supersedes: sibling.id,
+      generalises: [sibling.id],
       input: {
         title: 'Generate code with make gen',
-        body: 'Every service of the team generates mocks and stubs with `make gen`.',
-        scope: { groups: ['shapes.round'] },
+        body: 'Every web app generates mocks and stubs with `make gen`.',
+        scope: { repos: ['work:acme/*/web'] },
+        match: { families: ['f-web'] },
         supersedes: sibling.id,
       },
     })
-    if (placed.action !== 'create') throw new Error('expected create')
     expect(placed.input.evidence?.map((link) => link.url)).toEqual([
-      'https://forge.test/acme/widget-web/mr/12',
-      'https://forge.test/acme/widget-api/mr/3',
+      'https://forge.test/acme/round/web/mr/12',
+      'https://forge.test/acme/square/web/mr/3',
     ])
-    expect(placed.why).toContain('a sibling in shapes.round has it')
+    expect(placed.why).toStartWith('the same family f-web has it: matches')
     expect(placed.why).toContain(`supersedes kb:${sibling.id}`)
-    expect(placed).toMatchObject({ generalises: [sibling.id] })
   })
 
-  test('matches in two subgroups give a group proposal', () => {
-    const round = siblingEntry('acme/widget-api')
-    const square = siblingEntry('acme/gadget-api', {
-      updatedAt: '2026-09-01T00:00:00.000Z',
-    })
-    const placed = only(place([lesson()], [round, square]))
+  test('a family spread over unrelated folders is scoped to the owner teams of its members', () => {
+    const far = siblingEntry('other/zone/web-app')
+    const placed = created(only(place([lesson()], [far])))
     expect(placed).toMatchObject({
-      level: 'group',
-      input: { scope: { groups: ['shapes'] } },
-      supersedes: round.id,
+      level: 'family',
+      input: { scope: { teams: ['widgets', 'gizmo'] }, match: { families: ['f-web'] } },
+      supersedes: far.id,
     })
-    expect(placed.why).toContain('spans subgroups shapes.round, shapes.square')
-    expect(placed.matches.map((match) => match.entryId)).toEqual([round.id, square.id])
   })
 
-  test('a match that shares only the root group gives a group proposal', () => {
-    const loose = siblingEntry('acme/loose-tool')
-    const placed = only(place([lesson()], [loose]))
+  test('an entry already narrowed to the family but scoped to another team is generalised', () => {
+    const theirs = siblingEntry('acme/tri/web', {
+      scope: { teams: ['gizmo'] },
+      match: { families: ['f-web'] },
+    })
+    const placed = created(only(place([lesson()], [theirs])))
     expect(placed).toMatchObject({
-      level: 'group',
-      input: { scope: { groups: ['shapes'] } },
-      supersedes: loose.id,
+      level: 'family',
+      input: { scope: { teams: ['widgets', 'gizmo'] }, match: { families: ['f-web'] } },
+      supersedes: theirs.id,
     })
-    expect(placed.why).toContain('shares only group shapes')
   })
 
-  test('a team process lesson goes to the root group even when the match is a sibling', () => {
-    const sibling = siblingEntry('acme/widget-api', {
+  test('without families, siblings of one shape give a shape proposal', () => {
+    const sibling = siblingEntry('acme/square/web')
+    const placed = created(only(place([lesson()], [sibling], { familyOf: () => undefined })))
+    expect(placed).toMatchObject({
+      level: 'shape',
+      input: { scope: { repos: ['work:acme/*/web'] } },
+      supersedes: sibling.id,
+    })
+    expect(placed.input.match).toBeUndefined()
+    expect(placed.why).toContain('siblings of the shape acme/*/web have it')
+  })
+
+  test('a sibling in the same folder gives a folder proposal', () => {
+    const api = siblingEntry('acme/round/api')
+    const placed = created(only(place([lesson()], [api])))
+    expect(placed).toMatchObject({
+      level: 'folder',
+      input: { scope: { repos: ['work:acme/round/**'] } },
+      supersedes: api.id,
+      generalises: [api.id],
+    })
+    expect(placed.why).toContain('a sibling in acme/round has it')
+  })
+
+  test('matches in two folders of the team give a team proposal', () => {
+    const api = siblingEntry('acme/round/api')
+    const square = siblingEntry('acme/square/web', { updatedAt: '2026-09-01T00:00:00.000Z' })
+    const placed = created(only(place([lesson()], [api, square])))
+    expect(placed).toMatchObject({
+      level: 'team',
+      input: { scope: { teams: ['widgets'] } },
+      supersedes: api.id,
+    })
+    expect(placed.input.match).toBeUndefined()
+    expect(placed.generalises?.toSorted()).toEqual([api.id, square.id].toSorted())
+    expect(placed.why).toContain('shares owner team widgets with it')
+    expect(placed.matches.map((match) => match.entryId)).toEqual([api.id, square.id])
+  })
+
+  test('a folder only one segment deep is no folder level', () => {
+    const shallow = repo('acme/web', ['widgets'])
+    const sibling = siblingEntry('acme/api')
+    const placed = created(
+      only(
+        placeLessons({
+          repo: shallow,
+          lessons: [lesson()],
+          entries: [sibling],
+          teamsOf: (target) => (target.path.startsWith('acme/') ? ['widgets'] : []),
+          promote: true,
+        }),
+      ),
+    )
+    expect(placed).toMatchObject({ level: 'team', input: { scope: { teams: ['widgets'] } } })
+  })
+
+  test('entries of other teams outside its folders and family are not compared', () => {
+    const placed = only(place([lesson()], [siblingEntry('acme/square/api')]))
+    expect(placed).toMatchObject({ level: 'repo', matches: [] })
+    expect(placed.why).toBe('no matching entry around it')
+  })
+
+  test('repositories without owner teams promote to folders only', () => {
+    expect(
+      loose('misc/loose/two', [siblingEntry('misc/loose/one'), siblingEntry('misc/other/one')]),
+    ).toMatchObject({ level: 'folder', input: { scope: { repos: ['work:misc/loose/**'] } } })
+
+    const apart = loose('misc/loose/two', [
+      siblingEntry('misc/loose/one'),
+      siblingEntry('misc/loose/three', {
+        scope: { repos: ['work:misc/loose/three', 'work:z/y/x'] },
+      }),
+    ])
+    expect(apart).toMatchObject({ level: 'repo' })
+    expect(apart.why).toBe('no folder, shape, family or owner team holds it and its matches')
+  })
+
+  test('a team process lesson goes to the owner team, with or without matches', () => {
+    const sibling = siblingEntry('acme/round/api', {
       title: 'Squash merge requests into one conventional commit',
       body: 'Merge requests are squashed; the squash commit title follows Conventional Commits.',
     })
-    const placed = only(
-      place(
-        [
-          lesson({
-            level: 'process',
-            title: 'Squash merge requests into one conventional commit',
-            body: 'Reviewers ask to squash; the squash title follows Conventional Commits.',
-          }),
-        ],
-        [sibling],
-      ),
+    const process = lesson({
+      level: 'process',
+      title: 'Squash merge requests into one conventional commit',
+      body: 'Reviewers ask to squash; the squash title follows Conventional Commits.',
+    })
+    const placed = created(only(place([process], [sibling])))
+    expect(placed).toMatchObject({
+      level: 'team',
+      input: { scope: { teams: ['widgets'] } },
+      supersedes: sibling.id,
+    })
+    expect(placed.why).toStartWith('team process: matches')
+
+    const alone = created(only(place([lesson({ level: 'process' })])))
+    expect(alone).toMatchObject({ level: 'team', input: { scope: { teams: ['widgets'] } } })
+    expect(alone.why).toBe('team process')
+
+    const unowned = only(
+      placeLessons({
+        repo: repo('misc/loose/two', []),
+        lessons: [lesson({ level: 'process' })],
+        entries: [],
+        teamsOf,
+        promote: true,
+      }),
     )
-    expect(placed).toMatchObject({ level: 'group', input: { scope: { groups: ['shapes'] } } })
-    expect(placed.why).toStartWith('team process')
+    expect(unowned).toMatchObject({ level: 'repo' })
   })
 
-  test('a process lesson without matches stays at the repository', () => {
-    expect(only(place([lesson({ level: 'process' })]))).toMatchObject({ level: 'repo' })
+  test('a process lesson goes to the owner team its best match reaches', () => {
+    const both = repo('acme/round/web', ['tools', 'widgets'])
+    const placed = only(
+      placeLessons({
+        repo: both,
+        lessons: [lesson({ level: 'process' })],
+        entries: [siblingEntry('acme/round/api')],
+        teamsOf,
+        promote: true,
+      }),
+    )
+    expect(placed).toMatchObject({ level: 'team', input: { scope: { teams: ['widgets'] } } })
   })
 
-  test('an entry that already covers the repository gets the evidence instead', () => {
-    const group = siblingEntry('acme/widget-api', { scope: { groups: ['shapes.round'] } })
-    const placed = only(place([lesson()], [group]))
+  test('an entry that already applies to the repository gets the evidence instead', () => {
+    const team = siblingEntry('acme/round/api', { scope: { teams: ['widgets'] } })
+    const placed = only(place([lesson()], [team]))
     expect(placed).toEqual({
       action: 'covered',
       lesson: lesson(),
-      entryId: group.id,
+      entryId: team.id,
       evidence: lesson().evidence,
-      matches: [expect.objectContaining({ entryId: group.id })],
+      matches: [expect.objectContaining({ entryId: team.id })],
       why: expect.stringContaining('already covered by'),
+    })
+    const family = siblingEntry('acme/square/web', {
+      scope: { repos: ['work:acme/*/web'] },
+      match: { families: ['f-web'] },
+    })
+    expect(only(place([lesson()], [family]))).toMatchObject({
+      action: 'covered',
+      entryId: family.id,
     })
   })
 
-  test('a linked entry matches without word overlap; links outside the root groups are ignored', () => {
-    const unrelated = siblingEntry('acme/widget-api', {
+  test('an entry of another family does not cover the repository and is generalised', () => {
+    const apiFamily = siblingEntry('acme/round/api', {
+      scope: { teams: ['widgets'] },
+      match: { families: ['f-api'] },
+    })
+    const placed = created(only(place([lesson()], [apiFamily])))
+    expect(placed).toMatchObject({
+      level: 'team',
+      input: { scope: { teams: ['widgets'] } },
+      supersedes: apiFamily.id,
+    })
+  })
+
+  test('a linked entry matches without word overlap; links outside the neighbourhood are ignored', () => {
+    const unrelated = siblingEntry('acme/round/api', {
       title: 'Keep handlers thin',
       body: 'Handlers call services; no SQL in handlers.',
     })
-    const elsewhere = siblingEntry('other/thing', {
+    const elsewhere = siblingEntry('other/kit', {
       title: 'Keep handlers thin',
       body: 'Handlers call services.',
     })
@@ -203,7 +346,7 @@ describe('placeLessons', () => {
         [unrelated],
       ),
     )
-    expect(linked).toMatchObject({ level: 'subgroup', supersedes: unrelated.id })
+    expect(linked).toMatchObject({ level: 'folder', supersedes: unrelated.id })
     expect(linked.matches[0]).toMatchObject({ related: true })
 
     const ignored = only(
@@ -220,9 +363,9 @@ describe('placeLessons', () => {
       place(
         [lesson()],
         [
-          siblingEntry('acme/widget-api', { scope: { all: true } }),
-          siblingEntry('acme/widget-api', { status: 'rejected' }),
-          siblingEntry('acme/widget-api', { status: 'archived' }),
+          siblingEntry('acme/round/api', { scope: { all: true } }),
+          siblingEntry('acme/round/api', { status: 'rejected' }),
+          siblingEntry('acme/round/api', { status: 'archived' }),
         ],
       ),
     )
@@ -243,7 +386,7 @@ describe('placeLessons', () => {
         [],
         {
           libraryHome: (subject) =>
-            subject === 'Go:example.com/kit' ? { forge: 'work', path: 'acme/kit' } : undefined,
+            subject === 'Go:example.com/kit' ? { forge: 'work', path: 'other/kit' } : undefined,
         },
       ),
     )
@@ -251,84 +394,86 @@ describe('placeLessons', () => {
       action: 'create',
       level: 'library',
       input: {
-        scope: { repos: ['work:acme/kit'] },
+        scope: { repos: ['work:other/kit'] },
         subject: 'Go:example.com/kit',
         visibility: 'shared',
         packages: [{ ecosystem: 'go', name: 'example.com/kit' }],
       },
     })
-    expect(placed.why).toContain('work:acme/kit')
+    expect(placed.why).toContain('work:other/kit')
   })
 
   test('a library lesson without a fleet home, or about the repository itself, is placed normally', () => {
     const library = lesson({ level: 'library', library: 'npm:some-lib' })
-    const thirdParty = only(place([library]))
-    expect(thirdParty).toMatchObject({
+    expect(only(place([library]))).toMatchObject({
       level: 'repo',
       input: {
         subject: 'npm:some-lib',
         visibility: 'shared',
-        scope: { repos: [web.path].map((p) => `work:${p}`) },
+        scope: { repos: ['work:acme/round/web'] },
       },
     })
     const own = only(
-      place([library], [siblingEntry('acme/widget-api')], {
-        libraryHome: () => ({ forge: 'work', path: 'acme/widget-web' }),
+      place([library], [siblingEntry('acme/round/api')], {
+        libraryHome: () => ({ forge: 'work', path: 'acme/round/web' }),
       }),
     )
     expect(own).toMatchObject({
-      level: 'subgroup',
-      input: { subject: 'npm:some-lib', scope: { groups: ['shapes.round'] } },
+      level: 'folder',
+      input: { subject: 'npm:some-lib', scope: { repos: ['work:acme/round/**'] } },
     })
   })
 
-  test('a repository in two root groups is promoted in the root with the best match', () => {
-    const both = repo('acme/widget-web', ['shapes.round', 'shapes', 'tools'])
-    const weak = siblingEntry('acme/kit', {
+  test('a repository of two teams is promoted in the team with the best match', () => {
+    const both = repo('acme/round/web', ['tools', 'widgets'])
+    const weak = siblingEntry('other/kit', {
       title: 'Run code generators through make',
       body: 'Something else entirely about release trains and tags.',
     })
-    const strong = siblingEntry('acme/widget-api')
+    const strong = siblingEntry('acme/square/web')
     const placed = only(
       placeLessons({
         repo: both,
         lessons: [lesson()],
         entries: [weak, strong],
-        groupsOf,
+        teamsOf,
         promote: true,
       }),
     )
     expect(placed).toMatchObject({
-      level: 'subgroup',
-      input: { scope: { groups: ['shapes.round'] } },
+      level: 'team',
+      input: { scope: { teams: ['widgets'] } },
+      supersedes: strong.id,
+      generalises: [strong.id],
     })
   })
 
   test('ties break the same way every time', () => {
-    const a = siblingEntry('acme/widget-api', { id: 'b-entry' })
-    const b = siblingEntry('acme/widget-api', { id: 'a-entry' })
+    const a = siblingEntry('acme/round/api', { id: 'b-entry' })
+    const b = siblingEntry('acme/round/api', { id: 'a-entry' })
     const first = only(place([lesson()], [a, b]))
     const second = only(place([lesson()], [b, a]))
     expect(first).toEqual(second)
     expect(first).toMatchObject({ supersedes: 'a-entry' })
   })
 
-  test('a subgroup entry is superseded by a group promotion, a broader one is not', () => {
-    const squareGroup = siblingEntry('acme/gadget-api', { scope: { groups: ['shapes.square'] } })
-    const placed = only(place([lesson()], [squareGroup]))
-    expect(placed).toMatchObject({ level: 'group', supersedes: squareGroup.id })
-
-    const glob = siblingEntry('acme/gadget-api', { scope: { repos: ['work:acme/gadget-*'] } })
-    const globbed = only(place([lesson()], [glob]))
-    expect(globbed.action === 'create' && globbed.supersedes).toBeFalsy()
+  test('a glob inside the target folder is generalised; a glob is never inside a team', () => {
+    const glob = siblingEntry('acme/round/api', { scope: { repos: ['work:acme/round/api-*'] } })
+    expect(only(place([lesson()], [glob]))).toMatchObject({
+      level: 'folder',
+      supersedes: glob.id,
+    })
+    const square = siblingEntry('acme/square/web', { updatedAt: '2026-09-01T00:00:00.000Z' })
+    const team = created(only(place([lesson()], [glob, square])))
+    expect(team).toMatchObject({ level: 'team', supersedes: square.id, generalises: [square.id] })
   })
 })
 
 const generalised = (supersedes: string, overrides: Parameters<typeof entry>[0] = {}) =>
   entry({
-    title: 'Generators of the round team',
+    title: 'Generators of the round folder',
     body: 'Every round service regenerates code with one make target.',
-    scope: { groups: ['shapes.round'] },
+    scope: { repos: ['work:acme/round/**'] },
     status: 'proposed',
     supersedes,
     ...overrides,
@@ -336,7 +481,7 @@ const generalised = (supersedes: string, overrides: Parameters<typeof entry>[0] 
 
 describe('placeLessons with an evolving knowledge base', () => {
   test('a sibling entry another entry supersedes counts for its replacement', () => {
-    const sibling = siblingEntry('acme/widget-api')
+    const sibling = siblingEntry('acme/round/api')
     const promotion = generalised(sibling.id)
     const placed = only(place([lesson()], [sibling, promotion]))
     expect(placed).toMatchObject({ action: 'covered', entryId: promotion.id })
@@ -349,33 +494,47 @@ describe('placeLessons with an evolving knowledge base', () => {
   })
 
   test('a rejected replacement does not hide the entry it would supersede', () => {
-    const sibling = siblingEntry('acme/widget-api')
+    const sibling = siblingEntry('acme/round/api')
     const refused = generalised(sibling.id, { status: 'rejected' })
     const placed = only(place([lesson()], [sibling, refused]))
     expect(placed).toMatchObject({ action: 'create', level: 'repo' })
-    expect(placed.why).toContain(`a promotion to shapes.round was rejected (kb:${refused.id}`)
+    expect(placed.why).toContain(
+      `a promotion to folder work:acme/round/** was rejected (kb:${refused.id}`,
+    )
   })
 
   test('a rejected promotion to the target that matches the lesson keeps it at the repository', () => {
-    const sibling = siblingEntry('acme/widget-api')
-    const refused = siblingEntry('acme/widget-api', {
-      scope: { groups: ['shapes.round'] },
+    const sibling = siblingEntry('acme/round/api')
+    const refused = siblingEntry('acme/round/api', {
+      scope: { repos: ['acme/round/**'] },
       status: 'rejected',
     })
     expect(only(place([lesson()], [sibling, refused]))).toMatchObject({ level: 'repo' })
-    const elsewhere = siblingEntry('acme/widget-api', {
-      scope: { groups: ['shapes'] },
+    const elsewhere = siblingEntry('acme/round/api', {
+      scope: { teams: ['widgets'] },
       status: 'rejected',
     })
-    expect(only(place([lesson()], [sibling, elsewhere]))).toMatchObject({ level: 'subgroup' })
+    expect(only(place([lesson()], [sibling, elsewhere]))).toMatchObject({ level: 'folder' })
   })
 
-  test('any match that covers the repository makes it covered, not only the best one', () => {
-    const sibling = siblingEntry('acme/widget-api')
-    const team = siblingEntry('acme/widget-api', {
+  test('a rejected family promotion keeps the lesson at the repository', () => {
+    const sibling = siblingEntry('acme/square/web')
+    const refused = siblingEntry('acme/square/web', {
+      scope: { teams: ['widgets'] },
+      match: { families: ['f-web'] },
+      status: 'rejected',
+    })
+    const placed = only(place([lesson()], [sibling, refused]))
+    expect(placed).toMatchObject({ level: 'repo' })
+    expect(placed.why).toContain('a promotion to repos work:acme/*/web · family f-web was rejected')
+  })
+
+  test('any match that applies to the repository makes it covered, not only the best one', () => {
+    const sibling = siblingEntry('acme/round/api')
+    const team = siblingEntry('acme/round/api', {
       title: 'Run generators via make',
       body: 'Generated files come from make.',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['widgets'] },
     })
     const placed = only(place([lesson()], [sibling, team]))
     expect(placed).toMatchObject({ action: 'covered', entryId: team.id })
@@ -383,7 +542,7 @@ describe('placeLessons with an evolving knowledge base', () => {
   })
 
   test('repo-specific lessons and promote off still merge into an entry that covers the repository', () => {
-    const own = siblingEntry('acme/widget-web', { status: 'proposed' })
+    const own = siblingEntry('acme/round/web', { status: 'proposed' })
     expect(only(place([lesson({ repoSpecific: true })], [own]))).toMatchObject({
       action: 'covered',
       entryId: own.id,
@@ -394,58 +553,68 @@ describe('placeLessons with an evolving knowledge base', () => {
     })
   })
 
-  test('a repository in two overlapping subgroups goes to the one it shares with the sibling', () => {
-    const overlapping = repo('acme/widget-web', ['shapes.round', 'shapes.web', 'shapes'])
-    const sibling = siblingEntry('acme/widget-api')
-    const placed = only(
-      placeLessons({
-        repo: overlapping,
-        lessons: [lesson()],
-        entries: [sibling],
-        groupsOf,
-        promote: true,
-      }),
-    )
-    expect(placed).toMatchObject({
-      level: 'subgroup',
-      input: { scope: { groups: ['shapes.round'] } },
-    })
-  })
-
   test('a promotion over several siblings generalises all of them and carries their evidence', () => {
-    const api = siblingEntry('acme/widget-api')
-    const cli = siblingEntry('acme/widget-cli')
-    const placed = only(place([lesson()], [api, cli]))
-    expect(placed).toMatchObject({ level: 'subgroup', supersedes: api.id })
-    if (placed.action !== 'create') throw new Error('expected create')
+    const api = siblingEntry('acme/round/api')
+    const cli = siblingEntry('acme/round/cli')
+    const placed = created(only(place([lesson()], [api, cli])))
+    expect(placed).toMatchObject({ level: 'folder', supersedes: api.id })
     expect(placed.generalises?.toSorted()).toEqual([api.id, cli.id].toSorted())
     expect(placed.input.evidence?.map((link) => link.url)).toEqual([
-      'https://forge.test/acme/widget-web/mr/12',
-      'https://forge.test/acme/widget-api/mr/3',
-      'https://forge.test/acme/widget-cli/mr/3',
+      'https://forge.test/acme/round/web/mr/12',
+      'https://forge.test/acme/round/api/mr/3',
+      'https://forge.test/acme/round/cli/mr/3',
     ])
   })
 })
 
 describe('helpers', () => {
-  test('entriesInRoots keeps live entries reaching the repository root groups', () => {
-    const inRoot = siblingEntry('acme/gadget-api')
-    const outside = siblingEntry('other/thing')
-    const group = entry({ scope: { groups: ['shapes'] }, status: 'proposed' })
-    expect(entriesInRoots([inRoot, outside, group], web, groupsOf).map((e) => e.id)).toEqual([
-      inRoot.id,
-      group.id,
-    ])
+  const around = { teamsOf, familyOf }
+
+  test('entryTeams and reachesRepoTeams compare owner teams', () => {
+    const named = siblingEntry('acme/square/api', {
+      scope: { teams: ['tools'], repos: ['work:acme/square/api', 'acme/*/x'] },
+    })
+    expect(entryTeams(named, teamsOf, 'work')).toEqual(['gizmo', 'tools'])
+    expect(reachesRepoTeams(named, web, teamsOf)).toBeFalse()
+    expect(reachesRepoTeams(siblingEntry('acme/square/web'), web, teamsOf)).toBeTrue()
+    expect(reachesRepoTeams(entry({ scope: { repos: ['acme/**'] } }), web, teamsOf)).toBeTrue()
+  })
+
+  test('nearRepo: owner team, family or a folder at least two deep', () => {
+    expect(nearRepo(siblingEntry('acme/tri/web'), web, around)).toBeTrue()
+    expect(nearRepo(siblingEntry('acme/tri/web'), web, { teamsOf })).toBeFalse()
+    expect(
+      nearRepo(entry({ scope: { teams: ['gizmo'] }, match: { families: ['f-web'] } }), web, around),
+    ).toBeTrue()
+    expect(nearRepo(entry({ scope: { repos: ['work:acme/round/x-*'] } }), web, around)).toBeTrue()
+    expect(nearRepo(entry({ scope: { repos: ['other:acme/round/x-*'] } }), web, around)).toBeFalse()
+    expect(nearRepo(entry({ scope: { repos: ['acme/square/**'] } }), web, around)).toBeFalse()
+    expect(nearRepo(siblingEntry('acme/square/api'), web, around)).toBeFalse()
+  })
+
+  test('entriesNearRepo keeps live entries in the neighbourhood, never all scopes', () => {
+    const near = siblingEntry('acme/square/web')
+    const outside = siblingEntry('other/kit')
+    const team = entry({ scope: { teams: ['widgets'] }, status: 'proposed' })
+    const everything = entry({ scope: { all: true } })
+    const archived = siblingEntry('acme/round/api', { status: 'archived' })
+    expect(
+      entriesNearRepo([near, outside, team, everything, archived], web, around).map((e) => e.id),
+    ).toEqual([near.id, team.id])
   })
 
   test('describeScope and bootstrapMarker', () => {
-    expect(describeScope({ groups: ['shapes.round'] })).toBe('subgroup shapes.round')
-    expect(describeScope({ groups: ['shapes', ['shapes', 'tools']] })).toBe(
-      'group shapes, group shapes+tools',
+    expect(describeScope({ teams: ['widgets'] })).toBe('team widgets')
+    expect(
+      describeScope({ repos: ['work:acme/round/**', 'work:acme/*/web', 'work:other/kit'] }),
+    ).toBe('folder work:acme/round/**, repos work:acme/*/web, repo work:other/kit')
+    expect(describeScope({ teams: ['widgets'] }, { families: ['f-web'], files: ['src/**'] })).toBe(
+      'team widgets · family f-web · files src/**',
     )
-    expect(describeScope({ repos: ['work:acme/kit'] })).toBe('repo work:acme/kit')
-    expect(bootstrapMarker({ forge: 'work', path: 'acme/kit' })).toBe(
-      'knowledge:bootstrap:work:acme/kit',
+    expect(describeScope({ all: true })).toBe('everything')
+    expect(describeScope({})).toBe('nothing')
+    expect(bootstrapMarker({ forge: 'work', path: 'other/kit' })).toBe(
+      'knowledge:bootstrap:work:other/kit',
     )
   })
 })

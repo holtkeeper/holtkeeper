@@ -40,10 +40,10 @@ const forge = {
 
 const config = parseConfig({
   forges: { acme: { kind: 'gitlab', url: 'https://git.acme.test', create: () => forge } },
-  groups: {
-    shapes: { forge: 'acme', include: ['shapes/*'] },
-    tools: { forge: 'acme', include: ['tools/*'] },
-    labs: { forge: 'acme', include: ['Labs/*'] },
+  teams: {
+    shapes: { owns: ['acme:shapes/*'] },
+    tools: { owns: ['acme:tools/*'] },
+    labs: { owns: ['acme:Labs/*'] },
   },
   jobs: { webhookSecret: 'hook-secret', onMergeRequest: { analyzers: ['review'] } },
 })
@@ -124,7 +124,7 @@ const settle = async () => {
 const setting = (id: string, key: string, scope: SettingEntry['scope'], value: unknown) =>
   store.settings.put({ id, key, scope, value, secret: false, updatedAt: '2026-10-01T00:00:00Z' })
 
-const bind = (channels: string[], scope: SettingEntry['scope'] = { groups: ['shapes'] }) =>
+const bind = (channels: string[], scope: SettingEntry['scope'] = { teams: ['shapes'] }) =>
   setting(`slack-${JSON.stringify(scope)}`, 'slack.reviews', scope, { channels })
 
 const connect = async (emoji?: Record<string, string>) => {
@@ -598,7 +598,7 @@ describe('slack review status', () => {
 
 describe('slack review gates', () => {
   test('merge request reviews off: no reaction at all', async () => {
-    await setting('off', 'mergeRequests.comments', { groups: ['shapes'] }, { enabled: false })
+    await setting('off', 'mergeRequests.comments', { teams: ['shapes'] }, { enabled: false })
     await storeReview(review())
     await message(link())
     await queueReview()
@@ -609,7 +609,7 @@ describe('slack review gates', () => {
   test('turning reviews off later removes the emoji', async () => {
     await message(link())
     await queueReview()
-    await setting('off', 'mergeRequests.comments', { groups: ['shapes'] }, { enabled: false })
+    await setting('off', 'mergeRequests.comments', { teams: ['shapes'] }, { enabled: false })
     await deps.mergeRequestStatus?.reviewChanged({ repo: widget, mergeRequest: 7 })
     expect(reactions).toEqual([
       `+eyes ${BOUND}/1700000000.000100`,
@@ -627,7 +627,7 @@ describe('slack review gates', () => {
   })
 
   test('a channel not bound to the repository is ignored', async () => {
-    await bind([OTHER], { groups: ['tools'] })
+    await bind([OTHER], { teams: ['tools'] })
     await storeReview(review())
     await message(link(), { channel: OTHER })
     expect(reactions).toEqual([])
@@ -764,7 +764,7 @@ describe('slack status reply', () => {
 
   test('labels and links keep the path spelling of the repository', async () => {
     const spelled = 'https://git.acme.test/Labs/Gizmo/-/merge_requests'
-    await bind([BOUND], { groups: ['labs'] })
+    await bind([BOUND], { teams: ['labs'] })
     const data = review()
     await store.analyses.add({
       repo: { forge: 'acme', path: 'Labs/Gizmo' },
@@ -785,11 +785,11 @@ describe('slack status reply', () => {
   })
 
   test('a gate closing for one merge request keeps the reply with the rest', async () => {
-    await bind([BOUND], { groups: ['tools'] })
+    await bind([BOUND], { teams: ['tools'] })
     await storeReview(review())
     await message(`${link('shapes/widget', 7)} ${link('tools/gizmo', 3)}`)
     expect(posts).toHaveLength(1)
-    await setting('off', 'mergeRequests.comments', { groups: ['tools'] }, { enabled: false })
+    await setting('off', 'mergeRequests.comments', { teams: ['tools'] }, { enabled: false })
     await deps.mergeRequestStatus?.reviewChanged({
       repo: { forge: 'acme', path: 'tools/gizmo' },
       mergeRequest: 3,

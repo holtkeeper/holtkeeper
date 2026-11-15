@@ -144,7 +144,7 @@ export interface BundleRow extends BundleTargetRow {
   key: string
   repo: RepoRef
   repoKey: string
-  groups: string[]
+  teams: string[]
   /** Ref of the repository's newest record. */
   ref?: string
 }
@@ -162,7 +162,7 @@ export function bundleRows(overview: BundlesOverview): BundleRow[] {
         key: bundleRowKey(key, target.name),
         repo: entry.repo,
         repoKey: key,
-        groups: entry.groups,
+        teams: entry.teams,
         ...(entry.ref ? { ref: entry.ref } : {}),
       }
     }),

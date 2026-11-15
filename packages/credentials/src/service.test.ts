@@ -92,7 +92,7 @@ describe('create', () => {
       name: ' ',
       kind: 'fake',
       url: 'not a url',
-      scope: { groups: [''] },
+      scope: { teams: [''] },
       secret: '',
       rotation: { enabled: true, daysBefore: 0, lifetimeDays: 1.5 },
     }
@@ -104,7 +104,7 @@ describe('create', () => {
       'name',
       'url',
       'secret',
-      'scope.groups.0',
+      'scope.teams.0',
       'rotation.daysBefore',
       'rotation.lifetimeDays',
     ])
@@ -134,9 +134,9 @@ describe('update and remove', () => {
   test('keeps the secret when none is given', async () => {
     const { service } = setup()
     const { id } = await service.create(input())
-    await service.update(id, { scope: { groups: ['games'] } })
+    await service.update(id, { scope: { teams: ['games'] } })
     expect(await service.reveal(id)).toBe('glpat-secret')
-    expect((await service.get(id))?.scope).toEqual({ groups: ['games'] })
+    expect((await service.get(id))?.scope).toEqual({ teams: ['games'] })
   })
 
   test('capabilities are stored without updatedAt and dropped when the endpoint changes', async () => {

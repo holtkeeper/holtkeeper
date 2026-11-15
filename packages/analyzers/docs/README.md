@@ -14,12 +14,12 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `testids`             | repo  | test attributes frontend templates expose, per component                  |
 | `api-surface`         | repo  | public API of every package per version, for agents and semver checks     |
 | `licenses`            | repo  | third-party licenses judged against allow and deny lists                  |
-| `stack`               | group | runtimes, images and tools with end of life, and the group's conventions  |
+| `stack`               | group | runtimes, images and tools with end of life, and the team's conventions   |
 | `assets`              | repo  | asset inventory checked against budgets, with smaller formats suggested   |
 | `branches`            | repo  | branches to clean up: merged, closed unmerged or stale, per author        |
 | `ci-jobs`             | repo  | CI job durations and failures over time                                   |
 | `i18n`                | repo  | translation gaps per locale                                               |
-| `propagate`           | group | package updates rolled out across a group, failures handed to fix tasks   |
+| `propagate`           | group | package updates rolled out across a team, failures handed to fix tasks    |
 | `review`              | repo  | AI review of a merge request                                              |
 | `guide`               | repo  | generated Guide sections from repository evidence, hash-gated, proposed   |
 | `knowledge-bootstrap` | repo  | starter knowledge entries from code and merge requests, proposed once     |

@@ -5,8 +5,8 @@ import type { SettingEntry } from '@holtkeeper/store'
 import { mergeRequestComments } from './definitions.ts'
 import { resolveMergeRequestComments } from './merge-request-comments.ts'
 
-const widget = { forge: 'acme', path: 'shapes/widget', groups: ['shapes'] }
-const core = { forge: 'acme', path: 'shapes/widget-core', groups: ['shapes'] }
+const widget = { forge: 'acme', path: 'shapes/widget', teams: ['shapes'] }
+const core = { forge: 'acme', path: 'shapes/widget-core', teams: ['shapes'] }
 
 const entry = (
   id: string,
@@ -29,7 +29,7 @@ describe('mergeRequests.comments', () => {
   })
 
   test('a group turns it off and a repository entry turns it back on', () => {
-    const group = entry('g', { groups: ['shapes'] }, { enabled: false, reason: 'Team opted out' })
+    const group = entry('g', { teams: ['shapes'] }, { enabled: false, reason: 'Team opted out' })
     const own = entry('r', { repos: ['shapes/widget-core'] }, { enabled: true })
     expect(resolveMergeRequestComments([group, own], widget)).toEqual({
       enabled: false,

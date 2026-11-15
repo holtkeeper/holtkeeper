@@ -100,7 +100,7 @@ export const analysisPages = [
   },
 ] as const
 
-/** Where records of the group-scoped `stack` kind belong: Supply › Stack. */
+/** Where records of the team-scoped `stack` kind (analyzer scope `group`) belong: Supply › Stack. */
 export const stackRecords = { to: '/supply/stack', kind: 'stack', title: 'Stack' } as const
 
 /**

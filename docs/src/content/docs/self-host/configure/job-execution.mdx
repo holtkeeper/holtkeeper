@@ -69,7 +69,7 @@ Git always runs on the host with the forge credentials; containers never see the
 
 ## Tool versions
 
-For every checkout, Holtkeeper detects the tools the repository asks for (Node, Bun, pnpm, Yarn, Go, Python, Java, Ruby, Rust) from its own files and writes them to the job log. The scoped **Toolchain** setting overrides detection for everything, a group or a repository:
+For every checkout, Holtkeeper detects the tools the repository asks for (Node, Bun, pnpm, Yarn, Go, Python, Java, Ruby, Rust) from its own files and writes them to the job log. The scoped **Toolchain** setting overrides detection for everything, a team, a path pattern or a repository:
 
 | Field     | Meaning                                                                  |
 | --------- | ------------------------------------------------------------------------ |
@@ -78,7 +78,7 @@ For every checkout, Holtkeeper detects the tools the repository asks for (Node, 
 | `network` | Another network policy for these repositories (`container` mode).        |
 | `env`     | Variables set for every command. Store secrets in Credentials, not here. |
 
-```json title="toolchain · group web"
+```json title="toolchain · path acme/round/**"
 {
   "tools": { "node": "22", "pnpm": "9.12.0" },
   "env": { "TURBO_TOKEN": "6c1d7c9e-3a51-4b8e-9f0a-2d5e8b7c4f10" }
@@ -91,9 +91,9 @@ Pin a version only when detection picks the wrong one, for example in a monorepo
   <Toolbar title="Background work" />
   <Scroll>
 
-| Setting   | Value                                  | Set by    |
-| --------- | -------------------------------------- | --------- |
-| Toolchain | `node 22` · `pnpm 9.12.0` · 1 variable | group web |
+| Setting   | Value                                  | Set by               |
+| --------- | -------------------------------------- | -------------------- |
+| Toolchain | `node 22` · `pnpm 9.12.0` · 1 variable | path acme/round/\*\* |
 
   </Scroll>
 </Screen>

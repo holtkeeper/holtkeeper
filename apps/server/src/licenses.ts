@@ -37,7 +37,7 @@ export interface LicensesSource {
   /** Analysis kinds the server knows; the `licenses` kind computes metrics records lack. */
   // oxlint-disable-next-line typescript/no-explicit-any -- kinds differ in their data type
   kinds: ReadonlyMap<string, AnalysisKind<any, any>>
-  /** A repository with its config groups. */
+  /** A repository with its owner teams. */
   targetOf: (repo: RepoRef) => RepoTarget
   /** Keeps answers while the latest records and the policy stay the same. */
   cache?: FleetCache
@@ -139,7 +139,7 @@ function repoRow(scan: Scan): LicensesRepoRow {
   const { head, target, metrics } = scan
   return {
     repo: repoKey(head.repo),
-    groups: target.groups,
+    teams: target.teams,
     analysisId: head.id,
     createdAt: head.createdAt,
     packages: metrics.packages - metrics.verdicts.internal,
@@ -223,7 +223,7 @@ function violationsOf(scans: readonly Scan[]): LicenseViolation[] {
       for (const culprit of pkg.culprits) draft.culprits.add(culprit)
       if (compareVerdict(pkg.verdict, draft.verdict) < 0) draft.verdict = pkg.verdict
       if (!pkg.dev) draft.dev = false
-      draft.repos.set(repoKey(scan.head.repo), scan.target.groups)
+      draft.repos.set(repoKey(scan.head.repo), scan.target.teams)
       drafts.set(key, draft)
     }
   return [...drafts.values()]
@@ -236,7 +236,7 @@ function violationsOf(scans: readonly Scan[]): LicenseViolation[] {
       culprits: [...draft.culprits].toSorted(),
       dev: draft.dev,
       repos: [...draft.repos]
-        .map(([repo, groups]) => ({ repo, groups }))
+        .map(([repo, teams]) => ({ repo, teams }))
         .toSorted((a, b) => a.repo.localeCompare(b.repo)),
     }))
     .toSorted(

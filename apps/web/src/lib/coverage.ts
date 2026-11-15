@@ -9,11 +9,11 @@ import {
   freshnessOf,
   freshnessTone,
 } from './freshness.ts'
-import { type GroupTitleOf, groupMatchesQuery, keyAsTitle } from './group-titles.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
 import { defined, median } from './stats.ts'
 import type { SortState, SortValue } from './table-sort.ts'
+import { type TeamTitleOf, teamMatchesQuery, keyAsTitle } from './team-titles.ts'
 
 interface Counts {
   covered: number
@@ -118,7 +118,7 @@ export function coverageExcludes(value: unknown): string[] {
 /** One repository on the coverage table: its newest coverage record, or none yet. */
 export interface CoverageRow {
   repo: RepoRef
-  groups: readonly string[]
+  teams: readonly string[]
   card?: CoverageRepoCard
   /** Set when the repository has no tests by design (`repo.tests`). */
   noTests?: { reason?: string }
@@ -131,7 +131,7 @@ export interface CoverageRow {
  */
 export function coverageRows(
   cards: readonly CoverageRepoCard[],
-  repos: readonly { repo: RepoRef; groups: readonly string[]; noTests?: { reason?: string } }[],
+  repos: readonly { repo: RepoRef; teams: readonly string[]; noTests?: { reason?: string } }[],
 ): CoverageRow[] {
   const measured = new Set(cards.map((card) => repoKey(card.repo)))
   const noTests = new Map(
@@ -142,10 +142,10 @@ export function coverageRows(
     return marked ? { ...row, noTests: marked } : row
   }
   const rows: CoverageRow[] = [
-    ...cards.map((card) => withNoTests({ repo: card.repo, groups: card.groups, card })),
+    ...cards.map((card) => withNoTests({ repo: card.repo, teams: card.teams, card })),
     ...repos
       .filter((summary) => !measured.has(repoKey(summary.repo)))
-      .map((summary) => withNoTests({ repo: summary.repo, groups: summary.groups })),
+      .map((summary) => withNoTests({ repo: summary.repo, teams: summary.teams })),
   ]
   const rank = (row: CoverageRow) => (row.noTests ? 103 : row.card ? (lineShare(row) ?? 101) : 102)
   return rows.toSorted(
@@ -288,12 +288,12 @@ export function withCoverageSort(
   return sort ? { ...rest, sort: sort.key, dir: sort.direction } : rest
 }
 
-/** The rows `search` keeps: path or group title or key, freshness states, below target. */
+/** The rows `search` keeps: path or team title or key, freshness states, below target. */
 export function filterCoverageRows(
   rows: readonly CoverageRow[],
   search: CoverageSearch,
   target: number,
-  titleOf: GroupTitleOf = keyAsTitle,
+  titleOf: TeamTitleOf = keyAsTitle,
   now: Date = new Date(),
 ): CoverageRow[] {
   const needle = search.q?.trim().toLowerCase()
@@ -301,7 +301,7 @@ export function filterCoverageRows(
     (row) =>
       (!needle ||
         repoKey(row.repo).toLowerCase().includes(needle) ||
-        row.groups.some((group) => groupMatchesQuery(group, titleOf, needle))) &&
+        row.teams.some((team) => teamMatchesQuery(team, titleOf, needle))) &&
       (!search.freshness?.length ||
         search.freshness.some((state) => state === coverageFreshness(row, now))) &&
       (!search.below || belowTarget(row, target)),

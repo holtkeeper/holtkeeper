@@ -5,6 +5,7 @@ import type { AuditReport } from '@holtkeeper/vuln'
 import { ExternalAccountConflictError } from './accounts.ts'
 import { AUDIT_GENESIS_HASH, auditHash } from './audit.ts'
 import { chatStoreTests } from './chat-contract.ts'
+import { embeddingStoreTests } from './embeddings-contract.ts'
 import { guideStoreTests } from './guides-contract.ts'
 import { learningStoreTests } from './learnings-contract.ts'
 import { slackMessageStoreTests } from './slack-contract.ts'
@@ -83,7 +84,7 @@ const knowledgeEntry = (
   title: 'Prefer Vitest over Jest',
   body: 'We **decided** to use Vitest.',
   kind: 'convention',
-  scope: { groups: ['games'] },
+  scope: { teams: ['games'] },
   topics: ['testing'],
   appliesTo: ['tests', 'review'],
   packages: [{ ecosystem: 'npm', name: 'vitest', from: '>=1 <2' }],
@@ -100,7 +101,7 @@ const knowledgeEntry = (
 const usage = (overrides: Partial<NewAiUsageRecord> = {}): NewAiUsageRecord => ({
   at: '2026-10-01T10:00:00.000Z',
   repo: { forge: 'work', path: 'games/app' },
-  groups: ['games'],
+  teams: ['games'],
   taskKind: 'review',
   actor: 'jane',
   provider: 'anthropic',
@@ -242,6 +243,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
 
     guideStoreTests(() => store)
     learningStoreTests(() => store)
+    embeddingStoreTests(() => store)
     chatStoreTests(() => store)
     taskStoreTests(() => store)
     slackMessageStoreTests(() => store)
@@ -482,7 +484,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         name: 'GitLab bot',
         kind: 'gitlab',
         url: 'https://gitlab.test',
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         secret: 'v1.sealed',
         expiresAt: '2026-12-01T00:00:00.000Z',
         rotation: { enabled: true, daysBefore: 7, lifetimeDays: 30 },
@@ -951,7 +953,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await store.jobs.list({ repos: [] })).toEqual([])
     })
 
-    test('jobs: search by id prefix, repository, group, analyzer and listed analyzers', async () => {
+    test('jobs: search by id prefix, repository, team, analyzer and listed analyzers', async () => {
       const a = await store.jobs.enqueue(job('games/Alpha', t(1)))
       const b = await store.jobs.enqueue(job('games/beta', t(2), { analyzer: 'changelog' }))
       const c = await store.jobs.enqueue(job('games/gamma', t(3), { group: 'Widgets' }))
@@ -1147,7 +1149,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(same.map((j) => j.repo.path)).toEqual(['games/b', 'games/a', 'games/a'])
     })
 
-    test('jobs: targets lists each repository and group once', async () => {
+    test('jobs: targets lists each repository and team once', async () => {
       await store.jobs.enqueue(job('games/a', t(0)))
       await store.jobs.enqueue(job('games/a', t(1), { analyzer: 'changelog' }))
       await store.jobs.enqueue(job('games', t(2), { group: 'games' }))
@@ -1191,7 +1193,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         [1, 'agent:review', t(0), 'Prefer Vitest over Jest'],
       ])
       expect(history[1]).toMatchObject({
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         packages: [{ ecosystem: 'npm', name: 'vitest', from: '>=1 <2' }],
         evidence: [{ label: 'MR', url: 'https://forge.test/mr/1' }],
       })
@@ -1209,10 +1211,21 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       const stored = await store.knowledge.put(plain)
       expect(stored).toEqual({ ...plain, version: 1 })
       expect(await store.knowledge.get('k2')).toEqual({ ...plain, version: 1 })
+      const match = { families: ['family-1'], files: ['src/**/*.tsx', 'package.json'] }
       const full = await store.knowledge.put(
-        knowledgeEntry('k3', { supersedes: 'k2', updatedAt: t(1) }),
+        knowledgeEntry('k3', { supersedes: 'k2', match, updatedAt: t(1) }),
       )
+      expect(full.match).toEqual(match)
       expect(await store.knowledge.get('k3')).toEqual(full)
+      const { match: _match, ...unmatched } = full
+      await store.knowledge.put({ ...unmatched, updatedAt: t(2) })
+      expect(Object.hasOwn((await store.knowledge.get('k3'))!, 'match')).toBe(false)
+      expect((await store.knowledge.history('k3'))[0]?.match).toEqual(match)
+      const familyOnly = await store.knowledge.put(
+        knowledgeEntry('k4', { match: { families: ['family-2'] }, updatedAt: t(3) }),
+      )
+      expect(await store.knowledge.get('k4')).toEqual(familyOnly)
+      expect(Object.hasOwn((await store.knowledge.get('k2'))!, 'match')).toBe(false)
     })
 
     test('knowledge: list newest first with filters', async () => {
@@ -1423,7 +1436,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         usage({
           at: '2026-10-03T10:00:00.000Z',
           repo: { forge: 'work', path: 'tools/cli' },
-          groups: ['tools'],
+          teams: ['tools'],
           outcome: 'error',
           error: 'boom',
         }),
@@ -1432,7 +1445,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(first.id).toBeString()
       expect(first).toMatchObject({
         costSource: 'reported',
-        groups: ['games'],
+        teams: ['games'],
       })
       expect(first.analyzer).toBeUndefined()
       const all = await store.aiUsage.list()
@@ -1448,7 +1461,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       ).toEqual(['02'])
       expect((await store.aiUsage.list({ model: 'claude-sonnet-5-5' })).length).toBe(1)
       expect((await store.aiUsage.list({ analyzer: 'review' })).length).toBe(1)
-      expect((await store.aiUsage.list({ group: 'tools' })).length).toBe(1)
+      expect((await store.aiUsage.list({ team: 'tools' })).length).toBe(1)
       expect(
         (
           await store.aiUsage.list({
@@ -1465,7 +1478,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         ).length,
       ).toBe(1)
       expect((await store.aiUsage.list({ scopes: [] })).length).toBe(0)
-      expect((await store.aiUsage.list({ scopes: [{ groups: ['tools'] }] })).length).toBe(1)
+      expect((await store.aiUsage.list({ scopes: [{ teams: ['tools'] }] })).length).toBe(1)
       expect((await store.aiUsage.list({ scopes: [{ repos: ['work:games/**'] }] })).length).toBe(2)
       expect(
         (
@@ -1486,21 +1499,21 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(first.transcriptRef).toBeUndefined()
     })
 
-    test('ai usage: interactive and subject round-trip; actor, origin and groups filter', async () => {
+    test('ai usage: interactive and subject round-trip; actor, origin and teams filter', async () => {
       const automatic = await store.aiUsage.append(usage({ actor: 'system' }))
       const person = await store.aiUsage.append(
         usage({
           at: '2026-10-02T10:00:00.000Z',
           interactive: true,
           subject: 'MR !42',
-          groups: ['games', 'web'],
+          teams: ['games', 'web'],
         }),
       )
       await store.aiUsage.append(
         usage({
           at: '2026-10-03T10:00:00.000Z',
           repo: { forge: 'work', path: 'tools/cli' },
-          groups: ['tools'],
+          teams: ['tools'],
           interactive: false,
           actor: 'agent:learning',
         }),
@@ -1517,13 +1530,13 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect((await store.aiUsage.list({ actor: 'system' })).map((r) => r.id)).toEqual([
         automatic.id,
       ])
-      expect((await store.aiUsage.list({ groups: ['web', 'tools'] })).length).toBe(2)
-      expect(await store.aiUsage.list({ groups: [] })).toEqual([])
+      expect((await store.aiUsage.list({ teams: ['web', 'tools'] })).length).toBe(2)
+      expect(await store.aiUsage.list({ teams: [] })).toEqual([])
       expect(
         (
           await store.aiUsage.list({
-            groups: ['games'],
-            scopes: [{ groups: ['web'] }],
+            teams: ['games'],
+            scopes: [{ teams: ['web'] }],
           })
         ).map((r) => r.id),
       ).toEqual([person.id])
@@ -1537,7 +1550,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         ['interactive', 1],
       ])
       const [games] = await store.aiUsage.aggregate({
-        filter: { groups: ['games'] },
+        filter: { teams: ['games'] },
       })
       expect(games?.runs).toBe(2)
     })
@@ -1560,7 +1573,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       const [sum] = await store.aiUsage.aggregate({ filter: { taskKinds: ['review', 'chat'] } })
       expect(sum).toMatchObject({ runs: 2, costUsd: 5 })
       const scoped = await store.aiUsage.aggregate({
-        filter: { taskKinds: ['triage'], scopes: [{ groups: ['games'] }] },
+        filter: { taskKinds: ['triage'], scopes: [{ teams: ['games'] }] },
       })
       expect(scoped[0]).toMatchObject({ runs: 1, costUsd: 2 })
     })
@@ -1607,7 +1620,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         usage({
           at: '2026-10-11T08:00:00.000Z',
           model: 'claude-sonnet-5-5',
-          groups: ['games', 'web'],
+          teams: ['games', 'web'],
           costUsd: 0.25,
         }),
       )
@@ -1615,7 +1628,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         usage({
           at: '2026-11-02T08:00:00.000Z',
           repo: { forge: 'work', path: 'misc/x' },
-          groups: [],
+          teams: [],
           outcome: 'denied-budget',
           durationMs: 0,
           inputTokens: 0,
@@ -1661,8 +1674,8 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         ['2026-10', 'claude-sonnet-5-5', 1],
         ['2026-11', 'claude-opus-5-5', 1],
       ])
-      const byGroup = await store.aiUsage.aggregate({ groupBy: ['group'] })
-      expect(byGroup.map((b) => [b.key.group, b.runs])).toEqual([
+      const byTeam = await store.aiUsage.aggregate({ groupBy: ['team'] })
+      expect(byTeam.map((b) => [b.key.team, b.runs])).toEqual([
         ['', 1],
         ['games', 3],
         ['web', 1],
@@ -1696,7 +1709,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(
         (
           await store.aiUsage.aggregate({
-            filter: { scopes: [{ groups: ['web'] }] },
+            filter: { scopes: [{ teams: ['web'] }] },
           })
         )[0]?.runs,
       ).toBe(1)
@@ -1742,9 +1755,14 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(changed.version).toBe(2)
       expect(changed.updatedBy).toBeUndefined()
       await config.put({
-        type: 'group',
+        type: 'team',
         id: 'games',
-        data: { forge: 'work', include: ['games/*'], exclude: [] },
+        data: {
+          owns: ['work:games/**'],
+          exclude: [],
+          consumes: ['tools/**'],
+          members: [{ id: 'jane', role: 'maintainer' }],
+        },
         updatedAt: t(3),
       })
       await config.put({
@@ -1754,20 +1772,20 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         updatedAt: t(3),
       })
       await config.put({
-        type: 'group',
+        type: 'team',
         id: 'apps',
-        data: { forge: 'work', include: ['apps/*'], exclude: ['apps/old'] },
+        data: { owns: ['apps/*'], exclude: ['apps/old'], consumes: [], members: [] },
         updatedAt: t(4),
       })
 
       expect(await config.get('forge', 'work')).toEqual(changed)
       expect(await config.get('forge', 'missing')).toBeUndefined()
-      expect(await config.get('group', 'work')).toBeUndefined()
-      expect((await config.list('group')).map((d) => d.id)).toEqual(['apps', 'games'])
+      expect(await config.get('team', 'work')).toBeUndefined()
+      expect((await config.list('team')).map((d) => d.id)).toEqual(['apps', 'games'])
       expect((await config.list()).map((d) => `${d.type}:${d.id}`)).toEqual([
         'forge:work',
-        'group:apps',
-        'group:games',
+        'team:apps',
+        'team:games',
         'trigger:label:port',
       ])
       expect(await config.history('forge', 'work')).toEqual([
@@ -1782,7 +1800,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
           updatedBy: 'alice',
         },
       ])
-      expect(await config.history('group', 'nope')).toEqual([])
+      expect(await config.history('team', 'nope')).toEqual([])
 
       await config.remove('forge', 'work')
       expect(await config.get('forge', 'work')).toBeUndefined()

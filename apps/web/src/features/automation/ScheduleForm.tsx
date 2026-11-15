@@ -141,8 +141,8 @@ export function ScheduleForm({
         where={
           <>
             <GroupPicker
-              value={draft.groups}
-              onChange={(v) => set('groups', v)}
+              value={draft.teams}
+              onChange={(v) => set('teams', v)}
               description="None selected: every repository."
             />
             <TagInput
@@ -151,7 +151,7 @@ export function ScheduleForm({
               onChange={(v) => set('repos', v)}
               placeholder="work:toys/*"
               description={
-                errors.repos ?? 'forge:path globs; none means every repository of the groups.'
+                errors.repos ?? 'forge:path globs; none means every repository of the teams.'
               }
             />
           </>

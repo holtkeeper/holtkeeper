@@ -6,13 +6,12 @@ import type {
   ChatMessageView,
   ChatStepStatus,
   ChatThreadView,
-  GroupMatch,
 } from '@holtkeeper/api'
 
 import { shortId } from './format.ts'
-import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { type FoldedScope, type ScopeView, foldScope } from './home-scope.ts'
 import { kbId } from './knowledge.ts'
+import { keyAsTitle, type TeamTitleOf } from './team-titles.ts'
 
 const pathOf = (repo: string) => repo.slice(repo.indexOf(':') + 1)
 
@@ -262,25 +261,25 @@ export function insertMention(
 }
 
 /**
- * What a thread is about, for its list row and header: the repository path, the group (by
- * `titleOf`) or `Team`.
+ * What a thread is about, for its list row and header: the repository path, the team (by
+ * `titleOf`) or `Everyone`.
  */
 export const threadScope = (
-  thread: Pick<ChatThreadView, 'repo' | 'group'>,
-  titleOf: GroupTitleOf = keyAsTitle,
-): string => (thread.repo ? pathOf(thread.repo) : thread.group ? titleOf(thread.group) : 'Team')
+  thread: Pick<ChatThreadView, 'repo' | 'team'>,
+  titleOf: TeamTitleOf = keyAsTitle,
+): string => (thread.repo ? pathOf(thread.repo) : thread.team ? titleOf(thread.team) : 'Everyone')
 
 /**
  * Threads for a scope switch position. Team-wide threads count as the viewer's own teams; on
- * *My teams* the threads of other teams fold into `others` (with the groups they are in), a group
- * position keeps that group's threads, *All I can see* everything. Without home groups *My teams*
+ * *My teams* the threads of other teams fold into `others` (with the teams they are in), a team
+ * position keeps that team's threads, *All I can see* everything. Without home teams *My teams*
  * shows only the team-wide threads.
  */
-export const scopeThreads = <T extends Pick<ChatThreadView, 'groups'>>(
+export const scopeThreads = <T extends Pick<ChatThreadView, 'teams'>>(
   threads: readonly T[],
   view: ScopeView,
-  homeGroups: readonly GroupMatch[],
-): FoldedScope<T> => foldScope(threads, view, homeGroups, (thread) => thread.groups)
+  homeTeams: readonly string[],
+): FoldedScope<T> => foldScope(threads, view, homeTeams, (thread) => thread.teams)
 
 /** The tool trace of a reply in one line, e.g. `knowledge ×2 · catalog`. */
 export const toolSummary = (trace: readonly { tool: string; calls: number }[]): string =>
@@ -378,6 +377,6 @@ export function threadRefs(messages: readonly Pick<ChatMessageView, 'refs'>[]): 
 export const addableRepos = (readable: readonly string[], attached: readonly string[]): string[] =>
   readable.filter((repo) => !attached.includes(repo)).toSorted()
 
-/** What kind of thread it is, in words: about a repository, a group or the whole team. */
-export const threadKind = (thread: Pick<ChatThreadView, 'repo' | 'group'>): string =>
-  thread.repo ? 'Repository thread' : thread.group ? 'Group thread' : 'Team thread'
+/** What kind of thread it is, in words: about a repository, a team or everyone. */
+export const threadKind = (thread: Pick<ChatThreadView, 'repo' | 'team'>): string =>
+  thread.repo ? 'Repository thread' : thread.team ? 'Team thread' : 'Shared thread'

@@ -1,7 +1,7 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { FlaskConical } from 'lucide-react'
 
-import { useCoverageOverview, useGroupTitles, useRepos, useSettings } from '../../api/queries.ts'
+import { useCoverageOverview, useTeamTitles, useRepos, useSettings } from '../../api/queries.ts'
 import {
   type CoverageKpis,
   type CoverageRow,
@@ -102,7 +102,7 @@ function RepoName({ row }: { row: CoverageRow }) {
           <span className="font-medium">{name}</span>
         </Link>
         <span className="mono text-[11px] text-dim">
-          {[...row.groups, row.repo.forge].join(' · ')}
+          {[...row.teams, row.repo.forge].join(' · ')}
         </span>
       </div>
     </div>
@@ -251,8 +251,8 @@ export function CoveragePage() {
   const search = useSearch({ from: '/app/quality/coverage' })
   const navigate = useNavigate({ from: '/quality/coverage' })
   const setSearch = (next: CoverageSearch) => void navigate({ search: next, replace: true })
-  const { view, setView, homeGroups } = useScope()
-  const titleOf = useGroupTitles()
+  const { view, setView, homeTeams } = useScope()
+  const titleOf = useTeamTitles()
   const settings = useConfigure('Coverage settings', pageSettingKeys.coverage)
   const run = useRunJob({ analyzer: 'coverage', label: 'Run coverage' })
 
@@ -264,7 +264,7 @@ export function CoveragePage() {
   )
   const filtered = Boolean(search.q || search.freshness?.length || search.below)
 
-  const folded = foldScope(rows, view, homeGroups, (row) => row.groups)
+  const folded = foldScope(rows, view, homeTeams, (row) => row.teams)
   const order = [...folded.shown, ...folded.others]
   const selected = parseRepoKey(search.repo)
   const index = selected ? order.findIndex((row) => repoKey(row.repo) === repoKey(selected)) : -1
@@ -298,7 +298,7 @@ export function CoveragePage() {
           columns={columns(target)}
           sort={sort}
           onSort={(nextSort) => setSearch(withCoverageSort(search, nextSort))}
-          scope={{ value: view, onChange: setView, homeGroups }}
+          scope={{ value: view, onChange: setView, homeTeams }}
           strip={(shown) => kpiCells(coverageKpis(shown, target), target)}
           legend={[
             { tone: 'success', label: 'Covered' },

@@ -1,4 +1,3 @@
-import { leafGroups } from '@holtkeeper/access'
 import {
   type RegistryTool,
   type RegistryToolset,
@@ -17,7 +16,7 @@ import type { RepoHealth } from '../repo-health.ts'
 
 /** What the `ops` toolset reads for one caller; everything is limited to what it may see. */
 export interface OpsToolsAccess {
-  /** The repository (or `forge:<group>` of group jobs) when the caller may read its jobs. */
+  /** The repository (or `forge:<team>` of group-scope jobs) when the caller may read its jobs. */
   repoOf(value: string): RepoRef | undefined
   /** Jobs newest first, only of repositories the caller may read. */
   jobs(query: Omit<JobQuery, 'repos'>): Promise<Job[]>
@@ -37,13 +36,13 @@ export interface OpsToolsAccess {
   /** This week's AI usage the caller may read, split as `GET /api/ai/week` splits it. */
   spend?: () => Promise<WeekBreakdown>
   /**
-   * Freshness of every analyzer on a repository, or on a group when `repo` names one, already
+   * Freshness of every analyzer on a repository, or on a team when `repo` names one (`forge:<team>`), already
    * checked by `repoOf`; without it `analysis_status` is not offered.
    */
   freshness?: (repo: RepoRef) => Promise<FreshnessStatus[]>
   /**
    * Health of a repository (already checked by `repoOf`) with only the cells the caller may read;
-   * `undefined` for a group. Shown by `analysis_status`.
+   * `undefined` for a team. Shown by `analysis_status`.
    */
   health?: (repo: RepoRef) => Promise<RepoHealth | undefined>
   /**
@@ -52,11 +51,11 @@ export interface OpsToolsAccess {
    * offered.
    */
   fleet?: () => Promise<RepoSummary[]>
-  /** How a group key is named in tool output; default the key itself. */
-  groupLabel?: (key: string) => string
+  /** How a team key is named in tool output; default the key itself. */
+  teamLabel?: (key: string) => string
 }
 
-type GroupLabel = (key: string) => string
+type TeamLabel = (key: string) => string
 
 const statuses = ['queued', 'running', 'succeeded', 'failed', 'blocked', 'canceled'] as const
 const triggers = [
@@ -92,13 +91,13 @@ const firstLine = (text: string) =>
     ?.trim() ?? ''
 
 /** One job in one line for the `jobs` tool. */
-function jobLine(job: Job, now: number, label: GroupLabel): string {
+function jobLine(job: Job, now: number, label: TeamLabel): string {
   const duration = durationOf(job, now)
   const parts = [
     `\`${job.id}\``,
     job.status === 'blocked' ? 'blocked by budget' : job.status,
     job.analyzer,
-    job.group !== undefined ? `group ${label(job.group)}` : keyOf(job.repo),
+    job.group !== undefined ? `team ${label(job.group)}` : keyOf(job.repo),
     ...(job.ref ? [`ref ${job.ref}`] : []),
     job.schedule
       ? `${job.trigger} (${job.schedule})`
@@ -191,7 +190,7 @@ function renderStats(stats: JobStats): string {
 const noJob = (id: string) =>
   new ToolError(`No readable job ${id}; list jobs with the jobs tool to find its id.`)
 
-function jobTools(access: OpsToolsAccess, now: () => Date, label: GroupLabel): RegistryTool[] {
+function jobTools(access: OpsToolsAccess, now: () => Date, label: TeamLabel): RegistryTool[] {
   const readJob = async (id: string) => {
     const job = await access.job(id)
     if (!job) throw noJob(id)
@@ -287,7 +286,7 @@ function jobTools(access: OpsToolsAccess, now: () => Date, label: GroupLabel): R
         const job = await readJob(id)
         const why = await access.why(job)
         return [
-          `# ${job.analyzer} on ${job.group !== undefined ? `group ${label(job.group)}` : keyOf(job.repo)} (${job.status})`,
+          `# ${job.analyzer} on ${job.group !== undefined ? `team ${label(job.group)}` : keyOf(job.repo)} (${job.status})`,
           `- Origin: ${why.origin}.`,
           ...(why.outcome ? [`- Outcome: ${why.outcome}.`] : []),
           ...(why.wait
@@ -305,15 +304,11 @@ function jobTools(access: OpsToolsAccess, now: () => Date, label: GroupLabel): R
   ]
 }
 
-const scopeText = (status: BudgetStatus, label: GroupLabel) => {
+const scopeText = (status: BudgetStatus, label: TeamLabel) => {
   const { scope } = status
   if (scope.all) return 'everything'
   const parts = [
-    ...(scope.groups?.length
-      ? [
-          `groups ${scope.groups.map((group) => (typeof group === 'string' ? label(group) : group.map(label).join(' + '))).join(', ')}`,
-        ]
-      : []),
+    ...(scope.teams?.length ? [`teams ${scope.teams.map(label).join(', ')}`] : []),
     ...(scope.repos?.length ? [`repos ${scope.repos.join(', ')}`] : []),
   ]
   return parts.join('; ') || 'nothing'
@@ -335,7 +330,7 @@ function splitLine(
   return `${label}: ${shown.join(', ')}${rest > 0 ? `, ${rest} more` : ''}`
 }
 
-function budgetLine(status: BudgetStatus, label: GroupLabel): string {
+function budgetLine(status: BudgetStatus, label: TeamLabel): string {
   const stops = status.automaticStopsAt
     ? `automatic work is expected to stop at ${status.automaticStopsAt}`
     : status.spentUsd >= status.weeklyUsd - status.reserveUsd
@@ -347,7 +342,7 @@ function budgetLine(status: BudgetStatus, label: GroupLabel): string {
 function budgetTool(
   budgets: NonNullable<OpsToolsAccess['budgets']>,
   spend: OpsToolsAccess['spend'],
-  label: GroupLabel,
+  label: TeamLabel,
 ): RegistryTool {
   return defineTool({
     name: 'budget_status',
@@ -421,11 +416,11 @@ const cellText = (cells: RepoSummary['cells']) =>
     ([key, cell]) => `${key} ${cell.value}${cell.sub ? ` (${cell.sub})` : ''} ${cell.tone}`,
   )
 
-/** One repository of the fleet in one line: path, groups, state, the readable cells, freshness, updates. */
-function fleetLine(summary: RepoSummary, label: GroupLabel): string {
+/** One repository of the fleet in one line: path, owner teams, state, the readable cells, freshness, updates. */
+function fleetLine(summary: RepoSummary, label: TeamLabel): string {
   const parts = [
     keyOf(summary.repo),
-    `groups ${leafGroups(summary.groups).map(label).join(', ')}`,
+    `teams ${summary.teams.length ? summary.teams.map(label).join(', ') : 'none'}`,
     healthText[summary.health],
     ...cellText(summary.cells),
     ...(summary.freshness
@@ -437,19 +432,13 @@ function fleetLine(summary: RepoSummary, label: GroupLabel): string {
   return `- ${parts.join(' · ')}`
 }
 
-function fleetTool(fleet: NonNullable<OpsToolsAccess['fleet']>, label: GroupLabel): RegistryTool {
+function fleetTool(fleet: NonNullable<OpsToolsAccess['fleet']>, label: TeamLabel): RegistryTool {
   return defineTool({
     name: 'fleet_health',
     description:
-      'Every repository you may see in the configured groups, worst first, with the same health the Repos page shows: overall state (failing, with warnings, not analysed, healthy) and the cells you may read (security, dependencies, coverage, bundles, jobs, CI, licenses, release; each a value, a detail and a tone), how many records are current, when it was last analysed and how it learns about changes. Repositories never analysed are listed too. Filter by group, state or a path fragment. Read-only.',
+      'Every repository of the fleet you may see, worst first, with the same health the Repos page shows: overall state (failing, with warnings, not analysed, healthy) and the cells you may read (security, dependencies, coverage, bundles, jobs, CI, licenses, release; each a value, a detail and a tone), how many records are current, when it was last analysed and how it learns about changes. Repositories never analysed are listed too. Filter by owner team, state or a path fragment. Read-only.',
     input: z.object({
-      group: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          'Only members of this group or subgroup (its key; a group includes its subgroups)',
-        ),
+      team: z.string().min(1).optional().describe('Only repositories this team owns (its key)'),
       health: z.enum(healthStatuses).optional().describe('Only repositories in this state'),
       query: z.string().min(1).optional().describe('Only paths containing this text'),
       limit: z
@@ -460,13 +449,13 @@ function fleetTool(fleet: NonNullable<OpsToolsAccess['fleet']>, label: GroupLabe
         .optional()
         .describe('At most this many, 50 by default'),
     }),
-    run: async ({ group, health, query, limit }) => {
+    run: async ({ team, health, query, limit }) => {
       const needle = query?.toLowerCase()
       const all = await fleet()
       const matching = all
         .filter(
           (summary) =>
-            (!group || summary.groups.includes(group)) &&
+            (!team || summary.teams.includes(team)) &&
             (!health || summary.health === health) &&
             (!needle || keyOf(summary.repo).toLowerCase().includes(needle)),
         )
@@ -485,7 +474,7 @@ function fleetTool(fleet: NonNullable<OpsToolsAccess['fleet']>, label: GroupLabe
         `# ${matching.length} repositories: ${counts.join(', ')}`,
         ...shown.map((summary) => fleetLine(summary, label)),
         ...(shown.length < matching.length
-          ? [`${matching.length - shown.length} more; narrow by group, state or path.`]
+          ? [`${matching.length - shown.length} more; narrow by team, state or path.`]
           : []),
       ].join('\n')
     },
@@ -515,8 +504,8 @@ function freshnessTool(
   return defineTool({
     name: 'analysis_status',
     description:
-      'Health and freshness of a repository (or a group, as forge:group): the health cells you may read (security, dependencies, coverage, bundles, jobs, CI, licenses, release; each a value, a detail and a tone ok, warn, bad, info or none) with the overall state, then how current each analysis is: last run, the commit the record describes vs the default-branch head freshness last saw, stale or fresh and why, when it may refresh next, and whether the freshness sweeper would queue it now. Check it before trusting analysis data such as the public API, coverage or test ids. Read-only.',
-    input: z.object({ repo: z.string().min(1).describe('forge:path, or forge:group') }),
+      'Health and freshness of a repository (or a team, as forge:<team key>): the health cells you may read (security, dependencies, coverage, bundles, jobs, CI, licenses, release; each a value, a detail and a tone ok, warn, bad, info or none) with the overall state, then how current each analysis is: last run, the commit the record describes vs the default-branch head freshness last saw, stale or fresh and why, when it may refresh next, and whether the freshness sweeper would queue it now. Check it before trusting analysis data such as the public API, coverage or test ids. Read-only.',
+    input: z.object({ repo: z.string().min(1).describe('forge:path, or forge:<team key>') }),
     run: async ({ repo }) => {
       const target = access.repoOf(repo)
       if (!target) throw new ToolError(`No readable repository ${repo}; pass forge:path.`)
@@ -541,7 +530,7 @@ export function opsToolset(
   access: OpsToolsAccess,
   now: () => Date = () => new Date(),
 ): RegistryToolset {
-  const label = access.groupLabel ?? ((key: string) => key)
+  const label = access.teamLabel ?? ((key: string) => key)
   return {
     name: 'ops',
     instructions:

@@ -1,6 +1,6 @@
 ---
 title: Add repositories
-description: Put repositories under Holtkeeper's care by adding them to groups, by exact path or by pattern, and split teams into subgroups.
+description: Put repositories under Holtkeeper's care, by exact path or by folder pattern, and give them an owner team or keep them in the forge's fleet.
 panel: Repos › Repositories
 route: /repos
 permission: settings:write
@@ -23,15 +23,19 @@ import {
   Ui,
 } from '@ui'
 
-Holtkeeper looks after the repositories its groups include. A group is a set of path patterns on one forge, usually one team, and every repository it matches is listed, analysed and kept fresh. You can add repositories one by one with **Add repository**, or give a group a pattern such as `acme/web-*` and let new projects join on their own.
+Holtkeeper looks after the repositories in its fleet: those a team owns or consumes, plus the folders a forge includes. Every repository in the fleet is listed, analysed and kept fresh. You can add repositories one by one with **Add repository**, or give a team or a forge a folder pattern such as `acme/round/**` and let new projects join on their own.
 
 ## Add repositories by path
 
-**Add repository** is the primary action on **Repos** and **Repos › Groups**. It opens a side sheet in three steps.
+**Add repository** is the primary action on **Repos**. It opens a side sheet in three steps.
 
 1. **Forge**: pick the forge the repositories live on.
 2. **Paths**: either <Ui>Pick from forge</Ui>, browsing the projects the token can see, or <Ui>Paste paths</Ui>, one path or GitLab URL per line. URLs are trimmed to paths and duplicates dropped. Up to 50 paths are checked at once against the token.
-3. **Group**: add the paths to an <Ui>Existing group</Ui> or a <Ui>New group</Ui> with an id such as `web`. The exact paths go into the group's include list.
+3. **Where**: choose who answers for them.
+   - <Ui>A team owns them</Ui>: pick the team; the exact paths go into its **Owns** list. When
+     sibling repositories in the same folder already have an owner, that team is suggested.
+   - <Ui>Forge fleet only</Ui>: the exact paths go into the forge's **Include** list, with no owner
+     yet. Give them one later on [Repos › Teams](/guide/repos/teams/).
 
 <Screen
   title="Repos › Add repository"
@@ -43,87 +47,70 @@ Holtkeeper looks after the repositories its groups include. A group is a set of 
   <Fields columns={1}>
     <Field
       label="Paths or forge URLs, one per line"
-      value="acme/checkout-web, https://gitlab.example.com/acme/admin-ui, acme/widget-kit"
+      value="acme/round/web, https://gitlab.example.com/acme/round/api, acme/kit/ui-kit"
       mono
     />
   </Fields>
   <Rows>
-    <Row title="acme/checkout-web">
+    <Row title="acme/round/web">
       <Tag tone="ok">Readable</Tag>
     </Row>
-    <Row title="acme/admin-ui">
+    <Row title="acme/round/api">
       <Tag tone="ok">Readable</Tag>
     </Row>
-    <Row title="acme/widget-kit" sub="Not found for holtkeeper-bot: invite it to the project">
+    <Row title="acme/kit/ui-kit" sub="Not found for holtkeeper-bot: invite it to the project">
       <Tag tone="bad">Not added</Tag>
     </Row>
   </Rows>
 </Screen>
 
 :::note
-A path the token cannot read is not added. Invite the forge's account to the project in GitLab and add it again.
+A path the token cannot read is not added. Invite the forge's account to the project in GitLab and add it again. A path an **Exclude** pattern of the team or the forge leaves out is listed as blocked; edit that pattern first.
 :::
 
 ## Add repositories by pattern
 
-For a team that keeps creating projects, a pattern saves the clicking.
+For a team that keeps creating projects, a folder pattern saves the clicking.
 
-1. Open **Repos › Groups**, then the group.
-2. Go to the **Membership** tab.
-3. Add include patterns (`acme/web-*`, `acme/storefront/**`) and, if needed, exclude patterns (`acme/web-sandbox-*`).
-4. Before saving, the tab previews who joins and who leaves against the last listing. Save.
+- **For a team.** On [Repos › Teams](/guide/repos/teams/), edit the team and add **Owns** patterns (`acme/round/**`, `acme/*/web`) and, if needed, **Exclude** patterns (`acme/round/sandbox-*`). The dialog previews which repositories join and leave before you save.
+- **For nobody yet.** Under **Settings › Integrations**, edit the forge and add **Include** patterns to its **Fleet**, with **Exclude** patterns for what to leave out. The field says how many listed repositories match now.
 
-Holtkeeper lists the forge for the group's members every 30 minutes; **List now** runs it at once. A project that matches for the first time joins without anyone adding it.
+Holtkeeper lists each forge's fleet every 30 minutes. A project that matches for the first time joins without anyone adding it. Patterns that bring repositories in must start with a folder (`acme/**`, not `**/web`), since the forge is listed folder by folder.
 
 ## What happens next
 
-A repository a group finds for the first time gets every read-only analyzer once, on its default branch. Follow them in **Ops › Runs**. Until they finish, the repository shows as not analysed.
+A repository that joins the fleet gets every read-only analyzer once, on its default branch. Follow them in **Ops › Runs**. Until they finish, the repository shows as not analysed.
 
 <Screen
-  title="Repos › Groups › Web"
-  caption="A group page: its members, subgroups, stack, knowledge, settings and membership."
+  title="Repos › Teams › Widgets"
+  caption="A team page: the repositories it owns and consumes, its stack, knowledge and settings."
 >
-  <Toolbar title="Web" crumbs={['Repos', 'Groups']}>
-    <Button>Run job for group</Button>
+  <Toolbar title="Widgets" crumbs={['Repos', 'Teams']}>
+    <Button>Edit</Button>
+    <Button>Run job for team</Button>
   </Toolbar>
   <Strip
     items={[
-      { value: 2, label: 'patterns' },
-      { value: 14, label: 'members · 1 excluded' },
+      { value: 14, label: 'repositories' },
+      { value: 2, label: 'consumed' },
       { value: 9, label: 'healthy', tone: 'ok' },
       { value: 3, label: 'with warnings', tone: 'warn' },
-      { value: 2, label: 'not analysed' },
     ]}
-    end="Listed 4 min ago · next in 26 min"
+    end="3 members · 1 maintaining"
   />
-  <Segmented
-    items={[
-      'Repositories:14',
-      'Subgroups:2',
-      'Stack & conventions',
-      'Knowledge',
-      'Settings',
-      'Membership',
-    ]}
-  />
+  <Segmented items={['Repositories:14', 'Stack & conventions', 'Knowledge', 'Settings']} />
 </Screen>
 
-## Split a team into subgroups
+## Narrow by folder, not by subteam
 
-A subgroup narrows its parent: it only ever holds the parent's members, everything scoped to the parent keeps covering it, and its own settings, grants and knowledge win over the parent's.
-
-1. Open the root group and its **Subgroups** tab.
-2. Choose **New subgroup**: a display name, a key under the parent (`web.payments`), and the parent's members as exact paths or one glob.
-3. Save. To move a single repository later, use **Move to subgroup** on its row.
-
-Subgroups go one level deep. A repository in two sibling subgroups gets a warning, because their settings would tie.
+A team's repositories usually sit in a few folders already: `acme/round/web`, `acme/round/api`. To give part of a team its own settings, rules or access, scope them to that folder (`acme/round/**`) or to a shape across folders (`acme/*/web`). The deeper folder wins over the team and over a shallower folder; see [The fleet](/start/concepts/fleet/#the-most-specific-entry-wins).
 
 ## Remove a repository
 
-Remove its exact path from the group's include list, or add an exclude pattern on the **Membership** tab.
+Remove its exact path from the team's **Owns** list or the forge's **Include** list, or add an **Exclude** pattern there. A repository another team still owns or consumes stays in the fleet.
 
 ## Related
 
-- [The fleet](/start/concepts/fleet/) — forges, groups and scopes.
-- [Repositories](/guide/repos/repositories/), [Groups](/guide/repos/groups/) and [Repository hub](/guide/repos/repository-hub/) — the screens in detail.
+- [The fleet](/start/concepts/fleet/) — forges, folders, teams and scopes.
+- [Repositories](/guide/repos/repositories/), [Teams](/guide/repos/teams/) and [Repository hub](/guide/repos/repository-hub/) — the screens in detail.
 - [Invite your team](/start/first-steps/invite-team/) — the next step.

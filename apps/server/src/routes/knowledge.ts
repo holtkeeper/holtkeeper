@@ -1,11 +1,20 @@
 import { type Scope, can, scopeCoversRepo } from '@holtkeeper/access'
-import type { KnowledgeDetail, KnowledgeEntryView, KnowledgeList } from '@holtkeeper/api'
+import type {
+  KnowledgeCitationSummary,
+  KnowledgeCitations,
+  KnowledgeDetail,
+  KnowledgeEntryView,
+  KnowledgeList,
+} from '@holtkeeper/api'
+import { familyOf } from '@holtkeeper/guide'
 import {
   knowledgeKinds,
   knowledgeStatuses,
+  matchHolds,
   sharingDefaults,
   validateEntry,
 } from '@holtkeeper/knowledge'
+import { type KnowledgeCitation, summarizeCitations } from '@holtkeeper/review'
 import type {
   KnowledgeEntry,
   KnowledgeFilter,
@@ -24,10 +33,12 @@ import {
   limitParam,
   parseRepo,
   principalOf,
+  repoKey,
   repoTarget,
   ForbiddenException,
 } from '../context.ts'
-import { canReadShared, crossTeamPolicy, isSharedEntry, scopeOwner } from '../visibility.ts'
+import { createCitationIndex } from '../knowledge-citations.ts'
+import { canReadShared, canSee, crossTeamPolicy, isSharedEntry, scopeOwner } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
 
 const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
@@ -56,6 +67,7 @@ const contentOf = (entry: KnowledgeEntry | undefined) =>
     body: entry.body,
     kind: entry.kind,
     scope: entry.scope,
+    match: entry.match,
     topics: entry.topics,
     appliesTo: entry.appliesTo,
     packages: entry.packages,
@@ -107,7 +119,23 @@ export function knowledgeRoutes(deps: ServerDeps) {
   }
 
   const ownerOf = (entry: KnowledgeEntry) =>
-    scopeOwner(entry.scope, (repo) => repoTarget(config, repo).groups)
+    scopeOwner(entry.scope, (repo) => repoTarget(config, repo).teams)
+
+  const citationIndex = createCitationIndex({ store, now })
+  const targetOfKey = (key: string) => {
+    const split = key.indexOf(':')
+    return repoTarget(config, { forge: key.slice(0, split), path: key.slice(split + 1) })
+  }
+  /** Whether the citation reached its review as knowledge of a similar repository. */
+  const viaNeighbour = (entry: KnowledgeEntry, citation: KnowledgeCitation) =>
+    !scopeCoversRepo(entry.scope, targetOfKey(citation.repo))
+  const summaryOf = (
+    entry: KnowledgeEntry,
+    citations: readonly KnowledgeCitation[],
+  ): KnowledgeCitationSummary => ({
+    ...summarizeCitations(citations),
+    fromNeighbours: citations.filter((citation) => viaNeighbour(entry, citation)).length,
+  })
 
   app.get('/knowledge', async (c) => {
     const principal = principalOf(c)
@@ -135,7 +163,13 @@ export function knowledgeRoutes(deps: ServerDeps) {
     if (repo) {
       const target = repoTarget(config, repo)
       authorize(c, 'knowledge:read', { kind: 'repo', repo: target })
-      visible = hits.filter((entry) => scopeCoversRepo(entry.scope, target))
+      // Narrowed entries apply only within their families; file globs need a task's files.
+      const family = familyOf(await store.families.list(), repoKey(target))?.id
+      visible = hits.filter(
+        (entry) =>
+          scopeCoversRepo(entry.scope, target) &&
+          matchHolds(entry.match, family === undefined ? {} : { family }),
+      )
     } else {
       const policy = await crossTeamPolicy(store.settings)
       visible = hits.filter(
@@ -144,9 +178,16 @@ export function knowledgeRoutes(deps: ServerDeps) {
           (isSharedEntry(entry) && canReadShared(principal, entry.scope, policy)),
       )
     }
-    const entries: KnowledgeEntryView[] = visible
-      .slice(0, limit)
-      .map((entry) => ({ ...entry, owner: ownerOf(entry) }))
+    // Citations only add a column; the list answers without them when they cannot be read.
+    const cited = await citationIndex.all().catch(() => undefined)
+    const entries: KnowledgeEntryView[] = visible.slice(0, limit).map((entry) => {
+      const citations = cited?.get(entry.id)
+      return {
+        ...entry,
+        owner: ownerOf(entry),
+        ...(citations?.length && { citations: summaryOf(entry, citations) }),
+      }
+    })
     return c.json<KnowledgeList>({
       entries,
       people: await peopleOf(
@@ -170,6 +211,40 @@ export function knowledgeRoutes(deps: ServerDeps) {
     return c.json<KnowledgeDetail>({
       entry,
       history: own ? await store.knowledge.history(entry.id) : [],
+    })
+  })
+
+  app.get('/knowledge/:id/citations', async (c) => {
+    const principal = principalOf(c)
+    const entry = await store.knowledge.get(c.req.param('id'))
+    if (!entry) throw new HTTPException(404, { message: 'knowledge entry not found' })
+    const readable =
+      can(principal, 'knowledge:read', scopeTarget(entry.scope)) ||
+      (isSharedEntry(entry) &&
+        canReadShared(principal, entry.scope, await crossTeamPolicy(store.settings)))
+    if (!readable) throw new ForbiddenException('knowledge:read')
+    const citations = (await citationIndex.all()).get(entry.id) ?? []
+    const shown = citations.filter((citation) =>
+      canSee(principal, 'analyses:read', targetOfKey(citation.repo)),
+    )
+    return c.json<KnowledgeCitations>({
+      id: entry.id,
+      summary: summaryOf(entry, citations),
+      comments: shown.slice(0, 50).map((citation) => ({
+        repo: citation.repo,
+        mergeRequest: citation.mergeRequest,
+        title: citation.title,
+        severity: citation.severity,
+        category: citation.category,
+        ...(citation.href && { href: citation.href }),
+        at: citation.at,
+        outcome: citation.outcome,
+        replies: citation.replies,
+        up: citation.up,
+        down: citation.down,
+        neighbour: viaNeighbour(entry, citation),
+      })),
+      hidden: citations.length - shown.length,
     })
   })
 

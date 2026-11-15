@@ -54,36 +54,37 @@ Notes are for knowledge that does not fit a one-line rule: why the team chose so
   />
   <Scroll>
 
-| Permalink              | Note                                                                                    | Status                          | Author                |
-| ---------------------- | --------------------------------------------------------------------------------------- | ------------------------------- | --------------------- |
-| **Waiting for review** |                                                                                         |                                 |                       |
-| `kb:3e7a91c0`          | some-lib 4 needs `await init()` before the first call <Tag>quirk</Tag> <Tag>build</Tag> | <Tag tone="warn">Proposed</Tag> | agent · 2 h ago       |
-| `kb:b20f6d14`          | Migrate @acme/widget-kit 4 → 5 <Tag>migration</Tag> <Tag>dependencies</Tag>             | <Tag tone="warn">Proposed</Tag> | agent · 1 day ago     |
-| **Accepted**           |                                                                                         |                                 |                       |
-| `kb:91cc2a7e`          | Prices are integers in minor units <Tag>decision</Tag> <Tag>Shared</Tag>                | <Tag tone="ok">Accepted</Tag>   | Mira K. · 3 weeks ago |
-| `kb:0d54e8b3`          | Feature flags live in `config/flags.ts` <Tag>convention</Tag> <Tag>Inherited</Tag>      | <Tag tone="ok">Accepted</Tag>   | Ivo P. · 2 months ago |
+| Permalink              | Note                                                                                    | Status                          | Cited            | Author                |
+| ---------------------- | --------------------------------------------------------------------------------------- | ------------------------------- | ---------------- | --------------------- |
+| **Waiting for review** |                                                                                         |                                 |                  |                       |
+| `kb:3e7a91c0`          | some-lib 4 needs `await init()` before the first call <Tag>quirk</Tag> <Tag>build</Tag> | <Tag tone="warn">Proposed</Tag> | —                | agent · 2 h ago       |
+| `kb:b20f6d14`          | Migrate @acme/widget-kit 4 → 5 <Tag>migration</Tag> <Tag>dependencies</Tag>             | <Tag tone="warn">Proposed</Tag> | —                | agent · 1 day ago     |
+| **Accepted**           |                                                                                         |                                 |                  |                       |
+| `kb:91cc2a7e`          | Prices are integers in minor units <Tag>decision</Tag> <Tag>Shared</Tag>                | <Tag tone="ok">Accepted</Tag>   | 7 · 80% acted on | Mira K. · 3 weeks ago |
+| `kb:0d54e8b3`          | Feature flags live in `config/flags.ts` <Tag>convention</Tag> <Tag>Inherited</Tag>      | <Tag tone="ok">Accepted</Tag>   | 2                | Ivo P. · 2 months ago |
 
   </Scroll>
 </Screen>
 
 ## What a note holds
 
-| Field      | Meaning                                                                                                    |
-| ---------- | ---------------------------------------------------------------------------------------------------------- |
-| Title      | A short statement.                                                                                         |
-| Text       | The explanation, in Markdown.                                                                              |
-| Kind       | **decision**, **convention**, **migration**, **quirk** or **howto**.                                       |
-| Scope      | Which repositories it applies to: everything, groups, or repository paths and globs.                       |
-| Task kinds | Which tasks read it: review, port, propagate, or every task.                                               |
-| Topics     | Free lowercase tags such as `testing` or `i18n`.                                                           |
-| Packages   | Packages with version ranges. A migration must name them and only reaches tasks that touch those versions. |
-| Visibility | **team** (default) or **shared**: other teams read shared notes too.                                       |
-| Subject    | What it is about, such as `npm:some-lib`. A decision or convention about one package is shared by default. |
-| Evidence   | Links that back it up: merge requests, threads, docs.                                                      |
+| Field      | Meaning                                                                                                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title      | A short statement.                                                                                                                                                                     |
+| Text       | The explanation, in Markdown.                                                                                                                                                          |
+| Kind       | **decision**, **convention**, **migration**, **quirk** or **howto**.                                                                                                                   |
+| Scope      | Which repositories it may reach, and who may accept and edit it: everything, teams, or path patterns.                                                                                  |
+| Match      | Optional narrowing inside the scope: **Only in families** (repositories of the picked families) and **Only for files** (tasks touching files that match globs such as `src/**/*.tsx`). |
+| Task kinds | Which tasks read it: review, port, propagate, or every task.                                                                                                                           |
+| Topics     | Free lowercase tags such as `testing` or `i18n`.                                                                                                                                       |
+| Packages   | Packages with version ranges. A migration must name them and only reaches tasks that touch those versions.                                                                             |
+| Visibility | **team** (default) or **shared**: other teams read shared notes too.                                                                                                                   |
+| Subject    | What it is about, such as `npm:some-lib`. A decision or convention about one package is shared by default.                                                                             |
+| Evidence   | Links that back it up: merge requests, threads, docs.                                                                                                                                  |
 
 ## Find a note
 
-The notes follow the space picked in the sidebar. A team lists notes naming it; a family lists notes naming one of its members; a repository lists everything that covers it, and marks notes that reach it through a broader scope as **Inherited**.
+The notes follow the space picked in the sidebar. A team lists notes naming it; a folder lists notes whose path patterns name that folder; a family lists notes naming one of its members; a repository lists everything that covers it, and marks notes that reach it through a broader scope as **Inherited**.
 
 - The status tabs switch between **Live** (proposed and accepted), **Rejected** and **Archived**.
 - The text filter matches title, text, topics and the `kb:` id.
@@ -111,22 +112,22 @@ Since version 4, `some-lib` loads its locale data lazily. Calling `format()` bef
     <Facts
       items={[
         ['Where agents use it', 'quirk · every task'],
-        ['Scope', 'Group storefront'],
+        ['Scope', 'team widgets'],
         ['Topics', 'build, dependencies'],
         ['Packages', 'some-lib >=4 <5'],
         ['Visible to', 'Team'],
-        ['Proposed by', 'agent on acme/checkout-web · 2 h ago'],
+        ['Proposed by', 'agent on acme/round/web · 2 h ago'],
       ]}
     />
 
   </Sheet>
 </Screen>
 
-| Tab      | What it shows                                                                                                                                              |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Note     | The text and _Where agents use it_: kind, scope, task kinds, topics, packages, who may read it, the permalink and <Ui>Copy link</Ui>.                      |
-| History  | The current version and every earlier one, each with who made it, when and which fields changed. <Ui>Restore</Ui> puts an older version back as a new one. |
-| Evidence | The note's links, opened in a new tab.                                                                                                                     |
+| Tab      | What it shows                                                                                                                                                  |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Note     | The text and _Where agents use it_: kind, scope, task kinds, topics, packages, who may read it, the permalink and <Ui>Copy link</Ui>; then _Cited in reviews_. |
+| History  | The current version and every earlier one, each with who made it, when and which fields changed. <Ui>Restore</Ui> puts an older version back as a new one.     |
+| Evidence | The note's links, opened in a new tab.                                                                                                                         |
 
 With `knowledge:write` the sheet's actions are:
 
@@ -145,7 +146,7 @@ A proposal is often almost right. Click <Ui>Edit</Ui>, fix the kind or topics, t
 1. Pick the space the note is for. The scope starts from it.
 2. Click <Ui>New note</Ui>.
 3. Enter the title and the text in Markdown; the preview shows how it reads.
-4. Under **Details**, set kind, scope, task kinds, topics, packages, visibility, subject and evidence links.
+4. Under **Details**, set kind, scope, task kinds, topics, packages, visibility, subject and evidence links. Under the scope, **Only in families** and **Only for files** narrow where it applies.
 5. Save. The new note opens.
 
 <Screen title="Knowledge › Notes › New note">
@@ -158,7 +159,9 @@ A proposal is often almost right. Click <Ui>Edit</Ui>, fix the kind or topics, t
         wide
       />
       <Field label="Kind" value="migration" />
-      <Field label="Scope" value="Group storefront" />
+      <Field label="Scope" value="Path acme/*/web" mono />
+      <Field label="Only in families" value="f-web" mono />
+      <Field label="Only for files" value="src/**/*.tsx" mono />
       <Field label="Task kinds" value="review, port, propagate" />
       <Field label="Topics" value="dependencies" />
       <Field label="Packages" value={'npm @acme/widget-kit · from >=4 <5 · to >=5 <6'} mono wide />
@@ -177,9 +180,32 @@ Saving checks the version you started editing. If someone saved the note in the 
 
 ## Notes agents propose
 
-Agents propose notes through the MCP tool `propose_knowledge` and while working on tasks. A proposal that repeats an existing note (same title or text, or mostly the same words) creates nothing new: its evidence links are added to the existing note.
+Agents propose notes through the MCP tool `propose_knowledge` and while working on tasks. A proposal that repeats an existing note (same title or text, or mostly the same words) creates nothing new: its evidence links are added to the existing note. With [semantic search](#semantic-search) on, a proposal that says the same thing in other words counts as a repeat too.
 
 Proposals wait under **Waiting for review** and in the Inbox. The `knowledge.autoAccept` policy can accept chosen kinds at once; <Ui>Configure</Ui> on this tab opens it in **Settings › Policies** at **Agent knowledge**. Proposals from coding agents over MCP always wait for a person.
+
+## Which notes help reviews
+
+Reviews cite the notes they rely on as `[kb:<id>]`. The **Cited** column counts the posted review comments of the last year that cited a note, with the share of judged comments that were acted on (fixed or resolved, against dismissed) under it; hover it for the breakdown. The sheet's _Cited in reviews_ reads, for example, _Cited in 7 review comments · 4 resolved · 1 dismissed · 2 open_, says how many came from similar repositories the note was not written for, and lists the newest citing comments with their outcome and a link to the forge. You see the comments on repositories whose reviews you may read; the others are only counted.
+
+| Outcome   | Meaning                                                             |
+| --------- | ------------------------------------------------------------------- |
+| Resolved  | Merged, and the commented lines changed or the thread was resolved. |
+| Dismissed | Merged with the thread still open and the lines unchanged.          |
+| Open      | The merge request is still open.                                    |
+| Closed    | The merge request was closed without merging; it says nothing.      |
+
+A note cited often and dismissed often is worth rereading; a note never cited may be too narrow or worded so that reviews do not find it.
+
+## Semantic search
+
+By default agents find notes by their words. Turn on **Semantic search** in [Settings › AI](/guide/settings/ai/#semantic-search) and Holtkeeper also stores a vector of each note, which captures what the note means:
+
+- Agent and MCP searches find notes close in meaning even when they share no word with the question, for example a question in another language.
+- The notes a review or an agent task reads from the Guide are ranked by meaning as well as by words. Which notes apply never changes: vectors only change the order.
+- A proposal worded differently from an existing note, but saying the same thing, adds its evidence to that note instead of creating a new one.
+
+Notes are embedded in the background a few seconds after they change and every 10 minutes. When semantic search is off, not ready, over the AI budget or failing, everything quietly works by words as before.
 
 ## Starter knowledge
 
@@ -189,27 +215,29 @@ Every starter note is a proposal under **Waiting for review** and in the [Inbox]
 
 ### Where a starter note goes
 
-Before proposing, Holtkeeper compares each note with the live notes of the repository's team (its root group) and agrees on a level:
+Before proposing, Holtkeeper compares each note with the live notes of the repository's neighbourhood: notes of its owner teams, of its family, and of folders at least two levels deep that it shares. Then it agrees on a level, the narrowest that holds the repository and every matching note:
 
-| The note…                                                                                              | Goes to                                                                |
-| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| matches nothing, or only makes sense in this repository (its own paths, commands)                      | the repository                                                         |
-| says what a note of a **sibling repository in the same subgroup** says                                 | the **subgroup**, as one note for both; it replaces the sibling's note |
-| says what notes in **two or more subgroups** say, or a note sharing only the team with this repository | the **team** (root group)                                              |
-| is about team process (merge requests, reviews, releases, branches) and the team has it elsewhere      | the **team**                                                           |
-| is about how to use a library the fleet owns                                                           | the library's repository, **shared**, with the library as its subject  |
-| is already covered by a note of the subgroup or team                                                   | nothing new: its evidence links are added to that note                 |
+| The note…                                                                                                           | Goes to                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| matches nothing, or only makes sense in this repository (its own paths, commands)                                   | the repository                                                                                  |
+| says what notes of repositories of the **same family** say                                                          | the **family**: one note narrowed to the family (`match: f-web`), scoped to its folder or teams |
+| says what a note of a repository of the **same shape** says, one folder apart (`acme/round/web`, `acme/square/web`) | the **shape**: `acme/*/web`                                                                     |
+| says what a note of a sibling in a **shared folder** at least two levels deep says (`acme/round/api`)               | the **folder**: `acme/round/**`                                                                 |
+| matches notes that share only the owner team                                                                        | the **team**                                                                                    |
+| is about team process (merge requests, reviews, releases, branches)                                                 | the repository's **owner team**                                                                 |
+| is about how to use a library the fleet owns                                                                        | the library's repository, **shared**, with the library as its subject                           |
+| is already covered by a note that applies to the repository                                                         | nothing new: its evidence links are added to that note                                          |
 
-A note matches when the agent links it explicitly, or when the titles share at least half their words, or title and text a third of them. A note promoted to a subgroup or the team uses wording true for every repository involved and carries the evidence of the siblings it generalises. While a promotion waits for review, the next sibling's matching note counts as covered by it instead of starting a second one. Accepting it archives the sibling note it replaces; rejecting it keeps the sibling note, and later runs keep that lesson at their own repository instead of proposing the same promotion again.
+A note matches when the agent links it explicitly, or when the titles share at least half their words, or title and text a third of them. A promoted note uses wording true for every repository involved and carries the evidence of the siblings it generalises. While a promotion waits for review, the next sibling's matching note counts as covered by it instead of starting a second one. Accepting it archives the sibling note it replaces; rejecting it keeps the sibling note, and later runs keep that lesson at their own repository instead of proposing the same promotion again.
 
-Promotions depend on subgroups: split a team into subgroups (Repos › Groups) before building starter knowledge for many repositories at once.
+Promotions follow the forge's folders, families and owner teams. Confirm families and the teams' **Owns** patterns before building starter knowledge for many repositories at once, or alike repositories in different folders only meet at team level.
 
 ### Run it by hand
 
 - **One repository**: Settings › Analyzers › **Starter knowledge** › Run on the repository. A repository that was already bootstrapped or has notes of its own is skipped; set `force` in the run's options to build it again.
-- **A whole team**: add a schedule with this analyzer for the group in [Automation](/guide/ops/automation/) and click **Run now**. Repositories already done are skipped.
+- **A whole team or folder**: add a schedule with this analyzer for the team or a path pattern in [Automation](/guide/ops/automation/) and click **Run now**. Repositories already done are skipped.
 
-After a run the repository is marked, so starter knowledge never repeats on its own. The run's log lists every note with its level and why, for example `proposed [subgroup shapes.round] "Generate mocks with make gen" — a sibling in shapes.round has it`, and the run's record shows the same as a table.
+After a run the repository is marked, so starter knowledge never repeats on its own. The run's log lists every note with its level and why, for example `proposed [folder work:acme/round/**] "Generate mocks with make gen" — a sibling in acme/round has it`, and the run's record shows the same as a table.
 
 ### Settings and cost
 

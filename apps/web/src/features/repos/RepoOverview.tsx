@@ -1,9 +1,4 @@
-import {
-  type PersonView,
-  type RepoOverview as Overview,
-  type RepoRef,
-  leafGroups,
-} from '@holtkeeper/api'
+import { type PersonView, type RepoOverview as Overview, type RepoRef } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ArrowRight, ChevronRight } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -30,7 +25,7 @@ import { formatValue } from '../../lib/units.ts'
 import {
   CopyButton,
   Dot,
-  GroupName,
+  TeamName,
   KeyValue,
   Placeholder,
   Table,
@@ -234,19 +229,19 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
             ) : null,
           },
           {
-            label: 'Groups',
-            value: overview.groups.length ? (
+            label: 'Teams',
+            value: overview.teams.length ? (
               <span className="flex min-w-0 flex-wrap gap-1">
-                {leafGroups(overview.groups).map((group) => (
+                {overview.teams.map((team) => (
                   <Link
-                    key={group}
-                    to="/repos/groups/$groupId"
-                    params={{ groupId: group }}
+                    key={team}
+                    to="/repos/teams/$teamId"
+                    params={{ teamId: team }}
                     className="flex min-w-0 max-w-full no-underline"
                   >
                     <Tag className="max-w-full">
                       <span className="truncate">
-                        <GroupName group={group} path />
+                        <TeamName team={team} />
                       </span>
                     </Tag>
                   </Link>

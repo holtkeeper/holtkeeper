@@ -10,10 +10,9 @@ import type {
   ReleaseVersionDeploy,
   ReleaseVersionView,
 } from '@holtkeeper/api'
-import { type HoltkeeperConfig, rootGroups } from '@holtkeeper/core'
+import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { ForgeEvent, GitForge, RepoRef } from '@holtkeeper/forge'
 import { type Issue, issuesByKey } from '@holtkeeper/issues'
-import { groupRepositories } from '@holtkeeper/jobs'
 import {
   type Acceptance,
   type DeployState,
@@ -69,6 +68,7 @@ import { z } from 'zod'
 import { appendAudit } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { issueTrackerFor } from './issues.ts'
+import { knownRepos } from './new-repos.ts'
 import { peopleOf } from './routes/avatars.ts'
 
 const HISTORY = 100
@@ -352,7 +352,7 @@ function createReleaseService(deps: ServerDeps) {
     return releaseSettings(entry?.value)
   }
 
-  /** Whether a setting names the repository or one of its groups, not only everything. */
+  /** Whether a setting names the repository or one of its owner teams, not only everything. */
   const configuredFor = async (repo: RepoRef) => {
     const entry = resolveSetting(
       await entriesOf(releaseSettingsKey),
@@ -770,18 +770,11 @@ function createReleaseService(deps: ServerDeps) {
     }
   }
 
-  const repositories = async (group?: string) => {
-    const resolve = groupRepositories(config)
-    const found = new Map<string, RepoRef>()
-    for (const name of group ? [group] : rootGroups(config)) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- groups one after another keep forge limits
-        for (const member of await resolve(name)) found.set(repoKeyOf(member), member)
-      } catch (error) {
-        console.error(`releases: listing group ${name} failed: ${messageOf(error)}`)
-      }
-    }
-    return [...found.values()]
+  /** The fleet, listed forge by forge; a forge that cannot be listed is logged and left out. */
+  const repositories = async () => {
+    const { repos, failed } = await knownRepos(config)
+    for (const failure of failed) console.error(`releases: listing the fleet failed: ${failure}`)
+    return repos
   }
 
   // Overview: a snapshot in the key-value store, refreshed on forge events and every half hour
@@ -836,7 +829,7 @@ function createReleaseService(deps: ServerDeps) {
   }
 
   /**
-   * Rereads every repository of the config groups that turned releases on; others cost one
+   * Rereads every repository of the fleet that turned releases on; others cost one
    * settings read and no forge call. One run at a time here.
    */
   const refreshBoard = () => {
@@ -882,7 +875,7 @@ function createReleaseService(deps: ServerDeps) {
   /** One card per readable repository with releases on; `action` keeps those waiting on a person. */
   const overview = async (
     principal: Principal,
-    filter: { group?: string; refresh?: boolean; action?: boolean },
+    filter: { team?: string; refresh?: boolean; action?: boolean },
   ): Promise<ReleaseOverview> => {
     let index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
     if (!index) {
@@ -898,7 +891,7 @@ function createReleaseService(deps: ServerDeps) {
       if ((await kv.get(BOARD_REFRESHING)) === undefined) refreshBoardLater()
     }
     const repos = index.repos.filter(
-      (repo) => !filter.group || repoTarget(config, repo).groups.includes(filter.group),
+      (repo) => !filter.team || repoTarget(config, repo).teams.includes(filter.team),
     )
     const cards = (await cardsOf(repos, principal))
       .filter((card) => !filter.action || card.needsAction)
@@ -1282,7 +1275,7 @@ function createReleaseService(deps: ServerDeps) {
 
   /**
    * The flow suggested for a repository from what it already does, read from the forge on each
-   * call, and whether a setting already names the repository or one of its groups.
+   * call, and whether a setting already names the repository or one of its owner teams.
    */
   const detect = async (repo: RepoRef): Promise<ReleaseDetectView> => {
     const [detection, configured] = await Promise.all([

@@ -3,10 +3,7 @@ import {
   type Principal,
   type RepoTarget,
   can,
-  groupLineage,
-  groupNames,
-  leafGroups,
-  parentGroup,
+  teamsOfPrincipal,
 } from '@holtkeeper/access'
 import type { ReleaseCard, RepoList, RepoSummary } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
@@ -23,28 +20,26 @@ import { canSee } from '../visibility.ts'
 const LISTING_ACTIONS: Action[] = ['repos:read', 'audits:read', 'analyses:read', 'releases:read']
 
 /**
- * Config groups `principal` may know about: every group with global `settings:read`, otherwise the
- * groups its grants name plus the groups of listed repositories it holds a listing permission on,
- * with the subgroups of every such group and the parent of every such subgroup.
+ * Teams `principal` may know about: every team with global `settings:read`, otherwise the teams it
+ * is a member of, the teams its grants name and the owner teams of fleet repositories it holds a
+ * listing permission on. Only configured teams.
  */
-export async function reachableGroups(
+export async function reachableTeams(
   deps: Pick<ServerDeps, 'store' | 'config'>,
   principal: Principal,
 ): Promise<Set<string>> {
-  const configured = Object.keys(deps.config.groups)
+  const configured = Object.keys(deps.config.teams)
   if (can(principal, 'settings:read', { kind: 'global' })) return new Set(configured)
-  const granted = new Set(principal.grants.flatMap((grant) => groupNames(grant.scope.groups ?? [])))
-  const reach = new Set(granted)
+  const reach = new Set([
+    ...teamsOfPrincipal(deps.config.teams, principal),
+    ...principal.grants.flatMap((grant) => grant.scope.teams ?? []),
+  ])
   for (const repo of await listedRepos(deps.store.kv, deps.config)) {
     const target = repoTarget(deps.config, repo)
     if (LISTING_ACTIONS.some((action) => canSee(principal, action, target)))
-      for (const group of leafGroups(target.groups)) reach.add(group)
+      for (const team of target.teams) reach.add(team)
   }
-  const withSubgroups = configured.filter(
-    (group) => reach.has(group) || granted.has(parentGroup(group) ?? ''),
-  )
-  const withParents = new Set(withSubgroups.flatMap(groupLineage))
-  return new Set(configured.filter((group) => withParents.has(group)))
+  return new Set(configured.filter((team) => reach.has(team)))
 }
 
 /** What `repoSummaries` reads from the server; `analyses` lets health compute missing metrics. */
@@ -59,7 +54,7 @@ export interface FleetReader {
 }
 
 /**
- * Every member of the configured groups (from the stored listings plus exact include paths) that
+ * Every fleet repository (from the stored listings plus exact include paths) that
  * `reader` holds a listing permission on, sorted by `forge:path`, with the health cells, freshness,
  * updates and newest audit run it may read; whatever it may not read is absent. Repositories
  * without any record are listed as `not-analysed`; `noTests` marks those `repo.tests` turns off.
@@ -71,10 +66,7 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
   for (const repo of await listedRepos(store.kv, config)) members.set(repoKey(repo), repo)
   const visible = [...members.values()]
     .map((repo) => repoTarget(config, repo))
-    .filter(
-      (target) =>
-        target.groups.length > 0 && LISTING_ACTIONS.some((action) => reader.can(action, target)),
-    )
+    .filter((target) => LISTING_ACTIONS.some((action) => reader.can(action, target)))
     .toSorted((a, b) => repoKey(a).localeCompare(repoKey(b)))
   const reads = (action: Action) => visible.filter((target) => reader.can(action, target))
   const audited = new Set(reads('audits:read').map(repoKey))
@@ -111,7 +103,7 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
     const tests = resolveRepoTests(sources.settings, target)
     return {
       repo: { forge: target.forge, path: target.path },
-      groups: target.groups,
+      teams: target.teams,
       ...(reader.can('settings:write', target) && { configurable: true as const }),
       ...health,
       ...(updated && { updates: updated }),
@@ -123,7 +115,7 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
   })
 }
 
-/** `GET /api/repos`: every group member the caller may read, with its health. */
+/** `GET /api/repos`: every fleet repository the caller may read, with its health. */
 export function repoRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
 

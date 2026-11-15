@@ -28,9 +28,9 @@ import {
   tokensOf,
 } from './guide.ts'
 
-const repo = (path: string, groups: string[]): RepoSummary => ({
+const repo = (path: string, teams: string[]): RepoSummary => ({
   repo: { forge: 'w', path },
-  groups,
+  teams,
   health: 'not-analysed',
   cells: {},
 })
@@ -88,19 +88,21 @@ describe('spaces', () => {
   test('keys round-trip and malformed keys are dropped', () => {
     for (const space of [
       { kind: 'all' as const },
-      { kind: 'group' as const, group: 'shapes' },
+      { kind: 'team' as const, team: 'shapes' },
+      { kind: 'path' as const, forge: 'w', folder: 'shapes/round' },
       { kind: 'family' as const, family: 'f1' },
       { kind: 'repo' as const, repo: { forge: 'w', path: 'shapes/circle' } },
     ])
       expect(parseSpace(spaceKey(space))).toEqual(space)
     expect(parseSpace('repo:nopath')).toBeUndefined()
-    expect(parseSpace('team:x')).toBeUndefined()
+    expect(parseSpace('group:x')).toBeUndefined()
+    expect(parseSpace('path:nofolder')).toBeUndefined()
     expect(parseSpace(undefined)).toBeUndefined()
   })
 
   test('search parameters keep only a valid space, section and note', () => {
-    expect(knowledgeSearch({ space: 'group:shapes', tab: 'notes' })).toEqual({
-      space: 'group:shapes',
+    expect(knowledgeSearch({ space: 'team:shapes', tab: 'notes' })).toEqual({
+      space: 'team:shapes',
     })
     expect(knowledgeSearch({ space: 'nonsense' })).toEqual({})
     expect(knowledgeSearch({ space: 'all', section: 'review', note: 'n-1' })).toEqual({
@@ -115,7 +117,13 @@ describe('spaces', () => {
     const labels = (space: Parameters<typeof spaceTrail>[0]) =>
       spaceTrail(space, repos, [widgets]).map((step) => step.label)
     expect(labels({ kind: 'all' })).toEqual(['All repositories'])
-    expect(labels({ kind: 'group', group: 'tools' })).toEqual(['All repositories', 'tools'])
+    expect(labels({ kind: 'team', team: 'tools' })).toEqual(['All repositories', 'tools'])
+    expect(labels({ kind: 'path', forge: 'w', folder: 'shapes/round/inner' })).toEqual([
+      'All repositories',
+      'shapes',
+      'shapes/round',
+      'shapes/round/inner',
+    ])
     expect(labels({ kind: 'family', family: 'f1' })).toEqual([
       'All repositories',
       'shapes',
@@ -138,8 +146,8 @@ describe('spaces', () => {
   })
 
   test('counts of a space, zeros when the server left it out', () => {
-    const counts = { spaces: { 'group:shapes': { guide: 2, notes: 1, learnings: 3 } } }
-    expect(spaceCounts(counts, { kind: 'group', group: 'shapes' })).toEqual({
+    const counts = { spaces: { 'team:shapes': { guide: 2, notes: 1, learnings: 3 } } }
+    expect(spaceCounts(counts, { kind: 'team', team: 'shapes' })).toEqual({
       guide: 2,
       notes: 1,
       learnings: 3,
@@ -162,132 +170,59 @@ describe('spaces', () => {
     expect(knowledgeTabOf('/knowledge')).toBe('guide')
   })
 
-  test('labels name the team, the family and the repository path', () => {
+  test('labels name the team, the folder, the family and the repository path', () => {
     expect(scopeLabel('all', [])).toBe('All repositories')
-    expect(scopeLabel('group:shapes', [])).toBe('Team shapes')
+    expect(scopeLabel('team:shapes', [])).toBe('Team shapes')
+    expect(scopeLabel('team:shapes', [], () => 'Shapes')).toBe('Team Shapes')
+    expect(scopeLabel('path:w:acme/round', [])).toBe('Folder acme/round')
     expect(scopeLabel('family:f1', [widgets])).toBe('Widget apps')
     expect(scopeLabel('repo:w:shapes/circle', [])).toBe('shapes/circle')
-  })
-
-  test('a subgroup label puts its parent in front', () => {
-    const titles: Record<string, string> = { shapes: 'Shapes', 'shapes.round': 'Round' }
-    expect(scopeLabel('group:shapes.round', [], (key) => titles[key] ?? key)).toBe(
-      'Team Shapes › Round',
-    )
-  })
-
-  test('the trail of a subgroup and its members passes the parent', () => {
-    const nested = [repo('shapes/ball', ['shapes.round', 'shapes'])]
-    const labels = (space: Parameters<typeof spaceTrail>[0]) =>
-      spaceTrail(space, nested, []).map((step) => step.label)
-    expect(labels({ kind: 'group', group: 'shapes.round' })).toEqual([
-      'All repositories',
-      'shapes',
-      'shapes.round',
-    ])
-    const titles: Record<string, string> = { shapes: 'Shapes', 'shapes.round': 'Round' }
-    expect(
-      spaceTrail(
-        { kind: 'group', group: 'shapes.round' },
-        nested,
-        [],
-        (key) => titles[key] ?? key,
-      ).map((step) => step.label),
-    ).toEqual(['All repositories', 'Shapes', 'Round'])
-    expect(labels({ kind: 'repo', repo: { forge: 'w', path: 'shapes/ball' } })).toEqual([
-      'All repositories',
-      'shapes',
-      'shapes.round',
-      'shapes/ball',
-    ])
   })
 })
 
 describe('space tree', () => {
   test('nests families and loose repositories under every team holding them', () => {
     const tree = buildSpaceTree(repos, [widgets], 'all', [])
-    expect(tree.teams.map((t) => t.group)).toEqual(['shapes', 'tools'])
+    expect(tree.teams.map((t) => t.team)).toEqual(['shapes', 'tools'])
     const shapes = tree.teams[0]
     expect(shapes?.families.map((n) => [n.family.name, n.repos.map((r) => r.path)])).toEqual([
       ['Widget apps', ['shapes/circle', 'shapes/square']],
     ])
     expect(shapes?.repos.map((r) => r.path)).toEqual(['shapes/tools'])
     expect(tree.teams[1]?.repos.map((r) => r.path)).toEqual(['shapes/tools', 'tools/lint'])
-    expect(tree.ungrouped.repos.map((r) => r.path)).toEqual(['loose/one'])
+    expect(tree.unowned.repos.map((r) => r.path)).toEqual(['loose/one'])
     expect(tree.counts).toMatchObject({ mine: 0, all: 5 })
     expect(tree.folded).toBe(0)
+    expect(tree.folders.map((f) => [f.folder, f.total])).toEqual([
+      ['loose', 1],
+      ['shapes', 3],
+      ['tools', 1],
+    ])
   })
 
   test('My teams folds other teams and repositories in no team', () => {
-    const tree = buildSpaceTree(repos, [widgets], 'mine', [['shapes', 'other']])
-    expect(tree.teams.map((t) => t.group)).toEqual(['shapes'])
-    expect(tree.ungrouped.repos).toEqual([])
+    const tree = buildSpaceTree(repos, [widgets], 'mine', ['shapes', 'other'])
+    expect(tree.teams.map((t) => t.team)).toEqual(['shapes'])
+    expect(tree.unowned.repos).toEqual([])
     expect(tree.counts).toMatchObject({ mine: 3, all: 5 })
     expect(tree.folded).toBe(1)
-    expect(tree.others.map((t) => t.group)).toEqual(['tools'])
+    expect(tree.others.map((t) => t.team)).toEqual(['tools'])
     expect(tree.otherRepos).toBe(1)
+    expect(tree.folders.map((f) => f.folder)).toEqual(['shapes'])
   })
 
-  test('a group keeps that one team and folds nothing', () => {
-    const tree = buildSpaceTree(repos, [widgets], 'group:tools', [['shapes', 'other']])
-    expect(tree.teams.map((t) => t.group)).toEqual(['tools'])
+  test('a team position keeps that one team and folds nothing', () => {
+    const tree = buildSpaceTree(repos, [widgets], 'team:tools', ['shapes', 'other'])
+    expect(tree.teams.map((t) => t.team)).toEqual(['tools'])
     expect(tree.others).toEqual([])
-    expect(tree.ungrouped.repos).toEqual([])
-    expect(tree.counts.groups).toContainEqual({ group: 'tools', count: 2 })
+    expect(tree.unowned.repos).toEqual([])
+    expect(tree.counts.teams).toContainEqual({ team: 'tools', count: 2 })
   })
 
-  test('My teams without home groups shows and folds nothing', () => {
+  test('My teams without home teams shows and folds nothing', () => {
     const tree = buildSpaceTree(repos, [widgets], 'mine', [])
     expect(tree.teams).toEqual([])
     expect(tree.others).toEqual([])
-  })
-
-  test('subgroups nest under their team and hold their members there', () => {
-    const nested = [
-      repo('shapes/ball', ['shapes.round', 'shapes']),
-      repo('shapes/disc', ['shapes.round', 'shapes']),
-      repo('shapes/tile', ['shapes.flat', 'shapes']),
-      repo('shapes/both', ['shapes.flat', 'shapes.round', 'shapes']),
-      repo('shapes/plain', ['shapes']),
-    ]
-    const rounds = family('f3', 'Round apps', ['w:shapes/ball', 'w:shapes/disc'])
-    const tree = buildSpaceTree(nested, [rounds], 'all', [])
-    expect(tree.teams.map((t) => t.group)).toEqual(['shapes'])
-    const shapes = tree.teams[0]
-    expect(shapes?.repos.map((r) => r.path)).toEqual(['shapes/plain'])
-    expect(shapes?.families).toEqual([])
-    expect(shapes?.subgroups.map((t) => t.group)).toEqual(['shapes.flat', 'shapes.round'])
-    const [flat, round] = shapes?.subgroups ?? []
-    expect(flat?.repos.map((r) => r.path)).toEqual(['shapes/both', 'shapes/tile'])
-    expect(round?.families.map((n) => n.repos.map((r) => r.path))).toEqual([
-      ['shapes/ball', 'shapes/disc'],
-    ])
-    expect(round?.repos.map((r) => r.path)).toEqual(['shapes/both'])
-    expect(round?.subgroups).toEqual([])
-  })
-
-  test('a home subgroup keeps its parent team limited to that subgroup', () => {
-    const nested = [
-      repo('shapes/ball', ['shapes.round', 'shapes']),
-      repo('shapes/tile', ['shapes.flat', 'shapes']),
-      repo('shapes/plain', ['shapes']),
-      repo('tools/lint', ['tools']),
-    ]
-    const tree = buildSpaceTree(nested, [], 'mine', ['shapes.round'])
-    expect(tree.teams.map((t) => t.group)).toEqual(['shapes'])
-    expect(tree.teams[0]?.repos).toEqual([])
-    expect(tree.teams[0]?.subgroups.map((t) => t.group)).toEqual(['shapes.round'])
-    expect(tree.others.map((t) => [t.group, t.subgroups.map((s) => s.group)])).toEqual([
-      ['shapes', ['shapes.flat']],
-      ['tools', []],
-    ])
-    expect(tree.others[0]?.repos.map((r) => r.path)).toEqual(['shapes/plain'])
-    expect(tree.otherRepos).toBe(3)
-    expect(tree.counts.mine).toBe(1)
-    const picked = buildSpaceTree(nested, [], 'group:shapes.flat', [])
-    expect(picked.teams.map((t) => [t.group, t.subgroups.map((s) => s.group)])).toEqual([
-      ['shapes', ['shapes.flat']],
-    ])
   })
 
   test('family members the viewer cannot see are left out', () => {
@@ -299,9 +234,12 @@ describe('space tree', () => {
 
 describe('space coverage', () => {
   test('repositories of a space filter learning candidates', () => {
-    const covered = reposOfSpace({ kind: 'group', group: 'tools' }, repos, [widgets])
+    const covered = reposOfSpace({ kind: 'team', team: 'tools' }, repos, [widgets])
     expect([...(covered ?? [])]).toEqual(['w:shapes/tools', 'w:tools/lint'])
     expect(reposOfSpace({ kind: 'all' }, repos, [])).toBeUndefined()
+    expect([
+      ...(reposOfSpace({ kind: 'path', forge: 'w', folder: 'shapes' }, repos, []) ?? []),
+    ]).toEqual(['w:shapes/circle', 'w:shapes/square', 'w:shapes/tools'])
     expect([...(reposOfSpace({ kind: 'family', family: 'f1' }, repos, [widgets]) ?? [])]).toEqual(
       widgets.members,
     )
@@ -314,9 +252,13 @@ describe('space coverage', () => {
     const space = { kind: 'family' as const, family: 'f1' }
     expect(settingScopeOfSpace(space, widgets.members)).toEqual({ repos: widgets.members })
     expect(entryNamesSpace({ repos: ['shapes/square'] }, space, widgets.members)).toBe(true)
-    expect(entryNamesSpace({ groups: ['shapes'] }, space, widgets.members)).toBe(false)
+    expect(entryNamesSpace({ teams: ['shapes'] }, space, widgets.members)).toBe(false)
     expect(entryNamesSpace({ all: true }, { kind: 'all' })).toBe(true)
-    expect(settingScopeOfSpace({ kind: 'group', group: 'tools' })).toEqual({ groups: ['tools'] })
+    expect(settingScopeOfSpace({ kind: 'team', team: 'tools' })).toEqual({ teams: ['tools'] })
+    const folder = { kind: 'path' as const, forge: 'w', folder: 'shapes' }
+    expect(settingScopeOfSpace(folder)).toEqual({ repos: ['w:shapes/**'] })
+    expect(entryNamesSpace({ repos: ['shapes/**'] }, folder)).toBe(true)
+    expect(entryNamesSpace({ repos: ['w:shapes/circle'] }, folder)).toBe(false)
   })
 })
 
@@ -383,12 +325,12 @@ describe('sections', () => {
     expect([...(chained[1]?.layers ?? [])]).toEqual(['all'])
   })
 
-  test('rules of a subgroup space count as the subgroup layer', () => {
+  test('rules of a folder or team space count as that layer', () => {
     const rows = sectionRows([
-      section({ scope: 'group:shapes.round', rules: '- one' }),
-      section({ scope: 'group:shapes', section: 'review', rules: '- two' }),
+      section({ scope: 'path:w:shapes/round', rules: '- one' }),
+      section({ scope: 'team:shapes', section: 'review', rules: '- two' }),
     ])
-    expect(rows.map((row) => [...row.layers])).toEqual([['subgroup'], ['group']])
+    expect(rows.map((row) => [...row.layers])).toEqual([['path'], ['team']])
   })
 
   test('layer slots keep an editable place for the repository and generated text', () => {

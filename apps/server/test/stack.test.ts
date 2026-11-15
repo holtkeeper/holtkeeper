@@ -15,16 +15,16 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -132,31 +132,31 @@ const get = async (headers: Record<string, string>) => {
   return (await response.json()) as StackOverview
 }
 
-test('one entry per group with uses judged at the record time and conventions with diffs', async () => {
-  const { groups } = await get(asAdmin)
-  expect(groups.map((group) => group.group)).toEqual(['colors', 'shapes'])
-  const group = groups[1]
-  expect(group?.repos).toEqual([
-    { path: 'shapes/circle', groups: ['shapes'] },
-    { path: 'shapes/square', groups: ['shapes'] },
+test('one entry per team with uses judged at the record time and conventions with diffs', async () => {
+  const { teams } = await get(asAdmin)
+  expect(teams.map((team) => team.team)).toEqual(['colors', 'shapes'])
+  const team = teams[1]
+  expect(team?.repos).toEqual([
+    { path: 'shapes/circle', teams: ['shapes'] },
+    { path: 'shapes/square', teams: ['shapes'] },
   ])
   expect(
-    group?.tools[0]?.uses.map((use) => [use.repo, use.version, use.support, use.lag, use.cycle]),
+    team?.tools[0]?.uses.map((use) => [use.repo, use.version, use.support, use.lag, use.cycle]),
   ).toEqual([
     ['shapes/circle', '18', 'eol', 'major', '18'],
     ['shapes/square', '24.3', 'lts', 'major', '24'],
   ])
-  expect(group?.tools[0]).toMatchObject({ latest: '26.1.0', latestLts: '24.11.0' })
-  expect(group?.tools[0]?.cycles).toEqual([
+  expect(team?.tools[0]).toMatchObject({ latest: '26.1.0', latestLts: '24.11.0' })
+  expect(team?.tools[0]?.cycles).toEqual([
     { cycle: '26', eol: '2029-04-30' },
     { cycle: '24', eol: '2028-04-30', lts: '2025-10-28' },
     { cycle: '18', eol: '2025-04-30', lts: true },
   ])
-  const [circle, square] = group?.conventions ?? []
+  const [circle, square] = team?.conventions ?? []
   expect(circle).toMatchObject({ status: 'drifts', changeId: expect.stringMatching(/^stack:/) })
   expect(circle?.diff?.[0]).toMatchObject({ file: '.nvmrc', status: 'modified' })
   expect(square).toMatchObject({ status: 'missing', problems: ['file is missing'] })
-  expect(group?.changes).toEqual({
+  expect(team?.changes).toEqual({
     since: weekAgo,
     newEol: 1,
     resolvedEol: 0,
@@ -176,10 +176,10 @@ const crossTeam = (level: 'off' | 'metadata' | 'snippets') =>
   })
 
 test('other teams show through the cross-team catalog, without convention fixes', async () => {
-  const { groups } = await get(asShapes)
-  expect(groups.map((group) => group.group)).toEqual(['colors', 'shapes'])
-  expect(groups[0]?.repos).toEqual([{ path: 'colors/red', groups: ['colors'] }])
-  expect(groups[0]?.conventions).toEqual([
+  const { teams } = await get(asShapes)
+  expect(teams.map((team) => team.team)).toEqual(['colors', 'shapes'])
+  expect(teams[0]?.repos).toEqual([{ path: 'colors/red', teams: ['colors'] }])
+  expect(teams[0]?.conventions).toEqual([
     {
       repo: 'colors/red',
       file: '.nvmrc',
@@ -188,12 +188,12 @@ test('other teams show through the cross-team catalog, without convention fixes'
       problems: expect.any(Array),
     },
   ])
-  const own = groups[1]?.conventions.find((result) => result.repo === 'shapes/circle')
+  const own = teams[1]?.conventions.find((result) => result.repo === 'shapes/circle')
   expect(own?.changeId).toMatch(/^stack:/)
 })
 
-test('with the cross-team catalog off, only groups and repositories the caller may read', async () => {
+test('with the cross-team catalog off, only teams and repositories the caller may read', async () => {
   await crossTeam('off')
-  const { groups } = await get(asShapes)
-  expect(groups.map((group) => group.group)).toEqual(['shapes'])
+  const { teams } = await get(asShapes)
+  expect(teams.map((team) => team.team)).toEqual(['shapes'])
 })

@@ -22,15 +22,15 @@ import { supplyTools, supplyToolsAccess } from '../src/tools/repos.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    web: { forge: 'work', include: ['acme/web-*'] },
-    pay: { forge: 'work', include: ['acme/pay-*'] },
+  teams: {
+    web: { owns: ['work:acme/web-*'] },
+    pay: { owns: ['work:acme/pay-*'] },
   },
 })
 
 const grants: Record<string, Grant[]> = {
   admin: [{ scope: { all: true }, actions: ['*'] }],
-  web: [{ scope: { groups: ['web'] }, actions: ['audits:read', 'analyses:read'] }],
+  web: [{ scope: { teams: ['web'] }, actions: ['audits:read', 'analyses:read'] }],
 }
 const principalOf = (role: string): Principal => ({
   id: `header:${role}`,
@@ -288,8 +288,8 @@ describe('registration', () => {
   test('chat gets the requester’s supply, internal agents none', () => {
     const options = {
       ...base(),
-      repo: { forge: 'work', path: 'acme/web-shop', groups: ['web'] },
-      targetOf: (repo: { forge: string; path: string }) => ({ ...repo, groups: [] }),
+      repo: { forge: 'work', path: 'acme/web-shop', teams: ['web'] },
+      targetOf: (repo: { forge: string; path: string }) => ({ ...repo, teams: [] }),
       policy: 'off' as const,
       supply: supplyFor,
       now,

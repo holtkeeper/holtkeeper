@@ -1,5 +1,5 @@
 import { Modal } from '@heroui/react'
-import { type Action, leafGroups } from '@holtkeeper/api'
+import { type Action } from '@holtkeeper/api'
 import { Link, type NavigateOptions, useNavigate } from '@tanstack/react-router'
 import {
   BookOpen,
@@ -24,7 +24,7 @@ import {
   useAuthMutations,
   useChatThreads,
   useDependencySearch,
-  useGroupTitles,
+  useTeamTitles,
   usePublicApiSearch,
   useRepos,
   useSettings,
@@ -63,7 +63,7 @@ import { isRepoHubTab, repoSplat } from '../../lib/repo.ts'
 import { settingsIndex } from '../../lib/settings-search.ts'
 import { useDebounced } from '../../lib/use-debounced.ts'
 import type { StatusTone } from '../../ui/colors.ts'
-import { Count, Dot, GroupName, notify, Tag, useTheme } from '../../ui/index.ts'
+import { Count, Dot, TeamName, notify, Tag, useTheme } from '../../ui/index.ts'
 import { NewThreadDialog } from '../chat/ThreadList.tsx'
 import { docsUrl, groupByWorkspace, navKey, navLink, paletteNav, visibleNav } from './nav.ts'
 import { setPaletteOpen, usePaletteOpen } from './palette.ts'
@@ -222,9 +222,9 @@ function RepoPreview({
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <Tag tone={tagTones[repo.tone]}>{toneLabels[repo.tone]}</Tag>
-        {leafGroups(repo.groups).map((group) => (
-          <Tag key={group}>
-            <GroupName group={group} path />
+        {repo.teams.map((team) => (
+          <Tag key={team}>
+            <TeamName team={team} />
           </Tag>
         ))}
         <span className="mono text-xs text-muted">{repo.forge}</span>
@@ -302,7 +302,7 @@ function PaletteBody({ onClose, onNewThread }: { onClose: () => void; onNewThrea
 
   const visible = useMemo(() => visibleNav(principal, crossTeam), [principal, crossTeam])
   const repos = useRepos(canRepos)
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const dependencies = useDependencySearch(wantsLibraries ? debounced : '')
   const symbols = usePublicApiSearch({
     q: wantsLibraries && debounced.length >= 2 ? debounced : '',
@@ -568,7 +568,7 @@ function NewThread({ onClose }: { onClose: () => void }) {
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      groups={threads.data?.groups ?? []}
+      teams={threads.data?.teams ?? []}
       onCreated={(thread) => void navigate({ to: '/chat', search: { thread } })}
     />
   )

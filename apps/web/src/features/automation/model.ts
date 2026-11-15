@@ -28,7 +28,7 @@ export interface AutomationModel {
   /** Form schema of merge request policies; absent when the setting is unknown. */
   policySchema: unknown
   analyzers: readonly JobAnalyzerView[]
-  groups: readonly string[]
+  teams: readonly string[]
   rules: readonly AutomationRule[]
   lanes: readonly AutomationLane[]
   history: ReadonlyMap<string, { runs: ScheduleRun[]; next: string[] }>

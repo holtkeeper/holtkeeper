@@ -24,7 +24,7 @@ Some merge requests are skipped by default, with the reason stored and nothing p
 ## How it reviews
 
 1. **Scope.** Only lines the merge request adds in reviewable files. Lockfiles, generated code, snapshots, `dist` and similar are ignored, as are globs listed in the repository's `REVIEW.md`. After the first review, only lines added since the last reviewed head are in scope.
-2. **Context.** The agent gets the repository's `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`, then the team's Guide for reviews: team rules, learned rules, policies and the most relevant knowledge notes. It reads more code with its tools instead of getting whole files, and asks the package catalog and library index about dependencies, since the checkout is never installed.
+2. **Context.** The agent gets the repository's `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`, then the team's Guide for reviews: team rules, learned rules, policies and the most relevant knowledge notes, then, with lower priority, notes written for [similar repositories](/guide/knowledge/guide/#knowledge-from-similar-repositories). Comments cite the notes they rely on as `[kb:<id>]`, and **Knowledge › Notes** counts how those comments ended. It reads more code with its tools instead of getting whole files, and asks the package catalog and library index about dependencies, since the checkout is never installed.
 3. **Checks.** Deterministic checks run first. By default that is the test id check: new interactive elements without a test id, with an id suggested in the repository's style. The agent comments on the ones it agrees with.
 4. **A deliberate pass.** Every changed file, the code around each change, its callers and the paths it touches; error paths, edge cases, concurrency and contracts. A shallow answer on a larger diff is sent back once to inspect the code. Diffs over 600 changed lines or 12 files are split into parts of related files that are reviewed in parallel.
 5. **Images.** Added or changed images and inline SVG are checked for size and format against the asset policy.
@@ -92,7 +92,7 @@ Reply in one of the agent's threads and it answers that thread: it explains, con
         ['Repository', 'acme/checkout-web'],
         ['Branches', 'feat/ABC-512-coupons → main'],
         ['Mode', 'incremental'],
-        ['Guide scopes', 'all, group:storefront, repo:gitlab:acme/checkout-web'],
+        ['Guide scopes', 'all, team:widgets, path:gitlab:acme/round, repo:gitlab:acme/round/web'],
         ['Cost', '$0.38 · 1m 52s'],
       ]}
     />
@@ -102,7 +102,7 @@ Reply in one of the agent's threads and it answers that thread: it explains, con
 
 ## Configure it
 
-Options are the `analyzers.review` setting, per repository, group or everywhere; <Ui>Configure</Ui> on **Quality › Reviews** opens it.
+Options are the `analyzers.review` setting, per repository, path pattern, team or everywhere; <Ui>Configure</Ui> on **Quality › Reviews** opens it.
 
 | Option           | Default                 | Meaning                                                                   |
 | ---------------- | ----------------------- | ------------------------------------------------------------------------- |

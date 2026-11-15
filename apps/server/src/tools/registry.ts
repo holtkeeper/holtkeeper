@@ -3,8 +3,6 @@ import {
   type Principal,
   type RepoTarget,
   can,
-  leafGroups,
-  outerGroups,
   scopeCoversRepo,
 } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, mountToolsets } from '@holtkeeper/agent-tools'
@@ -19,7 +17,7 @@ import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import type { UsageIndex } from '../api-surface/usages.ts'
 import { repoKey } from '../context.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
-import { repoDependencies, stackGroupViews } from '../stack.ts'
+import { repoDependencies, stackTeamViews } from '../stack.ts'
 import { canReadShared, reachOf, scopeOwner } from '../visibility.ts'
 import { type AssetToolsAccess, assetsToolset } from './assets.ts'
 import { type CatalogToolsContext, catalogToolset } from './catalog.ts'
@@ -117,21 +115,22 @@ export const storedStackTools = (
   access: {
     canRead: RepoFilter
     canDetail: RepoFilter
-    groupsOf: (repo: RepoRef) => string[]
-    /** How a group key is named in tool output; default the key itself. */
-    groupLabel?: (key: string) => string
+    /** The owner teams of a repository. */
+    teamsOf: (repo: RepoRef) => string[]
+    /** How a team key is named in tool output; default the key itself. */
+    teamLabel?: (key: string) => string
   },
 ): StackToolsContext => ({
   views: () =>
-    stackGroupViews(analyses, {
+    stackTeamViews(analyses, {
       canRead: access.canRead,
       canFix: () => false,
       canDetail: access.canDetail,
-      groupsOf: access.groupsOf,
+      teamsOf: access.teamsOf,
     }),
   ownerOf: (repo) => {
-    const groups = leafGroups(access.groupsOf(repo))
-    return access.groupLabel ? groups.map(access.groupLabel) : groups
+    const teams = access.teamsOf(repo)
+    return access.teamLabel ? teams.map(access.teamLabel) : teams
   },
   dependencies: async (repo) => (access.canRead(repo) ? repoDependencies(analyses, repo) : []),
 })
@@ -144,10 +143,10 @@ export interface AgentCatalogOptions {
     Partial<Pick<Store, 'audit' | 'kv' | 'settings'>>
   /** The repository the task works on. */
   repo: RepoTarget
-  /** A repository with its config groups. */
+  /** A repository with its owner teams. */
   targetOf: (repo: RepoRef) => RepoTarget
-  /** How a group key is named in tool output; default the key itself. */
-  groupLabel?: (key: string) => string
+  /** How a team key is named in tool output; default the key itself. */
+  teamLabel?: (key: string) => string
   /** The `access.crossTeam` level. */
   policy: CrossTeamCatalog
   /** The person the task answers; their grants then bound what the agent reads. */
@@ -163,7 +162,7 @@ export interface AgentCatalogOptions {
  * The `catalog` context of an internal agent working on `repo`, with the `stack` tools. Without a
  * `requester`, the agent reads every repository's packages, usages, stack and shared notes while
  * `policy` is not `off` (usage snippets only under `snippets`), and only repositories sharing a
- * group with `repo` when it is `off`. With a `requester` (chat), reach is exactly theirs:
+ * an owner team with `repo` when it is `off`. With a `requester` (chat), reach is exactly theirs:
  * `canSeeCatalog` and `canSeeSnippets` under `policy`. Audits and team-scoped knowledge stay
  * limited to `repo` (and the requester's `audits:read` and `knowledge:read`); with `supply`, a
  * requester also gets the fleet's findings and licenses exactly as the HTTP endpoints answer them.
@@ -173,15 +172,15 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
   const { settings } = store
   const key = repoKey(repo)
   const sameTeam = (other: RepoRef) =>
-    repoKey(other) === key || targetOf(other).groups.some((group) => repo.groups.includes(group))
+    repoKey(other) === key || targetOf(other).teams.some((team) => repo.teams.includes(team))
   const reach = requester ? reachOf(requester, policy, targetOf) : undefined
   const canRead: RepoFilter = reach ? reach.catalog : (other) => policy !== 'off' || sameTeam(other)
   const canReadSnippets: RepoFilter = reach
     ? reach.snippets
     : (other) => policy === 'snippets' || sameTeam(other)
-  const groupsOf = (other: RepoRef) => targetOf(other).groups
-  const label = options.groupLabel ?? ((group: string) => group)
-  const ownerOf = (other: RepoRef) => leafGroups(groupsOf(other)).map(label)
+  const teamsOf = (other: RepoRef) => targetOf(other).teams
+  const label = options.teamLabel ?? ((team: string) => team)
+  const ownerOf = (other: RepoRef) => teamsOf(other).map(label)
   const canReadAnalyses: RepoFilter = (other) =>
     requester
       ? can(requester, 'analyses:read', { kind: 'repo', repo: targetOf(other) })
@@ -197,9 +196,8 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
         (!requester || can(requester, 'knowledge:read', { kind: 'scope', scope })),
       canReadShared: (scope) =>
         requester ? canReadShared(requester, scope, policy) : policy !== 'off',
-      ownerOf: (scope) =>
-        outerGroups(scopeOwner(scope, (other) => leafGroups(groupsOf(other)))).map(label),
-      groupLabel: label,
+      ownerOf: (scope) => scopeOwner(scope, teamsOf).map(label),
+      teamLabel: label,
       repoOf: (value) => (value === key ? repo : undefined),
       actor: 'agent',
       now: options.now,
@@ -216,8 +214,8 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     stack: storedStackTools(store.analyses, {
       canRead,
       canDetail: canReadAnalyses,
-      groupsOf,
-      groupLabel: label,
+      teamsOf,
+      teamLabel: label,
     }),
     ...(requester && options.supply ? { supply: options.supply(requester) } : {}),
     ...(store.libraries && artifacts
@@ -237,7 +235,7 @@ export interface AgentRulesOptions {
   repo: RepoTarget
   /** The person the task answers; rules then also need their `knowledge:read`, test ids their `analyses:read`. */
   requester?: Principal
-  /** A configured repository by `forge:path`, with its groups; `undefined` for anything else. */
+  /** A configured repository by `forge:path`, with its owner teams; `undefined` for anything else. */
   targetOf: (repo: string) => RepoTarget | undefined
   resolve: GuideResolver
   testIds: (repo: RepoTarget) => Promise<TestIdsSnapshot>
@@ -247,7 +245,7 @@ export interface AgentRulesOptions {
 
 /**
  * The `rules` access of an internal agent: `repo_rules` of other configured repositories that share
- * a group or a family with the task's repository, without team notes (its own Guide is already the task's
+ * an owner team or a family with the task's repository, without team notes (its own Guide is already the task's
  * context, so asking for it is refused), and test ids of any configured repository. Internal agents
  * propose through the knowledge tools, not here.
  */
@@ -266,7 +264,7 @@ export function agentRulesAccess(options: AgentRulesOptions): RulesAccess {
             "This repository's rules are already in your context; use repo_rules for other repositories.",
           )
         if (
-          !target.groups.some((group) => options.repo.groups.includes(group)) &&
+          !target.teams.some((team) => options.repo.teams.includes(team)) &&
           !familyOf(await options.families(), own)?.members.includes(repoKey(target))
         )
           throw new ToolError(

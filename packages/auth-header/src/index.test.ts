@@ -9,7 +9,7 @@ describe('headerAuth', () => {
     proxySecret: { header: 'x-proxy-secret', value: 's3cret' },
     roles: {
       'keeper-admins': [{ scope: { all: true }, actions: ['*'] }],
-      'games-team': [{ scope: { groups: ['games'] }, actions: ['audits:read', 'audits:run'] }],
+      'games-team': [{ scope: { teams: ['games'] }, actions: ['audits:read', 'audits:run'] }],
     },
     defaultGrants: [{ scope: { all: true }, actions: ['repos:read'] }],
   })
@@ -30,7 +30,7 @@ describe('headerAuth', () => {
       provider: 'header',
       grants: [
         { scope: { all: true }, actions: ['repos:read'] },
-        { scope: { groups: ['games'] }, actions: ['audits:read', 'audits:run'] },
+        { scope: { teams: ['games'] }, actions: ['audits:read', 'audits:run'] },
       ],
     })
   })
@@ -51,11 +51,11 @@ describe('headerAuth', () => {
       nameHeader: 'remote-name',
       groupsHeader: 'remote-groups',
       groupsSeparator: '|',
-      grants: (identity) => [{ scope: { groups: identity.groups }, actions: ['audits:read'] }],
+      grants: (identity) => [{ scope: { teams: identity.groups }, actions: ['audits:read'] }],
     })
     const principal = await custom.authenticate(
       request({ 'remote-user': 'u1', 'remote-name': 'Jane', 'remote-groups': 'a|b' }),
     )
-    expect(principal).toMatchObject({ name: 'Jane', grants: [{ scope: { groups: ['a', 'b'] } }] })
+    expect(principal).toMatchObject({ name: 'Jane', grants: [{ scope: { teams: ['a', 'b'] } }] })
   })
 })

@@ -27,12 +27,12 @@ const entry = (
   updatedAt,
 })
 
-const repo = { forge: 'work', path: 'games/app-x', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app-x', teams: ['games'] }
 
 describe('resolveSetting', () => {
   const entries = [
     entry('global', { all: true }, 'major'),
-    entry('group', { groups: ['games'] }, 'minor'),
+    entry('group', { teams: ['games'] }, 'minor'),
     entry('glob', { repos: ['games/app-*'] }, 'patch'),
   ]
 
@@ -42,42 +42,38 @@ describe('resolveSetting', () => {
       'group',
     )
     expect(
-      resolveSetting(entries, 'audit.upgrade', { forge: 'work', path: 'tools/x', groups: [] })?.id,
+      resolveSetting(entries, 'audit.upgrade', { forge: 'work', path: 'tools/x', teams: [] })?.id,
     ).toBe('global')
     expect(resolveSetting(entries, 'audit.fix', repo)).toBeUndefined()
   })
 
-  test('a subgroup beats its parent, and the parent beats everything', () => {
-    const round = { forge: 'work', path: 'shapes/circle', groups: ['shapes.round', 'shapes'] }
+  test('a deeper folder beats a shallower one, and a folder beats a team', () => {
+    const web = { forge: 'work', path: 'acme/round/web', teams: ['widgets'] }
     const layered = [
       entry('global', { all: true }, 'major'),
-      entry('sub', { groups: ['shapes.round'] }, 'patch', '2026-09-01'),
-      entry('parent', { groups: ['shapes'] }, 'minor', '2026-10-05'),
+      entry('team', { teams: ['widgets'] }, 'minor', '2026-10-07'),
+      entry('shallow', { repos: ['acme/**'] }, 'minor', '2026-10-05'),
+      entry('deep', { repos: ['work:acme/round/**'] }, 'patch', '2026-09-01'),
     ]
-    expect(resolveSetting(layered, 'audit.upgrade', round)?.id).toBe('sub')
+    const without = (...ids: string[]) => layered.filter((e) => !ids.includes(e.id))
+    expect(resolveSetting(layered, 'audit.upgrade', web)?.id).toBe('deep')
+    expect(resolveSetting(without('deep'), 'audit.upgrade', web)?.id).toBe('shallow')
+    expect(resolveSetting(without('deep', 'shallow'), 'audit.upgrade', web)?.id).toBe('team')
+    expect(resolveSetting(layered, 'audit.upgrade', { ...web, path: 'acme/square/web' })?.id).toBe(
+      'shallow',
+    )
     expect(
-      resolveSetting(
-        layered.filter((e) => e.id !== 'sub'),
-        'audit.upgrade',
-        round,
-      )?.id,
-    ).toBe('parent')
-    expect(
-      resolveSetting(layered, 'audit.upgrade', {
-        ...round,
-        path: 'shapes/square',
-        groups: ['shapes'],
-      })?.id,
-    ).toBe('parent')
+      resolveSetting(layered, 'audit.upgrade', { forge: 'work', path: 'gizmo/api', teams: [] })?.id,
+    ).toBe('global')
   })
 
-  test('a parent listed with its subgroup ranks like the parent, so the newer entry wins', () => {
-    const square = { forge: 'work', path: 'shapes/square', groups: ['shapes'] }
+  test('a team listed with a folder ranks like the team, so the newer entry wins', () => {
+    const web = { forge: 'work', path: 'acme/round/web', teams: ['widgets'] }
     const both = [
-      entry('union', { groups: ['shapes', 'shapes.round'] }, 'patch', '2026-09-01'),
-      entry('parent', { groups: ['shapes'] }, 'minor', '2026-10-05'),
+      entry('union', { teams: ['widgets'], repos: ['acme/round/**'] }, 'patch', '2026-09-01'),
+      entry('team', { teams: ['widgets'] }, 'minor', '2026-10-05'),
     ]
-    expect(resolveSetting(both, 'audit.upgrade', square)?.id).toBe('parent')
+    expect(resolveSetting(both, 'audit.upgrade', web)?.id).toBe('team')
   })
 
   test('exact paths beat globs and newer entries break ties', () => {
@@ -111,9 +107,9 @@ describe('resolveSetting', () => {
 describe('settingCascade', () => {
   const entries = [
     entry('global', { all: true }, 'major'),
-    entry('group', { groups: ['games'] }, 'minor'),
+    entry('group', { teams: ['games'] }, 'minor'),
     entry('glob', { repos: ['games/app-*'] }, 'patch'),
-    entry('other', { groups: ['tools'] }, 'x'),
+    entry('other', { teams: ['tools'] }, 'x'),
   ]
 
   test('lists covering entries from the one that applies to the broadest', () => {
@@ -127,7 +123,7 @@ describe('settingCascade', () => {
 
   test('cascades of every key with a covering entry', () => {
     const all = settingCascades(
-      [...entries, { ...entry('fix', { groups: ['tools'] }, true), key: 'audit.fix' }],
+      [...entries, { ...entry('fix', { teams: ['tools'] }, true), key: 'audit.fix' }],
       repo,
     )
     expect([...all].map(([key, list]) => [key, list.map((e) => e.id)])).toEqual([
@@ -141,7 +137,7 @@ describe('resolveGlobalSetting', () => {
     const entries = [
       entry('old', { all: true }, 'major', '2026-09-01'),
       entry('new', { all: true }, 'minor', '2026-10-01'),
-      entry('group', { groups: ['games'] }, 'patch', '2026-11-01'),
+      entry('group', { teams: ['games'] }, 'patch', '2026-11-01'),
     ]
     expect(resolveGlobalSetting(entries, 'audit.upgrade')?.id).toBe('new')
     expect(resolveGlobalSetting(entries.slice(2), 'audit.upgrade')).toBeUndefined()
@@ -169,8 +165,8 @@ const at = (key: string, id: string, scope: Scope, value: unknown): SettingEntry
 describe('effectiveSettings', () => {
   const entries = [
     at('audit.upgrade', 'global', { all: true }, 'major'),
-    at('audit.upgrade', 'group', { groups: ['games'] }, 'minor'),
-    at('llm.provider', 'narrow', { groups: ['games'] }, 'Other'),
+    at('audit.upgrade', 'group', { teams: ['games'] }, 'minor'),
+    at('llm.provider', 'narrow', { teams: ['games'] }, 'Other'),
     at('llm.provider', 'everywhere', { all: true }, 'Main'),
     at('llm.model', 'retired', { all: true }, 'old'),
     at('acme.unknown', 'unknown', { all: true }, 1),

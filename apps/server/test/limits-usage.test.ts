@@ -32,11 +32,11 @@ const config = parseConfig({
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    narrow: [{ scope: { groups: ['web'] }, actions: ['settings:read'] }],
+    narrow: [{ scope: { teams: ['web'] }, actions: ['settings:read'] }],
     settings: [{ scope: { all: true }, actions: ['settings:read'] }],
     web: [
       { scope: { all: true }, actions: ['settings:read'] },
-      { scope: { groups: ['web'] }, actions: ['credentials:read'] },
+      { scope: { teams: ['web'] }, actions: ['credentials:read'] },
     ],
   },
 })
@@ -181,7 +181,7 @@ describe('GET /api/limits/usage', () => {
 
   test('shows credential rows only to callers that may read the credential', async () => {
     await created('widget-bot', 'gitlab')
-    await created('web-bot', 'gitlab', undefined, { groups: ['web'] })
+    await created('web-bot', 'gitlab', undefined, { teams: ['web'] })
     await store.settings.put({
       id: 'l1',
       key: 'limits.credentials',

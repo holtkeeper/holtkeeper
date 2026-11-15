@@ -421,7 +421,7 @@ interface UsedByProps {
 
 function UsedByBody({ usage, ...props }: UsedByProps & { usage: PackageUsageView | undefined }) {
   const { detail, repo, onRepo, using } = props
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const all = consumerRows(detail.usedBy, usage?.repos)
   const rows = using ? all.filter((row) => row.versions.includes(using)) : all
   const prompt = () =>
@@ -507,7 +507,7 @@ function UsedByBody({ usage, ...props }: UsedByProps & { usage: PackageUsageView
         rows={rows}
         rowKey={(row) => repoKey(row.repo)}
         columns={consumerColumns(newest)}
-        scope={{ value: view, onChange: setView, homeGroups }}
+        scope={{ value: view, onChange: setView, homeTeams }}
         onOpen={(row) => onRepo(repoKey(row.repo) === repo ? undefined : repoKey(row.repo))}
         toolbar={
           <>

@@ -151,8 +151,8 @@ export interface SpendRunsFilter {
   /** A feature with a fixed list of task kinds. */
   feature?: FilterableFeature
   model?: string
-  /** Comma list of config groups. */
-  groups?: string
+  /** Comma list of team keys. */
+  teams?: string
 }
 
 /**

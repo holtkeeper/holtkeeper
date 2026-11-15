@@ -45,7 +45,7 @@ import { docsUrl } from '../shell/nav.ts'
 import { NotFound } from '../shell/NotFound.tsx'
 import { useSession } from '../shell/session.ts'
 import { ExternalAccounts } from './ExternalAccounts.tsx'
-import { HomeGroups } from './HomeGroups.tsx'
+import { HomeTeams } from './HomeTeams.tsx'
 import { MyAccess } from './MyAccess.tsx'
 import { Passkeys } from './Passkeys.tsx'
 import { Preferences } from './Preferences.tsx'
@@ -69,7 +69,7 @@ interface BodyProps {
 
 const bodies: Record<AccountSectionId, ComponentType<BodyProps>> = {
   profile: Profile,
-  teams: HomeGroups,
+  teams: HomeTeams,
   'sign-in': Passkeys,
   linked: ExternalAccounts,
   access: MyAccess,
@@ -187,7 +187,7 @@ function Nav({ section, passkeys }: { section: AccountSectionId; passkeys: numbe
     ? tokens.data.tokens.length - tokenStatusCounts(tokens.data.tokens).expired
     : undefined
   const meta: Partial<Record<AccountSectionId, ReactNode>> = {
-    teams: preferences.data?.homeGroups.length || undefined,
+    teams: preferences.data?.homeTeams.length || undefined,
     'sign-in':
       passkeys === undefined ? undefined : `${passkeys} passkey${passkeys === 1 ? '' : 's'}`,
     linked: unverified ? `${unverified} to verify` : undefined,

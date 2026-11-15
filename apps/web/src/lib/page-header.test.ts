@@ -5,7 +5,7 @@ import { currentTab, moreMenuLabel } from './page-header.ts'
 const tabs = [
   { to: '/', label: 'Home' },
   { to: '/widgets', label: 'Widgets' },
-  { to: '/widgets/groups', label: 'Groups' },
+  { to: '/widgets/teams', label: 'Teams' },
   { to: '/gadgets/', label: 'Gadgets' },
 ]
 const current = (pathname: string) => currentTab(tabs, pathname)?.label
@@ -14,8 +14,8 @@ describe('currentTab', () => {
   test('matches the tab at or under the pathname, longest first', () => {
     expect(current('/widgets')).toBe('Widgets')
     expect(current('/widgets/acme:shop/web')).toBe('Widgets')
-    expect(current('/widgets/groups')).toBe('Groups')
-    expect(current('/widgets/groups/shapes')).toBe('Groups')
+    expect(current('/widgets/teams')).toBe('Teams')
+    expect(current('/widgets/teams/shapes')).toBe('Teams')
   })
 
   test('the root only matches itself', () => {

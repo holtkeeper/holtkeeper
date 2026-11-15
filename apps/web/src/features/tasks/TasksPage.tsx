@@ -423,12 +423,12 @@ export function TasksPage() {
   const set = (patch: Partial<Record<keyof TasksSearch, unknown>>) =>
     void navigate({ search: (previous) => parseTasksSearch({ ...previous, ...patch }) })
 
-  const repoGroups = useMemo(
-    () => new Map((repos.data?.repos ?? []).map((repo) => [repoKey(repo.repo), repo.groups])),
+  const repoTeams = useMemo(
+    () => new Map((repos.data?.repos ?? []).map((repo) => [repoKey(repo.repo), repo.teams])),
     [repos.data],
   )
   const all = groups.data?.groups ?? []
-  const scoped = scope(all.map((group) => ({ group, groups: taskGroupTeams(group, repoGroups) })))
+  const scoped = scope(all.map((group) => ({ group, teams: taskGroupTeams(group, repoTeams) })))
   const inScope = scoped.shown.map((each) => each.group)
   const listPeople = groups.data?.people ?? {}
   const options = taskFilterOptions(inScope, listPeople)

@@ -15,7 +15,7 @@ import {
   totalTokens,
 } from '../../lib/ai-usage.ts'
 import { formatDateTime } from '../../lib/format.ts'
-import { viewGroups } from '../../lib/home-scope.ts'
+import { viewTeams } from '../../lib/home-scope.ts'
 import {
   EmptyState,
   ErrorState,
@@ -163,28 +163,28 @@ const featureOptions = filterableFeatures.map((feature) => ({
  */
 export function SpendPage() {
   const { canGlobal } = useSession()
-  const { view, setView, homeGroups, ready, noTeams } = useScope()
+  const { view, setView, homeTeams, ready, noTeams } = useScope()
   const [period, setPeriod] = useState<AiUsagePeriodKind>('week')
   const [origin, setOrigin] = useState<string[]>([])
   const [feature, setFeature] = useState<string[]>([])
   const [model, setModel] = useState<string[]>([])
-  const groups = viewGroups(view, homeGroups)?.join(',') || undefined
+  const teams = viewTeams(view, homeTeams)?.join(',') || undefined
   const started = starters.find((each) => each.id === origin[0])?.id
   const narrowTo = filterableFeatures.find((each) => each === feature[0])
   const filter: SpendRunsFilter = {
     ...(started && { origin: started }),
     ...(narrowTo && { feature: narrowTo }),
     ...(model[0] && { model: model[0] }),
-    ...(groups && { groups }),
+    ...(teams && { teams }),
   }
-  const scoped = ready && !noTeams && (view === 'all' || groups !== undefined)
+  const scoped = ready && !noTeams && (view === 'all' || teams !== undefined)
   const overview = useAiOverview(scoped, { period, ...filter })
   const data = overview.data
   const models = useAiUsage(
     {
       groupBy: 'model',
       ...(data && { from: data.current.from }),
-      ...(groups && { groups }),
+      ...(teams && { teams }),
     },
     scoped,
   )

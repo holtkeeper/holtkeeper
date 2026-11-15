@@ -21,7 +21,7 @@ import {
 
 const base = {
   scope: 'acme/widget-kit',
-  repos: [{ repo: 'work:acme/widget-kit', groups: ['web'] }],
+  repos: [{ repo: 'work:acme/widget-kit', teams: ['web'] }],
   href: '/ops/tasks',
   snoozed: false,
 }
@@ -60,7 +60,7 @@ const allowlist: InboxItem = {
   createdAt: '2026-11-04T00:00:00.000Z',
   dueAt: '2026-11-14T00:00:00.000Z',
   settingId: 'a-1',
-  settingScope: { groups: ['web'] },
+  settingScope: { teams: ['web'] },
   entry: { id: 'ABC-123', reason: 'Not reachable.', expires: '2026-11-14' },
   expires: '2026-11-14',
   expired: false,
@@ -72,7 +72,7 @@ const learning: InboxItem = {
   kind: 'learning',
   title: 'Name widgets after their shape',
   scope: 'acme/shape-lib',
-  repos: [{ repo: 'work:acme/shape-lib', groups: ['pay'] }],
+  repos: [{ repo: 'work:acme/shape-lib', teams: ['pay'] }],
   createdAt: '2026-11-01T10:00:00.000Z',
   learningId: 'l-1',
   section: 'review',

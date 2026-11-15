@@ -1,7 +1,9 @@
 import type {
   AgentToolList,
   AiBudgetOverview,
+  EmbeddingModelList,
   IntegrationForgeList,
+  KnowledgeEmbeddingsStatus,
   WebhookReenableResult,
 } from '@holtkeeper/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -20,6 +22,46 @@ const aiSettingsApi = {
       'POST',
       `/api/integrations/forges/${encodeURIComponent(forge)}/webhooks/reenable`,
     ),
+  embeddings: () => request<KnowledgeEmbeddingsStatus>('GET', '/api/knowledge/embeddings'),
+  embeddingModels: (credential: string) =>
+    request<EmbeddingModelList>(
+      'GET',
+      `/api/knowledge/embeddings/models${credential ? `?credential=${encodeURIComponent(credential)}` : ''}`,
+    ),
+  reindexEmbeddings: () =>
+    request<KnowledgeEmbeddingsStatus>('POST', '/api/knowledge/embeddings/reindex'),
+}
+
+const embeddingsKey = [...keys.ai, 'embeddings'] as const
+
+/** Where semantic search indexing stands; polled every few seconds while it indexes. */
+export const useKnowledgeEmbeddings = (enabled = true) =>
+  useQuery({
+    queryKey: embeddingsKey,
+    queryFn: aiSettingsApi.embeddings,
+    enabled,
+    refetchInterval: (query) => (query.state.data?.state === 'indexing' ? 5000 : false),
+  })
+
+/**
+ * Embedding models of an `ai-sdk` credential (id or name; empty for the one the setting or
+ * `llm.provider` names); needs a global `settings:write`.
+ */
+export const useEmbeddingModels = (credential: string, enabled = true) =>
+  useQuery({
+    queryKey: [...embeddingsKey, 'models', credential],
+    queryFn: () => aiSettingsApi.embeddingModels(credential),
+    enabled,
+    staleTime: 5 * 60_000,
+  })
+
+/** Drops every knowledge vector and embeds the notes again. */
+export function useReindexEmbeddings() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: aiSettingsApi.reindexEmbeddings,
+    onSuccess: (status) => client.setQueryData(embeddingsKey, status),
+  })
 }
 
 /** This week's budget with the spend per feature and per scoped cap. */

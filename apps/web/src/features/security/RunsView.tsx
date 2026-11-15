@@ -26,7 +26,7 @@ import { useScope } from '../shell/scope.ts'
 
 interface RunRow {
   run: AuditRunSummary
-  groups: string[]
+  teams: string[]
 }
 
 const columns = (narrowed: boolean): FleetColumn<RunRow>[] => [
@@ -125,12 +125,12 @@ export function RunsView({
   update: (patch: Partial<SecuritySearch>) => void
 }) {
   const navigate = useNavigate()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const latestOnly = !repo && search.runs !== 'all'
   const repos = useRepos()
   const runs = useAuditRuns(repo, 100, !latestOnly)
-  const groupsOf = new Map(
-    (repos.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.groups]),
+  const teamsOf = new Map(
+    (repos.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.teams]),
   )
   const source = latestOnly
     ? (repos.data?.repos ?? [])
@@ -139,7 +139,7 @@ export function RunsView({
     : (runs.data?.runs ?? [])
   const rows = filterRuns(source, search).map((run) => ({
     run,
-    groups: groupsOf.get(repoKey(run.repo)) ?? [],
+    teams: teamsOf.get(repoKey(run.repo)) ?? [],
   }))
   const query = latestOnly ? repos : runs
   const filtered = Boolean(search.trigger || search.findings)
@@ -153,7 +153,7 @@ export function RunsView({
       rows={rows}
       rowKey={(row) => row.run.id}
       columns={columns(repo !== undefined)}
-      {...(repo ? {} : { scope: { value: view, onChange: setView, homeGroups } })}
+      {...(repo ? {} : { scope: { value: view, onChange: setView, homeTeams } })}
       noun={{ one: 'run', many: 'runs' }}
       onOpen={(row) =>
         void navigate({ to: '/supply/security/runs/$runId', params: { runId: row.run.id } })

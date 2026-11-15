@@ -4,6 +4,8 @@ import type { KnowledgeEntry, KnowledgeRevision } from '@holtkeeper/api'
 
 import {
   changedFields,
+  citationHelpRate,
+  citationLine,
   draftOf,
   draftProblems,
   emptyDraft,
@@ -12,6 +14,7 @@ import {
   inputOf,
   isInherited,
   kbId,
+  matchParts,
   matchesFilter,
   noteLink,
   noteSections,
@@ -27,7 +30,7 @@ const entry = (overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry => ({
   title: 'Use the facade',
   body: 'Never import the engine.',
   kind: 'convention',
-  scope: { groups: ['games'] },
+  scope: { teams: ['games'] },
   topics: ['style'],
   appliesTo: ['review'],
   status: 'accepted',
@@ -42,7 +45,7 @@ const entry = (overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry => ({
 
 describe('knowledge drafts', () => {
   test('an empty draft lists what is missing', () => {
-    expect(draftProblems({ ...emptyDraft(), appliesTo: [], scope: { groups: [] } })).toEqual([
+    expect(draftProblems({ ...emptyDraft(), appliesTo: [], scope: { teams: [] } })).toEqual([
       'Add a title',
       'Add an explanation',
       'Choose where it applies',
@@ -61,7 +64,7 @@ describe('knowledge drafts', () => {
   test('inputOf trims, normalizes and drops blank rows', () => {
     expect(
       inputOf({
-        ...emptyDraft({ groups: ['games', 'games'], repos: [] }),
+        ...emptyDraft({ teams: ['games', 'games'], repos: [] }),
         title: ' Title ',
         body: ' Body ',
         topics: ['Testing', 'testing', ' '],
@@ -79,7 +82,7 @@ describe('knowledge drafts', () => {
       title: 'Title',
       body: 'Body',
       kind: 'convention',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       topics: ['testing'],
       appliesTo: ['*'],
       packages: [{ ecosystem: 'npm', name: 'react', from: '>=18 <19' }],
@@ -110,7 +113,7 @@ describe('notes of a space', () => {
       id: 'c',
       topics: ['testing'],
       status: 'proposed',
-      scope: { groups: [['games', 'web']] },
+      scope: { teams: ['games'], repos: ['w:web/**'] },
     }),
     entry({ id: 'd', topics: ['api'], scope: { all: true }, status: 'archived' }),
   ]
@@ -128,10 +131,7 @@ describe('notes of a space', () => {
   })
 
   test('a team space lists entries naming the team, also inside an intersection', () => {
-    expect(notesOfSpace(list, { kind: 'group', group: 'games' }).map((e) => e.id)).toEqual([
-      'a',
-      'c',
-    ])
+    expect(notesOfSpace(list, { kind: 'team', team: 'games' }).map((e) => e.id)).toEqual(['a', 'c'])
     expect(
       notesOfSpace(list, { kind: 'family', family: 'f1' }, ['w:shapes/circle']).map((e) => e.id),
     ).toEqual(['b'])
@@ -276,12 +276,74 @@ describe('note history', () => {
       title: 'Then',
       body: 'Never import the engine.',
       kind: 'convention',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       topics: ['style'],
       appliesTo: ['review'],
       visibility: 'shared',
       evidence: [],
       version: 5,
     })
+  })
+})
+
+describe('match', () => {
+  test('narrowing is sent only when set, trimmed and without duplicates', () => {
+    const draft = emptyDraft()
+    expect(inputOf({ ...draft, title: 't', body: 'b' })).not.toHaveProperty('match')
+    expect(
+      inputOf({
+        ...draft,
+        title: 't',
+        body: 'b',
+        match: { families: ['f-web', ' f-web '], files: [' src/**/*.tsx', ''] },
+      }).match,
+    ).toEqual({ families: ['f-web'], files: ['src/**/*.tsx'] })
+    expect(
+      inputOf({ ...draft, title: 't', body: 'b', match: { families: [], files: ['*.md'] } }).match,
+    ).toEqual({ files: ['*.md'] })
+  })
+
+  test('cards name families and file globs', () => {
+    expect(matchParts({ families: ['f-web'], files: ['src/**/*.tsx'] })).toEqual([
+      'family f-web',
+      'files src/**/*.tsx',
+    ])
+    expect(matchParts({ families: ['a', 'b'] }, (id) => id.toUpperCase())).toEqual([
+      'families A, B',
+    ])
+    expect(matchParts(undefined)).toEqual([])
+  })
+})
+
+describe('citations', () => {
+  const summary = {
+    comments: 5,
+    fixed: 1,
+    resolved: 2,
+    dismissed: 1,
+    open: 1,
+    closed: 0,
+    unknown: 0,
+    replied: 0,
+    up: 0,
+    down: 0,
+    fromNeighbours: 0,
+  }
+
+  test('the line counts comments and names only outcomes that happened', () => {
+    expect(citationLine(summary)).toBe(
+      'Cited in 5 review comments · 3 resolved · 1 dismissed · 1 open',
+    )
+    expect(
+      citationLine({ ...summary, comments: 1, fixed: 0, resolved: 1, dismissed: 0, open: 0 }),
+    ).toBe('Cited in 1 review comment · 1 resolved')
+    expect(citationLine(undefined)).toBe('')
+    expect(citationLine({ ...summary, comments: 0 })).toBe('')
+  })
+
+  test('the help rate counts judged comments only', () => {
+    expect(citationHelpRate(summary)).toBe(75)
+    expect(citationHelpRate({ ...summary, fixed: 0, resolved: 0, dismissed: 0 })).toBeUndefined()
+    expect(citationHelpRate(undefined)).toBeUndefined()
   })
 })

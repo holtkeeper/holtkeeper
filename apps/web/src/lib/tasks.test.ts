@@ -229,7 +229,7 @@ test('the kill switch flips only enabled on the global entry and keeps its caps'
   expect(
     writeTasksSwitch(
       [
-        entry('s1', { groups: ['shop'] }, { enabled: false }),
+        entry('s1', { teams: ['shop'] }, { enabled: false }),
         entry('s2', { all: true }, { perRepoUsd: 1 }),
       ],
       true,
@@ -241,7 +241,7 @@ test('the kill switch flips only enabled on the global entry and keeps its caps'
     value: { perRepoUsd: 1, enabled: true },
   })
   expect(
-    writeTasksEntry([entry('s1', { groups: ['shop'] }, {}), entry('s2', { all: true }, {})])?.id,
+    writeTasksEntry([entry('s1', { teams: ['shop'] }, {}), entry('s2', { all: true }, {})])?.id,
   ).toBe('s2')
   expect(writeTasksSwitch([], false)).toEqual({
     key: 'tasks.write',

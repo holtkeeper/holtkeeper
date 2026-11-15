@@ -21,8 +21,8 @@ export function ChatPage() {
   const [query, setQuery] = useState('')
   const q = useDeferredValue(query)
   const threads = useChatThreads(archived, q)
-  const { view, setView, homeGroups, noTeams } = useScope()
-  const scoped = threads.data ? scopeThreads(threads.data.threads, view, homeGroups) : undefined
+  const { view, setView, homeTeams, noTeams } = useScope()
+  const scoped = threads.data ? scopeThreads(threads.data.threads, view, homeTeams) : undefined
   const shown = scoped?.shown ?? []
   const current = search.thread ?? shown[0]?.id
   const select = (id: string) => void navigate({ search: { thread: id }, replace: true })
@@ -42,7 +42,7 @@ export function ChatPage() {
         archived={archived}
         onArchived={setArchived}
         archivedCount={threads.data?.archivedCount ?? 0}
-        groups={threads.data?.groups ?? []}
+        teams={threads.data?.teams ?? []}
         selected={current}
         onSelect={select}
         isPending={threads.isPending}
@@ -55,7 +55,7 @@ export function ChatPage() {
           <EmptyState
             icon={<MessagesSquare aria-hidden />}
             title="No thread open"
-            description="Start a thread for the whole team, a group or one repository. Mention @holtkeeper to ask the agent; / runs commands in repository and group threads."
+            description="Start a thread for everyone, a team or one repository. Mention @holtkeeper to ask the agent; / runs commands in repository and team threads."
           />
         </div>
       )}

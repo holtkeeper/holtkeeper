@@ -69,16 +69,17 @@ Connect GitLab forges, store the tokens Holtkeeper uses for Jira, Confluence, re
 
 A forge is a GitLab instance Holtkeeper reads repositories from and opens merge requests on.
 
-1. Add the GitLab token first: <Ui>Add credential</Ui> under **Credentials**, kind GitLab. Give the bot account the rights it needs on the groups you want analyzed.
+1. Add the GitLab token first: <Ui>Add credential</Ui> under **Credentials**, kind GitLab. Give the bot account the rights it needs on the GitLab groups or projects you want analyzed.
 2. Click <Ui>Add forge</Ui> (needs `settings:write` over everything).
-3. Enter an id (it prefixes repository names, `work:acme/checkout-web`), the GitLab URL, the token credential and, optionally, the bot username Holtkeeper posts as.
-4. Save. Repositories appear once groups that include them are set up in [Groups](/guide/repos/groups/).
+3. Enter an id (it prefixes repository names, `work:acme/round/web`), the GitLab URL, the token credential and, optionally, the bot username Holtkeeper posts as.
+4. Optionally fill in the **Fleet** (below).
+5. Save. Repositories appear once a team owns them on [Repos › Teams](/guide/repos/teams/) or the forge's fleet includes them.
 
 <Screen title="Settings › Integrations · Add forge" kind="example">
   <Stack>
     <Toolbar title="Add forge" />
     <Fields>
-      <Field label="Id" value="work" mono hint="Repositories read as work:group/project" />
+      <Field label="Id" value="work" mono hint="Repositories read as work:acme/round/web" />
       <Field label="URL" value="https://gitlab.acme.dev" mono />
       <Field label="Token" value="gitlab-bot" hint="A GitLab token credential" />
       <Field
@@ -86,6 +87,20 @@ A forge is a GitLab instance Holtkeeper reads repositories from and opens merge 
         value="holtkeeper-bot"
         mono
         hint="Optional. Pushes and notes by this user are ignored."
+      />
+      <Field
+        label="Fleet · Include"
+        value="acme/**"
+        mono
+        wide
+        hint="Path patterns on this forge. 42 listed repositories match now."
+      />
+      <Field
+        label="Fleet · Exclude"
+        value="acme/sandbox/**"
+        mono
+        wide
+        hint="Repositories these match stay out of the include list above."
       />
     </Fields>
     <Toolbar>
@@ -95,7 +110,13 @@ A forge is a GitLab instance Holtkeeper reads repositories from and opens merge 
   </Stack>
 </Screen>
 
-Each forge shows its token, how its repositories are named, the repository count and the last webhook delivery. <Ui>Edit</Ui> and delete change or remove it.
+Each forge shows its token, how its repositories are named, the repository count, the last webhook delivery and its fleet patterns. <Ui>Edit</Ui> and delete change or remove it.
+
+### Fleet
+
+Holtkeeper works on the repositories teams own or consume, plus the folders the forge's **Fleet** includes. Use **Include** for repositories nobody owns yet, or to take in a whole namespace (`acme/**`); **Exclude** leaves paths out of that include list (`acme/sandbox/**`). The patterns need no forge prefix, since they apply to this forge, and an include must start with a folder (`acme/**`, not `**/web`). The include field says how many listed repositories match now. Each forge card shows how many fleet repositories the last listing found and when; **List now** lists the fleet at once instead of waiting for the next scheduled listing, and **Listings** shows the recent attempts with their errors.
+
+Holtkeeper lists the fleet every 30 minutes; a new matching project joins on its own. To give repositories an owner, add them to a team on [Repos › Teams](/guide/repos/teams/). See [The fleet](/start/concepts/fleet/#what-is-in-the-fleet).
 
 ### SSH key
 
@@ -126,7 +147,7 @@ Re-enabling sends GitLab a test delivery of an event Holtkeeper ignores, so it n
 | ------------------------------------- | ------------- | ----------------- | ---------- | ------- | ------------- | --------------- | --------------------------------------------- |
 | **gitlab-bot** · `gitlab.acme.dev`    | gitlab        | Forge work        | Everything | 41 days | 7 days before | Within a minute | <Tag tone="ok">Healthy</Tag>                  |
 | **npm-registry** · `npm.acme.dev`     | egress-secret | Job network proxy | Everything | —       | —             | 3 min ago       | <Tag tone="ok">Healthy</Tag>                  |
-| **jira-cloud** · `acme.atlassian.net` | jira          | Issue lookups     | Payments   | 9 days  | —             | 1 h ago         | <Tag tone="warn">Expires soon</Tag> in 9 days |
+| **jira-cloud** · `acme.atlassian.net` | jira          | Issue lookups     | Team Gizmo | 9 days  | —             | 1 h ago         | <Tag tone="warn">Expires soon</Tag> in 9 days |
 | **wiki** · `acme.atlassian.net/wiki`  | confluence    | Documents         | Everything | —       | —             | yesterday       | <Tag tone="ok">Healthy</Tag>                  |
 | **gh-index** · `api.github.com`       | github        | Library index     | Everything | —       | —             | 12 min ago      | <Tag tone="ok">Healthy</Tag>                  |
 | **old-bot** · `gitlab.acme.dev`       | gitlab        | —                 | Widgets    | —       | —             | 2 months ago    | <Tag>Unused</Tag>                             |
@@ -136,7 +157,7 @@ Re-enabling sends GitLab a test delivery of an event Holtkeeper ignores, so it n
 
 1. Click <Ui>Add credential</Ui>.
 2. Pick the kind, name it, enter the URL and the secret.
-3. Choose who may use it: everything, some groups or some repositories. When several credentials of a kind cover a repository, the most specific one wins.
+3. Choose who may use it: everything, some teams or path patterns. When several credentials of a kind cover a repository, the most specific one wins.
 4. Optionally set an expiry and rotation. GitLab tokens can rotate themselves a set number of days before they expire.
 
 Search matches name, host or kind. **Used by** names what refers to the credential and links to it; empty means nothing does. Rows sort by status, then expiry. <Ui>Rotate</Ui>, <Ui>Edit</Ui> and <Ui>Delete</Ui> need `credentials:write`; deleting names what stops working.
@@ -209,7 +230,7 @@ The section needs `settings:read` or `credentials:read`. Forges, request limits 
 
 - [Slack](/guide/settings/slack/) — the Slack app, review status emoji and release announcements.
 - [AI](/guide/settings/ai/) — AI provider keys and the model tiers.
-- [Groups](/guide/repos/groups/) — which forge repositories Holtkeeper analyzes.
+- [Teams](/guide/repos/teams/) — who owns which forge repositories.
 - [Release timeline](/guide/releases/timeline/) — where Jira tickets show next to versions.
 - [Configuration](/self-host/configure/configuration/) — the config file, environment and the egress proxy.
 - [Credentials](/modules/credentials/) and [Limits](/modules/limits/) — sealing, rotation and limiters in depth.

@@ -1,26 +1,24 @@
-import { type RepoAccessBatch, type RepoAccessResult, parentGroup } from '@holtkeeper/api'
+import {
+  type RepoAccessBatch,
+  type RepoAccessResult,
+  parentFolder,
+  patternMatches,
+} from '@holtkeeper/api'
 import { X } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
   useCheckRepoAccess,
+  useForgeMutations,
   useForges,
-  useGroups,
-  useGroupTitles,
-  usePutGroup,
+  usePutTeam,
   useRepos,
+  useTeamTitles,
+  useTeams,
 } from '../../api/queries.ts'
 import { plural } from '../../lib/format.ts'
-import { byGroupTree, groupPathTitle } from '../../lib/group-titles.ts'
-import {
-  type PathCheck,
-  parsePastedPaths,
-  pathCheck,
-  validateGroupId,
-  withRepos,
-} from '../../lib/repo.ts'
-import { excludedByPattern, globMatcher, suggestGroup } from '../../lib/repos.ts'
+import { type PathCheck, parsePastedPaths, pathCheck, withPaths } from '../../lib/repo.ts'
 import {
   Button,
   Dot,
@@ -32,26 +30,28 @@ import {
   TextField,
   notify,
 } from '../../ui/index.ts'
+import { toForgeDraft, toForgeInput } from '../credentials/forge-form.ts'
 import { RepoExplorer } from './RepoExplorer.tsx'
 
 /** Paths one access check takes. */
 const MAX_PATHS = 50
 
-const steps = ['Forge', 'Paths', 'Group'] as const
+const steps = ['Forge', 'Paths', 'Where'] as const
 
 /**
  * Adds repositories in three steps: a forge, then paths (picked from the token's projects or
- * pasted, URLs trimmed) checked against the forge token in one batch, then a group, existing or
- * new, whose include list gets the exact paths. A subgroup can be the target: the paths its parent
- * does not match yet go into the parent's include list too. Settings, schedules and access follow
- * the group. Opens as a side sheet beside the list. Needs global `settings:write`.
+ * pasted, URLs trimmed) checked against the forge token in one batch, then where they go: a
+ * team's owns (the team answers for them, settings and access follow its folders and team) or
+ * the forge's fleet include list (no owner yet). Either puts the exact paths in the fleet. Opens
+ * as a side sheet beside the list. Needs global `settings:write`.
  */
 export function AddRepoDialog({ onClose }: { onClose: () => void }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const forges = useForges()
-  const groups = useGroups()
+  const teams = useTeams()
   const repos = useRepos()
-  const put = usePutGroup()
+  const putTeam = usePutTeam()
+  const { put: putForge } = useForgeMutations()
   const check = useCheckRepoAccess()
   const forgeIds = (forges.data?.entries ?? []).map((entry) => entry.id)
   const [step, setStep] = useState(0)
@@ -61,9 +61,8 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
   const [pasted, setPasted] = useState('')
   const [removed, setRemoved] = useState<string[]>([])
   const [checked, setChecked] = useState<{ forge: string; batch: RepoAccessBatch }>()
-  const [mode, setMode] = useState<'existing' | 'new'>('existing')
-  const [groupId, setGroupId] = useState<string>()
-  const [newGroup, setNewGroup] = useState('')
+  const [where, setWhere] = useState<'team' | 'fleet'>('team')
+  const [teamId, setTeamId] = useState<string>()
 
   const selectedForge = forge ?? (forgeIds.length === 1 ? forgeIds[0] : undefined)
   const forgeEntry = forges.data?.entries.find((entry) => entry.id === selectedForge)
@@ -94,36 +93,36 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
   const unchecked = paths.filter((path) => !added.has(path) && !resultOf(path))
   const tooMany = paths.length > MAX_PATHS
 
-  const forgeGroups = (groups.data?.entries ?? [])
-    .filter((entry) => entry.data.forge === selectedForge)
-    .toSorted((a, b) => byGroupTree(titleOf)(a.id, b.id))
-  const suggested = suggestGroup(ready, forgeGroups)
-  const groupMode = forgeGroups.length ? mode : 'new'
-  const chosenGroup = groupId ?? suggested
-  const target = groupMode === 'existing' ? chosenGroup : newGroup.trim()
-  const existing = forgeGroups.find((entry) => entry.id === target)
-  const parentId = target === undefined ? undefined : parentGroup(target)
-  const parentEntry = forgeGroups.find((entry) => entry.id === parentId)
-  const outsideParent = parentEntry
-    ? ready.filter(
-        (path) =>
-          !parentEntry.data.include.some((pattern) => globMatcher(pattern)(path)) ||
-          parentEntry.data.exclude.some((pattern) => globMatcher(pattern)(path)),
-      )
-    : []
-  const blocked = selectedForge
-    ? [
-        ...(parentEntry ? excludedByPattern(parentEntry.data, selectedForge, outsideParent) : []),
-        ...(existing ? excludedByPattern(existing.data, selectedForge, ready) : []),
-      ]
-    : []
-  const groupError =
-    groupMode === 'new' && newGroup
-      ? (validateGroupId(newGroup) ??
-        ((groups.data?.entries ?? []).some((entry) => entry.id === newGroup.trim())
-          ? 'A group with this id exists'
-          : undefined))
-      : undefined
+  const teamEntries = teams.data?.entries ?? []
+  const multiForge = forgeIds.length > 1
+  const patternOf = (path: string) => (multiForge ? `${selectedForge}:${path}` : path)
+  const suggested = selectedForge
+    ? suggestTeam(ready, selectedForge, repos.data?.repos ?? [], teamEntries)
+    : undefined
+  const mode = teamEntries.length ? where : 'fleet'
+  const chosenTeam = teamEntries.find((entry) => entry.id === (teamId ?? suggested))
+  const patterns = ready.map(patternOf)
+  const excludedBy = (excludes: readonly string[], exact: (path: string) => string) =>
+    selectedForge
+      ? ready.flatMap((path) =>
+          excludes
+            .filter(
+              (pattern) => pattern !== exact(path) && patternMatches(pattern, selectedForge, path),
+            )
+            .map((pattern) => ({ path, pattern, where: 'team' as const })),
+        )
+      : []
+  const blocked = [
+    ...(forgeEntry
+      ? excludedBy(forgeEntry.data.exclude ?? [], (path) => path).map((entry) => ({
+          ...entry,
+          where: 'forge' as const,
+        }))
+      : []),
+    ...(mode === 'team' && chosenTeam ? excludedBy(chosenTeam.data.exclude, patternOf) : []),
+  ]
+  const pending = putTeam.isPending || putForge.isPending
+  const saveError = putTeam.error ?? putForge.error
 
   const runCheck = (then?: (merged: RepoAccessBatch | undefined) => void) => {
     if (!selectedForge || !unchecked.length) {
@@ -151,23 +150,41 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
     )
   }
 
-  const continueToGroup = () =>
+  const continueToWhere = () =>
     runCheck((merged) => {
       if (verdictsFor(merged).some((verdict) => verdict.check.ready)) setStep(2)
     })
 
   const save = async () => {
-    if (!selectedForge || !target || !ready.length || blocked.length) return
+    if (!selectedForge || !ready.length || blocked.length) return
     try {
-      if (parentEntry && outsideParent.length)
-        await put.mutateAsync({
-          id: parentEntry.id,
-          data: withRepos(parentEntry.data, selectedForge, outsideParent),
+      if (mode === 'team') {
+        if (!chosenTeam) return
+        const { title, owns, exclude, consumes, members } = chosenTeam.data
+        const next = withPaths({ include: owns, exclude }, patterns)
+        await putTeam.mutateAsync({
+          id: chosenTeam.id,
+          data: {
+            ...(title ? { title } : {}),
+            owns: next.include,
+            exclude: next.exclude,
+            consumes,
+            members,
+          },
         })
-      await put.mutateAsync({ id: target, data: withRepos(existing?.data, selectedForge, ready) })
+      } else {
+        if (!forgeEntry) return
+        const draft = toForgeDraft(forgeEntry)
+        await putForge.mutateAsync({
+          id: forgeEntry.id,
+          data: toForgeInput({ ...draft, ...withPaths(draft, ready) }),
+        })
+      }
       notify.success(
         `${plural(ready.length, 'repository', 'repositories')} added`,
-        `Group ${groupPathTitle(titleOf, target)} on ${selectedForge}`,
+        mode === 'team' && chosenTeam
+          ? `Owned by team ${titleOf(chosenTeam.id)}`
+          : `Fleet of ${selectedForge}`,
       )
       onClose()
     } catch (error) {
@@ -207,9 +224,9 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
           variant="primary"
           isDisabled={tooMany || (!ready.length && !unchecked.length)}
           isPending={check.isPending}
-          onPress={continueToGroup}
+          onPress={continueToWhere}
         >
-          Continue to group
+          Continue
         </Button>
       </>
     ) : (
@@ -220,8 +237,8 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
         <Button
           variant="primary"
           onPress={() => void save()}
-          isDisabled={!target || !ready.length || groupError !== undefined || blocked.length > 0}
-          isPending={put.isPending}
+          isDisabled={!ready.length || (mode === 'team' && !chosenTeam) || blocked.length > 0}
+          isPending={pending}
         >
           Add {plural(ready.length, 'repository', 'repositories')}
         </Button>
@@ -245,12 +262,12 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted">
-          Holtkeeper works on repositories through groups: settings, schedules and access follow the
-          group. You pick the group in the last step.
+          Holtkeeper works on the repositories teams own plus the folders a forge includes. You pick
+          the owner team, or just the forge's fleet, in the last step.
         </p>
-        {forges.isError || groups.isError ? (
+        {forges.isError || teams.isError ? (
           <Notice tone="danger" title="Config is not available">
-            {messageOf(forges.error ?? groups.error)}
+            {messageOf(forges.error ?? teams.error)}
           </Notice>
         ) : null}
         {step === 0 ? (
@@ -386,80 +403,70 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
         ) : null}
         {step === 2 ? (
           <>
-            {put.error ? (
+            {saveError ? (
               <Notice tone="danger" title="Not added">
-                {messageOf(put.error)}
+                {messageOf(saveError)}
               </Notice>
             ) : null}
             <p className="text-sm">
-              {plural(ready.length, 'repository', 'repositories')} go to one group, or to a new one.
+              A team that owns {plural(ready.length, 'the repository', 'the repositories')} answers
+              for them; the forge's fleet list adds them without an owner.
               {suggested ? (
                 <span className="text-muted">
                   {' '}
-                  Suggested by name: <span className="mono text-foreground">{suggested}</span>
+                  Suggested by folder: <span className="text-foreground">{titleOf(suggested)}</span>
                 </span>
               ) : null}
             </p>
-            {forgeGroups.length ? (
+            {teamEntries.length ? (
               <Segmented
-                aria-label="Group"
+                aria-label="Where"
                 options={[
-                  { id: 'existing', label: 'Existing group' },
-                  { id: 'new', label: 'New group' },
+                  { id: 'team', label: 'A team owns them' },
+                  { id: 'fleet', label: 'Forge fleet only' },
                 ]}
-                value={mode}
-                onChange={setMode}
+                value={where}
+                onChange={setWhere}
               />
             ) : null}
-            {groupMode === 'existing' ? (
+            {mode === 'team' ? (
               <Select
-                label="Group"
-                options={forgeGroups.map((entry) => ({
+                label="Team"
+                options={teamEntries.map((entry) => ({
                   id: entry.id,
                   label: (
-                    <span
-                      className={`flex items-baseline gap-2 ${parentGroup(entry.id) === undefined ? '' : 'ps-4'}`}
-                    >
+                    <span className="flex items-baseline gap-2">
                       {titleOf(entry.id)}
                       <span className="truncate font-mono text-[11px] text-muted">
-                        {[
-                          titleOf(entry.id) === entry.id ? undefined : entry.id,
-                          ...entry.data.include,
-                        ]
+                        {[titleOf(entry.id) === entry.id ? undefined : entry.id, ...entry.data.owns]
                           .filter(Boolean)
                           .join(', ')}
                       </span>
                     </span>
                   ),
-                  text: groupPathTitle(titleOf, entry.id),
+                  text: titleOf(entry.id),
                 }))}
-                value={chosenGroup}
-                onChange={setGroupId}
-                placeholder="Choose a group"
+                value={chosenTeam?.id}
+                onChange={setTeamId}
+                placeholder="Choose a team"
               />
-            ) : (
-              <TextField
-                label="New group id"
-                value={newGroup}
-                onChange={setNewGroup}
-                placeholder="e.g. payments"
-                mono
-                error={groupError}
-              />
-            )}
-            {groupMode === 'existing' && parentEntry && outsideParent.length ? (
-              <Notice tone="accent" title={`Also added to ${titleOf(parentEntry.id)}`}>
-                A subgroup holds only members of its parent; the parent's include list gets{' '}
-                {plural(outsideParent.length, 'path')} too.
-              </Notice>
             ) : null}
+            {mode === 'team' ? (
+              <p className="text-xs text-muted">Its owns list gets the exact paths.</p>
+            ) : (
+              <p className="text-xs text-muted">
+                The include list of <span className="mono">{selectedForge}</span> gets the exact
+                paths. Give them an owner later on the Teams page.
+              </p>
+            )}
             {blocked.length ? (
               <Notice tone="danger" title="Excluded by a pattern">
                 <ul className="flex flex-col gap-0.5">
-                  {blocked.map(({ path, pattern }) => (
-                    <li key={`${path}:${pattern}`}>
-                      <span className="mono">{path}</span> is excluded by pattern{' '}
-                      <span className="mono">{pattern}</span>. Edit that group's patterns first.
+                  {blocked.map(({ path, pattern, where: owner }) => (
+                    <li key={`${owner}:${path}:${pattern}`}>
+                      <span className="mono">{path}</span> is excluded by{' '}
+                      {owner === 'forge' ? 'the forge' : 'the team'} pattern{' '}
+                      <span className="mono">{pattern}</span>. Edit that pattern first.
                     </li>
                   ))}
                 </ul>
@@ -537,4 +544,27 @@ function PathList({
       </ul>
     </div>
   )
+}
+
+/**
+ * The team that owns most listed repositories in the folders of the new paths, nearest folder
+ * first; `undefined` when no sibling has an owner.
+ */
+function suggestTeam(
+  paths: readonly string[],
+  forge: string,
+  repos: readonly { repo: { forge: string; path: string }; teams: readonly string[] }[],
+  teams: readonly { id: string }[],
+): string | undefined {
+  const known = new Set(teams.map((entry) => entry.id))
+  const votes = new Map<string, number>()
+  for (const path of paths) {
+    const folder = parentFolder(path)
+    if (folder === undefined) continue
+    for (const summary of repos)
+      if (summary.repo.forge === forge && parentFolder(summary.repo.path) === folder)
+        for (const team of summary.teams)
+          if (known.has(team)) votes.set(team, (votes.get(team) ?? 0) + 1)
+  }
+  return [...votes].toSorted((a, b) => b[1] - a[1])[0]?.[0]
 }

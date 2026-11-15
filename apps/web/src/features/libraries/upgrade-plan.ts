@@ -3,7 +3,7 @@ import { useState } from 'react'
 
 import { useDependencyUpgrade } from '../../api/queries.ts'
 import { narrowImpact, upgradeVersions } from '../../lib/dependencies.ts'
-import { viewGroup } from '../../lib/home-scope.ts'
+import { viewTeam } from '../../lib/home-scope.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { upgradePrompt } from '../../lib/upgrade-prompt.ts'
 import { useScope } from '../shell/scope.ts'
@@ -16,7 +16,7 @@ export function useFoldedUsers(usedBy: readonly User[]) {
   const [expanded, setExpanded] = useState(false)
   const scoped = scope(usedBy)
   const folding = view === 'mine' && scoped.others.items > 0
-  const narrowed = viewGroup(view) !== undefined || (folding && !expanded)
+  const narrowed = viewTeam(view) !== undefined || (folding && !expanded)
   return {
     shown: narrowed ? scoped.shown : [...usedBy],
     folded: folding ? scoped.others : undefined,

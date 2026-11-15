@@ -41,17 +41,17 @@ import {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    libs: { forge: 'work', include: ['libs/ui'] },
-    games: { forge: 'work', include: ['games/a'] },
+  teams: {
+    libs: { owns: ['work:libs/ui'] },
+    games: { owns: ['work:games/a'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    games: [{ scope: { groups: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
-    outsider: [{ scope: { groups: ['nothing'] }, actions: ['analyses:read'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
+    outsider: [{ scope: { teams: ['nothing'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -1092,7 +1092,7 @@ describe('library index duty', () => {
     await runLibraryIndex(
       {
         ...indexDeps(),
-        config: { groups: {}, forges: { self: { url: 'https://gitlab.example' } } },
+        config: { teams: {}, forges: { self: { url: 'https://gitlab.example' } } },
       },
       { registries: { npm: registry(), Go: go } },
     )

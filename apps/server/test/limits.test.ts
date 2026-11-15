@@ -24,7 +24,7 @@ describe('server limits', () => {
         {
           id: 'a',
           key: 'limits.credentials',
-          scope: { groups: ['x'] },
+          scope: { teams: ['x'] },
           value: {},
           secret: false,
           updatedAt: '',
@@ -45,7 +45,7 @@ describe('server limits', () => {
     const store = memoryStore()
     const config = parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gl.test', create: () => ({}) as never } },
-      groups: { games: { forge: 'work', include: ['games/*'] } },
+      teams: { games: { owns: ['work:games/*'] } },
     })
     const keys = jobLimitKeys({
       config,

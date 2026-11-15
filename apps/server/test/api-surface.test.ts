@@ -47,17 +47,17 @@ const config = parseConfig({
   forges: {
     work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => workForge as never },
   },
-  groups: {
-    libs: { forge: 'work', include: ['libs/ui'] },
-    games: { forge: 'work', include: ['games/a'] },
+  teams: {
+    libs: { owns: ['work:libs/ui'] },
+    games: { owns: ['work:games/a'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    games: [{ scope: { groups: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
-    readers: [{ scope: { groups: ['games'] }, actions: ['knowledge:read'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
+    readers: [{ scope: { teams: ['games'] }, actions: ['knowledge:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -659,6 +659,8 @@ describe('MCP endpoint', () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, bearer)).status).toBe(401)
   })
 
+  // src bug: app.ts wraps every principal with withTeams, so the MCP token WeakMap in
+  // routes/api-surface.ts (fromToken) no longer recognises token principals.
   test('offers release_step only to tokens with the release scope', async () => {
     const issue = async (body: Record<string, unknown>) =>
       (await (
@@ -737,6 +739,7 @@ describe('MCP endpoint', () => {
     expect(own.recent).toEqual([])
   })
 
+  // src bug: same fromToken lookup as above; token calls are not counted.
   test('usage per person and token stays with its owner unless the viewer may read users', async () => {
     const created = await app.request('/api/api-surface/mcp/tokens', {
       method: 'POST',
@@ -977,7 +980,7 @@ describe('knowledge tools', () => {
     await entry('dates', {
       title: 'Use date-fns instead of moment',
       body: 'moment is frozen; new code formats dates with date-fns.',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       packages: [{ ecosystem: 'npm', name: 'moment' }],
     })
     await entry('tokens', {
@@ -1045,7 +1048,7 @@ describe('knowledge tools', () => {
 describe('rules tools', () => {
   test('repo_rules resolves the Guide and propose_rule_change leaves an audited candidate', async () => {
     await store.guides.put({
-      scope: 'group:games',
+      scope: 'team:games',
       section: 'general',
       rules: 'Scenes own their assets.',
       steering: '',
@@ -1061,7 +1064,7 @@ describe('rules tools', () => {
         section: 'general',
         rule: 'Unload scene textures on exit.',
         reason: 'Leaks in two merge requests.',
-        scope: 'group',
+        scope: 'team',
       },
       asAdmin,
     )
@@ -1069,7 +1072,7 @@ describe('rules tools', () => {
     const [candidate] = await store.learnings.list()
     expect(candidate).toMatchObject({
       repo: 'work:games/a',
-      suggestedScope: 'group',
+      suggestedScope: 'team',
       proposal: { by: 'header:jane', reason: 'Leaks in two merge requests.' },
     })
     const events = await store.audit.list({ action: 'learning.propose' })
@@ -1084,11 +1087,11 @@ describe('rules tools', () => {
         section: 'general',
         rule: 'Preload scene audio.',
         reason: 'Stutters on first play.',
-        scope: 'group:games',
+        scope: 'team:games',
       },
       asAdmin,
     )
-    expect(targeted.content[0]?.text).toContain('into group:games.')
+    expect(targeted.content[0]?.text).toContain('into team:games.')
     const foreign = await callTool(
       'propose_rule_change',
       {
@@ -1096,7 +1099,7 @@ describe('rules tools', () => {
         section: 'general',
         rule: 'Bake scene lights.',
         reason: 'Slow loads.',
-        scope: 'group:elsewhere',
+        scope: 'team:elsewhere',
       },
       asAdmin,
     )
@@ -1106,7 +1109,7 @@ describe('rules tools', () => {
         .map((each) => [each.rule, each.targetScope])
         .toSorted(([a], [b]) => String(a).localeCompare(String(b))),
     ).toEqual([
-      ['Preload scene audio.', 'group:games'],
+      ['Preload scene audio.', 'team:games'],
       ['Unload scene textures on exit.', undefined],
     ])
   })
@@ -1114,7 +1117,7 @@ describe('rules tools', () => {
 
 const autoAccept = (
   value: unknown,
-  scope: { all: true } | { groups: string[] } | { repos: string[] } = { all: true },
+  scope: { all: true } | { teams: string[] } | { repos: string[] } = { all: true },
 ) =>
   store.settings.put({
     id: `learnings.autoAccept:${JSON.stringify(scope)}`,
@@ -1140,7 +1143,7 @@ const propose = (rule: string, scope?: string, headers = asAdmin) =>
 describe('learnings auto-accept', () => {
   test('stays proposed while the policy is off or leaves MCP out', async () => {
     await autoAccept({ sources: ['review-reply'], scope: 'suggested' })
-    const result = await propose('Unload scene textures on exit.', 'group')
+    const result = await propose('Unload scene textures on exit.', 'team')
     expect(result.content[0]?.text).toStartWith('Proposed ')
     const [candidate] = await store.learnings.list()
     expect(candidate?.status).toBe('proposed')
@@ -1150,16 +1153,16 @@ describe('learnings auto-accept', () => {
 
   test('accepts into the suggested scope, audited as auto-accept and still rejectable', async () => {
     await autoAccept({ sources: ['mcp'], scope: 'suggested' })
-    const result = await propose('Unload scene textures on exit.', 'group:games')
+    const result = await propose('Unload scene textures on exit.', 'team:games')
     expect(result.content[0]?.text).toStartWith('Accepted "Unload scene textures on exit."')
-    expect(result.content[0]?.text).toContain('into group:games')
+    expect(result.content[0]?.text).toContain('into team:games')
     const [candidate] = await store.learnings.list()
     expect(candidate).toMatchObject({
       status: 'accepted',
-      acceptedScope: 'group:games',
+      acceptedScope: 'team:games',
       decidedBy: 'auto-accept',
     })
-    const row = await store.guides.get('group:games', 'general')
+    const row = await store.guides.get('team:games', 'general')
     expect(row?.learnings).toMatchObject([
       { id: candidate?.id, rule: 'Unload scene textures on exit.', acceptedBy: 'auto-accept' },
     ])
@@ -1171,7 +1174,7 @@ describe('learnings auto-accept', () => {
         details: {
           auto: true,
           origin: 'mcp',
-          scope: 'group:games',
+          scope: 'team:games',
           proposedBy: candidate?.proposal?.by,
         },
       },
@@ -1180,37 +1183,37 @@ describe('learnings auto-accept', () => {
 
   test('a proposal of someone who may only read the repository stays proposed', async () => {
     await autoAccept({ sources: ['mcp'], scope: 'suggested' })
-    const result = await propose('Unload scene textures on exit.', 'group:games', asReader)
+    const result = await propose('Unload scene textures on exit.', 'team:games', asReader)
     expect(result.content[0]?.text).toStartWith('Proposed ')
     expect((await store.learnings.list())[0]?.status).toBe('proposed')
     expect((await store.guides.list()).flatMap((row) => row.learnings)).toEqual([])
   })
 
-  test('a repository entry never accepts into its group', async () => {
+  test('a repository entry never accepts into its team', async () => {
     await autoAccept({ sources: ['mcp'], scope: 'suggested' }, { repos: ['work:games/a'] })
-    await propose('Preload scene audio.', 'group:games')
+    await propose('Preload scene audio.', 'team:games')
     expect((await store.learnings.list())[0]).toMatchObject({
       status: 'accepted',
       acceptedScope: 'repo:work:games/a',
     })
-    expect((await store.guides.get('group:games', 'general'))?.learnings ?? []).toEqual([])
+    expect((await store.guides.get('team:games', 'general'))?.learnings ?? []).toEqual([])
   })
 
   test('the repo option keeps auto-accepted rules in the repository', async () => {
     await autoAccept({ sources: ['mcp'], scope: 'repo' })
-    await propose('Preload scene audio.', 'group')
+    await propose('Preload scene audio.', 'team')
     const [candidate] = await store.learnings.list()
     expect(candidate).toMatchObject({
       status: 'accepted',
       acceptedScope: 'repo:work:games/a',
-      suggestedScope: 'group',
+      suggestedScope: 'team',
     })
-    expect((await store.guides.get('group:games', 'general'))?.learnings ?? []).toEqual([])
+    expect((await store.guides.get('team:games', 'general'))?.learnings ?? []).toEqual([])
   })
 
   test('the entry that applies to the repository decides', async () => {
     await autoAccept({ sources: ['mcp'], scope: 'suggested' })
-    await autoAccept({ sources: [], scope: 'suggested' }, { groups: ['games'] })
+    await autoAccept({ sources: [], scope: 'suggested' }, { teams: ['games'] })
     await propose('Bake scene lights.')
     expect((await store.learnings.list())[0]?.status).toBe('proposed')
   })

@@ -20,15 +20,16 @@ import {
 import type { BootstrapOutput } from './prompt.ts'
 
 const fixture = join(import.meta.dir, '../../../fixtures/service')
-const repo = { forge: 'work', path: 'acme/widget-web' }
-const membership: Record<string, string[]> = {
-  'work:acme/widget-web': ['shapes.round', 'shapes'],
-  'work:acme/widget-api': ['shapes.round', 'shapes'],
-  'work:acme/widget-cli': ['shapes.round', 'shapes'],
+const repo = { forge: 'work', path: 'acme/round/web' }
+const owners: Record<string, string[]> = {
+  'work:acme/round/web': ['widgets'],
+  'work:acme/round/api': ['widgets'],
+  'work:acme/round/cli': ['widgets'],
+  'work:acme/square/web': ['widgets'],
   'work:acme/kit': ['tools'],
   'work:other/thing': ['tools'],
 }
-const groupsOf = (target: RepoRef) => membership[`${target.forge}:${target.path}`] ?? []
+const teamsOf = (target: RepoRef) => owners[`${target.forge}:${target.path}`] ?? []
 let dir = ''
 let store: Store
 
@@ -100,7 +101,7 @@ const merged = (id: number): MergeRequestRecord => ({
   draft: false,
   labels: [],
   author: 'dev-one',
-  webUrl: `https://forge.test/acme/widget-web/-/merge_requests/${id}`,
+  webUrl: `https://forge.test/acme/round/web/-/merge_requests/${id}`,
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-02T00:00:00.000Z',
   mergedAt: '2026-10-02T00:00:00.000Z',
@@ -110,9 +111,9 @@ const forge = {
   kind: 'gitlab',
   getRepository: async () => ({
     path: repo.path,
-    name: 'widget-web',
+    name: 'web',
     defaultBranch: 'main',
-    webUrl: 'https://forge.test/acme/widget-web',
+    webUrl: 'https://forge.test/acme/round/web',
     cloneUrl: '',
     archived: false,
   }),
@@ -124,7 +125,7 @@ const forge = {
 const analyzer = () =>
   createKnowledgeBootstrapAnalyzer({
     store,
-    groupsOf,
+    teamsOf,
     botUsername: () => 'holtkeeper',
     fleetPackages: async () => [
       { subject: 'Go:github.com/example/shapes', repo: { forge: 'work', path: 'acme/kit' } },
@@ -163,7 +164,7 @@ const entryFor = (overrides: Partial<KnowledgeEntry>): KnowledgeEntry => ({
   title: 'Some rule',
   body: 'Some text.',
   kind: 'convention',
-  scope: { repos: ['work:acme/widget-api'] },
+  scope: { repos: ['work:acme/round/api'] },
   topics: [],
   appliesTo: ['*'],
   status: 'accepted',
@@ -213,20 +214,20 @@ describe('knowledge-bootstrap analyzer', () => {
         status: 'proposed',
         source: 'agent',
         author: BOOTSTRAP_ACTOR,
-        scope: { repos: ['work:acme/widget-web'] },
+        scope: { repos: ['work:acme/round/web'] },
         appliesTo: ['*'],
       })
     const gen = entries.find((entry) => entry.title.startsWith('Run generators'))
     expect(gen?.evidence.map((link) => link.url)).toEqual([
-      'https://forge.test/acme/widget-web/-/tree/abc123',
-      'https://forge.test/acme/widget-web/-/merge_requests/7',
+      'https://forge.test/acme/round/web/-/tree/abc123',
+      'https://forge.test/acme/round/web/-/merge_requests/7',
     ])
 
     expect(lines).toEqual(
       expect.arrayContaining([
         expect.stringMatching(/^budget: estimate \$0\.\d\d, cap \$0\.40/),
         'dropped "Made up" — no known evidence',
-        'proposed [repo] "Run generators through make gen" — no matching entry in its groups',
+        'proposed [repo] "Run generators through make gen" — no matching entry around it',
         'proposed [repo] "Widgets live in memory only" — specific to this repository',
         'proposed 2 entries, 0 above the repository; marked as bootstrapped',
       ]),
@@ -277,7 +278,7 @@ describe('knowledge-bootstrap analyzer', () => {
 
   test('a repository with entries of its own is marked and skipped without a call', async () => {
     await store.knowledge.put(
-      entryFor({ scope: { repos: ['acme/widget-web'] }, status: 'proposed' }),
+      entryFor({ scope: { repos: ['acme/round/web'] }, status: 'proposed' }),
     )
     expect(await applies()).toBeFalse()
     const { agent, tasks } = fakeAgent()
@@ -290,11 +291,11 @@ describe('knowledge-bootstrap analyzer', () => {
     expect(await store.kv?.get(bootstrapMarker(repo))).toMatchObject({ reason: 'has-entries' })
   })
 
-  test('group, glob and rejected entries do not count as entries of the repository', async () => {
-    await store.knowledge.put(entryFor({ scope: { groups: ['shapes.round'] } }))
-    await store.knowledge.put(entryFor({ scope: { repos: ['work:acme/widget-*'] } }))
+  test('team, glob and rejected entries do not count as entries of the repository', async () => {
+    await store.knowledge.put(entryFor({ scope: { teams: ['widgets'] } }))
+    await store.knowledge.put(entryFor({ scope: { repos: ['work:acme/round/*'] } }))
     await store.knowledge.put(
-      entryFor({ scope: { repos: ['work:acme/widget-web'] }, status: 'rejected' }),
+      entryFor({ scope: { repos: ['work:acme/round/web'] }, status: 'rejected' }),
     )
     expect(await applies()).toBeTrue()
     expect(await createKnowledgeBootstrapAnalyzer().appliesTo?.({ repo, forge })).toBeTrue()
@@ -327,16 +328,16 @@ describe('knowledge-bootstrap analyzer', () => {
     expect(String(refused)).toContain('needs the server knowledge store')
   })
 
-  test('a lesson a sibling already has becomes a subgroup proposal that supersedes it', async () => {
+  test('a lesson a sibling already has becomes a folder proposal that supersedes it', async () => {
     const sibling = await store.knowledge.put(
       entryFor({
         title: 'Run generators through make gen',
         body: 'Mocks are generated by `make gen`; never edit `gen/` by hand.',
-        evidence: [{ label: '!3', url: 'https://forge.test/acme/widget-api/-/merge_requests/3' }],
+        evidence: [{ label: '!3', url: 'https://forge.test/acme/round/api/-/merge_requests/3' }],
       }),
     )
     const { agent, tasks } = fakeAgent((task) => {
-      expect(task.prompt).toContain(`kb:${sibling.id} [repo work:acme/widget-api]`)
+      expect(task.prompt).toContain(`kb:${sibling.id} [repo work:acme/round/api]`)
       return {
         lessons: [
           {
@@ -360,8 +361,8 @@ describe('knowledge-bootstrap analyzer', () => {
     expect(tasks).toHaveLength(1)
     expect(data.lessons).toEqual([
       expect.objectContaining({
-        level: 'subgroup',
-        scope: 'subgroup shapes.round',
+        level: 'folder',
+        scope: 'folder work:acme/round/**',
         outcome: 'created',
         supersedes: sibling.id,
       }),
@@ -369,16 +370,74 @@ describe('knowledge-bootstrap analyzer', () => {
     const promoted = (await store.knowledge.list({ status: 'proposed' }))[0]
     expect(promoted).toMatchObject({
       title: 'Generate mocks and stubs with make gen',
-      scope: { groups: ['shapes.round'] },
+      scope: { repos: ['work:acme/round/**'] },
       supersedes: sibling.id,
       status: 'proposed',
     })
     expect(promoted?.evidence.map((link) => link.url)).toEqual([
-      'https://forge.test/acme/widget-web/-/merge_requests/7',
-      'https://forge.test/acme/widget-api/-/merge_requests/3',
+      'https://forge.test/acme/round/web/-/merge_requests/7',
+      'https://forge.test/acme/round/api/-/merge_requests/3',
     ])
     expect(lines.find((line) => line.startsWith('proposed ['))).toStartWith(
-      'proposed [subgroup shapes.round] "Generate mocks and stubs with make gen" — a sibling in shapes.round has it',
+      'proposed [folder work:acme/round/**] "Generate mocks and stubs with make gen" — a sibling in acme/round has it',
+    )
+    expect(await store.kv?.get(bootstrapMarker(repo))).toMatchObject({ proposed: 1, promoted: 1 })
+  })
+
+  test('a lesson a sibling of the same family has becomes a family proposal', async () => {
+    await store.families.put({
+      id: 'f-web',
+      name: 'Web apps',
+      members: ['work:acme/round/web', 'work:acme/square/web'],
+      createdBy: 'jane',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const sibling = await store.knowledge.put(
+      entryFor({
+        title: 'Run generators through make gen',
+        body: 'Mocks are generated by `make gen`; never edit `gen/` by hand.',
+        scope: { repos: ['work:acme/square/web'] },
+      }),
+    )
+    const { agent, tasks } = fakeAgent((task) => {
+      expect(task.prompt).toContain(
+        'Repository: work:acme/round/web (teams: widgets; family: f-web)',
+      )
+      expect(task.prompt).toContain(`kb:${sibling.id} [repo work:acme/square/web]`)
+      return {
+        lessons: [
+          {
+            title: 'Run generators through make gen',
+            body: 'Mocks come from `make gen`.',
+            kind: 'convention',
+            evidence: ['mr:7'],
+            level: 'repo',
+            repoSpecific: false,
+            related: [sibling.id],
+          },
+        ],
+      }
+    })
+    const lines: string[] = []
+    const { data } = await run(agent, {}, { lines })
+    expect(tasks).toHaveLength(1)
+    expect(data.lessons).toEqual([
+      expect.objectContaining({
+        level: 'family',
+        scope: 'repos work:acme/*/web · family f-web',
+        outcome: 'created',
+        supersedes: sibling.id,
+      }),
+    ])
+    const [promoted] = await store.knowledge.list({ status: 'proposed' })
+    expect(promoted).toMatchObject({
+      scope: { repos: ['work:acme/*/web'] },
+      match: { families: ['f-web'] },
+      supersedes: sibling.id,
+    })
+    expect(lines.find((line) => line.startsWith('proposed ['))).toStartWith(
+      'proposed [repos work:acme/*/web · family f-web] "Run generators through make gen" — the same family f-web has it',
     )
     expect(await store.kv?.get(bootstrapMarker(repo))).toMatchObject({ proposed: 1, promoted: 1 })
   })
@@ -399,7 +458,7 @@ describe('knowledge-bootstrap analyzer', () => {
       entryFor({
         title: 'Run generators through make gen',
         body: 'Mocks are generated by `make gen`.',
-        scope: { repos: ['work:acme/widget-api'] },
+        scope: { repos: ['work:acme/round/api'] },
         updatedAt: '2026-10-02T00:00:00.000Z',
       }),
     )
@@ -407,7 +466,7 @@ describe('knowledge-bootstrap analyzer', () => {
       entryFor({
         title: 'Run generators through make gen',
         body: 'Stubs are generated by `make gen`.',
-        scope: { repos: ['work:acme/widget-cli'] },
+        scope: { repos: ['work:acme/round/cli'] },
       }),
     )
     const { agent } = fakeAgent(() => ({
@@ -424,11 +483,14 @@ describe('knowledge-bootstrap analyzer', () => {
     }))
     const { data } = await run(agent)
     expect(data.lessons).toEqual([
-      expect.objectContaining({ level: 'subgroup', outcome: 'created', supersedes: api.id }),
+      expect.objectContaining({ level: 'folder', outcome: 'created', supersedes: api.id }),
     ])
     const promoted = await store.knowledge.list({ status: 'proposed' })
     expect(promoted).toHaveLength(1)
-    expect(promoted[0]).toMatchObject({ scope: { groups: ['shapes.round'] }, supersedes: api.id })
+    expect(promoted[0]).toMatchObject({
+      scope: { repos: ['work:acme/round/**'] },
+      supersedes: api.id,
+    })
     expect(promoted[0]?.title).toBe('Run generators through make gen')
     expect((await store.knowledge.get(cli.id))?.evidence).toEqual([])
   })
@@ -472,7 +534,7 @@ describe('knowledge-bootstrap analyzer', () => {
       entryFor({
         title: 'Run generators through make gen',
         body: 'Mocks come from `make gen`.',
-        scope: { groups: ['shapes.round'] },
+        scope: { teams: ['widgets'] },
       }),
     )
     const inner = store
@@ -505,7 +567,7 @@ describe('knowledge-bootstrap analyzer', () => {
     }))
     const { data } = await run(agent, {}, { lines, forge: broken })
     expect(data.lessons).toEqual([
-      expect.objectContaining({ title: 'Squash before merge', level: 'repo', outcome: 'dropped' }),
+      expect.objectContaining({ title: 'Squash before merge', level: 'team', outcome: 'dropped' }),
     ])
     expect(data.lessons[0]?.why).toContain('evidence')
     expect(lines.some((line) => line.startsWith('dropped "Squash before merge"'))).toBeTrue()

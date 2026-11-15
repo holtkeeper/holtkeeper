@@ -22,7 +22,7 @@ import type { TrackerRouteDeps } from '../src/routes/trackers.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
 })
 
 const data: TrackerData = {
@@ -154,7 +154,7 @@ describe('POST /api/trackers/:analysisId/publish', () => {
       data,
     })
     const reader = headerAuth({
-      roles: { games: [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }] },
+      roles: { games: [{ scope: { teams: ['games'] }, actions: ['analyses:read'] }] },
     })
     expect(
       (

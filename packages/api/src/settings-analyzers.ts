@@ -10,7 +10,7 @@ export interface AnalyzerHealthView {
   failed: number
   /** Refused or stopped by the AI budget. */
   blocked: number
-  /** Repositories (or groups) it ran on. */
+  /** Repositories (or teams, for group-scope runs) it ran on. */
   targets: number
   lastRunAt?: Timestamp
   lastFailureAt?: Timestamp

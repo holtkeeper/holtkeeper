@@ -3,6 +3,7 @@ import type {
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
+  KnowledgeMatch,
   KnowledgePackage,
   KnowledgeVisibility,
   Store,
@@ -11,6 +12,7 @@ import type {
 import { classifyProposal } from './classify.ts'
 import type { TaskPackage } from './model.ts'
 import { KnowledgeValidationError, validateEntry } from './schema.ts'
+import { matchWithin } from './select.ts'
 import { contentHash, textOverlap } from './text.ts'
 
 /** What an agent proposes. Everything but title and body is optional and gets classified. */
@@ -23,12 +25,14 @@ export interface ProposalInput {
   packages?: KnowledgePackage[]
   /** Defaults to the proposing task's repository. */
   scope?: Scope
+  /** Narrows where the entry applies within `scope` (families, touched files). */
+  match?: KnowledgeMatch
   evidence?: KnowledgeLink[]
   /** Default: see `sharingDefaults`. */
   visibility?: KnowledgeVisibility
   subject?: string
   /**
-   * Id of the entry this proposal replaces, e.g. a repository entry a group-wide one generalises.
+   * Id of the entry this proposal replaces, e.g. a repository entry a folder-wide one generalises.
    * That entry is left out of the duplicate check, and the new entry records it as `supersedes`.
    */
   supersedes?: string
@@ -59,7 +63,16 @@ export interface ProposeEntryOptions {
   notDuplicates?: readonly string[]
   /** Only entries it holds for count as duplicates, e.g. the entries of the proposing team. Default: every entry. */
   duplicateScope?: (entry: KnowledgeEntry) => boolean
+  /**
+   * Cosine between the proposal's vector and `candidate`'s (`undefined` when the candidate has
+   * none). From `SEMANTIC_DUPLICATE` on, a candidate counts as a duplicate like one with high word
+   * overlap, which catches the same lesson worded differently or in another language.
+   */
+  similarity?: (candidate: KnowledgeEntry) => number | undefined
 }
+
+/** Cosine from which a proposal repeats an entry (`ProposeEntryOptions.similarity`). */
+export const SEMANTIC_DUPLICATE = 0.9
 
 export interface ProposeResult {
   /** The new entry, or the existing one the proposal duplicates (with merged evidence). */
@@ -93,20 +106,37 @@ export function sharingDefaults(draft: {
 
 const repoScope = (repo: RepoTarget): Scope => ({ repos: [`${repo.forge}:${repo.path}`] })
 
-/** The existing entry `input` repeats, if any: same title or body words, or high word overlap. */
+/**
+ * The existing entry `input` repeats, if any. An entry whose `match` applies at least wherever the
+ * proposal's does (`matchWithin`) is repeated by the same title or body words, high word overlap
+ * or a cosine from `SEMANTIC_DUPLICATE` on; among several, the one with the highest of the two
+ * wins. One narrowed differently (a family or file entry, when the proposal is broader or narrowed
+ * elsewhere) applies in other places, so only the same title and body words make the proposal its
+ * duplicate: similar wording or meaning there is a generalisation or a sibling, not a repeat.
+ */
 function findDuplicate(
   input: ProposalInput,
   candidates: readonly KnowledgeEntry[],
   threshold: number,
+  similarity: ProposeEntryOptions['similarity'],
 ): KnowledgeEntry | undefined {
   const title = contentHash(input.title)
   const body = contentHash(input.body)
   const text = `${input.title}\n${input.body}`
-  let best: { entry: KnowledgeEntry; overlap: number } | undefined
+  let best: { entry: KnowledgeEntry; strength: number } | undefined
   for (const entry of candidates) {
+    if (!matchWithin(input.match, entry.match)) {
+      if (contentHash(entry.title) === title && contentHash(entry.body) === body) return entry
+      continue
+    }
     if (contentHash(entry.title) === title || contentHash(entry.body) === body) return entry
     const overlap = textOverlap(text, `${entry.title}\n${entry.body}`)
-    if (overlap >= threshold && overlap > (best?.overlap ?? 0)) best = { entry, overlap }
+    const cosine = similarity?.(entry)
+    const strength = Math.max(
+      overlap >= threshold ? overlap : 0,
+      cosine !== undefined && cosine >= SEMANTIC_DUPLICATE ? cosine : 0,
+    )
+    if (strength > (best?.strength ?? 0)) best = { entry, strength }
   }
   return best?.entry
 }
@@ -167,7 +197,9 @@ export async function mergeEvidence({
 /**
  * Records an agent's proposal. A proposal that repeats a proposed, accepted or rejected entry
  * creates nothing: its new evidence links are added to that entry and its id comes back as
- * `duplicateOf`. The entry `input.supersedes` names and those in `notDuplicates` never count as
+ * `duplicateOf`. An entry narrowed by a `match` the proposal is not within counts only with the
+ * same title and body words. With `similarity`, a cosine from `SEMANTIC_DUPLICATE` (0.9) on counts
+ * like high word overlap. The entry `input.supersedes` names and those in `notDuplicates` never count as
  * duplicates, and with `duplicateScope` only the entries it holds for do. Otherwise the proposal is classified (`classifyProposal`), validated
  * (`validateEntry`, throwing `KnowledgeValidationError`) and stored as a `proposed` agent entry —
  * or `accepted` when its kind is in `autoAccept`. Both outcomes are audited (`knowledge.propose`,
@@ -184,6 +216,7 @@ export async function proposeEntry({
   duplicateOverlap = 0.8,
   notDuplicates = [],
   duplicateScope,
+  similarity,
 }: ProposeEntryOptions): Promise<ProposeResult> {
   const at = now().toISOString()
   const audit = (action: string, id: string, details: Record<string, unknown>) =>
@@ -208,7 +241,7 @@ export async function proposeEntry({
       !notDuplicates.includes(candidate.id) &&
       (duplicateScope?.(candidate) ?? true),
   )
-  const duplicate = findDuplicate(input, candidates, duplicateOverlap)
+  const duplicate = findDuplicate(input, candidates, duplicateOverlap, similarity)
 
   if (duplicate) {
     const { entry } = await mergeEvidence({
@@ -232,6 +265,7 @@ export async function proposeEntry({
     title: input.title,
     body: input.body,
     scope,
+    ...(input.match && { match: input.match }),
     evidence: input.evidence ?? [],
     ...classification,
     ...(input.visibility && { visibility: input.visibility }),

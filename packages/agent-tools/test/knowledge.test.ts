@@ -4,7 +4,7 @@ import { type KnowledgeAccess, knowledgeTools } from '../src/index.ts'
 import { call } from './fixture.ts'
 
 const ctx = { dir: '/repo', signal: new AbortController().signal }
-const repo = { forge: 'gitlab', path: 'g/app', groups: ['g'] }
+const repo = { forge: 'gitlab', path: 'acme/round/web', teams: ['widgets'] }
 
 function fakeAccess() {
   const searches: unknown[][] = []

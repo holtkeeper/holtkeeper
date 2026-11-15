@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Settings are values that can differ per repository, group or the whole organization. Each key can have entries for several scopes; for a repository, the most specific covering entry wins as a whole (an exact repository, then path globs, subgroups and group intersections, groups, then everything; ties go to the newest). Keys marked **global** take one value for every repository. Values are never merged field by field, but unset fields of an object keep their defaults.
+Settings are values that can differ per repository, folder, team or the whole organization. Each key can have entries for several scopes; for a repository, the most specific covering entry wins as a whole (an exact repository, then path patterns with the deeper folder first, then teams, then everything; a scope ranks by its broadest entry and ties go to the newest). Keys marked **global** take one value for every repository. Values are never merged field by field, but unset fields of an object keep their defaults.
 
 **Settings › Policies** and **Settings › Analyzers** also list keys whose home is another page, and the **Search settings** field in Settings finds every key wherever it lives. See [Settings](/guide/settings/people/) for the editors and [Policies](/start/concepts/policies/) for how scopes resolve.
 
@@ -25,11 +25,12 @@ This page follows the current definitions in the code, which are still moving. T
 
 ## Knowledge
 
-| Key                    | Section   | Value                                                                                                                                                       | Default                                    | Edited in           |
-| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------- |
-| `knowledge.autoAccept` | Knowledge | Knowledge kinds agent proposals are accepted for without review: `decision`, `convention`, `migration`, `quirk`, `howto`.                                   | none (`quirk`, `howto` on a fresh install) | Settings › Policies |
-| `learnings.autoAccept` | Knowledge | `{ sources, scope }`: rule candidates accepted into the Guide without review when they come from `mcp` or `review-reply`; `scope` is `suggested` or `repo`. | `{ sources: [], scope: 'suggested' }`      | Settings › Policies |
-| `guide.autoAccept`     | Knowledge | Guide sections whose generated text agents use without review: `general`, `testing`, `testids`, `commits`, ….                                               | none                                       | Settings › Policies |
+| Key                    | Section   | Value                                                                                                                                                                                                 | Default                                                      | Edited in           |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------- |
+| `knowledge.autoAccept` | Knowledge | Knowledge kinds agent proposals are accepted for without review: `decision`, `convention`, `migration`, `quirk`, `howto`.                                                                             | none (`quirk`, `howto` on a fresh install)                   | Settings › Policies |
+| `knowledge.embeddings` | Knowledge | Global. `{ enabled, credential?, model, dimensions? }`: vectors of knowledge notes for search, Guide ranking and duplicate checks; `credential` is an `ai-sdk` credential, default the AI provider's. | `{ enabled: false, model: 'openai/text-embedding-3-small' }` | Settings › AI       |
+| `learnings.autoAccept` | Knowledge | `{ sources, scope }`: rule candidates accepted into the Guide without review when they come from `mcp` or `review-reply`; `scope` is `suggested` or `repo`.                                           | `{ sources: [], scope: 'suggested' }`                        | Settings › Policies |
+| `guide.autoAccept`     | Knowledge | Guide sections whose generated text agents use without review: `general`, `testing`, `testids`, `commits`, ….                                                                                         | none                                                         | Settings › Policies |
 
 ## Repositories
 

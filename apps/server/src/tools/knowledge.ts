@@ -2,8 +2,11 @@ import { type RepoTarget, type Scope, scopeCoversRepo, scopeSpecificity } from '
 import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
 import {
   KnowledgeValidationError,
+  SEMANTIC_MATCH,
   citation,
   describePackage,
+  embeddingText,
+  fusedRelevance,
   knowledgeKinds,
   proposeEntry,
   renderEntry,
@@ -21,6 +24,7 @@ import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
 import { ForbiddenToolError } from '../context.ts'
+import type { KnowledgeSemantics } from '../embeddings.ts'
 
 /** The knowledge base as the knowledge tools read and propose to it, for one caller. */
 export interface KnowledgeToolsContext {
@@ -29,15 +33,21 @@ export interface KnowledgeToolsContext {
   canReadScope: (scope: Scope) => boolean
   /** Whether the caller may read accepted `shared` entries of `scope` (cross-team reach); default never. */
   canReadShared?: (scope: Scope) => boolean
-  /** The teams an entry of `scope` belongs to (innermost config groups), named on shared entries of other teams. */
+  /** The teams an entry of `scope` belongs to, named on shared entries of other teams. */
   ownerOf?: (scope: Scope) => string[]
-  /** `forge:path` with its groups when the caller may read that repository's knowledge. */
+  /** `forge:path` with its owner teams when the caller may read that repository's knowledge. */
   repoOf: (repo: string) => RepoTarget | undefined
-  /** How a group key is named in tool output; default the key itself. */
-  groupLabel?: (key: string) => string
+  /** How a team key is named in tool output; default the key itself. */
+  teamLabel?: (key: string) => string
   /** Who proposals are attributed to. */
   actor: string
   now: () => Date
+  /**
+   * Knowledge vectors: search also finds entries close in meaning and ranks by the fusion of
+   * words and meaning; proposals worded differently from an entry count as its duplicate.
+   * Absent (or answering `undefined`): words only.
+   */
+  semantics?: KnowledgeSemantics
 }
 
 /** Candidates ranked before the scope filters, so filtering does not starve `limit`. */
@@ -48,9 +58,7 @@ const bodyPreview = 600
 const scopeText = (scope: Scope, label: (key: string) => string) =>
   [
     ...(scope.all ? ['everything'] : []),
-    ...(scope.groups ?? []).map(
-      (group) => `group ${Array.isArray(group) ? group.map(label).join(' & ') : label(group)}`,
-    ),
+    ...(scope.teams ?? []).map((team) => `team ${label(team)}`),
     ...(scope.repos ?? []).map((repo) => `\`${repo}\``),
   ].join(', ') || 'nothing'
 
@@ -105,16 +113,44 @@ export async function searchKnowledge(
     ...(input.topic && { topic: input.topic }),
   }
   const query = input.query?.trim()
-  const hits = query
-    ? await context.store.knowledge.search(query, filter, pool)
-    : (await context.store.knowledge.list(filter)).map((entry) => ({ entry, score: 0 }))
+  const [found, cosines] = await Promise.all([
+    query
+      ? context.store.knowledge.search(query, filter, pool)
+      : context.store.knowledge
+          .list(filter)
+          .then((entries) => entries.map((entry) => ({ entry, score: 0 }))),
+    query ? context.semantics?.semantic(query) : undefined,
+  ])
+  let hits = found
+  if (cosines?.size) {
+    // Entries close in meaning count as hits even without a shared word (another language).
+    const known = new Set(found.map(({ entry }) => entry.id))
+    const close = new Set(
+      [...cosines]
+        .filter(([id, cosine]) => cosine >= SEMANTIC_MATCH && !known.has(id))
+        .map(([id]) => id),
+    )
+    if (close.size) {
+      const extra = (await context.store.knowledge.list(filter)).filter((entry) =>
+        close.has(entry.id),
+      )
+      hits = [...found, ...extra.map((entry) => ({ entry, score: 0 }))]
+    }
+  }
   const target = input.repo ? readableRepo(context, input.repo) : undefined
   const about = input.package !== undefined || input.subject !== undefined
-  const visible = hits.filter(({ entry }) =>
+  let visible = hits.filter(({ entry }) =>
     target
       ? scopeCoversRepo(entry.scope, target) || (about && canReadEntry(context, entry))
       : canReadEntry(context, entry),
   )
+  if (cosines?.size) {
+    const fused = fusedRelevance(
+      visible.map(({ entry, score }) => ({ id: entry.id, lexical: score })),
+      cosines,
+    )
+    visible = visible.map((hit) => ({ ...hit, score: fused.get(hit.entry.id) ?? 0 }))
+  }
   const ranked = withoutSuperseded(visible)
     .toSorted(
       (a, b) =>
@@ -137,6 +173,12 @@ const renderDetail = (entry: KnowledgeEntry, label: (key: string) => string) =>
     [
       `- kind: ${entry.kind}, status: ${entry.status}${entry.status === 'proposed' ? ' (not reviewed yet; do not rely on it)' : ''}`,
       `- applies to: ${scopeText(entry.scope, label)}; tasks ${entry.appliesTo.join(', ')}`,
+      ...(entry.match?.families?.length
+        ? [`- only in family ${entry.match.families.join(', ')}`]
+        : []),
+      ...(entry.match?.files?.length
+        ? [`- only for files ${entry.match.files.map((glob) => `\`${glob}\``).join(', ')}`]
+        : []),
       ...(entry.packages?.length
         ? [`- packages: ${entry.packages.map(describePackage).join(', ')}`]
         : []),
@@ -157,7 +199,7 @@ async function readKnowledge(context: KnowledgeToolsContext, id: string): Promis
   const entry = await context.store.knowledge.get(id.replace(/^\[?kb:|\]$/g, ''))
   if (!entry || !canReadEntry(context, entry))
     throw new ToolError(`No knowledge entry ${id}; search_knowledge lists the ones you can read.`)
-  return renderDetail(entry, context.groupLabel ?? ((key) => key))
+  return renderDetail(entry, context.teamLabel ?? ((key) => key))
 }
 
 /**
@@ -177,6 +219,9 @@ async function proposeKnowledge(
   },
 ): Promise<string> {
   const repo = readableRepo(context, input.repo)
+  const similarity = await context.semantics?.similarity(
+    embeddingText({ title: input.title, body: input.body, topics: input.topics ?? [] }),
+  )
   try {
     const result = await proposeEntry({
       store: context.store,
@@ -191,6 +236,7 @@ async function proposeKnowledge(
       actor: context.actor,
       task: { repo },
       now: context.now,
+      ...(similarity && { similarity }),
     })
     if (result.duplicateOf)
       return `Not added: ${citation(result.duplicateOf)} (${result.entry.status}) already says this: "${result.entry.title}".${input.evidence?.length ? ' New evidence links were added to it.' : ''}`

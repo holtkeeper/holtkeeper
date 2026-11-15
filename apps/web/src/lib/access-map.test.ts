@@ -21,8 +21,8 @@ describe('access map', () => {
       [
         user('ada', [{ scope: { all: true }, actions: ['*'] }]),
         user('bob', [
-          { scope: { groups: ['games'] }, actions: ['repos:read'] },
-          { scope: { groups: ['games'] }, actions: ['audits:read', 'repos:read'] },
+          { scope: { teams: ['games'] }, actions: ['repos:read'] },
+          { scope: { teams: ['games'] }, actions: ['audits:read', 'repos:read'] },
           { scope: { repos: ['work:games/**'] }, actions: ['audits:run'] },
         ]),
       ],
@@ -30,15 +30,15 @@ describe('access map', () => {
     )
     expect(map.scopes.map((s) => [s.id, s.idle])).toEqual([
       ['scope:everything', false],
-      ['scope:group games', false],
-      ['scope:group tools', true],
+      ['scope:team games', false],
+      ['scope:team tools', true],
       ['scope:work:games/**', false],
     ])
     expect(map.edges).toEqual([
       { from: 'user:ada', to: 'scope:everything', actions: ['*'], label: 'all actions' },
       {
         from: 'user:bob',
-        to: 'scope:group games',
+        to: 'scope:team games',
         actions: ['repos:read', 'audits:read'],
         label: 'read only',
       },
@@ -54,21 +54,21 @@ describe('access map', () => {
 })
 
 describe('editing grants', () => {
-  const grants: Grant[] = [{ scope: { groups: ['games'] }, actions: ['*'] }]
+  const grants: Grant[] = [{ scope: { teams: ['games'] }, actions: ['*'] }]
 
   test('linking adds a read-only grant once', () => {
-    expect(withGrant(grants, { groups: ['tools'] })).toEqual([
+    expect(withGrant(grants, { teams: ['tools'] })).toEqual([
       ...grants,
-      { scope: { groups: ['tools'] }, actions: ['repos:read', 'audits:read'] },
+      { scope: { teams: ['tools'] }, actions: ['repos:read', 'audits:read'] },
     ])
-    expect(withGrant(grants, { groups: ['games'] })).toEqual(grants)
+    expect(withGrant(grants, { teams: ['games'] })).toEqual(grants)
   })
 
   test('unlinking drops every grant on the scope', () => {
     expect(
       withoutGrant(
         [...grants, { scope: { all: true }, actions: ['repos:read'] }],
-        'scope:group games',
+        'scope:team games',
       ),
     ).toEqual([{ scope: { all: true }, actions: ['repos:read'] }])
   })

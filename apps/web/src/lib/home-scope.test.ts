@@ -4,20 +4,20 @@ import {
   defaultScopeView,
   foldOtherTeams,
   foldScope,
-  groupCounts,
-  groupView,
-  inHomeGroups,
+  inHomeTeams,
   inView,
   parseScopeView,
   resolveScopeView,
   scopeLabel,
   scopeList,
   scopeSuffix,
-  viewGroup,
-  viewGroups,
+  teamCounts,
+  teamView,
+  viewTeam,
+  viewTeams,
 } from './home-scope.ts'
 
-const item = (name: string, ...groups: string[]) => ({ name, groups })
+const item = (name: string, ...teams: string[]) => ({ name, teams })
 const items = [
   item('widget-app', 'widgets'),
   item('gadget-lib', 'gadgets', 'shared'),
@@ -26,17 +26,18 @@ const items = [
   item('shared-widget', 'widgets', 'shared'),
 ]
 const names = (list: readonly { name: string }[]) => list.map((i) => i.name)
-const groupsOf = (entry: { groups: readonly string[] }) => entry.groups
+const teamsOf = (entry: { teams: readonly string[] }) => entry.teams
+
+const studioTitle = (key: string) => (key === 'shapes' ? 'Shape studio' : key)
 
 describe('home scope', () => {
-  test('group entries match like grants: a combined entry needs every group', () => {
-    expect(inHomeGroups(['widgets'], ['widgets', 'shared'])).toBe(true)
-    expect(inHomeGroups([['widgets', 'shared']], ['widgets'])).toBe(false)
-    expect(inHomeGroups([['widgets', 'shared']], ['shared', 'widgets'])).toBe(true)
-    expect(inHomeGroups([], ['widgets'])).toBe(false)
+  test('an item belongs to the home teams when one of its owner teams is a home team', () => {
+    expect(inHomeTeams(['widgets'], ['widgets', 'shared'])).toBe(true)
+    expect(inHomeTeams(['gizmo'], ['widgets'])).toBe(false)
+    expect(inHomeTeams([], ['widgets'])).toBe(false)
   })
 
-  test('my team lists the home groups and counts the rest by team', () => {
+  test('my teams lists the home teams and counts the rest by team', () => {
     const scoped = scopeList(items, 'mine', ['widgets'])
     expect(names(scoped.shown)).toEqual(['widget-app', 'shared-widget'])
     expect(scoped.counts).toMatchObject({ mine: 2, all: 5 })
@@ -44,31 +45,31 @@ describe('home scope', () => {
   })
 
   test('all lists everything and still summarises the other teams', () => {
-    const all = scopeList(items, 'all', [['gadgets', 'shared']])
+    const all = scopeList(items, 'all', ['gadgets'])
     expect(names(all.shown)).toHaveLength(5)
     expect(all.counts).toMatchObject({ mine: 1, all: 5 })
     expect(all.others).toEqual({ items: 4, teams: 3 })
   })
 
-  test('a group lists its items and every group is counted', () => {
-    const scoped = scopeList(items, groupView('shared'), ['widgets'])
+  test('a team lists its items and every team is counted', () => {
+    const scoped = scopeList(items, teamView('shared'), ['widgets'])
     expect(names(scoped.shown)).toEqual(['gadget-lib', 'shared-widget'])
-    expect(scoped.counts.groups).toEqual([
-      { group: 'gadgets', count: 1 },
-      { group: 'shapes', count: 1 },
-      { group: 'shared', count: 2 },
-      { group: 'widgets', count: 2 },
+    expect(scoped.counts.teams).toEqual([
+      { team: 'gadgets', count: 1 },
+      { team: 'shapes', count: 1 },
+      { team: 'shared', count: 2 },
+      { team: 'widgets', count: 2 },
     ])
   })
 
-  test('group counts count an item once per group', () => {
-    expect(groupCounts([['b', 'a', 'a'], ['a'], []])).toEqual([
-      { group: 'a', count: 2 },
-      { group: 'b', count: 1 },
+  test('team counts count an item once per team', () => {
+    expect(teamCounts([['b', 'a', 'a'], ['a'], []])).toEqual([
+      { team: 'a', count: 2 },
+      { team: 'b', count: 1 },
     ])
   })
 
-  test('the default is my teams, even without home groups', () => {
+  test('the default is my teams, even without home teams', () => {
     expect(defaultScopeView).toBe('mine')
     expect(scopeList(items, 'mine', []).counts.mine).toBe(0)
     expect(scopeList(items, 'mine', []).shown).toEqual([])
@@ -77,27 +78,27 @@ describe('home scope', () => {
   test('parses stored positions; retired and unknown ones fall back to the default', () => {
     expect(parseScopeView('mine')).toBe('mine')
     expect(parseScopeView('all')).toBe('all')
-    expect(parseScopeView('group:widgets')).toBe('group:widgets')
-    expect(parseScopeView('group: widgets ')).toBe('group:widgets')
-    expect(parseScopeView('group:')).toBeUndefined()
+    expect(parseScopeView('team:widgets')).toBe('team:widgets')
+    expect(parseScopeView('team: widgets ')).toBe('team:widgets')
+    expect(parseScopeView('team:')).toBeUndefined()
+    expect(parseScopeView('group:widgets')).toBeUndefined()
     expect(parseScopeView('others')).toBeUndefined()
-    expect(parseScopeView('team')).toBeUndefined()
     expect(parseScopeView(null)).toBeUndefined()
     expect(resolveScopeView(parseScopeView('others'), ['widgets'])).toBe('mine')
   })
 
-  test('a group position round-trips through its stored form', () => {
-    const view = groupView('gadgets')
+  test('a team position round-trips through its stored form', () => {
+    const view = teamView('gadgets')
     expect(parseScopeView(view)).toBe(view)
-    expect(viewGroup(view)).toBe('gadgets')
-    expect(viewGroup('mine')).toBeUndefined()
-    expect(viewGroup('all')).toBeUndefined()
+    expect(viewTeam(view)).toBe('gadgets')
+    expect(viewTeam('mine')).toBeUndefined()
+    expect(viewTeam('all')).toBeUndefined()
   })
 
-  test('a chosen group the viewer can no longer see falls back to the default', () => {
-    expect(resolveScopeView('group:gadgets', ['gadgets', 'widgets'])).toBe('group:gadgets')
-    expect(resolveScopeView('group:gone', ['gadgets'])).toBe('mine')
-    expect(resolveScopeView('group:gone', undefined)).toBe('group:gone')
+  test('a chosen team the viewer can no longer see falls back to the default', () => {
+    expect(resolveScopeView('team:gadgets', ['gadgets', 'widgets'])).toBe('team:gadgets')
+    expect(resolveScopeView('team:gone', ['gadgets'])).toBe('mine')
+    expect(resolveScopeView('team:gone', undefined)).toBe('team:gone')
     expect(resolveScopeView('all', [])).toBe('all')
     expect(resolveScopeView(undefined, ['gadgets'])).toBe('mine')
   })
@@ -106,41 +107,48 @@ describe('home scope', () => {
     expect(inView('all', [], [])).toBe(true)
     expect(inView('mine', ['widgets'], ['widgets'])).toBe(true)
     expect(inView('mine', [], ['widgets'])).toBe(false)
-    expect(inView('group:shapes', ['widgets'], ['shapes'])).toBe(true)
-    expect(inView('group:shapes', ['shapes'], ['widgets'])).toBe(false)
-    expect(viewGroups('all', ['widgets'])).toBeUndefined()
-    expect(viewGroups('mine', ['widgets', ['gadgets', 'widgets']])).toEqual(['widgets', 'gadgets'])
-    expect(viewGroups('mine', [])).toEqual([])
-    expect(viewGroups('group:shapes', ['widgets'])).toEqual(['shapes'])
+    expect(inView('team:shapes', ['widgets'], ['shapes'])).toBe(true)
+    expect(inView('team:shapes', ['shapes'], ['widgets'])).toBe(false)
+    expect(viewTeams('all', ['widgets'])).toBeUndefined()
+    expect(viewTeams('mine', ['widgets', 'gadgets', 'widgets'])).toEqual(['widgets', 'gadgets'])
+    expect(viewTeams('mine', [])).toEqual([])
+    expect(viewTeams('team:shapes', ['widgets'])).toEqual(['shapes'])
+  })
+
+  test('names a team position by its title', () => {
+    expect(scopeLabel(teamView('shapes'), studioTitle)).toBe('Shape studio')
+    expect(scopeSuffix(teamView('shapes'), studioTitle)).toBe(' in Shape studio')
+    expect(scopeSuffix('mine')).toBe(' of my teams')
+    expect(scopeLabel('all')).toBe('All I can see')
   })
 })
 
 describe('foldScope', () => {
-  test('my teams folds other teams; items in no group stay', () => {
-    const folded = foldScope(items, 'mine', ['widgets'], groupsOf)
+  test('my teams folds other teams; items of no team stay', () => {
+    const folded = foldScope(items, 'mine', ['widgets'], teamsOf)
     expect(names(folded.shown)).toEqual(['widget-app', 'loose-tool', 'shared-widget'])
     expect(names(folded.others)).toEqual(['gadget-lib', 'shape-kit'])
     expect(folded.teams).toEqual(['gadgets', 'shapes', 'shared'])
     expect(folded.counts).toMatchObject({ mine: 3, all: 5 })
   })
 
-  test('a group shows its items and folds nothing', () => {
-    const folded = foldScope(items, 'group:widgets', ['shapes'], groupsOf)
+  test('a team shows its items and folds nothing', () => {
+    const folded = foldScope(items, 'team:widgets', ['shapes'], teamsOf)
     expect(names(folded.shown)).toEqual(['widget-app', 'shared-widget'])
     expect(folded.others).toEqual([])
     expect(folded.teams).toEqual([])
-    expect(folded.counts.groups).toContainEqual({ group: 'widgets', count: 2 })
+    expect(folded.counts.teams).toContainEqual({ team: 'widgets', count: 2 })
   })
 
-  test('my teams without home groups keeps only items in no group and folds nothing', () => {
-    const folded = foldScope(items, 'mine', [], groupsOf)
+  test('my teams without home teams keeps only items of no team and folds nothing', () => {
+    const folded = foldScope(items, 'mine', [], teamsOf)
     expect(names(folded.shown)).toEqual(['loose-tool'])
     expect(folded.others).toEqual([])
     expect(folded.counts).toMatchObject({ mine: 1, all: 5 })
   })
 
-  test('my teams without home groups and nothing ungrouped shows nothing', () => {
-    const folded = foldScope(items.slice(0, 3), 'mine', [], groupsOf)
+  test('my teams without home teams and nothing unowned shows nothing', () => {
+    const folded = foldScope(items.slice(0, 3), 'mine', [], teamsOf)
     expect(folded.shown).toEqual([])
     expect(folded.counts).toMatchObject({ mine: 0, all: 3 })
   })
@@ -148,70 +156,28 @@ describe('foldScope', () => {
 
 describe('foldOtherTeams', () => {
   const owned = [
-    { id: 'circle', groups: ['shapes'] },
-    { id: 'red', groups: ['colors'] },
-    { id: 'blue', groups: ['colors', 'paint'] },
-    { id: 'everyone', groups: [] },
+    { id: 'circle', teams: ['shapes'] },
+    { id: 'red', teams: ['colors'] },
+    { id: 'blue', teams: ['colors', 'paint'] },
+    { id: 'everyone', teams: [] },
   ]
 
   test('folds items of other teams and names those teams', () => {
-    const folded = foldOtherTeams(owned, ['shapes'], (entry) => entry.groups)
+    const folded = foldOtherTeams(owned, ['shapes'], (entry) => entry.teams)
     expect(folded.mine.map((entry) => entry.id)).toEqual(['circle', 'everyone'])
     expect(folded.others.map((entry) => entry.id)).toEqual(['red', 'blue'])
     expect(folded.teams).toEqual(['colors', 'paint'])
   })
 
-  test('folds nothing without home groups', () => {
-    const folded = foldOtherTeams(owned, [], (entry) => entry.groups)
+  test('folds nothing without home teams', () => {
+    const folded = foldOtherTeams(owned, [], (entry) => entry.teams)
     expect(folded.mine).toHaveLength(4)
     expect(folded.others).toEqual([])
   })
 
-  test('an intersection home group needs every group', () => {
-    const folded = foldOtherTeams(owned, [['colors', 'paint']], (entry) => entry.groups)
+  test('a shared item stays when one of its owner teams is a home team', () => {
+    const folded = foldOtherTeams(owned, ['paint'], (entry) => entry.teams)
     expect(folded.mine.map((entry) => entry.id)).toEqual(['blue', 'everyone'])
-    expect(folded.teams).toEqual(['shapes'])
-  })
-})
-
-const studioTitle = (key: string) => (key === 'shapes' ? 'Shape studio' : key)
-
-describe('subgroups', () => {
-  const nested = [
-    item('disc', 'shapes.round', 'shapes'),
-    item('tile', 'shapes.flat', 'shapes'),
-    item('cube', 'shapes'),
-    item('red', 'colors'),
-  ]
-
-  test('a parent home group holds its subgroups; a subgroup only its own', () => {
-    expect(names(scopeList(nested, 'mine', ['shapes']).shown)).toEqual(['disc', 'tile', 'cube'])
-    expect(names(scopeList(nested, 'mine', ['shapes.round']).shown)).toEqual(['disc'])
-    expect(names(scopeList(nested, groupView('shapes.flat'), []).shown)).toEqual(['tile'])
-  })
-
-  test('the parent of a subgroup does not count as one more team', () => {
-    expect(scopeList(nested, 'mine', ['colors']).others).toEqual({ items: 3, teams: 3 })
-    expect(foldOtherTeams(nested, ['shapes.round'], groupsOf).teams).toEqual([
-      'colors',
-      'shapes',
-      'shapes.flat',
-    ])
-  })
-
-  test('counts list subgroups right after their parent', () => {
-    expect(groupCounts([['shapes-old'], ['shapes.round', 'shapes'], ['colors']])).toEqual([
-      { group: 'colors', count: 1 },
-      { group: 'shapes', count: 1 },
-      { group: 'shapes.round', count: 1 },
-      { group: 'shapes-old', count: 1 },
-    ])
-  })
-
-  test('names a subgroup position with its parent', () => {
-    expect(scopeLabel(groupView('shapes.round'), studioTitle)).toBe('Shape studio › shapes.round')
-    expect(scopeSuffix(groupView('shapes.round'), studioTitle)).toBe(
-      ' in Shape studio › shapes.round',
-    )
+    expect(folded.teams).toEqual(['colors', 'shapes'])
   })
 })

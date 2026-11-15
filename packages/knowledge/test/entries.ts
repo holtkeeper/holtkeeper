@@ -1,9 +1,9 @@
 import type { KnowledgeEntry } from '@holtkeeper/store'
 
-export const repo = (path: string, groups: string[] = [], forge = 'work') => ({
+export const repo = (path: string, teams: string[] = [], forge = 'work') => ({
   forge,
   path,
-  groups,
+  teams,
 })
 
 let counter = 0

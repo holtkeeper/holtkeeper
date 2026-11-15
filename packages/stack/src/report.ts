@@ -686,7 +686,7 @@ function conventionsSection(
 }
 
 /**
- * The `stack` analysis: runtimes, package managers and images across the repositories of one group,
+ * The `stack` analysis: runtimes, package managers and images across the repositories of one team,
  * and how they match the group's conventions.
  */
 export const stackAnalysis = defineAnalysis<StackData>({

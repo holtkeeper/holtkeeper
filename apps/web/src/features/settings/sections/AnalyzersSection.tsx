@@ -3,13 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { History, Play, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import {
-  useConfigEntries,
-  useGroups,
-  useJobAnalyzers,
-  useJobs,
-  useSettings,
-} from '../../../api/queries.ts'
+import { useConfigEntries, useJobAnalyzers, useJobs, useSettings } from '../../../api/queries.ts'
 import { useAnalyzerHealth } from '../../../api/settings-analyzers.ts'
 import {
   type AnalyzerArea,
@@ -151,8 +145,8 @@ function AnalyzerOptions({
       entries={entries}
       {...(overridesOnly
         ? {
-            initialScope: { groups: [] },
-            empty: 'No repository or group overrides this analyzer’s options.',
+            initialScope: { repos: [] },
+            empty: 'No repository, folder or team overrides this analyzer’s options.',
           }
         : {})}
     />
@@ -339,8 +333,8 @@ function AnalyzerTable({
                         <span className="text-xs text-muted">
                           {plural(
                             row.health.targets,
-                            row.scope === 'group' ? 'group' : 'repository',
-                            row.scope === 'group' ? 'groups' : 'repositories',
+                            row.scope === 'group' ? 'team' : 'repository',
+                            row.scope === 'group' ? 'teams' : 'repositories',
                           )}
                         </span>
                       ) : null}
@@ -377,7 +371,6 @@ export function AnalyzersSection() {
   const settings = useSettings(can('settings:read'))
   const triggers = useConfigEntries('triggers', automation)
   const schedules = useConfigEntries('schedules', automation)
-  const groups = useGroups(automation)
   const [state, setState] = useState<AnalyzerState | 'all'>('all')
   const [areas, setAreas] = useState<AnalyzerArea[]>([])
   const [ai, setAi] = useState<string[]>([])
@@ -395,7 +388,7 @@ export function AnalyzersSection() {
     const entries = settings.data?.settings ?? []
     const rules = automation
       ? automationRules({
-          groups: (groups.data?.entries ?? []).map((group) => group.id),
+          teams: [],
           triggers: triggers.data?.entries ?? [],
           schedules: schedules.data?.entries ?? [],
           settings: entries,
@@ -408,15 +401,7 @@ export function AnalyzersSection() {
       settings: entries,
       ...(health.data && { health: health.data.analyzers }),
     })
-  }, [
-    analyzers.data,
-    settings.data,
-    triggers.data,
-    schedules.data,
-    groups.data,
-    health.data,
-    automation,
-  ])
+  }, [analyzers.data, settings.data, triggers.data, schedules.data, health.data, automation])
 
   const open = (patch: { item?: string | undefined; tab?: string | undefined }) =>
     void navigate({
@@ -485,7 +470,7 @@ export function AnalyzersSection() {
       <Strip
         cells={[
           { value: counts.all, label: 'analyzers' },
-          { value: counts.overrides, label: 'overrides on repositories and groups' },
+          { value: counts.overrides, label: 'overrides on repositories, folders and teams' },
           { value: counts.ai, label: 'use AI' },
           {
             value: counts.warn,

@@ -1,4 +1,5 @@
 import type { Grant } from '@holtkeeper/access'
+import type { TeamDefinition } from '@holtkeeper/access/teams'
 import type { Secret } from '@holtkeeper/forge'
 import type { AuditStore, ExternalAccountStore, KvStore, UserStore } from '@holtkeeper/store'
 
@@ -40,10 +41,16 @@ export interface UsersAuthOptions {
   store: UserStore
   /**
    * The server's key-value store (`store.kv`). With it, `UserView.invite` tracks enrollment links
-   * (`users:invite:<id>`) and `UserView.teams` honours the home groups people picked
-   * (`prefs:<id>`); without it there are no invite states and teams come from grants.
+   * (`users:invite:<id>`) and `UserView.teams` honours the home teams people picked
+   * (`prefs:<id>`); without it there are no invite states and teams come from membership and
+   * grants.
    */
   kv?: Pick<KvStore, 'get' | 'set'>
+  /**
+   * The configured teams (`config.teams`), read on every call: `UserView.teams` lists the teams a
+   * user is a member of. Membership grants themselves are not added here.
+   */
+  teams?: () => Readonly<Record<string, TeamDefinition>>
   /**
    * Receives sign-ins and what users change about themselves (`user.*`, `passkey.*`,
    * `identity.*`, `account.linked`) when given. Admin changes are audited by the server's

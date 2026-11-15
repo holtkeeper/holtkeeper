@@ -36,12 +36,12 @@ import { settingsSectionIds } from './settings-sections.ts'
 
 const repo = (
   path: string,
-  groups: string[] = ['web'],
+  teams: string[] = ['web'],
   health: RepoSummary['health'] = 'not-analysed',
   cells: RepoSummary['cells'] = {},
 ): RepoSummary => ({
   repo: { forge: 'gitlab', path },
-  groups,
+  teams,
   health,
   cells,
 })

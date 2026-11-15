@@ -6,7 +6,7 @@ import { repoFreeze } from './definitions.ts'
 import { activeFreeze, resolveRepoFreeze } from './freeze.ts'
 
 const now = new Date('2026-11-12T12:00:00.000Z')
-const repo = { forge: 'acme', path: 'shapes/widget', groups: ['shapes'] }
+const repo = { forge: 'acme', path: 'shapes/widget', teams: ['shapes'] }
 
 const entry = (id: string, scope: SettingEntry['scope'], value: unknown): SettingEntry => ({
   id,
@@ -55,7 +55,7 @@ describe('repo.freeze', () => {
   })
 
   test('an expired narrow entry is ignored and the broader one applies again', () => {
-    const group = entry('g', { groups: ['shapes'] }, { reason: 'Team freeze' })
+    const group = entry('g', { teams: ['shapes'] }, { reason: 'Team freeze' })
     const expired = entry(
       'r',
       { repos: ['shapes/widget'] },
@@ -73,13 +73,13 @@ describe('repo.freeze', () => {
       until: '2026-11-10T00:00:00.000Z',
       entry: expired,
     })
-    expect(resolveRepoFreeze([group], { ...repo, groups: ['other'] }, now)).toEqual({
+    expect(resolveRepoFreeze([group], { ...repo, teams: ['other'] }, now)).toEqual({
       frozen: false,
     })
   })
 
   test('a narrower lift keeps its repository writable under a group freeze', () => {
-    const group = entry('g', { groups: ['shapes'] }, { reason: 'Team freeze' })
+    const group = entry('g', { teams: ['shapes'] }, { reason: 'Team freeze' })
     const lift = entry('r', { repos: ['shapes/widget'] }, { frozen: false, reason: 'Reviewed lib' })
     expect(resolveRepoFreeze([group, lift], repo, now)).toEqual({
       frozen: false,
@@ -93,7 +93,7 @@ describe('repo.freeze', () => {
   })
 
   test('an expired lift lets the group freeze apply again', () => {
-    const group = entry('g', { groups: ['shapes'] }, { reason: 'Team freeze' })
+    const group = entry('g', { teams: ['shapes'] }, { reason: 'Team freeze' })
     const lift = entry(
       'r',
       { repos: ['shapes/widget'] },
@@ -112,7 +112,7 @@ describe('repo.freeze', () => {
     const lift = entry('r', { repos: ['shapes/widget'] }, { frozen: false })
     const expired = entry(
       'g',
-      { groups: ['shapes'] },
+      { teams: ['shapes'] },
       { reason: 'Team freeze', until: '2026-11-01T00:00:00.000Z' },
     )
     const all = entry('a', { all: true }, { frozen: false })
@@ -124,7 +124,7 @@ describe('repo.freeze', () => {
   })
 
   test('secret entries are skipped', () => {
-    const group = entry('g', { groups: ['shapes'] }, { reason: 'Team freeze' })
+    const group = entry('g', { teams: ['shapes'] }, { reason: 'Team freeze' })
     const sealed = {
       ...entry('r', { repos: ['shapes/widget'] }, { frozen: false }),
       secret: true,
@@ -139,7 +139,22 @@ describe('repo.freeze', () => {
 
   test('a narrower freeze still wins over a broader lift', () => {
     const all = entry('a', { all: true }, { frozen: false })
-    const group = entry('g', { groups: ['shapes'] }, { reason: 'Team freeze' })
+    const group = entry('g', { teams: ['shapes'] }, { reason: 'Team freeze' })
     expect(resolveRepoFreeze([all, group], repo, now).frozen).toBe(true)
+  })
+
+  test('a deeper folder lifts a freeze on its parent folder, and a team freeze yields to both', () => {
+    const web = { forge: 'acme', path: 'acme/round/web', teams: ['widgets'] }
+    const team = entry('t', { teams: ['widgets'] }, { reason: 'Team freeze' })
+    const parent = entry('p', { repos: ['acme/**'] }, { reason: 'Folder freeze' })
+    const lift = entry('l', { repos: ['acme/round/**'] }, { frozen: false })
+    expect(resolveRepoFreeze([team, parent, lift], web, now)).toEqual({
+      frozen: false,
+      entry: lift,
+      lifted: true,
+    })
+    expect(
+      resolveRepoFreeze([team, parent, lift], { ...web, path: 'acme/square/web' }, now),
+    ).toEqual({ frozen: true, reason: 'Folder freeze', entry: parent })
   })
 })

@@ -20,16 +20,16 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read', 'settings:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read', 'settings:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -153,7 +153,7 @@ test('totals, mix, violations, rows and the organization policy', async () => {
   await store.settings.put({
     id: 'colors-licenses',
     key: 'analyzers.licenses',
-    scope: { groups: ['colors'] },
+    scope: { teams: ['colors'] },
     value: { unknown: 'violation' },
     secret: false,
     updatedAt: twoDaysAgo,
@@ -187,8 +187,8 @@ test('totals, mix, violations, rows and the organization policy', async () => {
       culprits: ['GPL-3.0-only'],
       dev: false,
       repos: [
-        { repo: 'work:colors/red', groups: ['colors'] },
-        { repo: 'work:shapes/circle', groups: ['shapes'] },
+        { repo: 'work:colors/red', teams: ['colors'] },
+        { repo: 'work:shapes/circle', teams: ['shapes'] },
       ],
     },
     {
@@ -199,7 +199,7 @@ test('totals, mix, violations, rows and the organization policy', async () => {
       verdict: 'unlisted',
       culprits: ['MPL-2.0'],
       dev: false,
-      repos: [{ repo: 'work:shapes/circle', groups: ['shapes'] }],
+      repos: [{ repo: 'work:shapes/circle', teams: ['shapes'] }],
     },
     {
       package: 'doohickey',
@@ -209,7 +209,7 @@ test('totals, mix, violations, rows and the organization policy', async () => {
       verdict: 'unknown',
       culprits: [],
       dev: false,
-      repos: [{ repo: 'work:colors/red', groups: ['colors'] }],
+      repos: [{ repo: 'work:colors/red', teams: ['colors'] }],
     },
   ])
   expect(overview.repos.map((row) => [row.repo, row.packages, row.licenseFile])).toEqual([
@@ -275,7 +275,7 @@ test('a narrow grant sees only its own repositories and not the organization pol
   expect(overview.violations[0]).toMatchObject({
     versions: ['1.0.0'],
     dev: true,
-    repos: [{ repo: 'work:shapes/circle', groups: ['shapes'] }],
+    repos: [{ repo: 'work:shapes/circle', teams: ['shapes'] }],
   })
   expect(overview.policy).toBeUndefined()
   expect((await get(asAdmin)).policy?.updatedBy).toBe('jane')

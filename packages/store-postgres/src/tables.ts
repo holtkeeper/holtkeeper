@@ -14,6 +14,7 @@ export interface Tables {
   knowledge: SQL.Query<unknown>
   knowledgeHistory: SQL.Query<unknown>
   knowledgeFold: SQL.Query<unknown>
+  embeddings: SQL.Query<unknown>
   guides: SQL.Query<unknown>
   guideHistory: SQL.Query<unknown>
   guideGenerated: SQL.Query<unknown>
@@ -60,6 +61,7 @@ export function tables(sql: SQL, schema: string): Tables {
     knowledge: name('knowledge'),
     knowledgeHistory: name('knowledge_history'),
     knowledgeFold: name('knowledge_fold'),
+    embeddings: name('embeddings'),
     guides: name('guides'),
     guideHistory: name('guide_history'),
     guideGenerated: name('guide_generated'),

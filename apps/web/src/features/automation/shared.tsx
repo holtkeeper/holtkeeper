@@ -4,11 +4,11 @@ import type { ReactNode } from 'react'
 import { messageOf } from '../../api/client.ts'
 import {
   useConfigMutations,
-  useGroups,
-  useGroupTitles,
+  useKnownTeams,
+  useTeamTitles,
   useJobAnalyzers,
 } from '../../api/queries.ts'
-import { byGroupTitle } from '../../lib/group-titles.ts'
+import { byTeamTitle } from '../../lib/team-titles.ts'
 import { ConfirmDialog, MultiToggle, TagInput, notify } from '../../ui/index.ts'
 
 /** A titled block of a form. */
@@ -75,33 +75,31 @@ export function AnalyzerPicker({
   )
 }
 
-/** Toggles for config groups; none selected means every group. */
+/** Toggles for teams; none selected means every team. */
 export function GroupPicker({
   value,
   onChange,
-  description = 'None selected: every group.',
+  description = 'None selected: every team.',
 }: {
   value: readonly string[]
   onChange: (value: string[]) => void
   description?: string
 }) {
-  const groups = useGroups()
-  const titleOf = useGroupTitles()
-  const ids = [...new Set([...(groups.data?.entries ?? []).map((g) => g.id), ...value])].toSorted(
-    byGroupTitle(titleOf),
-  )
+  const known = useKnownTeams()
+  const titleOf = useTeamTitles()
+  const ids = [...new Set([...known, ...value])].toSorted(byTeamTitle(titleOf))
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium">Groups</span>
+      <span className="text-sm font-medium">Teams</span>
       {ids.length ? (
         <MultiToggle
-          aria-label="Groups"
+          aria-label="Teams"
           options={ids.map((id) => ({ id, label: titleOf(id) }))}
           value={value}
           onChange={onChange}
         />
       ) : (
-        <span className="text-sm text-muted">No groups configured.</span>
+        <span className="text-sm text-muted">No teams yet.</span>
       )}
       <span className="text-xs text-muted">{description}</span>
     </div>

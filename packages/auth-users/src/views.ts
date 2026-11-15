@@ -46,7 +46,7 @@ export interface UserView {
   lastSeenAt?: Timestamp
   /** The newest enrollment link while the user has never signed in. */
   invite?: UserInviteView
-  /** Their home groups, else the groups their grants name. */
+  /** Their home teams, else the teams they are a member of and those their grants name. */
   teams: string[]
 }
 

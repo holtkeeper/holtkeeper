@@ -2,7 +2,7 @@ import type { AiCatalogProviderView, CredentialView } from '@holtkeeper/api'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentialMutations, useRepos } from '../../api/queries.ts'
+import { useCredentialMutations } from '../../api/queries.ts'
 import { Button, Dialog, Notice, Select, Switch, TextField, notify } from '../../ui/index.ts'
 import { ScopeEditor } from '../access/ScopeEditor.tsx'
 import { AiProviderFields } from './AiProviderFields.tsx'
@@ -36,8 +36,6 @@ export function CredentialDialog({
   const [draft, setDraft] = useState<CredentialDraft>(() => toDraft(credential))
   const [submitted, setSubmitted] = useState(false)
   const { create, update } = useCredentialMutations()
-  const repos = useRepos()
-  const groups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
   const [keyHint, setKeyHint] = useState<string>()
   const rotatable = canRotate(draft.kind, credential)
   const saved = savedDraft(draft, credential)
@@ -192,7 +190,6 @@ export function CredentialDialog({
           <ScopeEditor
             value={draft.scope}
             onChange={(scope) => set('scope', scope)}
-            groups={groups}
             label="Usable by"
           />
           {errors.scope ? <span className="text-xs text-danger">{errors.scope}</span> : null}

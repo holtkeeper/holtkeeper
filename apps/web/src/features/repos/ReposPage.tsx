@@ -1,9 +1,9 @@
-import { type RepoSummary, leafGroups } from '@holtkeeper/api'
+import type { RepoSummary } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, FolderGit2, History, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { useGroupTitles, useRepos } from '../../api/queries.ts'
+import { useTeamTitles, useRepos } from '../../api/queries.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import { cellTones, dotToTagTone, healthLabels, healthOrder, healthTones } from '../../lib/home.ts'
 import { repoKey, repoSplat, splitRepoPath } from '../../lib/repo.ts'
@@ -33,7 +33,7 @@ import {
   FilterButton,
   type FleetColumn,
   FleetTable,
-  GroupName,
+  TeamName,
   HealthCell,
   Page,
   Placeholder,
@@ -43,9 +43,13 @@ import { copyLinkItem } from '../shell/copy-link.ts'
 import { useScope } from '../shell/scope.ts'
 import { useSession } from '../shell/session.ts'
 import { AddRepoDialog } from './AddRepoDialog.tsx'
+import { FolderTree } from './FolderTree.tsx'
 import { RepoAvatar } from './RepoAvatar.tsx'
 
-/** Every repository of the configured groups with its health, as a sortable fleet table. */
+/**
+ * Every fleet repository with its health, as a sortable fleet table beside a folder tree derived
+ * from the repository paths. The scope switch narrows to My teams or one owner team.
+ */
 export function ReposPage() {
   const { can, canGlobal } = useSession()
   const repos = useRepos()
@@ -54,14 +58,14 @@ export function ReposPage() {
   const setSearch = (next: ReposSearch) =>
     void navigate({ to: '/repos', search: next, replace: true })
   const [adding, setAdding] = useState(false)
-  const { view, setView, homeGroups } = useScope()
-  const titleOf = useGroupTitles()
+  const { view, setView, homeTeams } = useScope()
+  const titleOf = useTeamTitles()
   const all = repos.data?.repos ?? []
   const sort = reposSort(search)
   const rows = sortRows(worstFirst(filterRepos(all, search, titleOf)), sort, fleetSortValue)
   const forges = [...new Set(all.map((r) => r.repo.forge))].toSorted()
   const canAdd = canGlobal('settings:write')
-  const filtered = Boolean(search.q || search.health || search.forge)
+  const filtered = Boolean(search.q || search.health || search.forge || search.folder)
 
   const open = (summary: RepoSummary) =>
     void navigate({ to: '/repos/$', params: { _splat: repoSplat(summary.repo) } })
@@ -74,7 +78,7 @@ export function ReposPage() {
         value: search.q ?? '',
         onChange: (q) => setSearch({ ...search, ...(q ? { q } : { q: undefined }) }),
         'aria-label': 'Filter repositories',
-        placeholder: 'Filter by path or group',
+        placeholder: 'Filter by path or team',
       }}
       {...(canGlobal('settings:read') && {
         configure: { link: { to: '/settings/$section', params: { section: 'analyzers' } } },
@@ -92,76 +96,91 @@ export function ReposPage() {
       ) : repos.isError ? (
         <ErrorState error={repos.error} />
       ) : (
-        <FleetTable<RepoSummary, FleetSortKey>
-          label="Repositories"
-          rows={rows}
-          rowKey={(summary) => repoKey(summary.repo)}
-          columns={repoColumns}
-          sort={sort}
-          onSort={(next) => setSearch(withReposSort(search, next))}
-          scope={{ value: view, onChange: setView, homeGroups }}
-          strip={(shown, scope) => fleetStrip(shown, scope === 'mine' ? 'in my teams' : undefined)}
-          legend={healthLegend}
-          toolbar={
-            <>
-              <FilterButton
-                label="Health"
-                options={healthOrder.map((id) => ({ id, label: healthLabels[id] }))}
-                value={search.health ?? []}
-                onChange={(health) =>
-                  setSearch({
-                    ...search,
-                    health: health.length ? parseReposSearch({ health }).health : undefined,
-                  })
-                }
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          {all.length ? (
+            <aside className="lg:sticky lg:top-4 lg:w-60 lg:shrink-0">
+              <FolderTree
+                repos={all.map((summary) => summary.repo)}
+                selected={search.folder}
+                onSelect={(folder) => setSearch({ ...search, folder })}
               />
-              {forges.length > 1 ? (
-                <FilterButton
-                  label="Forge"
-                  options={forges.map((id) => ({ id, label: id }))}
-                  value={search.forge ?? []}
-                  onChange={(forge) =>
-                    setSearch({ ...search, forge: forge.length ? forge : undefined })
-                  }
+            </aside>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <FleetTable<RepoSummary, FleetSortKey>
+              label="Repositories"
+              rows={rows}
+              rowKey={(summary) => repoKey(summary.repo)}
+              columns={repoColumns}
+              sort={sort}
+              onSort={(next) => setSearch(withReposSort(search, next))}
+              scope={{ value: view, onChange: setView, homeTeams }}
+              strip={(shown, scope) =>
+                fleetStrip(shown, scope === 'mine' ? 'in my teams' : undefined)
+              }
+              legend={healthLegend}
+              toolbar={
+                <>
+                  <FilterButton
+                    label="Health"
+                    options={healthOrder.map((id) => ({ id, label: healthLabels[id] }))}
+                    value={search.health ?? []}
+                    onChange={(health) =>
+                      setSearch({
+                        ...search,
+                        health: health.length ? parseReposSearch({ health }).health : undefined,
+                      })
+                    }
+                  />
+                  {forges.length > 1 ? (
+                    <FilterButton
+                      label="Forge"
+                      options={forges.map((id) => ({ id, label: id }))}
+                      value={search.forge ?? []}
+                      onChange={(forge) =>
+                        setSearch({ ...search, forge: forge.length ? forge : undefined })
+                      }
+                    />
+                  ) : null}
+                  {sort ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => setSearch(withReposSort(search, null))}
+                    >
+                      Sort: worst first
+                    </Button>
+                  ) : null}
+                </>
+              }
+              onOpen={open}
+              othersSummary={healthSummaryText}
+              caption="· health cells open the matching tab of the repository"
+              empty={
+                <EmptyState
+                  icon={<FolderGit2 />}
+                  title={filtered ? 'No repository matches' : 'No repositories'}
+                  {...(!filtered && canAdd
+                    ? {
+                        action: (
+                          <Button variant="primary" onPress={() => setAdding(true)}>
+                            Add repository
+                          </Button>
+                        ),
+                      }
+                    : {})}
                 />
-              ) : null}
-              {sort ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onPress={() => setSearch(withReposSort(search, null))}
-                >
-                  Sort: worst first
-                </Button>
-              ) : null}
-            </>
-          }
-          onOpen={open}
-          othersSummary={healthSummaryText}
-          caption="· health cells open the matching tab of the repository"
-          empty={
-            <EmptyState
-              icon={<FolderGit2 />}
-              title={filtered ? 'No repository matches' : 'No repositories'}
-              {...(!filtered && canAdd
-                ? {
-                    action: (
-                      <Button variant="primary" onPress={() => setAdding(true)}>
-                        Add repository
-                      </Button>
-                    ),
-                  }
-                : {})}
+              }
             />
-          }
-        />
+          </div>
+        </div>
       )}
       {adding ? <AddRepoDialog onClose={() => setAdding(false)} /> : null}
     </Page>
   )
 }
 
-/** The repository list's columns, shared with a group's Repositories tab. */
+/** The repository list's columns, shared with a team's Repositories tab. */
 export const repoColumns: readonly FleetColumn<RepoSummary, FleetSortKey>[] = [
   {
     id: 'repo',
@@ -257,7 +276,7 @@ export const repoColumns: readonly FleetColumn<RepoSummary, FleetSortKey>[] = [
 ]
 
 function RepoName({ summary }: { summary: RepoSummary }) {
-  const { repo, groups } = summary
+  const { repo, teams } = summary
   const { namespace, name } = splitRepoPath(repo.path)
   return (
     <div className="flex items-start gap-2.5">
@@ -274,15 +293,15 @@ function RepoName({ summary }: { summary: RepoSummary }) {
         </Link>
         <div className="mt-0.5 flex flex-wrap items-center gap-1">
           <span className="mono text-[11px] text-dim">{repo.forge}</span>
-          {leafGroups(groups).map((group) => (
+          {teams.map((team) => (
             <Link
-              key={group}
-              to="/repos/groups/$groupId"
-              params={{ groupId: group }}
+              key={team}
+              to="/repos/teams/$teamId"
+              params={{ teamId: team }}
               className="no-underline"
             >
               <Tag className="hover:underline">
-                <GroupName group={group} path />
+                <TeamName team={team} />
               </Tag>
             </Link>
           ))}

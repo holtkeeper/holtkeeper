@@ -105,7 +105,7 @@ One repository in depth — its health per area, how fresh every analysis is, an
 
 ## The header
 
-The header shows the avatar, path, forge, default branch and groups, then:
+The header shows the avatar, path, forge, default branch and owner teams, then:
 
 - the **Updates** tag, saying whether changes arrive by webhook or polling. It turns into a warning when GitLab disabled the webhook. Click it to open the [Updates](/guide/repos/repository-settings/#how-the-repository-gets-updates) settings.
 - <Ui>Run analyzer</Ui>, which queues an analyzer for this repository now.
@@ -132,7 +132,7 @@ The tab and its area live in the URL, so a link opens the same view. A tab you m
 
 ### Supply chain and Quality areas
 
-Each area is the fleet page's table narrowed to this repository, with **Open in Supply ›** or **Open in Quality** linking to the fleet page filtered to it. Stack links to its group's **Stack & conventions** tab instead.
+Each area is the fleet page's table narrowed to this repository, with **Open in Supply ›** or **Open in Quality** linking to the fleet page filtered to it. Stack links to the **Stack & conventions** tab of its owner team instead (one of your home teams when it is one), or to Supply › Stack when no team owns it.
 
 <Screen title="Repos › acme/checkout-web › Quality › Bundles">
   <Toolbar title="Quality">

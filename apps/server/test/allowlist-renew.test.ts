@@ -13,16 +13,16 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: { web: { forge: 'work', include: ['acme/web-*'] } },
+  teams: { web: { owns: ['work:acme/web-*'] } },
 })
 
 const auth = headerAuth({
   roles: {
     auditor: [
-      { scope: { groups: ['web'] }, actions: ['audits:read', 'audits:run', 'settings:read'] },
+      { scope: { teams: ['web'] }, actions: ['audits:read', 'audits:run', 'settings:read'] },
     ],
-    owner: [{ scope: { groups: ['web'] }, actions: ['settings:write'] }],
-    other: [{ scope: { groups: ['pay'] }, actions: ['settings:write'] }],
+    owner: [{ scope: { teams: ['web'] }, actions: ['settings:write'] }],
+    other: [{ scope: { teams: ['pay'] }, actions: ['settings:write'] }],
   },
 })
 const as = (role: string) => ({ 'x-forwarded-user': role, 'x-forwarded-groups': role })
@@ -53,7 +53,7 @@ beforeEach(async () => {
   await store.settings.put({
     id: 'a-web',
     key: 'audit.allowlist',
-    scope: { groups: ['web'] },
+    scope: { teams: ['web'] },
     value: [
       { id: 'GHSA-1', reason: 'Not reachable from widgets.', expires: '2026-11-05' },
       { id: 'GHSA-1', package: 'some-lib', reason: 'Waiting for 2.0.', expires: '2026-11-01' },
@@ -64,7 +64,7 @@ beforeEach(async () => {
   await store.settings.put({
     id: 'fix-web',
     key: 'audit.fix',
-    scope: { groups: ['web'] },
+    scope: { teams: ['web'] },
     value: true,
     secret: false,
     updatedAt: '2026-10-01T00:00:00.000Z',

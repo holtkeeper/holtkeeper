@@ -5,8 +5,8 @@ import { type ReactNode, useCallback, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
-  useGroups,
-  useGroupTitles,
+  useTeamNames,
+  useTeamTitles,
   useJobAnalyzers,
   useJobMutations,
   useRepos,
@@ -23,11 +23,12 @@ import { useSession } from '../shell/session.ts'
 
 interface Target {
   repo?: RepoRef | undefined
-  group?: string | undefined
+  /** A team key: group-scope analyzers run over the repositories it owns. */
+  team?: string | undefined
   analyzer?: string | undefined
 }
 
-/** Queues one analyzer run for a repository or group and opens the new job on success. */
+/** Queues one analyzer run for a repository or team and opens the new job on success. */
 function RunJobDialog({
   isOpen,
   onOpenChange,
@@ -39,15 +40,15 @@ function RunJobDialog({
 
 function RunJobForm({
   repo,
-  group,
+  team,
   analyzer: initialKind,
   onClose,
 }: Target & { onClose: () => void }) {
   const navigate = useNavigate()
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const analyzers = useJobAnalyzers()
   const { create } = useJobMutations()
-  const available = analyzersFor(analyzers.data?.analyzers ?? [], { repo, group })
+  const available = analyzersFor(analyzers.data?.analyzers ?? [], { repo, team })
   const [kind, setKind] = useState<string | undefined>(initialKind)
   const selected =
     available.find((a) => a.kind === kind) ?? (available.length === 1 ? available[0] : undefined)
@@ -66,14 +67,14 @@ function RunJobForm({
   )
   const [applied, setApplied] = useState(0)
   const [targetRepo, setTargetRepo] = useState<string | undefined>()
-  const [targetGroup, setTargetGroup] = useState<string | undefined>()
+  const [targetTeam, setTargetTeam] = useState<string | undefined>()
   const [ref, setRef] = useState('')
 
-  const fixed = repo !== undefined || group !== undefined
+  const fixed = repo !== undefined || team !== undefined
   const repoValue = repo ? repoKey(repo) : selected?.scope === 'repo' ? targetRepo : undefined
-  const groupValue = group ?? (selected?.scope === 'group' ? targetGroup : undefined)
+  const teamValue = team ?? (selected?.scope === 'group' ? targetTeam : undefined)
   const invalid =
-    !selected || options === undefined || (selected.scope === 'repo' ? !repoValue : !groupValue)
+    !selected || options === undefined || (selected.scope === 'repo' ? !repoValue : !teamValue)
 
   const pick = (next: string) => {
     setKind(next)
@@ -87,7 +88,7 @@ function RunJobForm({
       {
         analyzer: selected.kind,
         ...(selected.scope === 'repo' && repoValue ? { repo: repoValue } : {}),
-        ...(selected.scope === 'group' && groupValue ? { group: groupValue } : {}),
+        ...(selected.scope === 'group' && teamValue ? { team: teamValue } : {}),
         ...(ref.trim() ? { ref: ref.trim() } : {}),
         ...(isRecord(options) ? { options } : {}),
       },
@@ -108,11 +109,7 @@ function RunJobForm({
       size="lg"
       title="Run analyzer"
       description={
-        repo
-          ? repo.path
-          : group
-            ? `Group ${titleOf(group)}`
-            : 'Queue a background run of an analyzer'
+        repo ? repo.path : team ? `Team ${titleOf(team)}` : 'Queue a background run of an analyzer'
       }
       footer={
         <>
@@ -139,7 +136,7 @@ function RunJobForm({
         </Notice>
       ) : available.length === 0 ? (
         <Notice title="No analyzers">
-          {group ? 'No analyzer runs on a group.' : 'No analyzer runs on a repository.'}
+          {team ? 'No analyzer runs on a team.' : 'No analyzer runs on a repository.'}
         </Notice>
       ) : (
         <div className="flex flex-col gap-4">
@@ -162,7 +159,7 @@ function RunJobForm({
             selected.scope === 'repo' ? (
               <RepoPicker value={targetRepo} onChange={setTargetRepo} />
             ) : (
-              <GroupPicker value={targetGroup} onChange={setTargetGroup} />
+              <TeamPicker value={targetTeam} onChange={setTargetTeam} />
             )
           ) : null}
           {selected ? (
@@ -234,37 +231,30 @@ function RepoPicker({
   )
 }
 
-function GroupPicker({
+function TeamPicker({
   value,
   onChange,
 }: {
   value: string | undefined
   onChange: (value: string) => void
 }) {
-  const groups = useGroups()
-  const titleOf = useGroupTitles()
-  if (groups.isPending) return <Placeholder className="h-14" />
-  if (groups.isError)
-    return (
-      <Notice tone="danger" title="Groups not loaded">
-        {messageOf(groups.error)}
-      </Notice>
-    )
+  const teams = useTeamNames()
+  const titleOf = useTeamTitles()
   return (
     <Select
-      label="Group"
-      placeholder="Pick a group…"
-      options={groups.data.entries.map((entry) => ({
-        id: entry.id,
+      label="Team"
+      placeholder="Pick a team…"
+      options={teams.map((team) => ({
+        id: team,
         label: (
           <span className="flex items-baseline gap-2">
-            {titleOf(entry.id)}
-            {titleOf(entry.id) === entry.id ? null : (
-              <span className="mono text-[11px] text-muted">{entry.id}</span>
+            {titleOf(team)}
+            {titleOf(team) === team ? null : (
+              <span className="mono text-[11px] text-muted">{team}</span>
             )}
           </span>
         ),
-        text: titleOf(entry.id),
+        text: titleOf(team),
       }))}
       value={value}
       onChange={onChange}
@@ -293,14 +283,14 @@ function Needs({ analyzer }: { analyzer: JobAnalyzerView }) {
  */
 export function useRunJob({
   repo,
-  group,
+  team,
   analyzer,
   label = 'Run analyzer',
 }: Target & { label?: string }): { action: PageAction | undefined; dialog: ReactNode } {
   const { can } = useSession()
   const analyzers = useJobAnalyzers()
   const [open, setOpen] = useState(false)
-  const available = analyzers.data ? analyzersFor(analyzers.data.analyzers, { repo, group }) : []
+  const available = analyzers.data ? analyzersFor(analyzers.data.analyzers, { repo, team }) : []
   const fits =
     can('analyses:run') &&
     available.length > 0 &&
@@ -312,7 +302,7 @@ export function useRunJob({
         isOpen={open}
         onOpenChange={setOpen}
         repo={repo}
-        group={group}
+        team={team}
         analyzer={analyzer}
       />
     ),

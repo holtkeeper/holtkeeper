@@ -37,7 +37,7 @@ export interface BranchListRow extends BranchRow {
   key: string
   repo: RepoRef
   repoKey: string
-  groups: string[]
+  teams: string[]
 }
 
 /** One row per listed branch of every repository on the overview, in the order the API gives. */
@@ -49,7 +49,7 @@ export function branchListRows(overview: BranchesOverview): BranchListRow[] {
       key: `${key}#${branch.name}`,
       repo: entry.repo,
       repoKey: key,
-      groups: entry.groups,
+      teams: entry.teams,
     }))
   })
 }

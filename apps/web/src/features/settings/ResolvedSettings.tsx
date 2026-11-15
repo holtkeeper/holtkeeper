@@ -11,8 +11,7 @@ import { Fragment, type ReactNode, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import {
   useCredentials,
-  useGroups,
-  useGroupTitles,
+  useTeamTitles,
   useRepos,
   useResolvedScope,
   useSettingMutations,
@@ -25,7 +24,6 @@ import {
   type ResolvedFilter,
   type ResolvedSection,
   layerCounts,
-  parentGroupCount,
   orgRowMatches,
   orgRows,
   resolvedSections,
@@ -35,7 +33,7 @@ import {
   sourceLabel,
 } from '../../lib/resolved-settings.ts'
 import { editorFor, previewValue } from '../../lib/schema.ts'
-import { type ScopeFocus, focusParent, isSharedScope, scopeOfFocus } from '../../lib/scope.ts'
+import { type ScopeFocus, isSharedScope, scopeOfFocus } from '../../lib/scope.ts'
 import {
   type SettingsSectionId,
   definitionsOf,
@@ -83,7 +81,7 @@ const filters: { id: ResolvedFilter; label: string }[] = [
 const chipClass: Record<SettingLayer | 'here', string> = {
   default: 'border-dashed border-line text-dim',
   org: 'border-line bg-chip text-foreground',
-  group: 'border-line-strong bg-chip text-foreground',
+  team: 'border-line-strong bg-chip text-foreground',
   repo: 'border-line bg-chip text-muted',
   here: 'border-[color-mix(in_oklab,var(--accent)_34%,transparent)] bg-[color-mix(in_oklab,var(--accent)_12%,transparent)] text-accent',
 }
@@ -111,8 +109,8 @@ const overriddenRowClass =
   '[&>td]:bg-[color-mix(in_oklab,var(--accent)_6%,transparent)] [&>td:first-child]:shadow-[inset_2px_0_var(--accent)]'
 
 /**
- * Every setting as it applies to a repository or a group: the winning value, the layer it comes
- * from (default, org, group, repository) and what it replaces, grouped by category with filters
+ * Every setting as it applies to a repository or a team: the winning value, the layer it comes
+ * from (default, org, team, repository or path) and what it replaces, grouped by category with filters
  * and a layer legend. People with `settings:write` override a key for the focus inline, edit or
  * remove the focus's own entry, or open the full editor. For a repository the Updates category
  * also shows its webhook, polling and recent events. `section` picks a category (`updates`, a
@@ -120,17 +118,14 @@ const overriddenRowClass =
  */
 export function ResolvedSettings({
   focus,
-  groups,
   section,
   onSection,
 }: {
   focus: ScopeFocus
-  /** Known groups, offered in the scope editor of the full editor. */
-  groups: readonly string[]
   section?: string | undefined
   onSection?: (section: string | undefined) => void
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { can, principal } = useSession()
   const elsewhere = visibleSettingsSections(principal).filter(
     (id) => id === 'analyzers' || id === 'policies' || id === 'audit',
@@ -146,7 +141,7 @@ export function ResolvedSettings({
   const [dialog, setDialog] = useState<Editing>()
   const [deleting, setDeleting] = useState<Editing>()
   const writable = can('settings:write')
-  const here = focus.kind === 'repo' ? 'this repository' : 'this group'
+  const here = focus.kind === 'repo' ? 'this repository' : 'this team'
 
   if (resolved.isPending || settings.isPending) return <Placeholder className="h-64" />
   if (resolved.isError) return <ErrorState error={resolved.error} />
@@ -172,14 +167,12 @@ export function ResolvedSettings({
     }))
     .filter((s) => s.rows.length > 0)
   const counts = layerCounts(resolved.data.rows)
-  const inherited =
-    focusParent(focus) === undefined ? undefined : parentGroupCount(resolved.data.rows, focus)
   const filterCounts: Record<ResolvedFilter, number> = {
     all: resolved.data.rows.length,
     here: resolved.data.rows.filter((row) => setHere(row, focus)).length,
     changed: resolved.data.rows.filter((row) => row.source.layer !== 'default').length,
   }
-  const groupNames = resolved.data.groups.map(titleOf).join(', ')
+  const teamNames = resolved.data.teams.map(titleOf).join(', ')
   const showUpdates = focus.kind === 'repo' && (selected === undefined || selected === UPDATES)
 
   const display = (definition: SettingDefinitionView | undefined, value: unknown) =>
@@ -394,10 +387,10 @@ export function ResolvedSettings({
             <h3 className="text-[13px] font-semibold">Effective configuration</h3>
             <p className="text-xs text-muted">
               Every setting as it applies to {here}
-              {focus.kind === 'group'
-                ? ' for members no narrower entry names'
-                : groupNames
-                  ? ` (groups ${groupNames})`
+              {focus.kind === 'team'
+                ? ' for repositories it owns that no narrower entry names'
+                : teamNames
+                  ? ` (teams ${teamNames})`
                   : ''}
               , and where the value comes from.
             </p>
@@ -451,31 +444,18 @@ export function ResolvedSettings({
               <span className="mono text-dim">{counts.org}</span>
             </li>
             <li aria-hidden>→</li>
-            {inherited !== undefined ? (
-              <>
-                <li className="inline-flex items-center gap-1.5">
-                  <SourceChip layer="group">Parent group</SourceChip>
-                  <span className="mono text-dim">{inherited}</span>
-                </li>
-                <li aria-hidden>→</li>
-              </>
-            ) : null}
             <li className="inline-flex items-center gap-1.5">
-              <SourceChip layer="group" here={focus.kind === 'group'}>
-                {focus.kind === 'group'
-                  ? 'This group'
-                  : groupNames
-                    ? `Group ${groupNames}`
-                    : 'Groups'}
+              <SourceChip layer="team" here={focus.kind === 'team'}>
+                {focus.kind === 'team' ? 'This team' : teamNames ? `Team ${teamNames}` : 'Teams'}
               </SourceChip>
-              <span className="mono text-dim">{counts.group - (inherited ?? 0)}</span>
+              <span className="mono text-dim">{counts.team}</span>
             </li>
             {focus.kind === 'repo' ? (
               <>
                 <li aria-hidden>→</li>
                 <li className="inline-flex items-center gap-1.5">
                   <SourceChip layer="repo" here>
-                    This repo
+                    Paths and this repo
                   </SourceChip>
                   <span className="mono text-dim">{counts.repo}</span>
                 </li>
@@ -511,7 +491,7 @@ export function ResolvedSettings({
           ) : (
             'audit log'
           )}
-          . Values for everything and for groups are edited in{' '}
+          . Values for everything, teams and folders are edited in{' '}
           {elsewhere.includes('analyzers') ? (
             <Link
               to="/settings/$section"
@@ -532,7 +512,6 @@ export function ResolvedSettings({
           key={dialog.entry?.id ?? dialog.definition.key}
           definition={dialog.definition}
           {...(dialog.entry ? { entry: dialog.entry } : { initialScope: scopeOfFocus(focus) })}
-          groups={groups}
           onClose={() => setDialog(undefined)}
         />
       ) : null}
@@ -553,8 +532,8 @@ export function ResolvedSettings({
           })
         }
       >
-        {focus.kind === 'group'
-          ? 'Repositories in this group fall back to broader entries or the default.'
+        {focus.kind === 'team'
+          ? "The team's repositories fall back to broader entries or the default."
           : 'This repository falls back to broader entries or the default.'}
       </ConfirmDialog>
     </div>
@@ -692,7 +671,7 @@ function OrgSource({ row }: { row: OrgSettingRow }) {
 }
 
 /** Edit and reset controls of one org row, with the dialogs they open. */
-function useOrgEditing(groups: readonly string[]) {
+function useOrgEditing() {
   const { canGlobal } = useSession()
   const { remove } = useSettingMutations()
   const [dialog, setDialog] = useState<Editing>()
@@ -730,7 +709,6 @@ function useOrgEditing(groups: readonly string[]) {
           key={dialog.entry?.id ?? dialog.definition.key}
           definition={dialog.definition}
           {...(dialog.entry ? { entry: dialog.entry } : { initialScope: { all: true } })}
-          groups={groups}
           onClose={() => setDialog(undefined)}
         />
       ) : null}
@@ -751,7 +729,7 @@ function useOrgEditing(groups: readonly string[]) {
           })
         }
       >
-        The organization-wide entry is removed; entries for groups and repositories stay.
+        The organization-wide entry is removed; entries for teams and paths stay.
       </ConfirmDialog>
     </>
   )
@@ -766,9 +744,7 @@ function useOrgEditing(groups: readonly string[]) {
  */
 export function BackgroundWork() {
   const settings = useSettings()
-  const groups = useGroups()
-  const groupNames = (groups.data?.entries ?? []).map((entry) => entry.id)
-  const { controls, dialogs } = useOrgEditing(groupNames)
+  const { controls, dialogs } = useOrgEditing()
   if (settings.isPending) return <Placeholder className="h-48" />
   if (settings.isError) return <ErrorState error={settings.error} />
   const definitions = new Map(settings.data.definitions.map((d) => [d.key, d]))
@@ -847,23 +823,24 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const focusOf = (value: string): ScopeFocus => {
   const repo = value.startsWith('repo:') ? parseRepoKey(value.slice(5)) : undefined
-  return repo ? { kind: 'repo', repo } : { kind: 'group', group: value }
+  return repo ? { kind: 'repo', repo } : { kind: 'team', team: value.replace(/^team:/, '') }
 }
 
 /**
  * Settings › System › All keys: how many settings exist, the ones without a page of their own as
  * tags, and behind "Show all keys" every key with its winner and source (decision 7). The
- * organization view resolves keys from the entries; picking a group or a repository shows the
+ * organization view resolves keys from the entries; picking a team or a repository shows the
  * settings resolver for it. Opens by itself when the URL points at a key homed here.
  */
 export function AllKeys() {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const settings = useSettings()
-  const groups = useGroups()
   const repos = useRepos()
-  const groupNames = (groups.data?.entries ?? []).map((entry) => entry.id)
+  const teamNames = [
+    ...new Set((repos.data?.repos ?? []).flatMap((summary) => summary.teams)),
+  ].toSorted()
   const repoKeys = (repos.data?.repos ?? []).map((summary) => repoKey(summary.repo)).toSorted()
-  const { controls, dialogs } = useOrgEditing(groupNames)
+  const { controls, dialogs } = useOrgEditing()
   const [open, setOpen] = useState(() => window.location.hash.startsWith('#setting-'))
   const [query, setQuery] = useState('')
   const [changedOnly, setChangedOnly] = useState(false)
@@ -919,7 +896,10 @@ export function AllKeys() {
               onChange={(value) => setFocus(value === 'org' ? '' : value)}
               options={[
                 { id: 'org', label: 'Organization' },
-                ...groupNames.map((group) => ({ id: group, label: `Group ${titleOf(group)}` })),
+                ...teamNames.map((team) => ({
+                  id: `team:${team}`,
+                  label: `Team ${titleOf(team)}`,
+                })),
                 ...repoKeys.map((key) => ({ id: `repo:${key}`, label: key })),
               ]}
             />
@@ -949,7 +929,7 @@ export function AllKeys() {
           </div>
           {focus ? (
             <div className="border-t border-line p-3.5">
-              <ResolvedSettings key={focus} focus={focusOf(focus)} groups={groupNames} />
+              <ResolvedSettings key={focus} focus={focusOf(focus)} />
             </div>
           ) : shown.length ? (
             <div className="border-t border-line">

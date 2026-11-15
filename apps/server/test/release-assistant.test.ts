@@ -29,7 +29,7 @@ const auth = headerAuth({
     admin: [{ scope: { all: true }, actions: ['releases:read', 'releases:run', 'settings:write'] }],
     viewer: [{ scope: { all: true }, actions: ['releases:read'] }],
     configurer: [{ scope: { all: true }, actions: ['releases:read', 'settings:write'] }],
-    games: [{ scope: { groups: ['games'] }, actions: ['releases:read'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['releases:read'] }],
     toys: [{ scope: { repos: ['work:t/*'] }, actions: ['releases:read', 'releases:run'] }],
     reposOnly: [{ scope: { all: true }, actions: ['repos:read'] }],
   },
@@ -56,7 +56,7 @@ beforeEach(async () => {
     forges: {
       work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fake.forge },
     },
-    groups: { games: { forge: 'work', include: ['g/app'] } },
+    teams: { games: { owns: ['work:g/app'] } },
   })
   deps = {
     config,
@@ -499,7 +499,7 @@ describe('release assistant routes', () => {
     await store.settings.put({
       id: 'releases-games',
       key: 'releases',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: { enabled: true },
       secret: false,
       updatedAt: '2026-10-02T00:00:00.000Z',

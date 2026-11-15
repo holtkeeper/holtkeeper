@@ -105,13 +105,13 @@ export function AutomationMap({
   const job = useJob(search.job)
   const targets = useJobTargets()
 
-  const jobGroups = job.data
+  const jobTeams = job.data
     ? job.data.group !== undefined
       ? [job.data.group]
-      : (targets.data?.targets.find((t) => t.repo === repoKey(job.data.repo))?.groups ?? [])
+      : (targets.data?.targets.find((t) => t.repo === repoKey(job.data.repo))?.teams ?? [])
     : []
   const jobLane = job.data
-    ? jobLanes(jobGroups)
+    ? jobLanes(jobTeams)
         .toReversed()
         .find((id) => {
           const lane = mergedLane(model.lanes, id)
@@ -213,7 +213,7 @@ export function AutomationMap({
           <RuleEditor
             rule={ref}
             model={model}
-            group={merged.group}
+            team={merged.team}
             onDone={() => setSearch({ rule: undefined })}
           />
         ),

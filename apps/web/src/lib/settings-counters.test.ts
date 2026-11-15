@@ -27,8 +27,8 @@ const credential = (overrides: Partial<CredentialView>): CredentialView => ({
 })
 
 test('the AI entry shows the share of the budget over everything', () => {
-  expect(budgetMeta([budget({ groups: ['shapes'] }, 90), budget({ all: true }, 55.6)])).toBe('56%')
-  expect(budgetMeta([budget({ groups: ['shapes'] }, 90)])).toBeUndefined()
+  expect(budgetMeta([budget({ teams: ['shapes'] }, 90), budget({ all: true }, 55.6)])).toBe('56%')
+  expect(budgetMeta([budget({ teams: ['shapes'] }, 90)])).toBeUndefined()
 })
 
 test('credentials with errors, failed probes or a near expiry need attention', () => {

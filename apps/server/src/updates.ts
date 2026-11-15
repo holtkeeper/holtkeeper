@@ -1,9 +1,9 @@
 import type { RepoTarget } from '@holtkeeper/access'
-import { parentGroup } from '@holtkeeper/access'
+import { globMatches, hasWildcard } from '@holtkeeper/access/paths'
 import type { RepoUpdatesSummary } from '@holtkeeper/api'
-import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core'
+import { type HoltkeeperConfig, fleetPatterns } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
-import { groupRepositories, staticPrefix } from '@holtkeeper/jobs'
+import { fleetRepositories, staticPrefix } from '@holtkeeper/jobs'
 import { type Limiter, resolveLimitPolicy } from '@holtkeeper/limits'
 import { resolveSetting } from '@holtkeeper/settings'
 import type { KvStore, SettingEntry, Store } from '@holtkeeper/store'
@@ -27,40 +27,44 @@ import { queueNewRepoJobs } from './new-repos.ts'
 const seenKey = (repo: RepoRef) => `webhook-seen:${repo.forge}:${repo.path}`
 const stateKey = (repo: RepoRef) => `poll:${repo.forge}:${repo.path}`
 const lockKey = (repo: RepoRef) => `poll-lock:${repo.forge}:${repo.path}`
-const groupKey = (group: string) => `poll-group:${group}`
+const fleetKey = (forge: string) => `poll-fleet:${forge}`
 const repoId = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
 /** A repository counts as reached by webhooks for this long after a delivery about it. */
 const WEBHOOK_FRESH_MS = 24 * 3_600_000
 const LOCK_TTL_SECONDS = 120
 const REPO_LIST_TTL_MS = 30 * 60_000
-/** Attempts kept per repository and per group. */
+/** Attempts kept per repository and per forge listing. */
 const MAX_ATTEMPTS = 20
 
-const exactIncludes = (group: HoltkeeperConfig['groups'][string]): RepoRef[] =>
-  group.include
-    .filter((path) => staticPrefix(path) === path)
-    .map((path) => ({ forge: group.forge, path }))
+/** The fleet's exact paths on a forge (patterns without wildcards that no exclude drops). */
+const exactIncludes = (config: HoltkeeperConfig, forge: string): RepoRef[] => {
+  const { include, exclude } = fleetPatterns(config, forge)
+  return include
+    .filter((path) => !hasWildcard(path))
+    .filter((path) => !exclude.some((pattern) => globMatches(pattern, path)))
+    .map((path) => ({ forge, path }))
+}
+
+/** Forges with a fleet: at least one include pattern (`fleetPatterns`). */
+const fleetForges = (config: HoltkeeperConfig): string[] =>
+  Object.keys(config.forges).filter((forge) => fleetPatterns(config, forge).include.length > 0)
 
 /**
- * Repositories the poller last listed for the config's root groups (none without `kv`), plus their
- * exact include paths; read from the store only, so it never calls a forge. Subgroups add nothing:
- * their members are members of the parent.
+ * Repositories the poller last listed for every forge's fleet (none without `kv`), plus the
+ * fleet's exact paths; read from the store only, so it never calls a forge.
  */
 export async function listedRepos(
   kv: KvStore | undefined,
   config: HoltkeeperConfig,
 ): Promise<RepoRef[]> {
-  const groups = rootGroups(config).flatMap((name) => {
-    const group = config.groups[name]
-    return group ? [[name, group] as const] : []
-  })
-  const listings = kv ? await Promise.all(groups.map(([name]) => kv.get(groupKey(name)))) : []
+  const forges = fleetForges(config)
+  const listings = kv ? await Promise.all(forges.map((forge) => kv.get(fleetKey(forge)))) : []
   const found = new Map<string, RepoRef>()
   for (const listing of listings)
-    if (isGroupListing(listing)) for (const repo of listing.repos) found.set(repoId(repo), repo)
-  for (const [, group] of groups)
-    for (const repo of exactIncludes(group)) found.set(repoId(repo), repo)
+    if (isFleetListing(listing)) for (const repo of listing.repos) found.set(repoId(repo), repo)
+  for (const forge of forges)
+    for (const repo of exactIncludes(config, forge)) found.set(repoId(repo), repo)
   return [...found.values()]
 }
 
@@ -130,7 +134,7 @@ interface PollAttempt {
   error?: string
 }
 
-/** One listing of a group's repositories on its forge. */
+/** One listing of the fleet's repositories on a forge. */
 interface ListingAttempt {
   at: string
   trigger: AttemptTrigger
@@ -139,11 +143,11 @@ interface ListingAttempt {
   error?: string
 }
 
-/** What polling knows about a group's repositories, as stored. */
-interface GroupListing {
+/** What polling knows about the fleet's repositories on one forge, as stored. */
+interface FleetListing {
   /** Repositories of the last successful listing. */
   repos: RepoRef[]
-  /** What the include patterns matched in that listing, before exclude patterns applied. */
+  /** What the fleet patterns matched in that listing, before the forge's excludes applied. */
   matched?: RepoRef[]
   listedAt?: string
   /** Newest first. */
@@ -190,7 +194,7 @@ interface PollerOptions {
   now: () => Date
   /** How often due repositories are looked for. Default 15 s. */
   tickMs?: number
-  /** Receives repositories a group listing found that no stored listing had. */
+  /** Receives repositories a fleet listing found that no stored listing had. */
   onNewRepos?: (repos: RepoRef[]) => Promise<unknown>
   log: (line: string) => void
 }
@@ -198,7 +202,7 @@ interface PollerOptions {
 const isPollState = (value: unknown): value is PollState =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const isGroupListing = (value: unknown): value is GroupListing =>
+const isFleetListing = (value: unknown): value is FleetListing =>
   typeof value === 'object' && value !== null && 'repos' in value && 'attempts' in value
 
 const withAttempt = <T>(attempts: readonly T[] | undefined, attempt: T) =>
@@ -224,78 +228,56 @@ const estimateCost = (config: PollingConfig) =>
  * slowed down evenly per forge credential when the credential's polling budget (`pollShare` of
  * its `requestsPerMinute`) cannot keep up, and held back while the credential is saturated. One
  * poll per credential runs at a time; a store lease keeps two processes from polling the same
- * repository at once. A group listing that finds repositories no stored listing of any group had
- * hands them to `onNewRepos`.
+ * repository at once. A forge's fleet listing that finds repositories its stored listing did not
+ * have hands them to `onNewRepos`.
  */
 function createPoller(options: PollerOptions) {
   const { config, store, kv, limiter } = options
   const spend = createSpendWindow()
   const busy = new Set<string>()
 
-  const readStored = async (group: string): Promise<GroupListing | undefined> => {
-    const value = await kv.get(groupKey(group))
-    return isGroupListing(value) ? value : undefined
+  const readListing = async (forge: string): Promise<FleetListing | undefined> => {
+    const value = await kv.get(fleetKey(forge))
+    return isFleetListing(value) ? value : undefined
   }
 
   /**
-   * A subgroup's listing, read from its parent's stored one: `matched` holds every member of the
-   * parent (the candidates its patterns pick from), `repos` the ones `resolveRepo` puts in it.
+   * What the fleet patterns match on one forge, before the forge's excludes apply: the fleet of a
+   * config narrowed to that forge without its excludes.
    */
-  const subgroupListing = async (
-    group: string,
-    parent: string,
-  ): Promise<GroupListing | undefined> => {
-    const definition = config.groups[group]
-    const stored = await readStored(parent)
-    if (!definition || !stored) return undefined
-    return {
-      repos: stored.repos.filter((repo) => resolveRepo(config, repo).groups.includes(group)),
-      matched: stored.repos,
-      ...(stored.listedAt && { listedAt: stored.listedAt }),
-      attempts: stored.attempts,
-    }
+  const matchFleet = (forge: string): Promise<RepoRef[]> => {
+    const definition = config.forges[forge]
+    if (!definition) return Promise.resolve([])
+    return fleetRepositories({
+      ...config,
+      forges: { [forge]: definition },
+      fleet: {
+        ...config.fleet,
+        [forge]: { include: config.fleet[forge]?.include ?? [], exclude: [] },
+      },
+    })()
   }
 
-  const readListing = async (group: string): Promise<GroupListing | undefined> => {
-    const parent = parentGroup(group)
-    return parent === undefined ? readStored(group) : subgroupListing(group, parent)
-  }
-
-  /**
-   * Lists a group's repositories on its forge now and records the attempt. A subgroup is never
-   * listed: it gets the view of its parent's stored listing.
-   */
-  const listGroup = async (group: string, trigger: AttemptTrigger): Promise<GroupListing> => {
-    if (parentGroup(group) !== undefined)
-      return (await readListing(group)) ?? { repos: [], matched: [], attempts: [] }
+  /** Lists the fleet's repositories on a forge now and records the attempt. */
+  const listFleet = async (forge: string, trigger: AttemptTrigger): Promise<FleetListing> => {
     const started = options.now()
-    const previous = await readStored(group)
+    const previous = await readListing(forge)
     const attempt = (result: { repos?: number; error?: string }): ListingAttempt => ({
       at: started.toISOString(),
       trigger,
       durationMs: options.now().getTime() - started.getTime(),
       ...result,
     })
-    let listing: GroupListing
+    let listing: FleetListing
     let added: RepoRef[] = []
     try {
-      const definition = config.groups[group]
-      const matched = definition
-        ? await groupRepositories({
-            ...config,
-            groups: { ...config.groups, [group]: { ...definition, exclude: [] } },
-          })(group)
-        : []
+      const { exclude } = fleetPatterns(config, forge)
+      const matched = await matchFleet(forge)
       const repos = matched.filter(
-        (repo) => !definition?.exclude.some((pattern) => new Bun.Glob(pattern).match(repo.path)),
+        (repo) => !exclude.some((pattern) => globMatches(pattern, repo.path)),
       )
       if (options.onNewRepos) {
-        const known = new Set<string>()
-        for (const name of rootGroups(config)) {
-          // oxlint-disable-next-line no-await-in-loop -- one store read per group
-          const stored = name === group ? previous : await readStored(name)
-          for (const repo of stored?.repos ?? []) known.add(repoId(repo))
-        }
+        const known = new Set((previous?.repos ?? []).map(repoId))
         added = repos.filter((repo) => !known.has(repoId(repo)))
       }
       listing = {
@@ -305,7 +287,7 @@ function createPoller(options: PollerOptions) {
         attempts: withAttempt(previous?.attempts, attempt({ repos: repos.length })),
       }
     } catch (error) {
-      options.log(`polling: could not list group ${group}: ${messageOf(error)}`)
+      options.log(`polling: could not list the fleet on ${forge}: ${messageOf(error)}`)
       listing = {
         repos: previous?.repos ?? [],
         ...(previous?.matched && { matched: previous.matched }),
@@ -313,37 +295,36 @@ function createPoller(options: PollerOptions) {
         attempts: withAttempt(previous?.attempts, attempt({ error: messageOf(error) })),
       }
     }
-    await kv.set(groupKey(group), listing)
+    await kv.set(fleetKey(forge), listing)
     if (added.length && options.onNewRepos)
       try {
         await options.onNewRepos(added)
       } catch (error) {
-        options.log(`polling: new repositories of group ${group}: ${messageOf(error)}`)
+        options.log(`polling: new repositories on ${forge}: ${messageOf(error)}`)
       }
     return listing
   }
 
   /**
-   * Repositories of every root group, listed again once the last attempt is older than 30 minutes,
-   * plus exact repositories the `polling` setting names. A group that never listed falls back to
-   * its exact include paths.
+   * The fleet of every forge, listed again once the last attempt is older than 30 minutes, plus
+   * exact repositories the `polling` setting names. A forge that never listed falls back to the
+   * fleet's exact paths.
    */
   const knownRepos = async (): Promise<RepoRef[]> => {
     const now = options.now().getTime()
     const found = new Map<string, RepoRef>()
-    for (const name of rootGroups(config)) {
-      const group = config.groups[name]
-      if (!group) continue
-      // oxlint-disable-next-line no-await-in-loop -- groups are listed one after another
-      const stored = await readStored(name)
+    for (const forge of fleetForges(config)) {
+      // oxlint-disable-next-line no-await-in-loop -- forges are listed one after another
+      const stored = await readListing(forge)
       const lastAt = stored?.attempts[0]?.at
       const listing =
         stored && lastAt && now - Date.parse(lastAt) < REPO_LIST_TTL_MS
           ? stored
           : // oxlint-disable-next-line no-await-in-loop
-            await listGroup(name, 'scheduled')
+            await listFleet(forge, 'scheduled')
       for (const repo of listing.repos) found.set(repoId(repo), repo)
-      if (!listing.listedAt) for (const repo of exactIncludes(group)) found.set(repoId(repo), repo)
+      if (!listing.listedAt)
+        for (const repo of exactIncludes(config, forge)) found.set(repoId(repo), repo)
     }
     for (const entry of await store.settings.list(pollingSetting.key))
       for (const pattern of entry.scope.repos ?? []) {
@@ -538,15 +519,15 @@ function createPoller(options: PollerOptions) {
       const current = await status(repo)
       return pollOne(repo, current.config, current.key, 'manual')
     },
-    /** The stored listing of a group; a subgroup's is narrowed from its parent's. */
+    /** The stored fleet listing of a forge. */
     listing: readListing,
-    /** When the next scheduled listing of a group is due; absent before its first listing. */
-    nextListingAt: (listing: GroupListing | undefined) => {
+    /** When the next scheduled listing of a forge is due; absent before its first listing. */
+    nextListingAt: (listing: FleetListing | undefined) => {
       const lastAt = listing?.attempts[0]?.at
       return lastAt ? new Date(Date.parse(lastAt) + REPO_LIST_TTL_MS).toISOString() : undefined
     },
-    /** Lists a group's repositories now; the next tick polls what it found. */
-    listGroup: (group: string) => listGroup(group, 'manual'),
+    /** Lists a forge's fleet now; the next tick polls what it found. */
+    listFleet: (forge: string) => listFleet(forge, 'manual'),
     /** Ticks every `tickMs` until the returned function is called; a leader duty. */
     start() {
       let running: Promise<void> | undefined

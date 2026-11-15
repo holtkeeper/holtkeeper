@@ -1,9 +1,9 @@
 import type { RepoTarget } from '@holtkeeper/access'
 import type { GuideScopeKey, GuideSectionName } from '@holtkeeper/store'
 
-import type { GuideResolver } from './load.ts'
+import type { GuideRequest, GuideResolver } from './load.ts'
 import { type GuideTask, guideSections } from './model.ts'
-import type { GuideCaps, GuideLayer, RepoDoc, ResolvedGuide } from './resolve.ts'
+import type { GuideLayer, RepoDoc, ResolvedGuide } from './resolve.ts'
 
 /** One numbered layer of a section's Guide chain: the text an agent gets from one source. */
 export interface GuideChainLayer {
@@ -29,7 +29,7 @@ export interface GuideChainSection {
 /** The layered Guide of a repository, per section, with the budget of what was resolved. */
 export interface GuideChain {
   sections: GuideChainSection[]
-  budget: GuideCaps & { used: number; humanUsed: number; generatedUsed: number; notesUsed: number }
+  budget: ResolvedGuide['budget']
   warnings: string[]
 }
 
@@ -45,8 +45,8 @@ export function chainTaskOf(section: GuideSectionName): GuideTask {
 
 /**
  * The layers of a resolved Guide in the order the agent reads them (the resolver's block order:
- * repository files, repository rules, family, subgroups, parent groups, all, learnings, policies,
- * generated text, notes), numbered from 1; blocks the budget left empty and never had text are
+ * repository files, repository rules, family, folders deepest first, owner teams, all, learnings,
+ * policies, generated text, notes, knowledge of similar repositories), numbered from 1; blocks the budget left empty and never had text are
  * dropped.
  */
 export function chainLayers(resolved: Pick<ResolvedGuide, 'blocks'>): GuideChainLayer[] {
@@ -80,12 +80,17 @@ export async function buildGuideChain(
     repo: RepoTarget
     sections?: readonly GuideSectionName[]
     repoDocs?: readonly RepoDoc[]
+    /** Knowledge of similar repositories, as the tasks get it (`GuideRequest.neighbours`). */
+    neighbours?: GuideRequest['neighbours']
   },
 ): Promise<GuideChain> {
   const wanted = guideSections.filter(
     (section) => !request.sections || request.sections.includes(section),
   )
-  const docs = request.repoDocs ? { repoDocs: request.repoDocs } : {}
+  const docs = {
+    ...(request.repoDocs && { repoDocs: request.repoDocs }),
+    ...(request.neighbours && { neighbours: request.neighbours }),
+  }
   const resolved = await Promise.all(
     wanted.map((section) =>
       resolve({ repo: request.repo, task: chainTaskOf(section), focus: [section], ...docs }),

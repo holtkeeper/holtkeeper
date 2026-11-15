@@ -15,14 +15,12 @@ export function EntryDialog({
   definition,
   entry,
   initialScope,
-  groups,
   onClose,
 }: {
   definition: SettingDefinitionView
   entry?: SettingView
   /** Scope of a new entry; defaults to everything. */
   initialScope?: Scope
-  groups: readonly string[]
   onClose: () => void
 }) {
   const editor = editorFor(definition.schema, definition.secret)
@@ -84,7 +82,7 @@ export function EntryDialog({
           {definition.global ? (
             <span className="text-sm text-muted">Applies to all repositories.</span>
           ) : (
-            <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+            <ScopeEditor value={scope} onChange={setScope} allowTeams={false} label="Applies to" />
           )}
           {definition.presets && definition.presets.length > 0 && !definition.secret ? (
             <PresetPicker
@@ -129,9 +127,9 @@ function SettingHelp({ definition }: { definition: SettingDefinitionView }) {
           <span>This setting has one value for all repositories.</span>
         ) : (
           <span>
-            Add one entry for all repositories, then narrower entries for groups or repository
-            patterns. Usually the most specific entry covering a repository wins; settings that
-            combine entries say so above. A repository's or group's Settings tab shows the outcome.
+            Add one entry for all repositories, then narrower entries for folders or repository
+            paths. Usually the most specific entry covering a repository wins; settings that combine
+            entries say so above. A repository's or team's Settings tab shows the outcome.
           </span>
         )}
       </div>

@@ -14,18 +14,18 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    web: { forge: 'work', include: ['acme/*-web'] },
-    pay: { forge: 'work', include: ['acme/*-api'] },
+  teams: {
+    web: { owns: ['work:acme/*-web'] },
+    pay: { owns: ['work:acme/*-api'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    'web-ai': [{ scope: { groups: ['web'] }, actions: ['ai:read'] }],
-    'web-owner': [{ scope: { groups: ['web'] }, actions: ['ai:read', 'settings:write'] }],
-    'web-docs': [{ scope: { groups: ['web'] }, actions: ['knowledge:read'] }],
+    'web-ai': [{ scope: { teams: ['web'] }, actions: ['ai:read'] }],
+    'web-owner': [{ scope: { teams: ['web'] }, actions: ['ai:read', 'settings:write'] }],
+    'web-docs': [{ scope: { teams: ['web'] }, actions: ['knowledge:read'] }],
   },
 })
 const as = (role: string) => ({ 'x-forwarded-user': role, 'x-forwarded-groups': role })
@@ -56,7 +56,7 @@ const run = (
 ): NewAiUsageRecord => ({
   at: '2026-11-10T09:00:00.000Z',
   repo: { forge: 'work', path },
-  groups: [path.endsWith('-web') ? 'web' : 'pay'],
+  teams: [path.endsWith('-web') ? 'web' : 'pay'],
   taskKind: 'review',
   actor: 'system',
   provider: 'anthropic',
@@ -96,7 +96,7 @@ beforeEach(async () => {
 describe('GET /api/ai/budget', () => {
   test('reports the week, the broadest budget, spend per feature and scoped caps', async () => {
     await budget('org', { all: true }, { weeklyUsd: 100, reserveUsd: 20, warnPercent: 90 })
-    await budget('web-cap', { groups: ['web'] }, { weeklyUsd: 50, action: 'warn' })
+    await budget('web-cap', { teams: ['web'] }, { weeklyUsd: 50, action: 'warn' })
     const response = await get('/ai/budget', 'admin')
     expect(response.status).toBe(200)
     const overview = (await response.json()) as AiBudgetOverview
@@ -114,7 +114,7 @@ describe('GET /api/ai/budget', () => {
     expect(overview.scopes).toEqual([
       {
         settingId: 'web-cap',
-        scope: { groups: ['web'] },
+        scope: { teams: ['web'] },
         weeklyUsd: 50,
         reserveUsd: 25,
         action: 'warn',
@@ -127,8 +127,8 @@ describe('GET /api/ai/budget', () => {
 
   test('a narrow ai:read sees only its own spend and caps, never the global budget', async () => {
     await budget('org', { all: true }, { weeklyUsd: 100 })
-    await budget('web-cap', { groups: ['web'] }, { weeklyUsd: 50 })
-    await budget('pay-cap', { groups: ['pay'] }, { weeklyUsd: 70 })
+    await budget('web-cap', { teams: ['web'] }, { weeklyUsd: 50 })
+    await budget('pay-cap', { teams: ['pay'] }, { weeklyUsd: 70 })
     const overview = (await (await get('/ai/budget', 'web-ai')).json()) as AiBudgetOverview
     expect(overview.spentUsd).toBe(40)
     expect(overview.byFeature.map((entry) => entry.feature)).toEqual(['review', 'chat'])
@@ -177,7 +177,7 @@ const budgetItems = async (role: string) => {
 describe('budget warnings in the Inbox', () => {
   test('a budget past its warnPercent shows once a week to whoever may change it', async () => {
     await budget('org', { all: true }, { weeklyUsd: 100, warnPercent: 90 })
-    await budget('web-cap', { groups: ['web'] }, { weeklyUsd: 50 })
+    await budget('web-cap', { teams: ['web'] }, { weeklyUsd: 50 })
     const items = await budgetItems('admin')
     expect(items.map((item) => item.id)).toEqual([
       'budget:org:2026-11-09',

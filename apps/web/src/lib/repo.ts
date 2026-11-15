@@ -1,4 +1,4 @@
-import type { GroupDocumentData, RepoAccessResult, RepoRef } from '@holtkeeper/api'
+import type { RepoAccessResult, RepoRef } from '@holtkeeper/api'
 
 import type { DotTone } from '../ui/Legend.tsx'
 
@@ -78,107 +78,29 @@ export function validateRepoPath(path: string): string | undefined {
   if (!value) return 'Enter the repository path'
   if (/\s/.test(value)) return 'Paths cannot contain spaces'
   if (value.startsWith('/') || value.endsWith('/')) return 'No leading or trailing "/"'
-  if (/[*?[\]{}]/.test(value)) return 'Use an exact path; edit the group for patterns'
+  if (/[*?[\]{}]/.test(value)) return 'Use an exact path; edit the team or forge for patterns'
   if (!value.includes('/')) return 'Include the namespace: team/app'
   return undefined
 }
 
 /**
- * Checks an id of a forge, a schedule or a root group, or the part of a subgroup key after the dot:
- * lowercase letters, digits and dashes, starting with a letter. Whole group keys go through
- * `validateGroupKey`.
+ * Checks an id of a forge, a schedule or a team: lowercase letters, digits and dashes, starting
+ * with a letter.
  */
-export const validateGroupId = (id: string): string | undefined =>
+export const validateConfigId = (id: string): string | undefined =>
   /^[a-z][a-z0-9-]*$/.test(id.trim()) ? undefined : 'Lowercase letters, digits and dashes'
 
-/** A group's data with `paths` included (and no longer excluded); a new group when there is none. */
-export function withRepos(
-  group: GroupDocumentData | undefined,
-  forge: string,
+/**
+ * Pattern lists (a forge's fleet `include`, a team's `owns`) with exact `paths` added, each no
+ * longer excluded by the same exact path. Glob excludes stay: they keep matching.
+ */
+export function withPaths(
+  patterns: { include: readonly string[]; exclude: readonly string[] },
   paths: readonly string[],
-): GroupDocumentData {
-  if (!group) return { forge, include: [...new Set(paths)], exclude: [] }
+): { include: string[]; exclude: string[] } {
   return {
-    ...group,
-    include: [...new Set([...group.include, ...paths])],
-    exclude: group.exclude.filter((pattern) => !paths.includes(pattern)),
-  }
-}
-
-/** A config group as the panel stores it. */
-interface GroupEntry {
-  id: string
-  data: GroupDocumentData
-}
-
-const groupDocument = ({
-  title,
-  forge,
-  include,
-  exclude,
-}: GroupDocumentData): GroupDocumentData => ({
-  ...(title !== undefined && { title }),
-  forge,
-  include,
-  exclude,
-})
-
-const globSyntax = /[*?[\]{}]/
-
-/**
- * The group documents to save to move `path` into subgroup `to`: the target includes it (and no
- * longer excludes it), and each subgroup in `from` lets it go. A source that names `path` as an
- * exact include path drops it; one that could still match it through a glob, or would be left
- * without include patterns, excludes it. Groups missing from `groups` are skipped.
- */
-export function moveToSubgroup(
-  groups: readonly GroupEntry[],
-  path: string,
-  from: string | readonly string[] | undefined,
-  to: string,
-): GroupEntry[] {
-  const changed: GroupEntry[] = []
-  const target = groups.find((entry) => entry.id === to)
-  if (target)
-    changed.push({ id: to, data: groupDocument(withRepos(target.data, target.data.forge, [path])) })
-  const sources = from === undefined ? [] : typeof from === 'string' ? [from] : from
-  for (const id of new Set(sources)) {
-    const source = groups.find((entry) => entry.id === id)
-    if (!source || id === to) continue
-    const rest = source.data.include.filter((pattern) => pattern !== path)
-    const include = rest.length ? rest : source.data.include
-    const exclude = include.includes(path) || include.some((pattern) => globSyntax.test(pattern))
-    changed.push({
-      id,
-      data: groupDocument({
-        ...source.data,
-        include,
-        exclude: exclude ? [...new Set([...source.data.exclude, path])] : source.data.exclude,
-      }),
-    })
-  }
-  return changed
-}
-
-/**
- * A new subgroup `<parent>.<key>` of `parent`: on the parent's forge, including `patterns` (exact
- * paths of the parent's members and globs), with `title` when one is given.
- */
-export function subgroupDraft(
-  parent: GroupEntry,
-  key: string,
-  title: string,
-  patterns: readonly string[],
-): GroupEntry {
-  const name = title.trim()
-  return {
-    id: `${parent.id}.${key.trim()}`,
-    data: {
-      ...(name && { title: name }),
-      forge: parent.data.forge,
-      include: [...new Set(patterns.map((pattern) => pattern.trim()).filter(Boolean))],
-      exclude: [],
-    },
+    include: [...new Set([...patterns.include, ...paths])],
+    exclude: patterns.exclude.filter((pattern) => !paths.includes(pattern)),
   }
 }
 

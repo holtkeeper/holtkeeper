@@ -23,28 +23,28 @@ flowchart LR
 
 ## Analyzers
 
-Each analyzer has a kind (`review`, `audit`, `licenses`, `bundle`, `coverage`, `stack`, `api-surface`, ...), options and a scope: most work on one repository, a few on a whole group. Options are ordinary scoped settings named `analyzers.<kind>`, so a team can set its own bundle budgets or review strictness while the rest of the fleet keeps the defaults. You find them on the page that owns the analyzer (its <Button ghost>Configure</Button> button) and all together in **Settings › Analyzers**.
+Each analyzer has a kind (`review`, `audit`, `licenses`, `bundle`, `coverage`, `stack`, `api-surface`, ...), options and a scope: most work on one repository, a few on a whole team. Options are ordinary scoped settings named `analyzers.<kind>`, so a team can set its own bundle budgets or review strictness while the rest of the fleet keeps the defaults. You find them on the page that owns the analyzer (its <Button ghost>Configure</Button> button) and all together in **Settings › Analyzers**.
 
 Some analyzers only read: they produce data and reports. Others write: the review posts comments, propagation and upgrades open merge requests. Writing analyzers respect [freezes and review switches](/start/concepts/policies/).
 
-An analyzer only runs where it applies. The browserslist refresh, for example, runs only in repositories whose lockfile resolves `caniuse-lite`, so an analyzer added to every group still skips repositories with nothing to do.
+An analyzer only runs where it applies. The browserslist refresh, for example, runs only in repositories whose lockfile resolves `caniuse-lite`, so an analyzer added to every repository still skips repositories with nothing to do.
 
 ## What queues a run
 
-| Source         | When                                                                                     | Set up in                                    |
-| -------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Freshness      | An analysis went stale: a new commit on the default branch, its refresh interval passed. | Built in; tuned per team in Ops › Automation |
-| New repository | A group lists a repository for the first time: every read-only analyzer runs once.       | Default trigger                              |
-| Event trigger  | A tag, push, merge request (opened, updated, reopened), label or `/holtkeeper` command.  | Ops › Automation                             |
-| Schedule       | A cron or interval over some groups.                                                     | Ops › Automation                             |
-| Policy         | A merge request policy asks for an analyzer as one of its actions.                       | Ops › Automation                             |
-| By hand        | <Button>Run analyzer</Button> on a repository, Runs or Settings › Analyzers.             | Needs `analyses:run`                         |
+| Source         | When                                                                                       | Set up in                                    |
+| -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Freshness      | An analysis went stale: a new commit on the default branch, its refresh interval passed.   | Built in; tuned per team in Ops › Automation |
+| New repository | A fleet listing finds a repository for the first time: every read-only analyzer runs once. | Default trigger                              |
+| Event trigger  | A tag, push, merge request (opened, updated, reopened), label or `/holtkeeper` command.    | Ops › Automation                             |
+| Schedule       | A cron or interval over some teams or path patterns.                                       | Ops › Automation                             |
+| Policy         | A merge request policy asks for an analyzer as one of its actions.                         | Ops › Automation                             |
+| By hand        | <Button>Run analyzer</Button> on a repository, Runs or Settings › Analyzers.               | Needs `analyses:run`                         |
 
 Freshness is what keeps the fleet current without schedules: every analyzer says how fresh its data must be, and a sweep every few minutes queues what fell behind, within hourly caps and a night window. A fresh install has two event triggers: every read-only analyzer on new repositories, and the public API snapshot on every tag. Merge request review needs a trigger you add; see [Turn on AI review](/start/first-steps/ai-review/).
 
 ## Runs
 
-A run is one analyzer on one repository (or group) at one ref. The queue runs at most one job per analyzer and repository at a time, and a run asked for twice while it waits is queued once. Runs that call an AI model draw on the weekly AI budget; when automatic work would pass it, they are **blocked** instead of spending.
+A run is one analyzer on one repository (or team) at one ref. The queue runs at most one job per analyzer and repository at a time, and a run asked for twice while it waits is queued once. Runs that call an AI model draw on the weekly AI budget; when automatic work would pass it, they are **blocked** instead of spending.
 
 **Ops › Runs** lists every run you may read, with why it ran, how long it took, how often it was tried and what it cost.
 

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
-import { toForgeDraft, toForgeInput, validateForgeDraft } from './forge-form.ts'
+import {
+  toForgeDraft,
+  toForgeInput,
+  validateFleetPattern,
+  validateForgeDraft,
+} from './forge-form.ts'
 
 describe('forge form', () => {
   test('needs an id, an http(s) URL and a token', () => {
@@ -18,6 +23,8 @@ describe('forge form', () => {
           packages: true,
           cachePackages: false,
           botUsername: '',
+          include: [],
+          exclude: [],
         },
         ['work'],
       ),
@@ -64,5 +71,32 @@ describe('forge form', () => {
     expect(toForgeInput({ ...draft, packages: false, cachePackages: true })).not.toHaveProperty(
       'cachePackages',
     )
+  })
+
+  test('fleet patterns round-trip, are sent only when present and carry no forge prefix', () => {
+    const draft = toForgeDraft({
+      type: 'forge',
+      id: 'work',
+      data: {
+        kind: 'gitlab',
+        url: 'https://gitlab.test',
+        credentialId: 'c1',
+        include: ['acme/round/**'],
+        exclude: ['acme/round/sandbox-*'],
+      },
+    })
+    expect(draft).toMatchObject({ include: ['acme/round/**'], exclude: ['acme/round/sandbox-*'] })
+    expect(toForgeInput(draft)).toMatchObject({
+      include: ['acme/round/**'],
+      exclude: ['acme/round/sandbox-*'],
+    })
+    expect(toForgeInput(toForgeDraft())).not.toHaveProperty('include')
+    expect(validateFleetPattern('work:acme/**')).toBe(
+      'No forge prefix: the patterns apply to this forge',
+    )
+    expect(validateFleetPattern('**/web')).toBe('Start with a folder, e.g. acme/**')
+    expect(validateForgeDraft({ ...draft, include: ['**/web'] }, [])).toEqual({
+      include: 'Start with a folder, e.g. acme/**',
+    })
   })
 })

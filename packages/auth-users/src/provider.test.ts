@@ -255,7 +255,7 @@ describe('usersAuth', () => {
   test('link info, unknown and expired links', async () => {
     const { auth, browser, root, advance } = await rootSession()
     const grants: Grant[] = [
-      { scope: { groups: ['widgets'] }, actions: ['repos:read', 'analyses:run'] },
+      { scope: { teams: ['widgets'] }, actions: ['repos:read', 'analyses:run'] },
       { scope: { repos: ['acme/gadget'] }, actions: ['knowledge:read'] },
     ]
     const invited = await body<LinkResponse>(
@@ -298,11 +298,11 @@ describe('usersAuth', () => {
       count: 1,
       role: 'viewer',
     })
-    expect(await role([{ scope: { groups: ['widgets'] }, actions: ['settings:write'] }])).toEqual({
+    expect(await role([{ scope: { teams: ['widgets'] }, actions: ['settings:write'] }])).toEqual({
       count: 1,
       role: 'custom',
     })
-    expect(await role([{ scope: { groups: ['widgets'] }, actions: ['*'] }])).toEqual({
+    expect(await role([{ scope: { teams: ['widgets'] }, actions: ['*'] }])).toEqual({
       count: 1,
       role: 'custom',
     })
@@ -659,8 +659,8 @@ async function addPasskey(auth: AuthProvider, browser: Browser, id: string, labe
   return { options, verify }
 }
 
-const groupGrant = (groups: string[]): Grant => ({
-  scope: { groups },
+const teamGrant = (teams: string[]): Grant => ({
+  scope: { teams },
   actions: ['repos:read', 'analyses:run'],
 })
 
@@ -672,7 +672,7 @@ describe('people', () => {
         auth,
         'POST',
         '/admin/users',
-        { name: 'Widget Dev', grants: [groupGrant(['widgets', 'gadgets'])] },
+        { name: 'Widget Dev', grants: [teamGrant(['widgets', 'gadgets'])] },
         root,
       ),
     )
@@ -751,9 +751,9 @@ describe('people', () => {
     const { auth, browser, root } = await rootSession()
     const invite = async (name: string, grants: Grant[]) =>
       body<LinkResponse>(await browser.send(auth, 'POST', '/admin/users', { name, grants }, root))
-    const active = await invite('Active', [groupGrant(['widgets'])])
+    const active = await invite('Active', [teamGrant(['widgets'])])
     await enroll(auth, active.link)
-    await invite('Pending', [groupGrant(['widgets'])])
+    await invite('Pending', [teamGrant(['widgets'])])
     const off = await invite('Off', [])
     await browser.send(auth, 'PATCH', `/admin/users/${off.user.id}`, { disabled: true }, root)
 
@@ -786,22 +786,22 @@ describe('people', () => {
     expect(self.lastSeenAt).toBe('2026-10-29T12:01:12.000Z')
   })
 
-  test('teams follow the home groups a person picked', async () => {
+  test('teams follow the home teams a person picked', async () => {
     const { auth, browser, root, store } = await rootSession()
     const invited = await body<LinkResponse>(
       await browser.send(
         auth,
         'POST',
         '/admin/users',
-        { name: 'Picky', grants: [groupGrant(['widgets', 'gadgets'])] },
+        { name: 'Picky', grants: [teamGrant(['widgets', 'gadgets'])] },
         root,
       ),
     )
-    await store.kv?.set(`prefs:${invited.user.id}`, { homeGroups: [['widgets', 'shapes']] })
+    await store.kv?.set(`prefs:${invited.user.id}`, { homeTeams: ['widgets', 'gizmo'] })
     const users = (
       await body<UserList>(await browser.send(auth, 'GET', '/admin/users', undefined, root))
     ).users
-    expect(users.find((user) => user.id === invited.user.id)?.teams).toEqual(['widgets + shapes'])
+    expect(users.find((user) => user.id === invited.user.id)?.teams).toEqual(['widgets', 'gizmo'])
     expect(users.find((user) => user.id === root.id)?.teams).toEqual([])
   })
 })

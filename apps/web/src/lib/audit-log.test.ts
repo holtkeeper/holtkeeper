@@ -18,19 +18,18 @@ const now = new Date('2026-10-30T12:00:00.000Z')
 
 const scope: HistoryScope = {
   repos: [
-    { repo: 'work:shop/web', groups: ['shop', 'frontend'] },
-    { repo: 'work:shop/api', groups: ['shop'] },
-    { repo: 'work:tools/cli', groups: ['tools'] },
+    { repo: 'work:shop/web', teams: ['shop', 'frontend'] },
+    { repo: 'work:shop/api', teams: ['shop'] },
+    { repo: 'work:tools/cli', teams: ['tools'] },
   ],
   instance: false,
 }
 
 describe('scopeRepos', () => {
-  test('narrows to the home groups, their complement, or nothing', () => {
+  test('narrows to the home teams, their complement, or nothing', () => {
     expect(scopeRepos('all', scope, ['shop'])).toBeUndefined()
     expect(scopeRepos('mine', undefined, ['shop'])).toBeUndefined()
     expect(scopeRepos('mine', scope, ['shop'])).toEqual(['work:shop/web', 'work:shop/api'])
-    expect(scopeRepos('mine', scope, [['shop', 'frontend']])).toEqual(['work:shop/web'])
     expect(scopeRepos('mine', scope, [])).toEqual([])
   })
 })

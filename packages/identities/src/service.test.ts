@@ -6,12 +6,12 @@ import { memoryStore } from '@holtkeeper/store/memory'
 
 import { createIdentities } from './service.ts'
 
-const games: RepoTarget = { forge: 'work', path: 'games/app', groups: ['games'] }
+const games: RepoTarget = { forge: 'work', path: 'games/app', teams: ['games'] }
 
 const user = (id: string, overrides: Partial<User> = {}): User => ({
   id,
   name: id,
-  grants: [{ scope: { groups: ['games'] }, actions: ['analyses:run'] }],
+  grants: [{ scope: { teams: ['games'] }, actions: ['analyses:run'] }],
   disabled: false,
   sessionVersion: 1,
   createdAt: '2026-10-30T00:00:00.000Z',
@@ -232,7 +232,7 @@ describe('self-service links', () => {
       id: 'jane',
       name: 'Jane',
       provider: 'header',
-      grants: [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['games'] }, actions: ['analyses:read'] }],
     }
     const account = await identities.link(jane, { provider: 'slack:T1', externalId: 'U1' })
     expect(account.principal).toEqual({ name: 'Jane', provider: 'header', grants: jane.grants })
@@ -240,7 +240,7 @@ describe('self-service links', () => {
 
     const promoted: Principal = {
       ...jane,
-      grants: [{ scope: { groups: ['games'] }, actions: ['analyses:run'] }],
+      grants: [{ scope: { teams: ['games'] }, actions: ['analyses:run'] }],
     }
     await identities.list(promoted)
     expect(

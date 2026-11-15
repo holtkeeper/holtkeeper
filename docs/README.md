@@ -38,10 +38,12 @@
 | `@holtkeeper/workspace`           | Repository checkouts with a mirror cache                                      | [packages/workspace/docs](../packages/workspace/docs/README.md)                     |
 | `@holtkeeper/jobs`                | Task engine: queue, scheduler, worker                                         | [packages/jobs/docs](../packages/jobs/docs/README.md)                               |
 | `@holtkeeper/updates`             | Polling forges for changes within a per-token budget                          | [packages/updates/docs](../packages/updates/docs/README.md)                         |
-| `@holtkeeper/managed-config`      | Panel-managed forges, groups, schedules and triggers; the effective config    | [packages/managed-config/docs](../packages/managed-config/docs/README.md)           |
+| `@holtkeeper/managed-config`      | Panel-managed forges, teams, schedules and triggers; the effective config     | [packages/managed-config/docs](../packages/managed-config/docs/README.md)           |
 | `@holtkeeper/agent`               | LLM agent contract and Claude adapter                                         | [packages/agent/docs](../packages/agent/docs/README.md)                             |
 | `@holtkeeper/ai-usage`            | AI usage recording, costs and budgets                                         | [packages/ai-usage/docs](../packages/ai-usage/docs/README.md)                       |
 | `@holtkeeper/ai-waibee`           | Waibee Router as an AI provider plugin                                        | [packages/ai-waibee/docs](../packages/ai-waibee/docs/README.md)                     |
+| `@holtkeeper/embed`               | Embeddings contract, vector helpers, a fake embedder for tests                | [packages/embed/docs](../packages/embed/docs/README.md)                             |
+| `@holtkeeper/embed-openai`        | Embedder over the OpenAI Embeddings format (OpenAI, Waibee Router)            | [packages/embed-openai/docs](../packages/embed-openai/docs/README.md)               |
 | `@holtkeeper/chat`                | Chat commands, cards and surfaces: merge request notes and the panel          | [packages/chat/docs](../packages/chat/docs/README.md)                               |
 | `@holtkeeper/chat-slack`          | Block Kit rendering of chat cards and forms                                   | [packages/chat-slack/docs](../packages/chat-slack/docs/README.md)                   |
 | `@holtkeeper/notify`              | Notifications: webhooks, Slack text                                           | [packages/notify/docs](../packages/notify/docs/README.md)                           |
@@ -91,7 +93,7 @@
 | `@holtkeeper/ssh-keys`            | Bot SSH keys: generation, forge registration, signing                         | [packages/ssh-keys/docs](../packages/ssh-keys/docs/README.md)                       |
 | `@holtkeeper/media`               | Image and SVG optimization engine (sharp, svgo)                               | [packages/media/docs](../packages/media/docs/README.md)                             |
 | `@holtkeeper/mr-policies`         | Merge request policies: conditions and actions on MR events                   | [packages/mr-policies/docs](../packages/mr-policies/docs/README.md)                 |
-| `@holtkeeper/propagate`           | Package updates rolled out across a group, failures handed to fix tasks       | [packages/propagate/docs](../packages/propagate/docs/README.md)                     |
+| `@holtkeeper/propagate`           | Package updates rolled out across a team, failures handed to fix tasks        | [packages/propagate/docs](../packages/propagate/docs/README.md)                     |
 | `@holtkeeper/write-task`          | Agent code changes on the write worker pool: branch, checks, merge request    | [packages/write-task/docs](../packages/write-task/docs/README.md)                   |
 | `@holtkeeper/tracker`             | Declarative tracking of entities across repositories and docs                 | [packages/tracker/docs](../packages/tracker/docs/README.md)                         |
 | `@holtkeeper/confluence`          | Confluence as a document source and sink for trackers                         | [packages/confluence/docs](../packages/confluence/docs/README.md)                   |

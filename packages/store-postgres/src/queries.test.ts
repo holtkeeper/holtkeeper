@@ -62,12 +62,12 @@ describe('query building', () => {
   })
 
   test('dimension flags mark only requested dimensions', () => {
-    const flags = dimensionFlags(['week', 'group'])
+    const flags = dimensionFlags(['week', 'team'])
     expect(
       Object.entries(flags)
         .filter(([, on]) => on)
         .map(([d]) => d),
-    ).toEqual(['week', 'group'])
+    ).toEqual(['week', 'team'])
     expect(Object.values(dimensionFlags()).some(Boolean)).toBeFalse()
   })
 
@@ -78,7 +78,7 @@ describe('query building', () => {
         k_week: '2026-10-05',
         k_month: '',
         k_repo: '',
-        k_group: 'games',
+        k_team: 'games',
         k_model: '',
         k_provider: '',
         k_task_kind: '',
@@ -95,10 +95,10 @@ describe('query building', () => {
         unknown_cost: '2',
         avg_duration_ms: null,
       },
-      ['week', 'group'],
+      ['week', 'team'],
     )
     expect(bucket).toEqual({
-      key: { week: '2026-10-05', group: 'games' },
+      key: { week: '2026-10-05', team: 'games' },
       inputTokens: 300,
       outputTokens: 60,
       cacheReadTokens: 0,
@@ -119,7 +119,7 @@ describe('query building', () => {
           ['work', 'games/app', ['games']],
           ['work', 'tools/cli', ['tools']],
         ],
-        [{ groups: ['tools'] }],
+        [{ teams: ['tools'] }],
       ),
     ).toEqual([['work', 'tools/cli', ['tools']]])
     expect(coveredRepos([['work', 'games/app', []]], [])).toEqual([])

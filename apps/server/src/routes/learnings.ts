@@ -15,6 +15,7 @@ import {
   familyOf,
   guideScopeKey,
   guideSections,
+  learningScopeKinds,
   parseGuideScope,
   rejectLearning,
   scopesFor,
@@ -48,7 +49,7 @@ const ruleSchema = z.string().trim().min(1).max(LEARNING_RULE_MAX)
 const editSchema = z.object({
   rule: ruleSchema.optional(),
   section: z.enum(guideSections).optional(),
-  suggestedScope: z.enum(['repo', 'family', 'group']).optional(),
+  suggestedScope: z.enum(learningScopeKinds).optional(),
   targetScope: z.string().min(1).optional(),
 })
 
@@ -233,7 +234,9 @@ export function learningRoutes(deps: ServerDeps) {
     const { family, scopes } = await contextOf(candidate)
     const chosen = input.scope === undefined ? undefined : parseGuideScope(input.scope)
     if (input.scope !== undefined && !chosen)
-      throw new HTTPException(400, { message: 'scope must be all, group:, family: or repo:' })
+      throw new HTTPException(400, {
+        message: 'scope must be all, team:, path:, family: or repo:',
+      })
     const scope = chosen ? guideScopeKey(chosen) : defaultLearningScope(candidate, scopes)
     if (!scope)
       throw new HTTPException(400, {
@@ -327,7 +330,7 @@ export function learningRoutes(deps: ServerDeps) {
     const key = target && target.kind !== 'all' ? guideScopeKey(target) : undefined
     if (input.targetScope !== undefined && (!key || !scopes.includes(key)))
       throw new HTTPException(400, {
-        message: `${input.targetScope} is not a group, family or repository scope of ${candidate.repo}`,
+        message: `${input.targetScope} is not a team, folder, family or repository scope of ${candidate.repo}`,
       })
     await ensurePlaced(principal, candidate)
     if (key) ensureScope(principal, key, family)

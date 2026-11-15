@@ -144,8 +144,7 @@ import type {
   ForgeSshKeyInput,
   ForgeSshKeyResult,
   GitHubTokenUsage,
-  GroupDocumentData,
-  GroupListingView,
+  FleetListingView,
   HistoryList,
   HomeView,
   HistoryScope,
@@ -154,6 +153,7 @@ import type {
   InboxCount,
   InboxFeed,
   KnowledgeCounts,
+  KnowledgeCitations,
   KnowledgeDetail,
   ReleaseDismissInput,
   SnoozeInput,
@@ -233,14 +233,14 @@ export interface JobQuery {
   signature?: string
   /** Only the jobs that produced this analysis. */
   analysisId?: string
-  /** Id prefix, repository, group, analyzer or its label, matched by the server. */
+  /** Id prefix, repository, team, analyzer or its label, matched by the server. */
   q?: string
 }
 
 /** Config collections of `/api/config/<collection>` and the document type each holds. */
 export interface ConfigCollections {
   forges: 'forge'
-  groups: 'group'
+  teams: 'team'
   schedules: 'schedule'
   triggers: 'trigger'
 }
@@ -248,7 +248,7 @@ export interface ConfigCollections {
 /** Filters of `GET /api/ai/usage` and `GET /api/ai/runs`. */
 export interface AiUsageQuery {
   repo?: string
-  group?: string
+  team?: string
   model?: string
   provider?: string
   taskKind?: string
@@ -259,8 +259,8 @@ export interface AiUsageQuery {
   /** `interactive` or `automatic`. */
   origin?: string
   actor?: string
-  /** Comma list of config groups; narrows what the caller may read. */
-  groups?: string
+  /** Comma list of team keys; narrows what the caller may read. */
+  teams?: string
   from?: string
   to?: string
 }
@@ -268,8 +268,8 @@ export interface AiUsageQuery {
 /** Query of `GET /api/ai/overview`. */
 export interface AiOverviewQuery {
   period?: AiUsagePeriodKind
-  /** Comma list of config groups. */
-  groups?: string
+  /** Comma list of team keys. */
+  teams?: string
   /** Narrows everything but budgets and caps, as `AiUsageQuery.feature`. */
   feature?: string
   /** `interactive` or `automatic`. */
@@ -361,10 +361,10 @@ export const api = {
     request<void>('DELETE', '/api/repos/updates/webhook', { query: { repo } }),
   reenableRepoWebhooks: (repo: string) =>
     request<RepoUpdatesView>('POST', '/api/repos/updates/webhook/reenable', { body: { repo } }),
-  groupListing: (group: string) =>
-    request<GroupListingView>('GET', `/api/repos/updates/groups/${id(group)}`),
-  listGroup: (group: string) =>
-    request<GroupListingView>('POST', `/api/repos/updates/groups/${id(group)}/list`),
+  fleetListing: (forge: string) =>
+    request<FleetListingView>('GET', `/api/repos/updates/fleet/${id(forge)}`),
+  listFleet: (forge: string) =>
+    request<FleetListingView>('POST', `/api/repos/updates/fleet/${id(forge)}/list`),
 
   auditRuns: (query: { repo?: RepoRef; limit?: number; before?: string }) =>
     request<AuditRunList>('GET', '/api/audit-runs', {
@@ -497,7 +497,7 @@ export const api = {
   deleteSetting: (settingId: string) => request<void>('DELETE', `/api/settings/${id(settingId)}`),
   resolveSettings: (focus: ScopeFocus) =>
     request<ResolvedSettings>('GET', '/api/settings/resolve', {
-      query: focus.kind === 'repo' ? { repo: repoKey(focus.repo) } : { group: focus.group },
+      query: focus.kind === 'repo' ? { repo: repoKey(focus.repo) } : { team: focus.team },
     }),
 
   knowledge: (query: { status?: readonly KnowledgeStatus[]; repo?: RepoRef; q?: string }) =>
@@ -515,6 +515,8 @@ export const api = {
     request<KnowledgeEntry>('PUT', `/api/knowledge/${id(entryId)}`, { body: input }),
   knowledgeEntry: (entryId: string) =>
     request<KnowledgeDetail>('GET', `/api/knowledge/${id(entryId)}`),
+  knowledgeCitations: (entryId: string) =>
+    request<KnowledgeCitations>('GET', `/api/knowledge/${id(entryId)}/citations`),
   reviewKnowledge: (entryId: string, action: 'accept' | 'reject' | 'archive') =>
     request<KnowledgeEntry>('POST', `/api/knowledge/${id(entryId)}/${action}`),
   deleteKnowledge: (entryId: string) => request<void>('DELETE', `/api/knowledge/${id(entryId)}`),
@@ -609,9 +611,9 @@ export const api = {
     request<RepoAccessBatch>('POST', `/api/forges/${id(forgeId)}/repositories/access`, {
       body: input,
     }),
-  groups: () => request<ConfigEntryList<'group'>>('GET', '/api/config/groups'),
-  putGroup: (groupId: string, data: GroupDocumentData) =>
-    request<ConfigEntryView<'group'>>('PUT', `/api/config/groups/${id(groupId)}`, { body: data }),
+  teams: () => request<ConfigEntryList<'team'>>('GET', '/api/config/teams'),
+  putTeam: (teamId: string, data: PutConfigInput['team']) =>
+    request<ConfigEntryView<'team'>>('PUT', `/api/config/teams/${id(teamId)}`, { body: data }),
 
   configEntries: <C extends keyof ConfigCollections>(collection: C) =>
     request<ConfigEntryList<ConfigCollections[C]>>('GET', `/api/config/${collection}`),
@@ -714,7 +716,7 @@ export const api = {
 
   aiOverview: (query: AiOverviewQuery = {}) =>
     request<AiUsageOverview>('GET', '/api/ai/overview', { query: toQuery(query) }),
-  aiWeek: (query: { week?: string; groups?: string } = {}) =>
+  aiWeek: (query: { week?: string; teams?: string } = {}) =>
     request<AiWeekBreakdown>('GET', '/api/ai/week', { query: toQuery(query) }),
   aiUsage: (filter: AiUsageQuery & { groupBy?: string }) =>
     request<AiUsageBuckets>('GET', '/api/ai/usage', { query: toQuery(filter) }),

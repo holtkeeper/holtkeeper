@@ -28,7 +28,7 @@ The server tells MCP clients this order in its instructions, so agents usually f
 
 `repo_rules` returns the repository's **Guide**: the rules an agent must follow there, layered from broad to narrow.
 
-1. Team rules written in **Knowledge › Guide** for the whole organization, the repository's groups, its family and the repository itself.
+1. Team rules written in **Knowledge › Guide** for the whole organization, the repository's owner teams, its folders, its family and the repository itself.
 2. Learned rules: candidates people accepted from review replies and agent proposals.
 3. Policies turned into sentences, such as commit conventions, test ids and the asset policy.
 4. Generated text from the Guide generator, marked lower priority. Human rules always win over it.
@@ -47,7 +47,7 @@ The repository's own rules files (`AGENTS.md`, `CLAUDE.md`, …) are not include
 ● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", section: "testing")
   ⎿ # Guide for gitlab:acme/checkout-web (agent, testing)
     ## General
-    - Money is integer cents; never use floats for prices. (team rule, group storefront)
+    - Money is integer cents; never use floats for prices. (team rule, team widgets)
     - Run `pnpm check` before committing. (team rule, repository)
     ## Testing
     - Use the test renderer from `src/test/render.tsx`, never render without providers. (learned)
@@ -95,7 +95,7 @@ When an agent notices a lasting convention that is missing or wrong, `propose_ru
   ⎿ Proposed for review in Knowledge › Learnings.
 ```
 
-`scope` says where it should apply once accepted: `repo` (default), `family`, `group` (the nearest one), or an exact scope such as `group:<key>`. Use `propose_knowledge` for one-off facts, not rules.
+`scope` says where it should apply once accepted: `repo` (default), `family`, `path` (the repository's folder), `team` (its first owner team), or an exact scope such as `path:<forge>:<folder>`, `team:<key>`, `family:<id>` or `repo:<forge:path>`. Use `propose_knowledge` for one-off facts, not rules.
 
 ## Commit conventions
 
@@ -141,7 +141,7 @@ Teams set the attribute and which elements need ids in the `analyzers.testids` s
 
 ```text
 ● holtkeeper - asset_policy (repo: "gitlab:acme/checkout-web", path: "public/hero.png")
-  ⎿ # Asset policy of `gitlab:acme/checkout-web`, from group storefront
+  ⎿ # Asset policy of `gitlab:acme/checkout-web`, from team widgets
     - raster images: WebP required; warn above 500 kB, error above 1 MB; at most 2560 px
     ## This file
     - not allowed as PNG: ship public/hero.webp
@@ -151,7 +151,7 @@ The policy is the `assets.policy` setting; prose rules such as which image compo
 
 ## The knowledge base
 
-The knowledge base holds what the team decided and learned: decisions, conventions, migration notes, quirks and how-tos, each scoped to repositories or groups. Agents read only accepted entries, plus other teams' entries marked shared.
+The knowledge base holds what the team decided and learned: decisions, conventions, migration notes, quirks and how-tos, each scoped to repositories, folders or teams. Agents read only accepted entries, plus other teams' entries marked shared.
 
 `search_knowledge` searches them best match first. With `repo`, only entries that apply there; filter with `kind`, `package`, `subject` (`npm:react`, `tool:node`) or `topic`. `get_knowledge` reads one entry in full. Agents cite entries as `[kb:<id>]`, and the panel shows the same ids, so a reader can follow the citation.
 

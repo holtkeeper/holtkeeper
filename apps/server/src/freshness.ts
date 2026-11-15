@@ -9,6 +9,7 @@ import {
   enqueueUnique,
   matchesAnyPath,
   systemTimeZone,
+  teamForges,
 } from '@holtkeeper/jobs'
 import { analyzerOff, defineSetting, repoAnalyzersKey, resolveSetting } from '@holtkeeper/settings'
 import type { AnalysisHead, Job, KvStore } from '@holtkeeper/store'
@@ -38,7 +39,7 @@ export const freshnessSetting = defineSetting({
   help: `Every analyzer declares when its data goes stale: after the default branch moved (at most once per its minimum interval), or after a cadence for data that changes without commits (advisories, registries, CI history). A leader process checks every few minutes and queues what is stale.
 
 - **mode** \`on\` (default) refreshes as the analyzers declare, \`off\` never refreshes automatically (events, schedules and runs by hand still work), \`slower\` stretches every interval and cadence by **factor** (default 3).
-- Scope it to a group to set it for one team. The most specific entry wins.`,
+- Scope it to a folder or a team to set it for those repositories. The most specific entry wins.`,
   default: freshnessSchema.parse({}),
   schema: freshnessSchema,
   presets: [
@@ -164,10 +165,11 @@ async function sweepConfig(deps: Pick<ServerDeps, 'store'>): Promise<FreshnessSw
   return sweepSchema.safeParse(entry?.value ?? {}).data ?? sweepSchema.parse({})
 }
 
-/** One analyzer on one repository (or group), as freshness sees it now. */
+/** One analyzer on one repository (or team, for group-scope analyzers), as freshness sees it now. */
 interface FreshnessEntry {
   analyzer: string
   repo: RepoRef
+  /** Team key of a group-scope target (`repo.path` is the team key too). */
   group?: string
   refresh: NonNullable<JobAnalyzerInfo['refresh']>
   latest?: Pick<AnalysisHead, 'id' | 'sha' | 'createdAt'>
@@ -188,7 +190,8 @@ interface Target {
 }
 
 /**
- * Evaluates freshness over `targets` (every listed repository and every group when absent): one
+ * Evaluates freshness over `targets` (every listed repository and every team on each forge it can
+ * live on when absent): one
  * entry per target and analyzer that declares `refresh`, with the decision of `decideFreshness`
  * refined by checks that cost reads: whether the analyzer applies to the repository (cached per
  * head) and whether its options are set up there (for due entries, and waiting ones of explicit
@@ -216,10 +219,9 @@ async function evaluate(
     options.targets ??
     [
       ...(await listedRepos(kv, config)).map((repo) => ({ repo })),
-      ...Object.keys(config.groups).map((group) => ({
-        repo: { forge: config.groups[group]?.forge ?? '', path: group },
-        group,
-      })),
+      ...Object.keys(config.teams).flatMap((team) =>
+        teamForges(config, team).map((forge) => ({ repo: { forge, path: team }, group: team })),
+      ),
     ].filter((target) => target.repo.forge in config.forges)
 
   const latest = new Map<string, AnalysisHead>()
@@ -362,7 +364,7 @@ async function notApplicable(
   if (blocked?.blocker === 'frozen')
     return 'the repository is read-only for Holtkeeper (repo.freeze) and the analyzer would change it'
   if (blocked?.blocker === 'options')
-    return `its options are not set up for this ${target.group === undefined ? 'repository' : 'group'}`
+    return `its options are not set up for this ${target.group === undefined ? 'repository' : 'team'}`
   if (!analyzer.appliesTo || target.group !== undefined || !forge) return undefined
   const cached = z
     .object({ sha: z.string().optional(), applies: z.boolean() })
@@ -609,8 +611,8 @@ export interface FreshnessStatus extends FreshnessEntry {
 }
 
 /**
- * Freshness of every analyzer that declares `refresh` on `target` (a repository, or a group with
- * `group` set), without queuing anything or reading heads from the forge: the head is the one
+ * Freshness of every analyzer that declares `refresh` on `target` (a repository, or a team with
+ * `group` set to its key), without queuing anything or reading heads from the forge: the head is the one
  * freshness last saw. `wouldRun` also accounts for the hourly caps.
  */
 export async function freshnessStatus(
@@ -681,16 +683,16 @@ interface FreshnessCounts {
   skipped: number
 }
 
-/** The last sweep's decisions summed per team (config group; `group` absent for every repository). */
+/** The last sweep's decisions summed per team (`team` absent for every repository). */
 export interface FreshnessTeamSummary {
-  group?: string
+  team?: string
   analyzers: FreshnessCounts[]
 }
 
 /**
  * The last sweep's decisions summed per team, over the targets `visible` lets through: every
- * repository counts in the every-repository row and in the row of each of its config groups,
- * group targets in their group's row. `at` is absent before the first sweep (or a day after the
+ * repository counts in the every-repository row and in the row of each of its owner teams,
+ * team (group-scope) targets in their team's row. `at` is absent before the first sweep (or a day after the
  * last); the next sweep is due `SWEEP_MS` after it.
  */
 export async function freshnessSummary(
@@ -722,9 +724,9 @@ export async function freshnessSummary(
     const repo = { forge: entry.repo.slice(0, separator), path: entry.repo.slice(separator + 1) }
     const target = { repo, ...(entry.group !== undefined && { group: entry.group }) }
     if (!visible(target)) continue
-    const groups = entry.group !== undefined ? [entry.group] : jobTarget(deps.config, target).groups
     add('', entry.analyzer, entry.action)
-    for (const group of new Set(groups)) add(group, entry.analyzer, entry.action)
+    for (const team of new Set(jobTarget(deps.config, target).teams))
+      add(team, entry.analyzer, entry.action)
   }
   return {
     at: summary.at,
@@ -732,8 +734,8 @@ export async function freshnessSummary(
     sweepMinutes,
     teams: [...teams.entries()]
       .toSorted(([a], [b]) => a.localeCompare(b))
-      .map(([group, counts]) => ({
-        ...(group !== '' && { group }),
+      .map(([team, counts]) => ({
+        ...(team !== '' && { team }),
         analyzers: [...counts.values()].toSorted((a, b) => a.analyzer.localeCompare(b.analyzer)),
       })),
   }

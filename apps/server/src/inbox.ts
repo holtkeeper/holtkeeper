@@ -1,12 +1,5 @@
-import {
-  type Action,
-  type GroupMatch,
-  type Principal,
-  type Scope,
-  can,
-  groupsMatch,
-  outerGroups,
-} from '@holtkeeper/access'
+import { type Action, type Principal, type Scope, can } from '@holtkeeper/access'
+import { isExactPattern, splitPattern } from '@holtkeeper/access/paths'
 import { budgetKey, budgetStatuses } from '@holtkeeper/ai-usage'
 import type {
   AiBudgetStatus,
@@ -33,12 +26,12 @@ import type {
 import { type AllowlistEntry, allowlistSchema, isExpired } from '@holtkeeper/vuln'
 import { webPaths } from '@holtkeeper/web-paths'
 
-import { type ServerDeps, groupLabeler, parseRepo, repoTarget } from './context.ts'
+import { type ServerDeps, parseRepo, repoTarget, teamLabeler } from './context.ts'
 import { withLiveTarget } from './learnings.ts'
 import { awaitsAcceptance, releaseCan, releaseServiceFor } from './releases.ts'
 import { canReadAiScope } from './routes/ai.ts'
 import { peopleOf } from './routes/avatars.ts'
-import { homeGroupsOf } from './routes/preferences.ts'
+import { homeTeamsOf } from './routes/preferences.ts'
 import { snoozedIds } from './snoozes.ts'
 import { canSeeGroup } from './tasks.ts'
 import { canSeeCatalog, crossTeamPolicy, scopeOwner } from './visibility.ts'
@@ -70,10 +63,10 @@ interface InboxSources {
   crossTeam: CrossTeamCatalog
 }
 
-/** An item with the group memberships that decide its section. */
+/** An item with the team memberships that decide its section. */
 interface Placed {
   item: InboxItem
-  /** Groups of each repository or owning team; empty for items above every team. */
+  /** Owner teams of each repository, or each owning team alone; empty for items above every team. */
   memberships: string[][]
 }
 
@@ -91,33 +84,23 @@ const firstLine = (text: string, max = 160) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
-const formatMatch = (entry: GroupMatch, label: (key: string) => string) =>
-  typeof entry === 'string' ? label(entry) : entry.map(label).join(' + ')
-
 /**
- * A scope as people read it: `All repositories`, `Team Web (web)`, a repository path or pattern.
- * A subgroup named next to its parent is left out: the parent already covers it.
+ * A scope as people read it: `All repositories`, `Team Web (web)`, a repository path, or a path
+ * pattern such as a folder.
  */
 function scopeText(scope: Scope, label: (key: string) => string): string {
   if (scope.all) return 'All repositories'
-  const groups = scope.groups ?? []
-  const outer = new Set(outerGroups(groups.filter((entry) => typeof entry === 'string')))
   const parts = [
-    ...groups
-      .filter((entry) => typeof entry !== 'string' || outer.has(entry))
-      .map((entry) => `Team ${formatMatch(entry, label)}`),
-    ...(scope.repos ?? []).map((pattern) => {
-      const repo = exactRepo(pattern)
-      return repo ? repo.path : pattern
-    }),
+    ...(scope.teams ?? []).map((team) => `Team ${label(team)}`),
+    ...(scope.repos ?? []).map((pattern) => exactRepo(pattern)?.path ?? pattern),
   ]
   return parts.join(', ') || 'Nothing'
 }
 
 const exactRepo = (pattern: string): RepoRef | undefined => {
-  const separator = pattern.indexOf(':')
-  if (separator < 1 || /[*?[{]/.test(pattern)) return undefined
-  return { forge: pattern.slice(0, separator), path: pattern.slice(separator + 1) }
+  if (!isExactPattern(pattern)) return undefined
+  const { forge, glob } = splitPattern(pattern)
+  return forge === undefined ? undefined : { forge, path: glob }
 }
 
 /** An `audit.allowlist` entry that expires within 7 days or has expired. */
@@ -303,12 +286,12 @@ function inboxItems(
   now: Date,
 ): Placed[] {
   const { config } = deps
-  const label = groupLabeler(config)
-  const groupsOfKey = (key: string) => {
+  const label = teamLabeler(config)
+  const teamsOfKey = (key: string) => {
     const repo = parseRepo(key)
-    return repo ? repoTarget(config, repo).groups : []
+    return repo ? repoTarget(config, repo).teams : []
   }
-  const ref = (key: string): HomeRepoRef => ({ repo: key, groups: groupsOfKey(key) })
+  const ref = (key: string): HomeRepoRef => ({ repo: key, teams: teamsOfKey(key) })
   const known = (key: string) => {
     const repo = parseRepo(key)
     return repo !== undefined && config.forges[repo.forge] !== undefined ? repo : undefined
@@ -340,7 +323,7 @@ function inboxItems(
       return repo ? [ref(keyOf(repo))] : []
     })
   const scopeMemberships = (scope: Scope) =>
-    scopeOwner(scope, (repo) => repoTarget(config, repo).groups).map((group) => [group])
+    scopeOwner(scope, (repo) => repoTarget(config, repo).teams).map((team) => [team])
   const placed: Placed[] = []
 
   for (const { group, proposed } of sources.tasks) {
@@ -365,7 +348,7 @@ function inboxItems(
         groupId: group.id,
         taskKind: group.kind,
       },
-      memberships: repos.map((repo) => repo.groups),
+      memberships: repos.map((repo) => repo.teams),
     })
   }
 
@@ -410,7 +393,7 @@ function inboxItems(
         suggestedScope: candidate.suggestedScope,
         ...(candidate.targetScope && { targetScope: candidate.targetScope }),
       },
-      memberships: [repo.groups],
+      memberships: [repo.teams],
     })
   }
 
@@ -434,7 +417,7 @@ function inboxItems(
         inputHash: pending.inputHash,
         generatedAt: pending.generatedAt,
       },
-      memberships: [repo.groups],
+      memberships: [repo.teams],
     })
   }
 
@@ -461,7 +444,7 @@ function inboxItems(
         head: card.head,
         can: allowed,
       },
-      memberships: [repo.groups],
+      memberships: [repo.teams],
     })
   }
 
@@ -528,12 +511,12 @@ const oldestFirst = (a: InboxItem, b: InboxItem) =>
 const awake = (items: readonly InboxItem[]) => items.filter((item) => !item.snoozed).length
 
 /**
- * Splits items into `mine` (within the home groups, or above every team) and `teams`; without home
- * groups everything is `mine`. Each section is oldest first.
+ * Splits items into `mine` (owned by a home team, or above every team) and `teams`; without home
+ * teams everything is `mine`. Each section is oldest first.
  */
 function sectionItems(
   placed: readonly Placed[],
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
   snoozed: ReadonlySet<string>,
 ): Pick<InboxFeed, 'mine' | 'teams'> {
   const mine: InboxItem[] = []
@@ -541,9 +524,9 @@ function sectionItems(
   for (const { item, memberships } of placed) {
     const marked = { ...item, snoozed: snoozed.has(item.id) }
     const home =
-      homeGroups.length === 0 ||
+      homeTeams.length === 0 ||
       memberships.length === 0 ||
-      memberships.some((groups) => groupsMatch(homeGroups, groups))
+      memberships.some((owners) => owners.some((team) => homeTeams.includes(team)))
     ;(home ? mine : teams).push(marked)
   }
   return { mine: mine.toSorted(oldestFirst), teams: teams.toSorted(oldestFirst) }
@@ -567,12 +550,12 @@ function createInboxService(deps: ServerDeps) {
 
   const sectioned = async (principal: Principal) => {
     const now = deps.now()
-    const [raw, homeGroups, snoozed] = await Promise.all([
+    const [raw, homeTeams, snoozed] = await Promise.all([
       sources(),
-      homeGroupsOf(deps, principal),
+      homeTeamsOf(deps, principal),
       snoozedIds(deps.store.kv, principal.id, now),
     ])
-    return sectionItems(inboxItems(deps, principal, raw, now), homeGroups, snoozed)
+    return sectionItems(inboxItems(deps, principal, raw, now), homeTeams, snoozed)
   }
 
   /** `GET /api/inbox` for `principal`. */

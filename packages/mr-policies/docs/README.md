@@ -24,7 +24,7 @@ const result = await evaluatePolicies({
 //     outcomes: ActionOutcome[], skipAnalyzers: '*' | string[], enqueue: { analyzer, options? }[] }
 ```
 
-- **Order** — enabled policies whose `scope` (and `within`, the settings entry scope) cover the repository, most specific scope first (exact path > path glob > group > everything), list order among equals. A matching policy with `stop: true` ends evaluation.
+- **Order** — enabled policies whose `scope` (and `within`, the settings entry scope) cover the repository, most specific scope first (exact path > path glob, deeper folders first > team > everything), list order among equals. A matching policy with `stop: true` ends evaluation.
 - **Actions** run in list order. Every action yields an `ActionOutcome` `{ policyId, action, status, detail, data? }` — `done`, `dry-run`, `skipped`, `deferred`, `unsupported`, `failed` or `intent` — with a human-readable `detail` for the audit log. Errors never escape: a throwing condition makes the policy unmatched (`error: ...`), a throwing action becomes `failed`.
 - **Idempotency** — `approve`, `merge` and `comment` (by default) happen once per head commit: the key `mr-policy:<forge>:<repo>!<id>@<sha>:<policy>:<action JSON>` is stored in `PolicyMemory` after a `done` outcome, and a later run with the same key is `skipped`. `deferred`, `failed` and dry-run outcomes are not remembered, so a later event (e.g. the pipeline turning green) retries them. The server should back `PolicyMemory` (`seen(key)`, `remember(key)`) with the store; `createMemory(limit)` is an in-memory LRU.
 - **Comments off** — with `commentsOff` (the server sets it from `mergeRequests.comments`), actions whose provider `posts` (`comment`, `label`) are `skipped` with `merge request comments are off` before they run, and `approve` drops its `summary` so it is a bare approval. Other actions run as usual.
@@ -36,7 +36,7 @@ const result = await evaluatePolicies({
 ```ts
 interface MergeRequestEvent {
   repo: RepoRef
-  groups: string[]
+  teams: string[] // owner teams of the repository
   mr: MergeRequest & { headSha?: string }
   action: 'open' | 'update' | 'reopen' | 'label' | 'merge' | 'approve' | 'command'
   labelsAdded?: string[]
@@ -94,7 +94,7 @@ Each action is an `ActionProvider` `{ type, schema, run(action, context) → Act
 
 - entries whose scope covers the repository, most specific first, newest first among equals;
 - a policy without `scope` takes the entry's; one with its own `scope` applies only inside the entry's (`within`);
-- an id from a more specific entry overrides the same id from less specific ones, so a repository can disable (`enabled: false`) or replace a group policy;
+- an id from a more specific entry overrides the same id from less specific ones, so a repository can disable (`enabled: false`) or replace a folder policy;
 - invalid entries are reported in `invalid` with a readable error and otherwise ignored.
 
 `policiesSchema` validates a list (unique ids, defaults `enabled: true`, `when: {}`, `actions: []`); `createPoliciesSchema(registry)` validates actions against a custom registry.

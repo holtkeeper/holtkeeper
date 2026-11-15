@@ -15,9 +15,9 @@ import type { JobAnalyzerInfo } from '../src/context.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    web: { forge: 'work', include: ['acme/web-*'] },
-    pay: { forge: 'work', include: ['acme/pay-*'] },
+  teams: {
+    web: { owns: ['work:acme/web-*'] },
+    pay: { owns: ['work:acme/pay-*'] },
   },
 })
 
@@ -29,7 +29,7 @@ const analyzers: JobAnalyzerInfo[] = [
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['analyses:read'] }],
-    web: [{ scope: { groups: ['web'] }, actions: ['analyses:read'] }],
+    web: [{ scope: { teams: ['web'] }, actions: ['analyses:read'] }],
   },
 })
 const as = (role: string) => ({ 'x-forwarded-user': role, 'x-forwarded-groups': role })

@@ -3,10 +3,9 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 
-import { useGroupTitles, useUsers } from '../../api/queries.ts'
+import { useTeamTitles, useUsers } from '../../api/queries.ts'
 import { usePeopleSummary } from '../../api/settings-people.ts'
 import { plural } from '../../lib/format.ts'
-import { type GroupTitleOf } from '../../lib/group-titles.ts'
 import {
   type PeopleFilter,
   type SignInKind,
@@ -25,6 +24,7 @@ import {
 } from '../../lib/people.ts'
 import { roleNames, roleOf } from '../../lib/roles.ts'
 import { parseSettingsSearch } from '../../lib/settings-sections.ts'
+import { type TeamTitleOf } from '../../lib/team-titles.ts'
 import { useNow } from '../../lib/use-now.ts'
 import {
   Avatar,
@@ -67,7 +67,7 @@ const statusFilter: { id: UserStatus; label: string }[] = [
 const appliesTo = (
   user: UserView,
   match: ReturnType<typeof roleOf>,
-  titleOf: GroupTitleOf,
+  titleOf: TeamTitleOf,
 ): string => {
   if ('scope' in match) return scopeLabel(match.scope, titleOf)
   return user.grants.length ? plural(user.grants.length, 'grant') : 'Nothing'
@@ -102,7 +102,7 @@ function PeopleStrip() {
  * map), a fold for disabled people, the invite dialog and a side sheet per person.
  */
 export function People() {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { auth, can, principal } = useSession()
   const enabled = auth.provider === 'users'
   const users = useUsers(enabled && can('users:read'))

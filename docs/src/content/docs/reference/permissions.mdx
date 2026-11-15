@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-Access in Holtkeeper is a list of **grants**. Each grant pairs a scope (everything, some groups, or repository path globs) with a list of actions; `*` allows every action. A check asks whether a person may do one action on one repository, on an object owned by a scope (a credential, a setting), or on the whole system, which needs a grant scoped to everything. See [Permissions and scopes](/start/concepts/permissions/) for how scopes match.
+Access in Holtkeeper is a list of **grants**. Each grant pairs a scope (everything, some teams, or path patterns) with a list of actions; `*` allows every action. A check asks whether a person may do one action on one repository, on an object owned by a scope (a credential, a setting), or on the whole system, which needs a grant scoped to everything. Team members get grants on their team's repositories from membership: maintainers `*`, members the read and run actions, and every member the read actions on what the team consumes. See [Permissions and scopes](/start/concepts/permissions/) for how scopes match.
 
 ## Actions
 
@@ -19,7 +19,7 @@ Access in Holtkeeper is a list of **grants**. Each grant pairs a scope (everythi
 | `catalog:read`      | Read other teams' catalog: packages, versions, public API, stack, usage counts and shared notes. Implied by `analyses:read` on the same scope; never covers findings, audits, jobs, releases, reviews or code. |
 | `releases:read`     | Read release plans, status and timelines.                                                                                                                                                                      |
 | `releases:run`      | Run release steps: propose, accept, version, deploy.                                                                                                                                                           |
-| `tasks:run`         | Approve agent tasks that push a branch and open a merge request. For another team's repository the grant must name it or its group explicitly.                                                                 |
+| `tasks:run`         | Approve agent tasks that push a branch and open a merge request. For another team's repository the grant must cover that repository itself; your own team's grant never reaches it.                            |
 | `settings:read`     | Read settings and the effective config.                                                                                                                                                                        |
 | `settings:write`    | Change settings in scope.                                                                                                                                                                                      |
 | `credentials:read`  | See credentials.                                                                                                                                                                                               |
@@ -69,7 +69,7 @@ AI, people, credentials and audit-log actions are not part of any narrower prese
 
 ## Delegation
 
-A person may hand grants to someone else only with `users:invite` over each scope and only within their own grants. An admin of the `storefront` group can invite an admin of `storefront`, or of a subgroup of it, but never of another group or of everything.
+A person may hand grants to someone else only with `users:invite` over each scope and only within their own grants. An admin of `acme/round/**` can invite an admin of `acme/round/**` or of `acme/round/web`, but never of `acme/**`, another folder or everything. A maintainer of team `widgets` can invite onto the team's repositories, never beyond them.
 
 ## MCP tokens
 
@@ -84,11 +84,11 @@ See [Tokens and scopes](/agents/tokens/).
 
 ## Refusals
 
-A refused request answers `403` with the missing action and, for a repository, its `forge:path`. It never names groups, and a repository you cannot see gets the same answer as one that does not exist. MCP tools answer the same as an error result. The panel hides buttons you lack the permission for and shows a card naming it on pages you cannot open.
+A refused request answers `403` with the missing action and, for a repository, its `forge:path`. It never names teams, and a repository you cannot see gets the same answer as one that does not exist. MCP tools answer the same as an error result. The panel hides buttons you lack the permission for and shows a card naming it on pages you cannot open.
 
 ## Related
 
-- [Permissions and scopes](/start/concepts/permissions/) — grants, scopes and groups.
+- [Permissions and scopes](/start/concepts/permissions/) — grants, scopes and team membership.
 - [Settings › People](/guide/settings/people/) — invite people and change roles.
 - [Tokens and scopes](/agents/tokens/) — what agents keep of your access.
 - [Access module](/modules/access/) — the model and its checks.

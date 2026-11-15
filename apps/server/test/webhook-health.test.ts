@@ -61,14 +61,14 @@ const config = parseConfig({
       }),
     },
   },
-  groups: { shapes: { forge: 'work', include: ['shapes/widget'] } },
+  teams: { shapes: { owns: ['work:shapes/widget'] } },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
     reader: [{ scope: { all: true }, actions: ['settings:read'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['settings:read', 'settings:write'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['settings:read', 'settings:write'] }],
   },
 })
 const as = (role: string) => ({

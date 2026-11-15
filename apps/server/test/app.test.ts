@@ -85,9 +85,9 @@ const sizeKind = defineAnalysis<{ bytes: number }>({
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => fakeForge } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*', 'tools/cli'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*', 'work:tools/cli'] },
   },
 })
 
@@ -160,7 +160,7 @@ const games = headerAuth({
   roles: {
     games: [
       {
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         actions: ['audits:read', 'settings:read', 'settings:write', 'credentials:read'],
       },
     ],
@@ -279,7 +279,7 @@ describe('server', () => {
     })
     await send(app, 'PUT', '/api/settings', {
       key: 'test.note',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: 'Money is integer cents.',
     })
     const secret = await send(app, 'PUT', '/api/settings', {
@@ -302,7 +302,7 @@ describe('server', () => {
     ).toBe(400)
     const narrowProvider = await send(app, 'PUT', '/api/settings', {
       key: 'llm.provider',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: 'Anthropic',
     })
     expect(narrowProvider.status).toBe(400)
@@ -322,7 +322,7 @@ describe('server', () => {
     const resolved = (await (
       await app.request('/api/settings/resolve?repo=work:games/a')
     ).json()) as ResolvedSettings
-    expect(resolved.groups).toEqual(['games'])
+    expect(resolved.teams).toEqual(['games'])
     expect(resolved.settings['test.note']?.value).toBe('Money is integer cents.')
     expect(resolved.settings['test.token']?.value).toBeNull()
     expect(resolved.cascade['test.note']?.[0]).toEqual(resolved.settings['test.note'])
@@ -358,7 +358,7 @@ describe('server', () => {
       app,
       'PUT',
       '/api/settings',
-      { key: 'test.note', scope: { groups: ['games'] }, value: 'm' },
+      { key: 'test.note', scope: { teams: ['games'] }, value: 'm' },
       asGames,
     )
     expect(own.status).toBe(200)
@@ -378,7 +378,7 @@ describe('server', () => {
       name: 'GitLab bot',
       kind: 'other',
       url: 'https://gitlab.test',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       secret: 'glpat-123',
     })
     expect(created.status).toBe(201)
@@ -447,7 +447,7 @@ describe('server', () => {
     await store.settings.put({
       ...base,
       id: 's2',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       updatedBy: 'system',
     })
     const list = (await (await setup().request('/api/settings')).json()) as SettingList

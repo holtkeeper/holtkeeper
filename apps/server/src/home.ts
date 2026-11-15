@@ -1,4 +1,4 @@
-import { type RepoTarget, groupLineage } from '@holtkeeper/access'
+import type { RepoTarget } from '@holtkeeper/access'
 import type {
   AuditRunSummary,
   HomeAttentionAction,
@@ -48,8 +48,8 @@ export interface RepoAudits {
 /** Everything Needs attention is computed from, already narrowed to what the caller may read. */
 export interface HomeSources {
   now: Date
-  /** `forge:path` → groups the config gives the repository. */
-  groupsOf: (repo: string) => string[]
+  /** `forge:path` → the repository's owner teams. */
+  teamsOf: (repo: string) => string[]
   /** Label of an analyzer kind for sentences. */
   analyzerLabel: (kind: string) => string
   /** Failed jobs, newest first. */
@@ -93,14 +93,15 @@ const open = (label: string, href: string): HomeAttentionAction => ({ type: 'ope
 
 const review = (href: string): HomeAttentionAction => ({ type: 'review', label: 'Review', href })
 
-const repoRef = (sources: Pick<HomeSources, 'groupsOf'>, repo: string): HomeRepoRef => ({
+const repoRef = (sources: Pick<HomeSources, 'teamsOf'>, repo: string): HomeRepoRef => ({
   repo,
-  groups: sources.groupsOf(repo),
+  teams: sources.teamsOf(repo),
 })
 
-const jobRepo = (sources: Pick<HomeSources, 'groupsOf'>, job: Job): HomeRepoRef =>
+// A group-scope job's `group` is the team it ran for.
+const jobRepo = (sources: Pick<HomeSources, 'teamsOf'>, job: Job): HomeRepoRef =>
   job.group !== undefined
-    ? { repo: keyOf(job.repo), groups: groupLineage(job.group) }
+    ? { repo: keyOf(job.repo), teams: [job.group] }
     : repoRef(sources, keyOf(job.repo))
 
 const endedAt = (job: Job) => job.finishedAt ?? job.createdAt
@@ -117,16 +118,16 @@ const uniqueRepos = (refs: readonly HomeRepoRef[]) => [
  * analyzer and repository for failures without a signature; ids are `failureSnoozeId`s.
  */
 export function failureItems(sources: HomeSources): HomeAttentionItem[] {
-  const groups = new Map<string, Job[]>()
+  const byId = new Map<string, Job[]>()
   for (const job of recent(sources.failedJobs, sources.now)) {
     const id = failureSnoozeId({
       analyzer: job.analyzer,
       ...(job.errorSignature !== undefined && { signature: job.errorSignature }),
       repo: keyOf(job.repo),
     })
-    groups.set(id, [...(groups.get(id) ?? []), job])
+    byId.set(id, [...(byId.get(id) ?? []), job])
   }
-  return [...groups.entries()].map(([id, jobs]) => {
+  return [...byId.entries()].map(([id, jobs]) => {
     const last = jobs[0]!
     const repos = uniqueRepos(jobs.map((job) => jobRepo(sources, job)))
     const label = sources.analyzerLabel(last.analyzer)
@@ -162,12 +163,12 @@ export function failureItems(sources: HomeSources): HomeAttentionItem[] {
 
 /** Jobs an AI budget stopped in the attention window, one item per reason. */
 function blockedItems(sources: HomeSources): HomeAttentionItem[] {
-  const groups = new Map<string, Job[]>()
+  const byReason = new Map<string, Job[]>()
   for (const job of recent(sources.blockedJobs, sources.now)) {
     const reason = firstLine(job.error ?? 'AI budget reached')
-    groups.set(reason, [...(groups.get(reason) ?? []), job])
+    byReason.set(reason, [...(byReason.get(reason) ?? []), job])
   }
-  return [...groups.entries()].map(([reason, jobs]) => ({
+  return [...byReason.entries()].map(([reason, jobs]) => ({
     id: `budget-blocked:${reason}`,
     kind: 'budget-blocked',
     severity: 'high',
@@ -337,9 +338,9 @@ function reviewItems(sources: HomeSources): HomeAttentionItem[] {
   return items
 }
 
-const targetOf = (sources: Pick<HomeSources, 'groupsOf'>, repo: string): RepoTarget => ({
+const targetOf = (sources: Pick<HomeSources, 'teamsOf'>, repo: string): RepoTarget => ({
   ...(parseRepo(repo) ?? { forge: '', path: repo }),
-  groups: sources.groupsOf(repo),
+  teams: sources.teamsOf(repo),
 })
 
 /** Repositories whose newest analysis of some kind is older than `STALE_ANALYSIS_DAYS`. */
@@ -648,7 +649,7 @@ export const changeActionPrefixes = [...new Set(changeRules.flatMap((rule) => ru
  */
 export function summarizeChanges(
   events: readonly AuditEvent[],
-  groupsOf: (repo: string) => string[],
+  teamsOf: (repo: string) => string[],
   limit = 40,
 ): HomeChange[] {
   return events
@@ -667,7 +668,7 @@ export function summarizeChanges(
           href,
           at: event.at,
           actor: event.actor.id,
-          ...(repo !== undefined && { repo: { repo, groups: groupsOf(repo) } }),
+          ...(repo !== undefined && { repo: { repo, teams: teamsOf(repo) } }),
         },
       ]
     })

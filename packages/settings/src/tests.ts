@@ -13,7 +13,7 @@ export interface ResolvedRepoTests {
 }
 
 /**
- * `repo.tests` for `repo`: the most specific covering entry, so a repository entry lifts a group
+ * `repo.tests` for `repo`: the most specific covering entry, so a repository entry lifts a folder
  * one. A secret or invalid winning value counts as the default (tests expected), with no entry.
  */
 export function resolveRepoTests(

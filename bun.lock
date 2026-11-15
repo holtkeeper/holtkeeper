@@ -62,6 +62,8 @@
         "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/credentials": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
+        "@holtkeeper/embed": "workspace:*",
+        "@holtkeeper/embed-openai": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
@@ -553,6 +555,17 @@
         "@holtkeeper/depgraph": "workspace:*",
       },
     },
+    "packages/embed": {
+      "name": "@holtkeeper/embed",
+      "version": "0.0.0",
+    },
+    "packages/embed-openai": {
+      "name": "@holtkeeper/embed-openai",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/embed": "workspace:*",
+      },
+    },
     "packages/exec": {
       "name": "@holtkeeper/exec",
       "version": "0.0.0",
@@ -681,6 +694,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/embed": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "zod": "^4.6.7",
       },
@@ -911,6 +925,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/embed": "workspace:*",
         "@holtkeeper/store": "workspace:*",
       },
     },
@@ -919,6 +934,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/embed": "workspace:*",
         "@holtkeeper/store": "workspace:*",
       },
     },
@@ -1317,6 +1333,10 @@
     "@holtkeeper/depgraph-js": ["@holtkeeper/depgraph-js@workspace:packages/depgraph-js"],
 
     "@holtkeeper/docs": ["@holtkeeper/docs@workspace:docs"],
+
+    "@holtkeeper/embed": ["@holtkeeper/embed@workspace:packages/embed"],
+
+    "@holtkeeper/embed-openai": ["@holtkeeper/embed-openai@workspace:packages/embed-openai"],
 
     "@holtkeeper/examples": ["@holtkeeper/examples@workspace:examples"],
 

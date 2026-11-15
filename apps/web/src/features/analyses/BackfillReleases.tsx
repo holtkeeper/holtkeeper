@@ -61,7 +61,7 @@ export function useBackfillReleases(
         isOpen={open}
         onOpenChange={setOpen}
         title="Analyze past releases"
-        description={repo ? repo.path : 'Every repository of every group'}
+        description={repo ? repo.path : 'Every repository in the fleet'}
         footer={
           <>
             <Button variant="tertiary" onPress={() => setOpen(false)}>

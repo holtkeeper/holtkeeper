@@ -1,44 +1,41 @@
-import type { GroupMatch } from '@holtkeeper/api'
-
 import { messageOf } from '../../api/client.ts'
-import { useGroupTitles, usePreferences, useRepos, useSetPreferences } from '../../api/queries.ts'
-import { groupMatchTitle } from '../../lib/group-titles.ts'
+import {
+  useMe,
+  usePreferences,
+  useRepos,
+  useSetPreferences,
+  useTeamTitles,
+} from '../../api/queries.ts'
 import { scopeList } from '../../lib/home-scope.ts'
 import { healthLabels, healthOrder, healthTones } from '../../lib/home.ts'
-import { type TeamRow, homeCombinations, teamRows, toggleHomeGroup } from '../../lib/my-teams.ts'
-import { formatGroupMatch, parseGroupMatch, validateGroupMatch } from '../../lib/scope.ts'
+import { type MyTeamRow, myTeamRows, toggleHomeTeam } from '../../lib/my-teams.ts'
 import {
   Button,
   Checkbox,
   Dot,
   EmptyState,
   ErrorState,
-  GroupName,
+  TeamName,
   notify,
   Placeholder,
   Table,
-  TagInput,
   Td,
   Th,
 } from '../../ui/index.ts'
 
-const validateCombination = (text: string) =>
-  validateGroupMatch(text) ??
-  (text.includes('+') ? undefined : 'Join two or more groups with +; tick single groups above')
-
 /**
- * Account › My teams: the groups the *My teams* scope shows, as a table of every group the viewer
- * can see (subgroups indented under their parent, each a home group on its own) plus group
- * combinations. Defaults to the groups in the viewer's grants.
+ * Account › My teams: the teams the *My teams* scope shows, as a table of every team the viewer
+ * can see with a tick each. Defaults to the teams the viewer is a member of or whose grants name.
  */
-export function HomeGroups() {
+export function HomeTeams() {
   const preferences = usePreferences()
   const repos = useRepos()
   const save = useSetPreferences()
-  const titleOf = useGroupTitles()
-  const update = (homeGroups: GroupMatch[] | null) =>
+  const titleOf = useTeamTitles()
+  const known = Object.keys(useMe().data?.teamTitles ?? {})
+  const update = (homeTeams: string[] | null) =>
     save.mutate(
-      { homeGroups },
+      { homeTeams },
       { onError: (error) => notify.error('My teams not saved', messageOf(error)) },
     )
 
@@ -46,33 +43,32 @@ export function HomeGroups() {
   if (preferences.isError) return <ErrorState error={preferences.error} />
   if (repos.isError) return <ErrorState error={repos.error} />
 
-  const home = preferences.data.homeGroups
-  const rows = teamRows(repos.data.repos, home, titleOf)
-  const combinations = homeCombinations(home)
+  const home = preferences.data.homeTeams
+  const rows = myTeamRows(repos.data.repos, home, titleOf, known)
   const counts = scopeList(repos.data.repos, 'mine', home).counts
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
         <span className="flex-1">
-          {preferences.data.homeGroupsFromGrants
-            ? 'From your grants until you change them.'
+          {preferences.data.homeTeamsFromMembership
+            ? 'From your memberships and grants until you change them.'
             : 'Picked by you.'}{' '}
           My teams: <b className="font-medium text-foreground">{counts.mine}</b> of {counts.all}{' '}
           repositories; other teams fold under each list.
         </span>
-        {preferences.data.homeGroupsFromGrants ? null : (
+        {preferences.data.homeTeamsFromMembership ? null : (
           <Button variant="ghost" size="sm" isPending={save.isPending} onPress={() => update(null)}>
-            Use my grants
+            Use my memberships
           </Button>
         )}
       </div>
       {rows.length ? (
-        <Table label="Groups you can add to My teams">
+        <Table label="Teams you can add to My teams">
           <thead>
             <tr>
               <Th className="w-28">In My teams</Th>
-              <Th>Group</Th>
+              <Th>Team</Th>
               <Th align="right">Repositories</Th>
               <Th>Health</Th>
               <Th>Forge</Th>
@@ -80,20 +76,17 @@ export function HomeGroups() {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.group}>
+              <tr key={row.team}>
                 <Td>
                   <Checkbox
-                    label={<span className="sr-only">{`${titleOf(row.group)} in My teams`}</span>}
+                    label={<span className="sr-only">{`${titleOf(row.team)} in My teams`}</span>}
                     isSelected={row.inMyTeams}
                     isDisabled={save.isPending}
-                    onChange={(on) => update(toggleHomeGroup(home, row.group, on))}
+                    onChange={(on) => update(toggleHomeTeam(home, row.team, on))}
                   />
                 </Td>
-                <Td className={row.parent === undefined ? 'font-medium' : 'ps-8'}>
-                  <GroupName group={row.group} />
-                  {row.parent === undefined ? null : (
-                    <span className="ms-1.5 text-[11px] text-dim">in {titleOf(row.parent)}</span>
-                  )}
+                <Td className="font-medium">
+                  <TeamName team={row.team} />
                 </Td>
                 <Td align="right" className="tabular">
                   {row.repos}
@@ -107,28 +100,16 @@ export function HomeGroups() {
           </tbody>
         </Table>
       ) : (
-        <EmptyState title="No groups yet" description="Repositories you can see are in no group." />
+        <EmptyState
+          title="No teams yet"
+          description="No team owns a repository you can see. Teams are set up under Repos › Teams."
+        />
       )}
-      <TagInput
-        label="Group combinations"
-        values={combinations.map(formatGroupMatch)}
-        onChange={(values) =>
-          update([
-            ...home.filter((entry) => typeof entry === 'string'),
-            ...values.map(parseGroupMatch),
-          ])
-        }
-        validate={validateCombination}
-        suggestions={rows.map((row) => row.group)}
-        labelOf={(text) => groupMatchTitle(parseGroupMatch(text), titleOf)}
-        placeholder="Add a combination, e.g. web + payments"
-        description="Groups joined with + match repositories in all of them."
-      />
     </div>
   )
 }
 
-function TeamHealth({ health }: { health: TeamRow['health'] }) {
+function TeamHealth({ health }: { health: MyTeamRow['health'] }) {
   const parts = healthOrder.filter((status) => health[status] > 0)
   if (!parts.length) return <span className="text-dim">—</span>
   return (

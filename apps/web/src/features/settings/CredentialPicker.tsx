@@ -8,6 +8,7 @@ import { useSession } from '../shell/session.ts'
 
 const kindsOf: Record<string, readonly string[]> = {
   'ai-provider': aiProviderKinds,
+  'ai-sdk': ['ai-sdk'],
   github: ['github'],
 }
 
@@ -15,6 +16,10 @@ const missing: Record<string, { title: string; text: string }> = {
   'ai-provider': {
     title: 'No AI provider yet',
     text: 'Add an AI provider credential with its API key first, then pick it here.',
+  },
+  'ai-sdk': {
+    title: 'No ai-sdk credential yet',
+    text: 'Add an AI provider credential of kind ai-sdk (an OpenAI-compatible endpoint) first, then pick it here.',
   },
   github: {
     title: 'No GitHub token yet',
@@ -41,10 +46,10 @@ function MissingNotice({ of }: { of: string }) {
         {notice.text}
         <LinkButton
           to="/settings/$section"
-          params={{ section: of === 'ai-provider' ? 'ai' : 'integrations' }}
+          params={{ section: of.startsWith('ai-') ? 'ai' : 'integrations' }}
           size="sm"
         >
-          Open {of === 'ai-provider' ? 'AI providers' : 'Credentials'}
+          Open {of.startsWith('ai-') ? 'AI providers' : 'Credentials'}
         </LinkButton>
       </span>
     </Notice>

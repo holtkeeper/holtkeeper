@@ -15,7 +15,7 @@ import {
 import { automaticStopsAt, spendForecast } from './forecast.ts'
 import { monthRange, periodSpans, previousWeek, weekRange } from './period.ts'
 
-const app: RepoTarget = { forge: 'work', path: 'games/app', groups: ['games'] }
+const app: RepoTarget = { forge: 'work', path: 'games/app', teams: ['games'] }
 
 const entry = (
   id: string,
@@ -31,7 +31,7 @@ const spend = (
 ): NewAiUsageRecord => ({
   at,
   repo: { forge: app.forge, path: app.path },
-  groups: app.groups,
+  teams: app.teams,
   taskKind: 'review',
   actor: 'system',
   provider: 'anthropic',
@@ -143,7 +143,7 @@ describe('budget resolution', () => {
   test('most specific covering budget plus the global one; invalid values skipped', () => {
     const budgets = parseBudgets([
       entry('global', { all: true }, { weeklyUsd: 100, action: 'warn' }),
-      entry('games', { groups: ['games'] }, { weeklyUsd: 50 }),
+      entry('games', { teams: ['games'] }, { weeklyUsd: 50 }),
       entry('glob', { repos: ['work:games/**'] }, { weeklyUsd: 20 }),
       entry('exact', { repos: ['work:games/app'] }, { weeklyUsd: 2, reserveUsd: 1 }),
       entry('broken', { repos: ['work:games/app'] }, { action: 'explode' }),
@@ -152,29 +152,42 @@ describe('budget resolution', () => {
     expect(budgets.map((b) => b.id)).toEqual(['global', 'games', 'glob', 'exact'])
     expect(applicableBudgets(budgets, app).map((b) => b.id)).toEqual(['exact', 'global'])
     expect(
-      applicableBudgets(budgets, { forge: 'work', path: 'games/adventure', groups: [] }).map(
+      applicableBudgets(budgets, { forge: 'work', path: 'games/adventure', teams: [] }).map(
         (b) => b.id,
       ),
     ).toEqual(['glob', 'global'])
     expect(
-      applicableBudgets(budgets, { forge: 'work', path: 'tools/x', groups: [] }).map((b) => b.id),
+      applicableBudgets(budgets, { forge: 'work', path: 'tools/x', teams: [] }).map((b) => b.id),
     ).toEqual(['global'])
-    expect(applicableBudgets(budgets.slice(1), { forge: 'w', path: 'x', groups: [] })).toEqual([])
+    expect(applicableBudgets(budgets.slice(1), { forge: 'w', path: 'x', teams: [] })).toEqual([])
   })
 
-  test('a subgroup budget does not lift its repositories out of the parent cap', () => {
+  test('a folder budget does not lift its repositories out of a wider folder cap', () => {
     const budgets = parseBudgets([
-      entry('shapes', { groups: ['shapes'] }, { weeklyUsd: 50 }),
-      entry('round', { groups: ['shapes.round'] }, { weeklyUsd: 500 }),
+      entry('shapes', { repos: ['work:shapes/**'] }, { weeklyUsd: 50 }),
+      entry('round', { repos: ['work:shapes/round/**'] }, { weeklyUsd: 500 }),
+      entry('team', { teams: ['widgets'] }, { weeklyUsd: 5 }),
+      entry('global', { all: true }, { weeklyUsd: 1000 }),
     ])
-    const circle = { forge: 'work', path: 'shapes/circle', groups: ['shapes.round', 'shapes'] }
-    expect(applicableBudgets(budgets, circle).map((b) => b.id)).toEqual(['round', 'shapes'])
+    const circle = { forge: 'work', path: 'shapes/round/circle', teams: ['widgets'] }
+    expect(applicableBudgets(budgets, circle).map((b) => b.id)).toEqual([
+      'round',
+      'shapes',
+      'global',
+    ])
+    const square = { forge: 'work', path: 'shapes/square', teams: ['widgets'] }
+    expect(applicableBudgets(budgets, square).map((b) => b.id)).toEqual(['shapes', 'global'])
+    const exact = parseBudgets([
+      entry('shapes', { repos: ['work:shapes/**'] }, { weeklyUsd: 50 }),
+      entry('circle', { repos: ['work:shapes/round/circle'] }, { weeklyUsd: 500 }),
+    ])
+    expect(applicableBudgets(exact, circle).map((b) => b.id)).toEqual(['circle'])
   })
 
   test('the newest of equally specific budgets wins', () => {
     const budgets = parseBudgets([
-      entry('old', { groups: ['games'] }, { weeklyUsd: 1 }, '2026-01-01T00:00:00Z'),
-      entry('new', { groups: ['games'] }, { weeklyUsd: 2 }, '2026-02-01T00:00:00Z'),
+      entry('old', { teams: ['games'] }, { weeklyUsd: 1 }, '2026-01-01T00:00:00Z'),
+      entry('new', { teams: ['games'] }, { weeklyUsd: 2 }, '2026-02-01T00:00:00Z'),
     ])
     expect(applicableBudgets(budgets, app).map((b) => b.id)).toEqual(['new'])
   })
@@ -237,17 +250,17 @@ describe('budgetGuard', () => {
     ])
   })
 
-  test('a run in a subgroup is still blocked by the parent budget', async () => {
-    const circle = { forge: 'work', path: 'shapes/circle', groups: ['shapes.round', 'shapes'] }
+  test('a run in a folder is still blocked by the wider folder budget', async () => {
+    const circle = { forge: 'work', path: 'shapes/round/circle', teams: ['widgets'] }
     const { guard } = await setup(
       [
-        entry('shapes', { groups: ['shapes'] }, { weeklyUsd: 50 }),
-        entry('round', { groups: ['shapes.round'] }, { weeklyUsd: 500 }),
+        entry('shapes', { repos: ['work:shapes/**'] }, { weeklyUsd: 50 }),
+        entry('round', { repos: ['work:shapes/round/**'] }, { weeklyUsd: 500 }),
       ],
       [
         spend('2026-10-27T00:00:00.000Z', 49, {
-          repo: { forge: 'work', path: 'shapes/circle' },
-          groups: circle.groups,
+          repo: { forge: 'work', path: 'shapes/round/circle' },
+          teams: circle.teams,
         }),
       ],
     )
@@ -291,7 +304,7 @@ describe('budgetGuard', () => {
     expect(decision.exceeded.map((s) => [s.budgetId, s.action])).toEqual([['global', 'warn']])
     expect(decision.remainingUsd).toBe(0.5)
     const other = await guard.check({
-      repo: { forge: 'work', path: 'tools/cli', groups: [] },
+      repo: { forge: 'work', path: 'tools/cli', teams: [] },
       taskKind: 'review',
       estimateUsd: 0,
     })
@@ -363,14 +376,14 @@ test('budgetStatuses reports weekly spend, percent, forecast and when automatic 
   await store.aiUsage.append(spend('2026-11-08T00:00:00.000Z', 50))
   const now = new Date('2026-11-12T12:00:00.000Z')
   const [status] = await budgetStatuses(
-    [entry('g', { groups: ['games'] }, { weeklyUsd: 20, reserveUsd: 5, action: 'warn' })],
+    [entry('g', { teams: ['games'] }, { weeklyUsd: 20, reserveUsd: 5, action: 'warn' })],
     store.aiUsage,
     now,
     { timeZone: 'UTC' },
   )
   expect(status).toEqual({
     id: 'g',
-    scope: { groups: ['games'] },
+    scope: { teams: ['games'] },
     action: 'warn',
     weeklyUsd: 20,
     reserveUsd: 5,
@@ -401,8 +414,8 @@ test('broadestBudget prefers a global budget, then the least specific, then the 
   expect(
     broadestBudget([
       status('repo', { repos: ['work:games/app'] }, 90),
-      status('games', { groups: ['games'] }, 10),
-      status('tools', { groups: ['tools'] }, 40),
+      status('games', { teams: ['games'] }, 10),
+      status('tools', { teams: ['tools'] }, 40),
     ])?.id,
   ).toBe('tools')
   expect(broadestBudget([])).toBeUndefined()

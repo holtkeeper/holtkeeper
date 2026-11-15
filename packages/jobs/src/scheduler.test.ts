@@ -9,6 +9,7 @@ import { z } from 'zod'
 
 import { cronError, nextRun } from './cron.ts'
 import { enqueueUnique } from './enqueue.ts'
+import { type ResolveRepos, selectionCovers } from './repos.ts'
 import { createScheduler, planSchedule, scheduleProblems, spreadRequests } from './scheduler.ts'
 
 const analyzer = (kind: string, scope: 'repo' | 'group' = 'repo'): AnyAnalyzer => ({
@@ -25,9 +26,9 @@ const analyzers = [analyzer('depgraph'), analyzer('quality'), analyzer('fleet', 
 const forge = { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never }
 const config = parseConfig({
   forges: { work: forge },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['games/*'] },
+    tools: { owns: ['tools/*'] },
   },
   jobs: {
     schedules: [
@@ -35,7 +36,7 @@ const config = parseConfig({
         name: 'nightly',
         cron: '0 3 * * *',
         analyzers: ['depgraph', 'fleet'],
-        groups: ['games'],
+        teams: ['games'],
         options: { depgraph: { depth: 2 } },
       },
       { name: 'weekly', cron: '0 4 * * 1', analyzers: ['quality'], repos: ['work:*/a'] },
@@ -43,14 +44,13 @@ const config = parseConfig({
   },
 })
 
-const reposOf: Record<string, RepoRef[]> = {
-  games: [
-    { forge: 'work', path: 'games/a' },
-    { forge: 'work', path: 'games/b' },
-  ],
-  tools: [{ forge: 'work', path: 'tools/a' }],
-}
-const resolveRepos = async (group: string) => reposOf[group] ?? []
+const fleet: RepoRef[] = [
+  { forge: 'work', path: 'games/a' },
+  { forge: 'work', path: 'games/b' },
+  { forge: 'work', path: 'tools/a' },
+]
+const resolveRepos: ResolveRepos = async (selection) =>
+  fleet.filter((repo) => selectionCovers(config, selection, repo))
 
 let store: Store
 let clock: Date
@@ -141,7 +141,7 @@ describe('scheduler', () => {
     expect(lines.join('\n')).not.toContain('skipped')
   })
 
-  test('enqueues per repository and once per group when a schedule comes due', async () => {
+  test('enqueues per repository and once per team when a schedule comes due', async () => {
     const s = scheduler()
     expect(await s.tick()).toEqual([])
     clock = new Date('2026-10-30T03:00:30.000Z')
@@ -155,70 +155,35 @@ describe('scheduler', () => {
     expect(await s.tick()).toEqual([])
   })
 
-  test('group intersections pick repositories in every listed group', async () => {
-    const layered = parseConfig({
-      forges: { work: forge },
-      groups: {
-        frontend: { forge: 'work', include: ['shop/web', 'admin/ui'] },
-        storefront: { forge: 'work', include: ['shop/*'] },
-        'admin-panel': { forge: 'work', include: ['admin/*'] },
-      },
-    })
-    const members: Record<string, RepoRef[]> = {
-      frontend: [
-        { forge: 'work', path: 'shop/web' },
-        { forge: 'work', path: 'admin/ui' },
-      ],
-      'admin-panel': [
-        { forge: 'work', path: 'admin/ui' },
-        { forge: 'work', path: 'admin/api' },
-      ],
-    }
+  test('teams and path patterns combine with OR', async () => {
     const requests = await planSchedule(
-      { analyzers: ['depgraph', 'fleet'], groups: [['frontend', 'storefront'], 'admin-panel'] },
-      {
-        config: layered,
-        analyzers,
-        resolveRepos: async (group) => members[group] ?? [],
-      },
+      { analyzers: ['depgraph', 'fleet'], teams: ['tools'], repos: ['games/b'] },
+      { config, analyzers, resolveRepos },
     )
     expect(requests.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
-      'depgraph shop/web',
-      'depgraph admin/ui',
-      'depgraph admin/api',
-      'fleet admin-panel',
+      'depgraph games/b',
+      'depgraph tools/a',
+      'fleet tools',
     ])
   })
 
-  test('schedules without groups run group analyzers for root groups only', async () => {
-    const nested = parseConfig({
-      forges: { work: forge },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'] },
-        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+  test('team analyzers run once per team and forge it can live on', async () => {
+    const spread = parseConfig({
+      forges: { work: forge, lab: forge },
+      teams: {
+        widgets: { owns: ['work:acme/widgets/*'] },
+        gizmo: { owns: ['acme/gizmo/**'] },
       },
     })
-    const asked: string[] = []
-    const members = async (group: string) => {
-      asked.push(group)
-      return group === 'shapes' ? [{ forge: 'work', path: 'shapes/circle' }] : []
-    }
-    const all = await planSchedule(
-      { analyzers: ['depgraph', 'fleet'] },
-      { config: nested, analyzers, resolveRepos: members },
-    )
-    expect(all.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
-      'depgraph shapes/circle',
-      'fleet shapes',
-    ])
-    expect(asked).toEqual(['shapes'])
-    const named = await planSchedule(
-      { analyzers: ['fleet'], groups: ['shapes.round'] },
-      { config: nested, analyzers, resolveRepos: members },
-    )
-    expect(named.map((r) => `${r.analyzer} ${r.repo.path} ${r.group}`)).toEqual([
-      'fleet shapes.round shapes.round',
-    ])
+    const plan = async (teams?: string[]) =>
+      (
+        await planSchedule(
+          { analyzers: ['fleet'], ...(teams && { teams }) },
+          { config: spread, analyzers, resolveRepos: async () => [] },
+        )
+      ).map((r) => `${r.repo.forge}:${r.repo.path} ${r.group}`)
+    expect(await plan()).toEqual(['work:widgets widgets', 'work:gizmo gizmo', 'lab:gizmo gizmo'])
+    expect(await plan(['widgets'])).toEqual(['work:widgets widgets'])
   })
 
   test('repository jobs skip repositories the analyzer does not apply to', async () => {
@@ -237,7 +202,7 @@ describe('scheduler', () => {
     }
     const lines: string[] = []
     const requests = await planSchedule(
-      { analyzers: ['browserslist', 'renovate', 'quality'], groups: ['games'] },
+      { analyzers: ['browserslist', 'renovate', 'quality'], teams: ['games'] },
       {
         config,
         analyzers: [usesLockfile('browserslist'), usesLockfile('renovate'), broken],
@@ -266,7 +231,7 @@ describe('scheduler', () => {
     const listed: string[] = []
     const trees: Record<string, string[]> = { 'games/a': ['web/page.html'], 'games/b': ['main.go'] }
     const requests = await planSchedule(
-      { analyzers: ['testids', 'i18n'], groups: ['games'] },
+      { analyzers: ['testids', 'i18n'], teams: ['games'] },
       {
         config,
         analyzers: [html('testids'), html('i18n')],
@@ -291,7 +256,7 @@ describe('scheduler', () => {
   test('skip leaves a repository out of one analyzer and logs it once', async () => {
     const lines: string[] = []
     const requests = await planSchedule(
-      { analyzers: ['depgraph', 'quality'], groups: ['games'] },
+      { analyzers: ['depgraph', 'quality'], teams: ['games'] },
       {
         config,
         analyzers,
@@ -318,7 +283,7 @@ describe('scheduler', () => {
     expect(await store.jobs.list({ schedule: 'nightly' })).toEqual([])
   })
 
-  test('repos globs filter across every group when none are named', async () => {
+  test('repos patterns alone pick across every team', async () => {
     const jobs = await scheduler().run('weekly')
     expect(jobs.map((j) => j.repo.path)).toEqual(['games/a', 'tools/a'])
   })
@@ -353,7 +318,7 @@ describe('scheduler', () => {
   test('re-reads schedules each tick, skips disabled ones and spreads repository jobs', async () => {
     const live = parseConfig({
       forges: { work: forge },
-      groups: { games: { forge: 'work', include: ['games/*'] } },
+      teams: { games: { owns: ['games/*'] } },
       jobs: { schedules: [] },
     })
     const logs: string[] = []
@@ -371,7 +336,7 @@ describe('scheduler', () => {
     jobs.schedules =
       parseConfig({
         forges: { work: forge },
-        groups: { games: { forge: 'work', include: ['games/*'] } },
+        teams: { games: { owns: ['games/*'] } },
         jobs: {
           schedules: [
             { name: 'off', enabled: false, every: '1h', analyzers: ['quality'] },
@@ -390,14 +355,15 @@ describe('scheduler', () => {
     const created = await s.tick()
     expect(created.map((j) => `${j.analyzer} ${j.repo.path} ${j.runAfter}`)).toEqual([
       'depgraph games/a 2026-10-30T03:00:00.000Z',
-      'depgraph games/b 2026-10-30T03:15:00.000Z',
+      'depgraph games/b 2026-10-30T03:10:00.000Z',
+      'depgraph tools/a 2026-10-30T03:20:00.000Z',
       'fleet games 2026-10-30T03:00:00.000Z',
     ])
     await s.tick()
     expect(logs.filter((line) => line.includes('broken skipped'))).toHaveLength(1)
   })
 
-  test('spreadRequests keeps group jobs at the start', () => {
+  test('spreadRequests keeps team jobs at the start', () => {
     const start = new Date('2026-10-30T00:00:00.000Z')
     const end = new Date('2026-10-30T01:00:00.000Z')
     const spread = spreadRequests(

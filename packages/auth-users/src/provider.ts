@@ -85,6 +85,7 @@ function buildContext(options: UsersAuthOptions, deps: UsersAuthDeps): Context {
   return {
     store: options.store,
     ...(options.kv && { kv: options.kv }),
+    ...(options.teams && { teams: options.teams }),
     origin,
     rpID: url.hostname,
     rpName: options.rpName ?? 'Holtkeeper',

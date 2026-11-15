@@ -32,7 +32,7 @@ const config = parseConfig({
       gitCredentials: () => ({ username: 'oauth2', password: 'tok' }),
     },
   },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
 })
 
 const analyzer = (needs: AnyAnalyzer['needs'], scope: 'repo' | 'group' = 'repo'): AnyAnalyzer => ({
@@ -72,7 +72,13 @@ describe('createContextFactory', () => {
     cacheDir: '/cache',
     runner: createFakeRunner().runner,
     agentFor: (repo) => (repo.path === 'games/a' ? agent : undefined),
-    resolveRepos: async () => [{ forge: 'work', path: 'games/a' }],
+    resolveRepos: async (selection) =>
+      selection?.teams?.includes('games')
+        ? [
+            { forge: 'lab', path: 'games/a' },
+            { forge: 'work', path: 'games/a' },
+          ]
+        : [],
     checkout: async (options) => {
       checkouts.push(options)
       return {
@@ -167,7 +173,7 @@ describe('createContextFactory', () => {
     expect(prepared.context.ref).toBe('v1.2.0')
   })
 
-  test('group analyzers get the group repositories and no checkout', async () => {
+  test('group-scope analyzers get the team repositories on the job forge and no checkout', async () => {
     const before = checkouts.length
     const { context } = await contextFor(
       job({ repo: { forge: 'work', path: 'games' }, group: 'games' }),
@@ -319,7 +325,7 @@ describe('forge SSH keys in checkouts', () => {
   test('forgeAccess carries the forge fetch, so external tools share its limits', async () => {
     const withFetch = parseConfig({
       forges: { work: { ...config.forges.work!, fetch: limited } },
-      groups: { games: { forge: 'work', include: ['games/*'] } },
+      teams: { games: { owns: ['work:games/*'] } },
     })
     const contextFor = createContextFactory({
       config: withFetch,

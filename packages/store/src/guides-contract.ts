@@ -6,7 +6,7 @@ import type { Family, GuideSection, GuideSectionInput, Store } from './types.ts'
 const at = (minute: number) => `2026-11-01T10:${String(minute).padStart(2, '0')}:00.000Z`
 
 const section = (overrides: Partial<GuideSectionInput> = {}): GuideSectionInput => ({
-  scope: 'group:games',
+  scope: 'team:games',
   section: 'general',
   rules: 'Keep components small.',
   steering: '',
@@ -43,7 +43,7 @@ export function guideStoreTests(store: () => Store) {
     const guides = store().guides
     const first = await guides.put(section())
     expect(first).toMatchObject({ version: 1, editedBy: 'jane', editedAt: at(0) })
-    expect(await guides.history('group:games', 'general')).toEqual([])
+    expect(await guides.history('team:games', 'general')).toEqual([])
 
     const generated = {
       body: '- Run `bun test`.',
@@ -80,7 +80,7 @@ export function guideStoreTests(store: () => Store) {
       }),
     )
     expect(edited).toEqual({
-      scope: 'group:games',
+      scope: 'team:games',
       section: 'general',
       rules: 'Keep files short.',
       steering: '',
@@ -93,8 +93,8 @@ export function guideStoreTests(store: () => Store) {
     await guides.put(
       section({ rules: 'Keep files short.', steering: 'Ignore legacy/.', editedAt: at(4) }),
     )
-    expect(await guides.get('group:games', 'general')).toMatchObject({ version: 3 })
-    expect(await guides.history('group:games', 'general')).toEqual([
+    expect(await guides.get('team:games', 'general')).toMatchObject({ version: 3 })
+    expect(await guides.history('team:games', 'general')).toEqual([
       { rules: 'Keep files short.', steering: '', version: 2, editedBy: 'bob', editedAt: at(3) },
       {
         rules: 'Keep components small.',
@@ -112,12 +112,12 @@ export function guideStoreTests(store: () => Store) {
     const proposal = layer('- Run `make check`.', 'proposed')
     const stored = await guides.put(section({ generated, proposal }))
     expect(stored.proposal).toEqual({ ...proposal, version: 2 })
-    expect((await guides.get('group:games', 'general'))?.generated).toEqual({
+    expect((await guides.get('team:games', 'general'))?.generated).toEqual({
       ...generated,
       version: 1,
     })
     await guides.put(section({ generated }))
-    expect((await guides.get('group:games', 'general'))?.proposal).toBeUndefined()
+    expect((await guides.get('team:games', 'general'))?.proposal).toBeUndefined()
   })
 
   test('guides: generator runs get versions and a history, newest first', async () => {

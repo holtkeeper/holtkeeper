@@ -37,6 +37,7 @@ import {
   readBody,
 } from '../context.ts'
 import { EGRESS_SECRET_KIND } from '../egress-secrets.ts'
+import { embeddingsSettingOf } from '../embeddings.ts'
 import { credentialTestSchema } from '../schemas.ts'
 import { listedRepos } from '../updates.ts'
 import { checkWebhookHealth, webhookHealthSummary } from '../webhook-health.ts'
@@ -70,8 +71,8 @@ const librariesGithubSchema = z.object({
 type UsedCredential = Pick<CredentialView, 'id' | 'name' | 'kind'>
 
 /**
- * What refers to each credential: panel forges by token or SSH key, the global `llm.provider`
- * and `libraries` settings by id or name, and the services that use every credential of a kind.
+ * What refers to each credential: panel forges by token or SSH key, the global `llm.provider`,
+ * `knowledge.embeddings` (while on) and `libraries` settings by id or name, and the services that use every credential of a kind.
  */
 async function credentialUses(
   deps: Pick<ServerDeps, 'store'>,
@@ -111,6 +112,18 @@ async function credentialUses(
       kind: 'setting',
       id: 'llm.provider',
       label: 'Agents',
+      href: webPaths.settings('ai'),
+    })
+
+  const embeddings = embeddingsSettingOf(settings)
+  const embeddingReference = embeddings.credential ?? provider
+  const embeddingCredential =
+    embeddings.enabled && embeddingReference !== undefined ? named(embeddingReference) : undefined
+  if (embeddingCredential?.kind === 'ai-sdk')
+    add(embeddingCredential.id, {
+      kind: 'setting',
+      id: 'knowledge.embeddings',
+      label: 'Semantic search',
       href: webPaths.settings('ai'),
     })
 

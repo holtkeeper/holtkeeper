@@ -1,6 +1,6 @@
 import type { Action, Grant, Scope } from '@holtkeeper/api'
 
-import { formatGroupMatch, normalizeScope } from './scope.ts'
+import { normalizeScope } from './scope.ts'
 
 /** The four presets People hands out, narrowest first. */
 export const rolePresetIds = ['viewer', 'developer', 'maintainer', 'admin'] as const
@@ -79,7 +79,7 @@ const sameActions = (a: readonly (Action | '*')[], b: readonly (Action | '*')[])
 function mergeScopes(scopes: readonly Scope[]): Scope {
   if (scopes.some((scope) => scope.all)) return { all: true }
   return normalizeScope({
-    groups: scopes.flatMap((scope) => scope.groups ?? []),
+    teams: scopes.flatMap((scope) => scope.teams ?? []),
     repos: scopes.flatMap((scope) => scope.repos ?? []),
   })
 }
@@ -110,7 +110,7 @@ const scopeKey = (scope: Scope) => {
   const normal = normalizeScope(scope)
   return JSON.stringify([
     normal.all === true,
-    (normal.groups ?? []).map(formatGroupMatch).toSorted(),
+    (normal.teams ?? []).toSorted(),
     (normal.repos ?? []).toSorted(),
   ])
 }

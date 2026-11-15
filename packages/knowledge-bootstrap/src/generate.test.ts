@@ -154,7 +154,7 @@ describe('generateLessons', () => {
       links,
       prompt: {
         repo: 'work:acme/widget-api',
-        groups: ['shapes.round', 'shapes'],
+        teams: ['widgets'],
         since: '2026-05-13',
         maxEntries: 10,
         evidence,

@@ -35,14 +35,14 @@ const fakeForge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*'] },
   },
   jobs: {
     webhookSecret: 'hook-secret',
     botUsernames: { work: 'holtkeeper' },
-    onMergeRequest: { analyzers: ['review', 'fleet'], groups: ['games'] },
+    onMergeRequest: { analyzers: ['review', 'fleet'], teams: ['games'] },
     onLabel: { 'needs-port': ['port'], 'deep-review': ['review'] },
     commands: {
       review: { analyzer: 'review' },
@@ -223,7 +223,7 @@ describe('merge request events', () => {
     expect(await jobs()).toHaveLength(1)
   })
 
-  test('skips drafts, closed merge requests, bot events and other groups', async () => {
+  test('skips drafts, closed merge requests, bot events and other teams', async () => {
     expect(
       await ignored(
         await hook('Merge Request Hook', mergeRequestEvent({ action: 'open', draft: true })),
@@ -249,7 +249,7 @@ describe('merge request events', () => {
           project: project('tools/x'),
         }),
       ),
-    ).toContain('onMergeRequest.groups')
+    ).toContain('onMergeRequest.teams')
     expect((await hook('Merge Request Hook', { object_kind: 'merge_request' })).status).toBe(400)
     expect(await jobs()).toEqual([])
   })
@@ -428,7 +428,7 @@ describe('note events', () => {
     await store.settings.put({
       id: 'off',
       key: 'repo.analyzers',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: { off: ['review'], reason: 'Values only' },
       secret: false,
       updatedAt: '2026-10-01T00:00:00.000Z',

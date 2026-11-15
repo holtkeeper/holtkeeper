@@ -12,7 +12,7 @@ export const TEST_ANALYZERS: ReadonlySet<string> = new Set(['coverage'])
 export type RepoTestsFor = (repo: RepoRef) => Promise<{ expected: boolean; reason?: string }>
 
 /**
- * Reads `repo.tests` for a repository with its groups from `config()`. The settings are read on
+ * Reads `repo.tests` for a repository with its owner teams from `config()`. The settings are read on
  * every call, so a change in the panel applies to the next decision.
  */
 export function repoTestsFor(

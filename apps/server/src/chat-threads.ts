@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type Principal, type RepoTarget, can, groupLineage } from '@holtkeeper/access'
+import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
 import { type Agent, BudgetExceededError, type Toolset } from '@holtkeeper/agent'
 import { ToolError, defineTool } from '@holtkeeper/agent-tools'
 import { BudgetDeniedError } from '@holtkeeper/ai-usage'
@@ -57,7 +57,7 @@ export interface ChatAgentRun {
 
 /**
  * The agent chat replies run on for `target`: the thread's repository, or a stand-in target for
- * group and unscoped threads (`chat:group/<name>` with that group, `chat:team` with none).
+ * team and unscoped threads (`chat:team/<key>` owned by that team, `chat:team` with no team).
  */
 export type ChatAgentFor = (target: RepoTarget, run: ChatAgentRun) => Promise<Agent | undefined>
 
@@ -73,8 +73,8 @@ export const hasChatAccess = (principal: Principal) =>
   )
 
 /**
- * Whether the principal sees the thread: `repos:read` on its repository or group, or chat access
- * for unscoped threads.
+ * Whether the principal sees the thread: `repos:read` on its repository or team (`ChatThread.group`
+ * holds the team key), or chat access for unscoped threads.
  */
 export function canSeeThread(
   config: HoltkeeperConfig,
@@ -87,7 +87,7 @@ export function canSeeThread(
       repo: repoTarget(config, parseKey(thread.repo)),
     })
   if (thread.group)
-    return can(principal, 'repos:read', { kind: 'scope', scope: { groups: [thread.group] } })
+    return can(principal, 'repos:read', { kind: 'scope', scope: { teams: [thread.group] } })
   return hasChatAccess(principal)
 }
 
@@ -103,17 +103,16 @@ export const bodyRefs = (config: HoltkeeperConfig, body: string) =>
   textRefs(body, (forge) => config.forges[forge] !== undefined)
 
 /**
- * The target the agent of a thread works for (see `ChatAgentFor`); a group thread's stand-in is in
- * the group and, for a subgroup, its parent.
+ * The target the agent of a thread works for (see `ChatAgentFor`); a team thread's stand-in is
+ * owned by that team alone.
  */
 export function agentTarget(
   config: HoltkeeperConfig,
   thread: Pick<ChatThread, 'repo' | 'group'>,
 ): RepoTarget {
   if (thread.repo) return repoTarget(config, parseKey(thread.repo))
-  if (thread.group)
-    return { forge: 'chat', path: `group/${thread.group}`, groups: groupLineage(thread.group) }
-  return { forge: 'chat', path: 'team', groups: [] }
+  if (thread.group) return { forge: 'chat', path: `team/${thread.group}`, teams: [thread.group] }
+  return { forge: 'chat', path: 'team', teams: [] }
 }
 
 const toolName = (name: string) => name.replace(/^mcp__.+?__/, '')

@@ -284,8 +284,9 @@ export type CheckoutFn = (
 /** Longest bump patch a fix task takes; write tasks accept 1 000 000 characters. */
 const MAX_FIX_PATCH = 1_000_000
 
-/** Everything one wave across a group needs. */
+/** Everything one wave across a team needs. */
 export interface PropagationInput {
+  /** Key of the team whose repositories the wave covers. */
   group: string
   forgeId: string
   repos: RepoRef[]
@@ -345,7 +346,7 @@ const bumpedTargets = (targets: PackageTarget[], bumps: Bump[]) =>
   targets.filter((target) => bumps.some((bump) => bump.package === target.name))
 
 /**
- * Rolls package updates out across the repositories of a group: plans through the forge, then
+ * Rolls package updates out across the repositories of a team: plans through the forge, then
  * per repository checks out, bumps, verifies and (unless `dryRun`) commits and opens or updates a
  * merge request. Repositories whose checks fail go to one task group of write tasks (`fixes`)
  * that carry the bump as a patch. Per-repository failures end up in the outcome, never as a

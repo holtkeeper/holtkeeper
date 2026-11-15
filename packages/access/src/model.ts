@@ -28,21 +28,15 @@ export const actions = [
 export type Action = (typeof actions)[number]
 
 /**
- * One entry of a group list: a group name, or a list of groups a repository must belong to all at
- * once (`['frontend', 'storefront']`). Entries of a list combine with OR, groups inside an entry
- * with AND.
- */
-export type GroupMatch = string | string[]
-
-/**
  * Which repositories something applies to. `all` covers everything, including global objects.
- * Otherwise a repository is covered when it matches one of `groups` (see `GroupMatch`) or its path
- * matches one of `repos`. A `repos` pattern is a path glob, optionally prefixed with a forge id:
- * `work:games/**`.
+ * Otherwise a repository is covered when one of `teams` owns it or its path matches one of
+ * `repos`. A `repos` pattern is a path glob (`*` stays within one folder, `**` crosses folders),
+ * optionally prefixed with a forge id: `work:acme/**`, `acme/*\/game-frontend`. Entries combine
+ * with OR.
  */
 export interface Scope {
   all?: boolean
-  groups?: GroupMatch[]
+  teams?: string[]
   repos?: string[]
 }
 
@@ -60,11 +54,23 @@ export interface Principal {
   /** Name of the auth provider that produced the principal, e.g. `none`, `header`, `users`. */
   provider: string
   grants: Grant[]
+  /**
+   * The path patterns of the teams its grants name, so a grant on `{ teams: [key] }` also covers
+   * objects scoped to paths inside the team (`scopeWithin`). Without it a team grant covers only
+   * repositories and objects scoped to that team.
+   */
+  teamDefs?: Readonly<Record<string, TeamPatterns>>
 }
 
-/** A repository with the groups the config puts it in. */
+/** What scope checks need of a team: the patterns it owns and those cut out of them. */
+export interface TeamPatterns {
+  owns: readonly string[]
+  exclude?: readonly string[]
+}
+
+/** A repository with the teams that own it (see `teamsOwning`); empty when nobody does. */
 export interface RepoTarget extends RepoRef {
-  groups: string[]
+  teams: string[]
 }
 
 /** What an action is performed on: a repository, an object owned by a scope, or the whole system. */

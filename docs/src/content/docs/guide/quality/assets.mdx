@@ -102,9 +102,9 @@ Files are scanned in `public/`, `assets/`, `static/`, `src/**/assets/` and `res/
 
 ## Set the asset policy
 
-The policy says which formats, sizes and dimensions are acceptable. It is a setting, `assets.policy`, scoped like every setting: an entry for every repository, overridden by group or repository entries, the most specific entry winning as a whole.
+The policy says which formats, sizes and dimensions are acceptable. It is a setting, `assets.policy`, scoped like every setting: an entry for every repository, overridden by team, path pattern or repository entries, the most specific entry winning as a whole.
 
-The **Asset policy** card under the table shows the fleet's policy and how many group or repository entries override it. Narrowed to one repository, it shows that repository's effective policy and where it comes from.
+The **Asset policy** card under the table shows the fleet's policy and how many team, path or repository entries override it. Narrowed to one repository, it shows that repository's effective policy and where it comes from.
 
 <Screen title="Quality › Assets › Asset policy">
   <Toolbar title="Asset policy">
@@ -131,7 +131,7 @@ The **Asset policy** card under the table shows the fleet's policy and how many 
 <Screen title="Settings › assets.policy">
   <Stack>
     <Fields>
-      <Field label="Scope" value="Group · storefront" />
+      <Field label="Scope" value="Team · Widgets" />
       <Field label="Raster format" value="avif+webp" hint="webp, avif, avif+webp or keep" />
       <Field label="SVG" value="optimize" hint="optimize or keep" />
       <Field label="Allowed formats" value="png, jpg, webp, avif, svg, woff2" mono />

@@ -10,7 +10,7 @@ import { analyzerOffFor } from '../src/repo-analyzers.ts'
 
 const config = parseConfig({
   forges: { acme: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: { shapes: { forge: 'acme', include: ['shapes/*'] } },
+  teams: { shapes: { owns: ['acme:shapes/*'] } },
 })
 
 const widget = { forge: 'acme', path: 'shapes/widget' }
@@ -36,7 +36,7 @@ test('analyzers turned off are blocked for automatic jobs; a narrower entry turn
       secret: false,
       updatedAt: '2026-11-01T00:00:00.000Z',
     })
-  await put('group', { groups: ['shapes'] }, { off: ['audit'], reason: 'Values only' })
+  await put('group', { teams: ['shapes'] }, { off: ['audit'], reason: 'Values only' })
   await put('core', { repos: ['acme:shapes/widget-core'] }, { off: [] })
   expect(await blocker('audit')).toEqual({ blocker: 'off', reason: 'Values only' })
   expect(await blocker('bundle')).toBeUndefined()

@@ -25,7 +25,7 @@ const QUALITY_DAYS = 90
 const qualityQuerySchema = z.object({
   by: z.enum(qualityGroups).default('category'),
   since: z.iso.datetime().optional(),
-  group: z.string().min(1).optional(),
+  team: z.string().min(1).optional(),
 })
 
 const querySchema = z.object({
@@ -33,7 +33,7 @@ const querySchema = z.object({
   since: z.iso.datetime().optional(),
   before: z.iso.datetime().optional(),
   limit: z.coerce.number().int().min(1).optional(),
-  group: z.string().min(1).optional(),
+  team: z.string().min(1).optional(),
 })
 
 /**
@@ -61,7 +61,7 @@ export function reviewRoutes(deps: ServerDeps) {
         (target) => canSee(principal, 'analyses:read', target),
         {
           ...(repo ? { repo } : {}),
-          ...(query.group ? { group: query.group } : {}),
+          ...(query.team ? { team: query.team } : {}),
           ...(query.verdict ? { verdict: query.verdict } : {}),
           since: query.since ?? new Date(deps.now().getTime() - 30 * DAY_MS).toISOString(),
           ...(query.before ? { before: query.before } : {}),
@@ -83,7 +83,7 @@ export function reviewRoutes(deps: ServerDeps) {
         {
           by: query.by,
           ...(repo ? { repo } : {}),
-          ...(query.group ? { group: query.group } : {}),
+          ...(query.team ? { team: query.team } : {}),
           since:
             query.since ?? new Date(deps.now().getTime() - QUALITY_DAYS * DAY_MS).toISOString(),
         },

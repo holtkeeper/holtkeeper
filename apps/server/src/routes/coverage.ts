@@ -89,7 +89,7 @@ function coverageTests(
   const exact = { repos: [key] }
   const own = settingCascade(entries, repoTests.key, repo).find(
     ({ scope }) =>
-      !scope.all && !scope.groups?.length && scope.repos?.length === 1 && scope.repos[0] === key,
+      !scope.all && !scope.teams?.length && scope.repos?.length === 1 && scope.repos[0] === key,
   )
   const configurable =
     can(principal, 'settings:write', { kind: 'scope', scope: exact }) &&

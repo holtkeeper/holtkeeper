@@ -77,7 +77,7 @@ export function scheduleFromDocument(doc: ConfigDocument<'schedule'>): ScheduleC
     jitterMinutes: data.jitterMinutes,
     spread: data.spread,
     analyzers: data.analyzers,
-    groups: data.groups,
+    teams: data.teams,
     repos: data.repos,
     options: data.options,
   })
@@ -86,10 +86,10 @@ export function scheduleFromDocument(doc: ConfigDocument<'schedule'>): ScheduleC
 type Jobs = HoltkeeperConfig['jobs']
 
 /**
- * Builds the effective config from the file config and the panel documents: forges, groups,
+ * Builds the effective config from the file config and the panel documents: forges, teams,
  * repository traits, schedules, triggers (by trigger id), bot usernames and webhook secrets all
  * come from documents. Throws `ConfigError` when the documents reference each other wrongly
- * (unknown forge or group, duplicate schedule).
+ * (unknown forge or team, duplicate schedule).
  */
 export function effectiveConfig(
   file: HoltkeeperFileConfig,
@@ -98,7 +98,8 @@ export function effectiveConfig(
 ): EffectiveConfig {
   const forges: Record<string, ForgeDefinition> = {}
   const origins: Record<string, ForgeOrigin> = {}
-  const groups: HoltkeeperConfig['groups'] = {}
+  const teams: HoltkeeperConfig['teams'] = {}
+  const fleet: HoltkeeperConfig['fleet'] = {}
   const repos: HoltkeeperConfig['repos'] = {}
   const schedules: ScheduleConfig[] = []
   const jobs: Partial<Jobs> = { ...file.jobs }
@@ -128,18 +129,21 @@ export function effectiveConfig(
           url: doc.data.url,
           credentialId: doc.data.credentialId,
         }
+        if (doc.data.include?.length || doc.data.exclude?.length)
+          fleet[doc.id] = { include: doc.data.include ?? [], exclude: doc.data.exclude ?? [] }
         if (doc.data.botUsername)
           jobs.botUsernames = { ...jobs.botUsernames, [doc.id]: doc.data.botUsername }
         const secret = options.webhookSecrets?.[doc.id]
         if (secret !== undefined) jobs.webhooks = { ...jobs.webhooks, [doc.id]: { secret } }
         break
       }
-      case 'group':
-        groups[doc.id] = without({
+      case 'team':
+        teams[doc.id] = without({
           title: doc.data.title,
-          forge: doc.data.forge,
-          include: doc.data.include,
+          owns: doc.data.owns,
           exclude: doc.data.exclude,
+          consumes: doc.data.consumes,
+          members: doc.data.members,
         })
         break
       case 'repoTraits':
@@ -151,25 +155,28 @@ export function effectiveConfig(
       case 'trigger': {
         const data = doc.data
         if (data.on === 'tag')
-          jobs.onTag = without({ analyzers: data.analyzers, groups: data.groups })
+          jobs.onTag = without({ analyzers: data.analyzers, teams: data.teams, repos: data.repos })
         else if (data.on === 'push')
           jobs.onPush = without({
             analyzers: data.analyzers,
             branches: data.branches,
-            groups: data.groups,
+            teams: data.teams,
+            repos: data.repos,
           })
         else if (data.on === 'mergeRequest')
           jobs.onMergeRequest = without({
             analyzers: data.analyzers,
             actions: data.actions,
             draft: data.draft ?? false,
-            groups: data.groups,
+            teams: data.teams,
+            repos: data.repos,
           })
         else if (data.on === 'newRepo')
           jobs.onNewRepo = without({
             analyzers: data.analyzers,
             exclude: data.exclude,
-            groups: data.groups,
+            teams: data.teams,
+            repos: data.repos,
           })
         else if (data.on === 'label')
           jobs.onLabel = { ...jobs.onLabel, [data.label]: data.analyzers }
@@ -183,6 +190,13 @@ export function effectiveConfig(
     }
   }
 
-  const config = parseConfig({ ...file, forges, groups, repos, jobs: { ...jobs, schedules } })
+  const config = parseConfig({
+    ...file,
+    forges,
+    teams,
+    fleet,
+    repos,
+    jobs: { ...jobs, schedules },
+  })
   return { config, forges: origins }
 }

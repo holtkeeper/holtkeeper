@@ -62,7 +62,7 @@ test('state, scope and triggers come from Automation; overrides from narrower en
     rules,
     settings: [
       setting('analyzers.licenses', { all: true }),
-      setting('analyzers.licenses', { groups: ['web'] }),
+      setting('analyzers.licenses', { teams: ['web'] }),
       setting('analyzers.licenses', { repos: ['work:acme/web-shop'] }),
     ],
     health: [{ analyzer: 'coverage', runs: 4, failed: 1, blocked: 0, targets: 3 }],

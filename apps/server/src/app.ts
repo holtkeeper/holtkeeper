@@ -4,7 +4,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import { auditMiddleware } from './audit.ts'
-import { type Env, ForbiddenException, type ServerDeps } from './context.ts'
+import { type Env, ForbiddenException, type ServerDeps, withTeams } from './context.ts'
 import { createEventDispatcher } from './events.ts'
 import { releaseVersion } from './health.ts'
 import { inboxServiceFor } from './inbox.ts'
@@ -30,6 +30,7 @@ import { coverageRoutes } from './routes/coverage.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { databaseRoutes } from './routes/database.ts'
 import { egressRoutes } from './routes/egress.ts'
+import { embeddingRoutes } from './routes/embeddings.ts'
 import { guideRoutes } from './routes/guides.ts'
 import { homeRoutes, invalidateHome } from './routes/home.ts'
 import { inboxRoutes } from './routes/inbox.ts'
@@ -44,7 +45,7 @@ import { preferenceRoutes } from './routes/preferences.ts'
 import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { repoPageRoutes } from './routes/repo-page.ts'
-import { reachableGroups, repoRoutes } from './routes/repos.ts'
+import { reachableTeams, repoRoutes } from './routes/repos.ts'
 import { reviewRoutes } from './routes/reviews.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
@@ -83,10 +84,12 @@ export function createApp(deps: ServerDeps) {
   })
 
   app.use('*', async (c, next) => {
+    const signedIn = await deps.auth.authenticate(c.req.raw)
     c.set(
       'principal',
-      (await deps.auth.authenticate(c.req.raw)) ??
-        (await apiSurface.tokenPrincipal(c.req.raw, c.req.path)),
+      signedIn
+        ? withTeams(deps.config, signedIn)
+        : await apiSurface.tokenPrincipal(c.req.raw, c.req.path),
     )
     await next()
   })
@@ -118,11 +121,11 @@ export function createApp(deps: ServerDeps) {
   api.get('/me', async (c) => {
     const publicUrl = deps.config.server?.publicUrl?.replace(/\/+$/, '')
     const principal = c.get('principal')
-    const groupTitles: Record<string, string> = {}
+    const teamTitles: Record<string, string> = {}
     if (principal) {
-      const reach = await reachableGroups(deps, principal)
-      for (const [key, group] of Object.entries(deps.config.groups))
-        if (group.title && reach.has(key)) groupTitles[key] = group.title
+      const reach = await reachableTeams(deps, principal)
+      for (const [key, team] of Object.entries(deps.config.teams))
+        if (team.title && reach.has(key)) teamTitles[key] = team.title
     }
     return c.json<MeResponse>({
       principal: await withAvatar(deps, principal),
@@ -130,7 +133,7 @@ export function createApp(deps: ServerDeps) {
       crossTeam: await crossTeamPolicy(deps.store.settings),
       ...(version && { version }),
       ...(publicUrl && { publicUrl }),
-      groupTitles,
+      teamTitles,
     })
   })
   api.route('/', avatarRoutes(deps))
@@ -164,6 +167,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', repoPageRoutes(deps))
   api.route('/', backfillRoutes(deps))
   api.route('/', guideRoutes(deps))
+  api.route('/', embeddingRoutes(deps))
   api.route('/', knowledgeRoutes(deps))
   api.route('/', learningRoutes(deps))
   const dispatch = createEventDispatcher(deps)

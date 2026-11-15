@@ -86,7 +86,7 @@ Every pod runs as uid 10001 with a read-only root filesystem, no capabilities an
    kubectl logs deploy/holtkeeper-web
    ```
 
-5. Add the GitLab forge, its token credential and groups in [Settings › Integrations](/guide/settings/integrations/). The chart's config has no forge.
+5. Add the GitLab forge, its token credential and its fleet in [Settings › Integrations](/guide/settings/integrations/), then teams on [Repos › Teams](/guide/repos/teams/). The chart's config has no forge.
 
 The image defaults to `ghcr.io/holtkeeper/holtkeeper` at the chart's `appVersion`; set `image.tag` to the release you run. Every container gets `HOLTKEEPER_VERSION` (from `version`, else `image.tag`, else `appVersion`), which the panel shows in the Settings footer. `values.schema.json` validates the values.
 

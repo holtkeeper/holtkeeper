@@ -7,7 +7,7 @@ import { buildGuideChain, chainLayers, chainTaskOf } from './chain.ts'
 import { createGuideResolver } from './load.ts'
 import { resolveGuide } from './resolve.ts'
 
-const repo = { forge: 'work', path: 'games/app', groups: ['games', 'web'] }
+const repo = { forge: 'work', path: 'acme/round/web', teams: ['widgets', 'gizmo'] }
 
 const row = (overrides: Partial<GuideSection>): GuideSection => ({
   scope: 'all',
@@ -20,7 +20,7 @@ const row = (overrides: Partial<GuideSection>): GuideSection => ({
 })
 
 describe('chainLayers', () => {
-  test('numbers layers in the order the agent reads them, several groups in config order', () => {
+  test('numbers layers in the order the agent reads them, folders deepest first, then owner teams', () => {
     const resolved = resolveGuide({
       repo,
       task: 'review',
@@ -29,11 +29,13 @@ describe('chainLayers', () => {
       repoDocs: [{ file: 'REVIEW.md', text: 'Flag raw fooUtil calls.' }],
       sections: [
         row({ scope: 'all', rules: 'ALL.' }),
-        row({ scope: 'group:web', rules: 'WEB.' }),
-        row({ scope: 'group:games', rules: 'GAMES.' }),
+        row({ scope: 'team:gizmo', rules: 'GIZMO.' }),
+        row({ scope: 'team:widgets', rules: 'WIDGETS.' }),
+        row({ scope: 'path:work:acme', rules: 'ACME.' }),
+        row({ scope: 'path:work:acme/round', rules: 'ROUND.' }),
         row({ scope: 'family:f1', rules: 'FAMILY.' }),
         row({
-          scope: 'repo:work:games/app',
+          scope: 'repo:work:acme/round/web',
           rules: 'REPO.',
           learnings: [
             {
@@ -51,10 +53,12 @@ describe('chainLayers', () => {
       [1, 'repo-file', 'REVIEW.md'],
       [2, 'repo', 'This repository'],
       [3, 'family', 'Family Game apps'],
-      [4, 'group', 'Team games'],
-      [5, 'group', 'Team web'],
-      [6, 'all', 'All repositories'],
-      [7, 'learnings', 'Learned rules'],
+      [4, 'path', 'Folder acme/round'],
+      [5, 'path', 'Folder acme'],
+      [6, 'team', 'Team widgets'],
+      [7, 'team', 'Team gizmo'],
+      [8, 'all', 'All repositories'],
+      [9, 'learnings', 'Learned rules'],
     ])
   })
 
@@ -69,7 +73,7 @@ describe('chainLayers', () => {
 describe('buildGuideChain', () => {
   test('resolves each section on its own with the store resolver and keeps the 12k budget', async () => {
     const store = memoryStore()
-    await store.guides.put({ ...row({ scope: 'group:games', rules: 'GAMES review.' }) })
+    await store.guides.put({ ...row({ scope: 'team:widgets', rules: 'WIDGETS review.' }) })
     await store.guides.put({ ...row({ scope: 'all', section: 'general', rules: 'ALL general.' }) })
     const resolve = createGuideResolver({ store })
     const chain = await buildGuideChain(resolve, {
@@ -86,7 +90,7 @@ describe('buildGuideChain', () => {
       'releases',
     ])
     const review = chain.sections.find((section) => section.section === 'review')
-    expect(review?.layers.map((layer) => layer.kind)).toEqual(['repo-file', 'group'])
+    expect(review?.layers.map((layer) => layer.kind)).toEqual(['repo-file', 'team'])
     expect(review?.layers.map((layer) => layer.text).join('')).not.toContain('ALL general')
     expect(chain.budget.total).toBe(12_000)
 

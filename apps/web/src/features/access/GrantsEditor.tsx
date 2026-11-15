@@ -12,11 +12,12 @@ const areas = [...new Set(actions.map((action) => action.split(':')[0]!))]
 export function GrantsEditor({
   value,
   onChange,
-  groups,
+  teams,
 }: {
   value: readonly Grant[]
   onChange: (grants: Grant[]) => void
-  groups?: readonly string[]
+  /** Known teams, offered as suggestions; defaults to the owner teams of visible repositories. */
+  teams?: readonly string[]
 }) {
   const update = (index: number, grant: Grant) =>
     onChange(value.map((g, i) => (i === index ? grant : g)))
@@ -57,7 +58,7 @@ export function GrantsEditor({
               <ScopeEditor
                 value={grant.scope}
                 onChange={(scope) => update(index, { ...grant, scope })}
-                groups={groups ?? []}
+                teams={teams}
               />
               <fieldset className="flex flex-col gap-2">
                 <legend className="mb-2 text-sm font-medium">Actions</legend>

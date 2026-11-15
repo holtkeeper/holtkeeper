@@ -115,13 +115,13 @@ function ActionBlock({
 
 /**
  * Edits one merge request policy of a `mergeRequests.policies` entry in the rule drawer, or adds
- * one: to `entry` when given, else to a new entry scoped to `group` (every repository without it).
+ * one: to `entry` when given, else to a new entry scoped to `team` (every repository without it).
  * The other policies of the entry are kept, in order.
  */
 export function PolicyForm({
   entry,
   policyId,
-  group,
+  team,
   taken = [],
   schema,
   writable,
@@ -129,7 +129,7 @@ export function PolicyForm({
 }: {
   entry?: SettingView
   policyId?: string
-  group?: string
+  team?: string
   /** Policy ids in use anywhere, so a new policy's default id cannot shadow or be shadowed. */
   taken?: readonly string[]
   /** The setting's form schema, for action options. */
@@ -168,7 +168,7 @@ export function PolicyForm({
     [],
   )
   const kept = keptConditions(when)
-  const scope = entry?.scope ?? (group === undefined ? { all: true } : { groups: [group] })
+  const scope = entry?.scope ?? (team === undefined ? { all: true } : { teams: [team] })
 
   const store = (value: PolicyValue[], message: string) => {
     const done = {

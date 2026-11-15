@@ -51,8 +51,8 @@ test('extends the repository entry in place and keeps other options', () => {
 })
 
 test('starts a repository entry from a broader winning value', () => {
-  const group = entry({ groups: ['games'] }, { budgets: [], ignore: ['vendor/**'] })
-  expect(excludeEntry('analyzers.assets', 'ignore', 'tmp/**', repo, group)).toEqual({
+  const teamEntry = entry({ teams: ['games'] }, { budgets: [], ignore: ['vendor/**'] })
+  expect(excludeEntry('analyzers.assets', 'ignore', 'tmp/**', repo, teamEntry)).toEqual({
     key: 'analyzers.assets',
     scope: { repos: ['work:games/app'] },
     value: { budgets: [], ignore: ['vendor/**', 'tmp/**'] },

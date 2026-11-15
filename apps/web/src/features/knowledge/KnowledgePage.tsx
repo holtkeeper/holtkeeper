@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearch } from '@tanstack/react-router'
 import { Plus, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 
-import { useFamilies, useGroupTitles, useKnowledgeCounts, useRepos } from '../../api/queries.ts'
+import { useFamilies, useTeamTitles, useKnowledgeCounts, useRepos } from '../../api/queries.ts'
 import {
   type KnowledgeTab,
   type Space,
@@ -45,7 +45,7 @@ export function KnowledgePage() {
   const repos = useRepos(can('repos:read'))
   const families = useFamilies()
   const counts = useKnowledgeCounts()
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const [prompt, setPrompt] = useState(false)
   const [creating, setCreating] = useState(false)
 
@@ -59,7 +59,6 @@ export function KnowledgePage() {
       ? { kind: 'all' }
       : (parsed ?? { kind: 'all' })
   const tab = knowledgeTabOf(pathname)
-  const groups = [...new Set(repoList.flatMap((r) => r.groups))].toSorted()
   const repoKeys = repoList.map((r) => repoKey(r.repo))
   const covered = reposOfSpace(space, repoList, familyList)
   const coveredRepos = repoKeys.filter((key) => !covered || covered.has(key))
@@ -161,7 +160,6 @@ export function KnowledgePage() {
             <NotesTable
               space={space}
               families={familyList}
-              groups={groups}
               creating={creating}
               onCreating={setCreating}
             />

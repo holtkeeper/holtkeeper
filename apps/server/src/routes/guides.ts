@@ -5,7 +5,14 @@ import {
   type Scope,
   can,
   scopeCoversRepo,
+  scopeWithin,
 } from '@holtkeeper/access'
+import {
+  folderPattern,
+  isExactPattern,
+  pathAncestors,
+  splitPattern,
+} from '@holtkeeper/access/paths'
 import type {
   FamilyList,
   FamilySuggestionList,
@@ -22,7 +29,6 @@ import type {
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import {
   type GuideScope,
-  type RepoSignals,
   buildGuideChain,
   createGuideResolver,
   guideScopeKey,
@@ -34,6 +40,7 @@ import {
   readRepoRuleFiles,
   repoDocsOf,
   repoKey,
+  scopesFor,
   suggestFamilies,
   suggestionKey,
 } from '@holtkeeper/guide'
@@ -46,13 +53,11 @@ import {
 import { GUIDELINE_FILES } from '@holtkeeper/review'
 import {
   AUTO_ACCEPT_ACTOR,
-  type AnalysisStore,
   type Family,
   FamilyConflictError,
   type GuideScopeKey,
   type GuideSection,
   type GuideSectionName,
-  newestRecords,
 } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -66,13 +71,14 @@ import {
   type ServerDeps,
   authorize,
   forgeFor,
-  groupLabeler,
+  teamLabeler,
   parseRepo,
   principalOf,
   readBody,
   repoTarget,
   ForbiddenException,
 } from '../context.ts'
+import { createNeighbourIndex, guideNeighbours, repoSignals } from '../neighbours.ts'
 import { listedRepos } from '../updates.ts'
 import { canReadShared, crossTeamPolicy, isSharedEntry } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
@@ -135,10 +141,7 @@ const withoutRejected = (section: GuideSection, rejected: ReadonlySet<string>): 
   return section
 }
 
-const namesGroup = (scope: Scope, group: string) =>
-  scope.groups?.some((match) =>
-    typeof match === 'string' ? match === group : match.includes(group),
-  ) ?? false
+const namesTeam = (scope: Scope, team: string) => scope.teams?.includes(team) ?? false
 
 const namesRepo = (scope: Scope, key: string) => {
   const path = key.slice(key.indexOf(':') + 1)
@@ -148,39 +151,15 @@ const namesRepo = (scope: Scope, key: string) => {
 const human = (section: GuideSection | undefined) =>
   section && { rules: section.rules, steering: section.steering }
 
-interface StackShape {
-  components?: { kind?: unknown; id?: unknown; usages?: { repo?: unknown }[] }[]
-}
-
-/** Runtimes and package managers per `forge:path`, from the newest `stack` records. */
-async function toolchains(analyses: AnalysisStore): Promise<Map<string, string[]>> {
-  const found = await newestRecords(analyses, 'stack', (record) =>
-    typeof record.data === 'object' && record.data !== null
-      ? (record.data as StackShape)
-      : undefined,
-  )
-  const result = new Map<string, Set<string>>()
-  for (const { record, value } of found.values())
-    for (const component of value.components ?? []) {
-      if (component.kind !== 'runtime' && component.kind !== 'package-manager') continue
-      if (typeof component.id !== 'string') continue
-      for (const usage of component.usages ?? []) {
-        if (typeof usage.repo !== 'string') continue
-        const key = `${record.repo.forge}:${usage.repo}`
-        result.set(key, (result.get(key) ?? new Set()).add(component.id))
-      }
-    }
-  return new Map([...result].map(([key, ids]) => [key, [...ids]]))
-}
-
 /** What editing a scope's sections needs: `knowledge:write` for a repository, else `settings:write`. */
 export const editAction = (scope: GuideScope): Action =>
   scope.kind === 'repo' ? 'knowledge:write' : 'settings:write'
 
 /**
  * Whether `principal` may perform `action` on a Guide scope: on `all` reading needs the action in
- * any grant and anything else a global grant; a group needs it on the group, a family on every
- * member, a repository on the repository.
+ * any grant and anything else a global grant; a team needs it on the team, a folder on every
+ * repository under it (`forge:folder/**`), a family on every member, a repository on the
+ * repository.
  */
 export function guideScopePermission(config: HoltkeeperConfig) {
   const targetOf = (key: string): RepoTarget | undefined => {
@@ -194,8 +173,13 @@ export function guideScopePermission(config: HoltkeeperConfig) {
             (grant) => grant.actions.includes('*') || grant.actions.includes(action),
           )
         : can(principal, action, { kind: 'global' })
-    if (scope.kind === 'group')
-      return can(principal, action, { kind: 'scope', scope: { groups: [scope.group] } })
+    if (scope.kind === 'team')
+      return can(principal, action, { kind: 'scope', scope: { teams: [scope.team] } })
+    if (scope.kind === 'path')
+      return can(principal, action, {
+        kind: 'scope',
+        scope: { repos: [folderPattern(scope.folder, scope.forge)] },
+      })
     if (scope.kind === 'family')
       return (
         family !== undefined &&
@@ -231,11 +215,13 @@ const scopeRepo = (scope: GuideScope) => (scope.kind === 'repo' ? repoKey(scope)
 const labelOf = (scope: GuideScope, family?: Family) =>
   scope.kind === 'all'
     ? 'All repositories'
-    : scope.kind === 'group'
-      ? `Team ${scope.group}`
-      : scope.kind === 'family'
-        ? `Family ${family?.name ?? scope.family}`
-        : `${scope.forge}:${scope.path}`
+    : scope.kind === 'team'
+      ? `Team ${scope.team}`
+      : scope.kind === 'path'
+        ? `Folder ${scope.folder}`
+        : scope.kind === 'family'
+          ? `Family ${family?.name ?? scope.family}`
+          : `${scope.forge}:${scope.path}`
 
 const auditTarget = (scope: GuideScope, key: GuideScopeKey, section: GuideSectionName) => ({
   type: 'guide',
@@ -260,12 +246,12 @@ const auditEdit = (
   })
 
 /**
- * The Guide: team rules per scope (`all`, group, family, repository) and section, their revisions,
+ * The Guide: team rules per scope (`all`, team, folder, family, repository) and section, their revisions,
  * the generated history, the layered chain and effective prompt of a repository (its rules files
  * read through the forge at the default branch head, cached by that sha), Knowledge counts per
  * space, and families with suggestions. Reading needs
- * `knowledge:read` on the scope; editing `all`, a group or a family needs `settings:write` on it
- * (for a family: on every member), editing a repository's rules `knowledge:write` on it.
+ * `knowledge:read` on the scope; editing `all`, a team, a folder or a family needs `settings:write`
+ * on it (for a folder: on every repository under it, for a family: on every member), editing a repository's rules `knowledge:write` on it.
  * Accepting or rejecting a repository's generated text needs `knowledge:write`; regenerating it (a
  * `guide` job) also `analyses:run`. Rejected text stays stored (`rememberGuideRejection` names it)
  * but no longer shows as waiting, and the generator does not propose it again. Text accepted by
@@ -276,8 +262,12 @@ const auditEdit = (
 export function guideRoutes(deps: ServerDeps) {
   const { store, config, now, analyzers } = deps
   const app = new Hono<Env>()
-  const resolve = createGuideResolver({ store, groupTitle: groupLabeler(config) })
+  const resolve = createGuideResolver({ store, teamTitle: teamLabeler(config) })
   const usages = createUsageIndex({ analyses: store.analyses })
+  const neighbourIndex = deps.neighbours ?? createNeighbourIndex({ store, config })
+  // The panel shows the block as the tasks get it, less what the viewer may not read.
+  const neighboursFor = (target: RepoTarget, viewer: Principal) =>
+    guideNeighbours({ index: neighbourIndex, store, config }, target, viewer)
 
   const targetOf = (key: string): RepoTarget | undefined => {
     const repo = parseRepo(key)
@@ -295,10 +285,12 @@ export function guideRoutes(deps: ServerDeps) {
     const key = c.req.query('scope') ?? ''
     const scope = parseGuideScope(key)
     if (!scope)
-      throw new HTTPException(400, { message: 'scope must be all, group:, family: or repo:' })
-    if (scope.kind === 'group' && !config.groups[scope.group])
-      throw new HTTPException(404, { message: `group ${scope.group} is not configured` })
-    if (scope.kind === 'repo' && !config.forges[scope.forge])
+      throw new HTTPException(400, {
+        message: 'scope must be all, team:, path:, family: or repo:',
+      })
+    if (scope.kind === 'team' && !config.teams[scope.team])
+      throw new HTTPException(404, { message: `team ${scope.team} is not configured` })
+    if ((scope.kind === 'repo' || scope.kind === 'path') && !config.forges[scope.forge])
       throw new HTTPException(404, { message: `forge ${scope.forge} is not configured` })
     const family = scope.kind === 'family' ? await store.families.get(scope.family) : undefined
     if (scope.kind === 'family' && !family)
@@ -449,7 +441,9 @@ export function guideRoutes(deps: ServerDeps) {
     const input = await readBody(c, rejectSchema)
     const scope = parseGuideScope(input.scope)
     if (!scope)
-      throw new HTTPException(400, { message: 'scope must be all, group:, family: or repo:' })
+      throw new HTTPException(400, {
+        message: 'scope must be all, team:, path:, family: or repo:',
+      })
     const key = guideScopeKey(scope)
     c.set('audit', {
       action: 'guide.reject',
@@ -591,12 +585,16 @@ export function guideRoutes(deps: ServerDeps) {
       throw new HTTPException(400, {
         message: `section must be one of ${guideSections.join(', ')}`,
       })
-    const read = await readRuleFiles(target)
+    const [read, neighbours] = await Promise.all([
+      readRuleFiles(target),
+      neighboursFor(target, principal),
+    ])
     const resolved = await resolve({
       repo: target,
       task,
       ...(section && { section }),
       ...(read.files.length && { repoDocs: repoDocsOf(read.files) }),
+      ...(neighbours && { neighbours }),
     })
     return c.json<GuidePreview>({
       repo: repoKey(repo),
@@ -644,11 +642,15 @@ export function guideRoutes(deps: ServerDeps) {
       throw new HTTPException(400, {
         message: `section must be one of ${guideSections.join(', ')}`,
       })
-    const read = await readRuleFiles(target)
+    const [read, neighbours] = await Promise.all([
+      readRuleFiles(target),
+      neighboursFor(target, principalOf(c)),
+    ])
     const chain = await buildGuideChain(resolve, {
       repo: target,
       ...(section && { sections: [section] }),
       ...(read.files.length && { repoDocs: repoDocsOf(read.files) }),
+      ...(neighbours && { neighbours }),
     })
     return c.json<GuideChainView>({
       repo: repoKey(target),
@@ -718,11 +720,11 @@ export function guideRoutes(deps: ServerDeps) {
         (isSharedEntry(note) && canReadShared(principal, note.scope, policy)),
     )
     bump('all', 'notes', listable.length)
-    for (const group of Object.keys(config.groups))
+    for (const team of Object.keys(config.teams))
       bump(
-        guideScopeKey({ kind: 'group', group }),
+        guideScopeKey({ kind: 'team', team }),
         'notes',
-        listable.filter((note) => namesGroup(note.scope, group)).length,
+        listable.filter((note) => namesTeam(note.scope, team)).length,
       )
     for (const family of families)
       bump(
@@ -734,35 +736,54 @@ export function guideRoutes(deps: ServerDeps) {
     const repoKeys = new Set([
       ...listed.map((repo) => `${repo.forge}:${repo.path}`),
       ...families.flatMap((family) => family.members),
-      ...notes.flatMap((note) => (note.scope.repos ?? []).filter((key) => key.includes(':'))),
+      ...notes.flatMap((note) =>
+        (note.scope.repos ?? []).filter(
+          (key) => splitPattern(key).forge !== undefined && isExactPattern(key),
+        ),
+      ),
       ...candidates.map((candidate) => candidate.repo),
     ])
+    const folders = new Map<GuideScopeKey, Scope>()
     for (const key of repoKeys) {
       const target = targetOf(key)
-      if (target)
-        bump(
-          `repo:${key}`,
-          'notes',
-          notes.filter((note) => scopeCoversRepo(note.scope, target)).length,
-        )
+      if (!target) continue
+      bump(
+        `repo:${key}`,
+        'notes',
+        notes.filter((note) => scopeCoversRepo(note.scope, target)).length,
+      )
+      for (const folder of pathAncestors(target.path))
+        folders.set(guideScopeKey({ kind: 'path', forge: target.forge, folder }), {
+          repos: [folderPattern(folder, target.forge)],
+        })
     }
+    // A note scoped to a folder pattern (`forge:a/b/**`) gives that folder a space even when no
+    // listed repository sits in it yet.
+    for (const note of notes)
+      for (const pattern of note.scope.repos ?? []) {
+        const { forge, glob } = splitPattern(pattern)
+        const folder = glob.endsWith('/**') ? glob.slice(0, -3) : undefined
+        if (forge === undefined || !folder || !isExactPattern(folder)) continue
+        folders.set(guideScopeKey({ kind: 'path', forge, folder }), {
+          repos: [folderPattern(folder, forge)],
+        })
+      }
+    // A folder's notes: those whose scope covers the whole folder, inherited ones included.
+    const teamDefs = principal.teamDefs ?? {}
+    for (const [key, folder] of folders)
+      bump(key, 'notes', notes.filter((note) => scopeWithin(folder, note.scope, teamDefs)).length)
     for (const candidate of candidates) {
       const target = targetOf(candidate.repo)
       if (!target || !can(principal, 'knowledge:read', { kind: 'repo', repo: target })) continue
       const family = families.find((f) => f.members.includes(candidate.repo))
-      for (const key of [
-        `repo:${candidate.repo}` as const,
-        ...(family ? [guideScopeKey({ kind: 'family', family: family.id })] : []),
-        ...target.groups.map((group) => guideScopeKey({ kind: 'group', group })),
-        'all' as const,
-      ])
-        bump(key, 'learnings')
+      for (const key of scopesFor(target, family?.id)) bump(key, 'learnings')
     }
     const readable = (key: GuideScopeKey) => {
       const scope = parseGuideScope(key)
       if (!scope) return false
-      if (scope.kind === 'group' && !config.groups[scope.group]) return false
-      if (scope.kind === 'repo' && !config.forges[scope.forge]) return false
+      if (scope.kind === 'team' && !config.teams[scope.team]) return false
+      if ((scope.kind === 'repo' || scope.kind === 'path') && !config.forges[scope.forge])
+        return false
       const family =
         scope.kind === 'family' ? families.find((f) => f.id === scope.family) : undefined
       return permitted(principal, 'knowledge:read', scope, family)
@@ -820,16 +841,10 @@ export function guideRoutes(deps: ServerDeps) {
 
   app.get('/families/suggestions', async (c) => {
     const principal = principalOf(c)
-    const [families, entries, tools] = await Promise.all([
+    const [families, signals] = await Promise.all([
       store.families.list(),
-      usages.entries(() => true),
-      toolchains(store.analyses),
+      repoSignals(store.analyses, usages),
     ])
-    const signals: RepoSignals[] = entries.map((entry) => ({
-      repo: entry.origin,
-      dependencies: entry.data.packages.filter((pkg) => !pkg.local).map((pkg) => pkg.name),
-      toolchain: tools.get(entry.origin) ?? [],
-    }))
     const hidden = new Set(await dismissed())
     const suggestions = suggestFamilies(signals, {
       exclude: families.flatMap((family) => family.members),

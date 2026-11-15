@@ -8,7 +8,7 @@ import { budgetGuard } from './budget.ts'
 import { computeCost, costOf, defaultPrices, priceFor } from './cost.ts'
 import { BudgetDeniedError, meteredAgent, usageRecorder } from './meter.ts'
 
-const repo = { forge: 'work', path: 'games/app', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app', teams: ['games'] }
 
 const fakeAgent = (
   outcome: AgentResult | Error,
@@ -77,7 +77,7 @@ describe('meteredAgent', () => {
       {
         at: '2026-10-30T10:00:00.000Z',
         repo: { forge: 'work', path: 'games/app' },
-        groups: ['games'],
+        teams: ['games'],
         taskKind: 'review',
         jobId: 'j1',
         actor: 'jane',
@@ -219,7 +219,7 @@ describe('usageRecorder', () => {
     const store = memoryStore()
     const record = usageRecorder(store.aiUsage, {
       now: () => new Date('2026-10-30T10:00:10.000Z'),
-      groupsOf: () => ['games'],
+      teamsOf: () => ['games'],
     })
     await record({
       repo: { forge: 'work', path: 'games/app' },
@@ -235,7 +235,7 @@ describe('usageRecorder', () => {
       transcriptRef: 'b'.repeat(64),
     })
     await record({
-      repo: { forge: 'work', path: 'games/app', groups: ['other'] },
+      repo: { forge: 'work', path: 'games/app', teams: ['other'] },
       taskKind: 'review',
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
@@ -249,7 +249,7 @@ describe('usageRecorder', () => {
     const [denied, ok] = await store.aiUsage.list()
     expect(ok).toMatchObject({
       at: '2026-10-30T10:00:00.000Z',
-      groups: ['games'],
+      teams: ['games'],
       actor: 'system',
       costUsd: 2,
       costSource: 'computed',
@@ -259,7 +259,7 @@ describe('usageRecorder', () => {
     })
     expect(denied?.transcriptRef).toBeUndefined()
     expect(denied).toMatchObject({
-      groups: ['other'],
+      teams: ['other'],
       actor: 'jane',
       interactive: true,
       subject: 'MR !42',

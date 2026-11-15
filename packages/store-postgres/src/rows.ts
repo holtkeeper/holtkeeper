@@ -286,6 +286,7 @@ export interface KnowledgeRow {
   source: KnowledgeEntry['source']
   author: string
   scope: KnowledgeEntry['scope']
+  matches: KnowledgeEntry['match'] | null
   topics: string[]
   applies_to: string[]
   packages: KnowledgeEntry['packages'] | null
@@ -305,6 +306,7 @@ export const toKnowledgeEntry = (r: KnowledgeRow): KnowledgeEntry => ({
   body: r.body,
   kind: r.kind,
   scope: r.scope,
+  ...(r.matches !== null && r.matches !== undefined && { match: r.matches }),
   topics: r.topics,
   appliesTo: r.applies_to,
   ...(r.packages !== null && r.packages !== undefined && { packages: r.packages }),
@@ -327,6 +329,7 @@ export const knowledgeContent = (entry: KnowledgeEntry): KnowledgeContent => ({
   body: entry.body,
   kind: entry.kind,
   scope: entry.scope,
+  ...(entry.match !== undefined && { match: entry.match }),
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   ...(entry.packages !== undefined && { packages: entry.packages }),
@@ -356,7 +359,7 @@ export interface AiUsageRow {
   at: PgTimestamp
   repo_forge: string
   repo_path: string
-  groups: string[]
+  teams: string[]
   task_kind: string
   analyzer: string | null
   job_id: string | null
@@ -383,7 +386,7 @@ export const toAiUsage = (r: AiUsageRow): AiUsageRecord => ({
   id: r.id,
   at: iso(r.at),
   repo: { forge: r.repo_forge, path: r.repo_path },
-  groups: r.groups,
+  teams: r.teams,
   taskKind: r.task_kind,
   ...(r.analyzer !== null && { analyzer: r.analyzer }),
   ...(r.job_id !== null && { jobId: r.job_id }),

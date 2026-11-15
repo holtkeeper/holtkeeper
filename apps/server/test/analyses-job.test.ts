@@ -15,16 +15,16 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }

@@ -35,7 +35,7 @@ import { z } from 'zod'
 import {
   type ServerDeps,
   forgeFor,
-  groupLabeler,
+  teamLabeler,
   repoKey,
   repoTarget,
   ForbiddenToolError,
@@ -1146,7 +1146,7 @@ export async function refreshTaskGroup(deps: TaskDeps, groupId: string): Promise
 
 /**
  * Repositories related to a write task's repository, for its agent: the other targets of its
- * group, members of its family and repositories sharing a config group that Holtkeeper has run
+ * group, members of its family and repositories sharing an owner team that Holtkeeper has run
  * jobs on. At most 50.
  */
 export async function relatedRepos(
@@ -1163,16 +1163,14 @@ export async function relatedRepos(
     if (family.members.includes(own))
       for (const member of family.members)
         if (member !== own && !found.has(member)) found.set(member, `same family ${family.name}`)
-  const groups = repoTarget(deps.config, repo).groups
-  if (groups.length)
+  const teams = repoTarget(deps.config, repo).teams
+  if (teams.length)
     for (const target of await deps.store.jobs.targets()) {
       if (target.group) continue
       const key = repoKey(target.repo)
       if (key === own || found.has(key)) continue
-      const shared = repoTarget(deps.config, target.repo).groups.find((name) =>
-        groups.includes(name),
-      )
-      if (shared) found.set(key, `same group ${groupLabeler(deps.config)(shared)}`)
+      const shared = repoTarget(deps.config, target.repo).teams.find((team) => teams.includes(team))
+      if (shared) found.set(key, `same team ${teamLabeler(deps.config)(shared)}`)
     }
   return [...found].slice(0, 50).map(([key, relation]) => ({ repo: key, relation }))
 }

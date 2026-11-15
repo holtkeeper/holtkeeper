@@ -78,8 +78,8 @@ export function usageRoutes(options: {
   catalog: ApiCatalog
   usages: UsageIndex
   reach: (principal: Principal) => Promise<CatalogReach>
-  /** The config groups of a repository. */
-  groupsOf: (repo: RepoRef) => string[]
+  /** The owner teams of a repository. */
+  teamsOf: (repo: RepoRef) => string[]
 }) {
   const { catalog, usages } = options
   const readable = async (principal: Principal) => (await options.reach(principal)).catalog
@@ -109,7 +109,7 @@ export function usageRoutes(options: {
         return [
           {
             repo: repo.origin,
-            groups: options.groupsOf(repo.origin),
+            teams: options.teamsOf(repo.origin),
             analysisId: record.id,
             analyzedAt: record.createdAt,
             ...(record.ref ? { ref: record.ref } : {}),

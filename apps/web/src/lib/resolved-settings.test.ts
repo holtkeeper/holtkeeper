@@ -3,11 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import type { ResolvedSettingRow, SettingDefinitionView, SettingView } from '@holtkeeper/api'
 
 import {
-  fromParentGroup,
   layerCounts,
   orgRowMatches,
   orgRows,
-  parentGroupCount,
   resolvedSections,
   rowMatches,
   sectionSlug,
@@ -19,7 +17,7 @@ import {
 import type { ScopeFocus } from './scope.ts'
 
 const repo: ScopeFocus = { kind: 'repo', repo: { forge: 'work', path: 'acme/widget-kit' } }
-const group: ScopeFocus = { kind: 'group', group: 'web' }
+const team: ScopeFocus = { kind: 'team', team: 'widgets' }
 
 const entry = (scope: SettingView['scope']): SettingView => ({
   id: 'e',
@@ -83,49 +81,28 @@ describe('filters', () => {
     expect(layerCounts([own, pattern, fallback])).toEqual({
       default: 1,
       org: 0,
-      group: 0,
+      team: 0,
       repo: 2,
     })
   })
 })
 
 describe('sourceLabel', () => {
-  test('a subgroup focus names entries of its parent group', () => {
-    const round: ScopeFocus = { kind: 'group', group: 'shapes.round' }
-    const parent = { layer: 'group' as const, groups: ['shapes'] }
-    const own = { layer: 'group' as const, groups: ['shapes.round', 'shapes'] }
-    expect(sourceLabel(parent, round)).toBe('Parent group')
-    expect(sourceLabel(own, round)).toBe('This group')
-    expect(fromParentGroup(parent, round)).toBe(true)
-    expect(fromParentGroup(own, round)).toBe(false)
-    expect(fromParentGroup(parent, { kind: 'group', group: 'shapes' })).toBe(false)
-    expect(sourceLabel(parent, { kind: 'group', group: 'shapes' })).toBe('This group')
-    const rows = [own, parent, { layer: 'org' as const }].map(
-      (source, index): ResolvedSettingRow => ({
-        key: `k${index}`,
-        label: `k${index}`,
-        section: 'Polling',
-        value: 1,
-        source,
-        overrides: 0,
-      }),
-    )
-    expect(parentGroupCount(rows, round)).toBe(1)
-    expect(parentGroupCount(rows, group)).toBe(0)
-  })
-
   test('names the layer in words', () => {
     expect(sourceLabel({ layer: 'default' }, repo)).toBe('Default')
     expect(sourceLabel({ layer: 'org' }, repo)).toBe('Org')
-    expect(sourceLabel({ layer: 'group', groups: ['web', 'payments'] }, repo)).toBe(
-      'Group web + payments',
+    expect(sourceLabel({ layer: 'team', teams: ['widgets', 'gizmo'] }, repo)).toBe(
+      'Team widgets + gizmo',
     )
-    expect(sourceLabel({ layer: 'group', groups: ['web'] }, group)).toBe('This group')
+    expect(
+      sourceLabel({ layer: 'team', teams: ['widgets'] }, repo, (key) => key.toUpperCase()),
+    ).toBe('Team WIDGETS')
+    expect(sourceLabel({ layer: 'team', teams: ['widgets'] }, team)).toBe('This team')
     expect(
       sourceLabel({ layer: 'repo', entry: entry({ repos: ['work:acme/widget-kit'] }) }, repo),
     ).toBe('This repo')
     expect(sourceLabel({ layer: 'repo', entry: entry({ repos: ['acme/*'] }) }, repo)).toBe(
-      'Repo pattern',
+      'Path pattern',
     )
   })
 })
@@ -162,7 +139,7 @@ describe('orgRows', () => {
       [
         setting('polling', { all: true }, 10, '2026-11-01T00:00:00.000Z'),
         setting('polling', { all: true }, 15, '2026-11-02T00:00:00.000Z'),
-        setting('polling', { groups: ['web'] }, 1, '2026-11-03T00:00:00.000Z'),
+        setting('polling', { teams: ['web'] }, 1, '2026-11-03T00:00:00.000Z'),
         setting('toolchain', { repos: ['acme/*'] }, 2, '2026-11-03T00:00:00.000Z'),
       ],
     )

@@ -1,9 +1,9 @@
-import type { Family, KnowledgeEntry, KnowledgeEntryView, PersonView } from '@holtkeeper/api'
+import type { Family, KnowledgeEntryView, PersonView } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { BookOpen, Link2 } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
-import { useGroupTitles, useKnowledge } from '../../api/queries.ts'
+import { useTeamTitles, useKnowledge } from '../../api/queries.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import { type Space, scopeLabel, settingScopeOfSpace, spaceKey } from '../../lib/guide.ts'
@@ -11,6 +11,8 @@ import { foldOtherTeams } from '../../lib/home-scope.ts'
 import {
   type NoteFilter,
   type NoteGrouping,
+  citationHelpRate,
+  citationLine,
   filterNotes,
   isInherited,
   kbId,
@@ -25,6 +27,7 @@ import {
   noteTotals,
   notesOfSpace,
   statusTone,
+  matchParts,
   taskKinds,
 } from '../../lib/knowledge.ts'
 import { personOf } from '../../lib/people.ts'
@@ -55,7 +58,7 @@ import { useScope } from '../shell/scope.ts'
 import { useSession } from '../shell/session.ts'
 import { NoteSheet } from './NoteSheet.tsx'
 
-const COLUMNS = 5
+const COLUMNS = 6
 
 const copyLink = async (id: string) => {
   try {
@@ -70,25 +73,22 @@ const copyLink = async (id: string) => {
  * Notes of a space as one table grouped by topic or kind, proposals first under "Waiting for
  * review", other teams' notes folded into a row under the table. A row opens the note in a side
  * sheet (`?note=<id>`) with its text, history and evidence; New note opens the sheet's form.
- * `groups` are offered in the scope editor.
  */
 export function NotesTable({
   space,
   families,
-  groups,
   creating,
   onCreating: setCreating,
 }: {
   space: Space
   families: readonly Family[]
-  groups: readonly string[]
   /** The New note form is open; the page header's primary action opens it. */
   creating: boolean
   onCreating: (open: boolean) => void
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { can } = useSession()
-  const { homeGroups } = useScope()
+  const { homeTeams } = useScope()
   const note = useSearch({ strict: false, select: (search) => search.note })
   const navigate = useNavigate()
   const knowledge = useKnowledge(space.kind === 'repo' ? { repo: space.repo } : {})
@@ -119,7 +119,7 @@ export function NotesTable({
   const shown = filterNotes(inSpace, { filter, text: query, kinds, topics, tasks })
   const folded = foldOtherTeams(
     shown,
-    space.kind === 'all' ? homeGroups : [],
+    space.kind === 'all' ? homeTeams : [],
     (entry) => entry.owner,
   )
   const sections = noteSections(folded.mine, grouping)
@@ -141,6 +141,7 @@ export function NotesTable({
       entry={entry}
       space={space}
       people={people}
+      familyName={(id) => families.find((family) => family.id === id)?.name ?? id}
       open={entry.id === note}
       onOpen={() => open(entry.id)}
     />
@@ -256,6 +257,7 @@ export function NotesTable({
               <Th>Permalink</Th>
               <Th className="w-full">Note</Th>
               <Th>Status</Th>
+              <Th align="right">Cited</Th>
               <Th>Author</Th>
               <Th>
                 <span className="sr-only">Copy link</span>
@@ -300,7 +302,6 @@ export function NotesTable({
         entry={current}
         {...(creating ? { creating: settingScopeOfSpace(space, members) } : {})}
         space={space}
-        groups={groups}
         people={people}
         writable={writable}
         {...(current && step.index >= 0 ? { index: step.index, total: ordered.length } : {})}
@@ -344,12 +345,14 @@ function NoteRow({
   entry,
   space,
   people,
+  familyName,
   open,
   onOpen,
 }: {
-  entry: KnowledgeEntry
+  entry: KnowledgeEntryView
   space: Space
   people: Readonly<Record<string, PersonView>>
+  familyName: (id: string) => string
   open: boolean
   onOpen: () => void
 }) {
@@ -361,6 +364,13 @@ function NoteRow({
       </Td>
       <Td valign="top" className="min-w-56 whitespace-normal">
         <span className="font-medium">{entry.title}</span>
+        {entry.match ? (
+          <span className="ms-1.5 text-xs text-muted">
+            {matchParts(entry.match, familyName)
+              .map((part) => `· ${part}`)
+              .join(' ')}
+          </span>
+        ) : null}
         <div className="mt-1 flex flex-wrap gap-1">
           <Tag>{kindLabel(entry.kind)}</Tag>
           {entry.topics.map((topic) => (
@@ -381,6 +391,9 @@ function NoteRow({
           <Dot tone={statusTone(entry.status)} />
           {noteStatusLabel[entry.status]}
         </span>
+      </Td>
+      <Td valign="top" align="right" className="whitespace-nowrap">
+        <Citations entry={entry} />
       </Td>
       <Td valign="top" className="whitespace-nowrap">
         <span className="inline-flex items-center gap-1.5">
@@ -407,5 +420,23 @@ function NoteRow({
         </Tooltip>
       </Td>
     </Tr>
+  )
+}
+
+/** How many review comments cited the note, with how they ended on hover. */
+function Citations({ entry }: { entry: KnowledgeEntryView }) {
+  const summary = entry.citations
+  if (!summary?.comments) return <span className="text-dim">—</span>
+  const rate = citationHelpRate(summary)
+  const similar = summary.fromNeighbours
+    ? ` · ${summary.fromNeighbours} on similar repositories`
+    : ''
+  return (
+    <Tooltip content={`${citationLine(summary)}${similar}`}>
+      <span className="tabular inline-flex flex-col items-end leading-tight">
+        <span>{summary.comments}</span>
+        {rate === undefined ? null : <span className="text-xs text-dim">{rate}% acted on</span>}
+      </span>
+    </Tooltip>
   )
 }

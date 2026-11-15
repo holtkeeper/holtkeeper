@@ -42,7 +42,7 @@ import {
   Dot,
   EmptyState,
   ErrorState,
-  GroupName,
+  TeamName,
   KeyValue,
   type KeyValueRow,
   notify,
@@ -88,16 +88,16 @@ function Section({
   )
 }
 
-/** The job's analyzer target: a group page or a repository in monospace. */
+/** The job's analyzer target: a team page (`Job.group` holds the team key) or a repository. */
 function JobTarget({ job }: { job: Pick<Job, 'repo' | 'group'> }) {
   return job.group !== undefined ? (
     <Link
-      to="/repos/groups/$groupId"
-      params={{ groupId: job.group }}
+      to="/repos/teams/$teamId"
+      params={{ teamId: job.group }}
       search={{}}
       className="hover:underline"
     >
-      Group <GroupName group={job.group} />
+      Team <TeamName team={job.group} />
     </Link>
   ) : (
     <Link

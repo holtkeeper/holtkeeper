@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { policiesSchema } from './schema.ts'
 import { combinePolicies, mergeRequestPoliciesSetting } from './settings.ts'
 
-const repo = { forge: 'work', path: 'games/app', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app', teams: ['games'] }
 
 describe('combinePolicies', () => {
   test('combines covering scopes most specific first; specific ids override', () => {
@@ -17,7 +17,7 @@ describe('combinePolicies', () => {
           ],
         },
         {
-          scope: { groups: ['games'] },
+          scope: { teams: ['games'] },
           value: [{ id: 'docs', name: 'Games docs', enabled: false }],
         },
         {
@@ -27,7 +27,7 @@ describe('combinePolicies', () => {
         { scope: { repos: ['tools/**'] }, value: [{ id: 'tools', name: 'Tools' }] },
         { key: 'other.key', scope: { all: true }, value: 'x' },
         {
-          scope: { groups: ['games'] },
+          scope: { teams: ['games'] },
           value: [{ id: 'bad', name: 'Bad', actions: [{ type: 'teleport' }] }],
         },
       ],
@@ -40,7 +40,7 @@ describe('combinePolicies', () => {
     ])
     expect(policies[0]?.scope).toEqual({ repos: ['games/**'] })
     expect(policies[0]?.within).toEqual({ repos: ['games/app'] })
-    expect(policies[1]?.scope).toEqual({ groups: ['games'] })
+    expect(policies[1]?.scope).toEqual({ teams: ['games'] })
     expect(invalid).toHaveLength(1)
     expect(invalid[0]?.error).toContain('unknown action teleport')
   })
@@ -49,12 +49,12 @@ describe('combinePolicies', () => {
     const { policies } = combinePolicies(
       [
         {
-          scope: { groups: ['games'] },
+          scope: { teams: ['games'] },
           value: [{ id: 'p', name: 'Old' }],
           updatedAt: '2026-01-01',
         },
         {
-          scope: { groups: ['games'] },
+          scope: { teams: ['games'] },
           value: [{ id: 'p', name: 'New' }],
           updatedAt: '2026-02-01',
         },

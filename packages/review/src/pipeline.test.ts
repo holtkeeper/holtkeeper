@@ -139,7 +139,7 @@ describe('reviewMergeRequest', () => {
         agent,
         guide: async (docs) => ({
           text: `Guide with ${docs.length} docs. Check money.`,
-          scopes: ['all', 'group:web'],
+          scopes: ['all', 'team:web'],
         }),
       }),
     )
@@ -165,7 +165,7 @@ describe('reviewMergeRequest', () => {
     })
     expect(data.skipped).toEqual([{ path: 'bun.lock', reason: 'ignored' }])
     expect(data.usage).toMatchObject({ turns: 2, inputTokens: 100, model: 'fake-main' })
-    expect(data.guideScopes).toEqual(['all', 'group:web'])
+    expect(data.guideScopes).toEqual(['all', 'team:web'])
     expect(data.durationMs).toBeGreaterThanOrEqual(0)
 
     const [submission] = submissions

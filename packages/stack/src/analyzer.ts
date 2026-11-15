@@ -30,7 +30,7 @@ export const stackOptionsSchema = z.object({
   conventions: z
     .array(conventionSpecSchema)
     .default([])
-    .describe('Golden files every repository of the group should match'),
+    .describe('Golden files every repository of the team should match'),
 })
 
 export type StackOptions = z.output<typeof stackOptionsSchema>

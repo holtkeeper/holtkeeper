@@ -1,8 +1,8 @@
 import type { CrossTeamLevel, PersonView, Scope, UserView } from '@holtkeeper/api'
 
 import { formatRelative } from './format.ts'
-import { type GroupTitleOf, groupMatchTitle, keyAsTitle } from './group-titles.ts'
 import { type RoleId, roleOf } from './roles.ts'
+import { type TeamTitleOf, keyAsTitle } from './team-titles.ts'
 
 /** Up to two initials of a name, `?` when it has none. */
 export const initialsOf = (name: string): string =>
@@ -79,16 +79,13 @@ export function statusNote(user: UserView, now: Date): string | undefined {
 export const lastSeenLabel = (user: UserView, now: Date): string =>
   user.lastSeenAt ? formatRelative(user.lastSeenAt, now) : 'Never'
 
-/** `All repositories`, `Group Web`, `Web, Payments +1`, or `Nothing` for a scope. */
-export function scopeLabel(scope: Scope, titleOf: GroupTitleOf = keyAsTitle): string {
+/** `All repositories`, `Team Widgets`, `Widgets, acme/** +1`, or `Nothing` for a scope. */
+export function scopeLabel(scope: Scope, titleOf: TeamTitleOf = keyAsTitle): string {
   if (scope.all) return 'All repositories'
-  const parts = [
-    ...(scope.groups ?? []).map((entry) => groupMatchTitle(entry, titleOf)),
-    ...(scope.repos ?? []),
-  ]
+  const parts = [...(scope.teams ?? []).map(titleOf), ...(scope.repos ?? [])]
   const [only] = parts
   if (parts.length === 0 || only === undefined) return 'Nothing'
-  if (parts.length === 1) return scope.groups?.length ? `Group ${only}` : only
+  if (parts.length === 1) return scope.teams?.length ? `Team ${only}` : only
   return parts.length > 2
     ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}`
     : parts.join(', ')

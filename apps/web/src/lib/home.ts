@@ -1,6 +1,5 @@
 import { type AiFeature, featureLabel, featureOf } from '@holtkeeper/ai-usage/features'
 import type {
-  GroupMatch,
   HealthTone,
   HomeAttentionItem,
   HomeAttentionKind,
@@ -24,12 +23,12 @@ import { repoKey } from './repo.ts'
  * every position, others when one of their repositories does.
  */
 export function inScope(
-  refs: readonly { groups: readonly string[] }[],
+  refs: readonly { teams: readonly string[] }[],
   view: ScopeView,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): boolean {
   if (view === 'all' || !refs.length) return true
-  return refs.some((ref) => inView(view, homeGroups, ref.groups))
+  return refs.some((ref) => inView(view, homeTeams, ref.teams))
 }
 
 /** Needs attention and What changed narrowed to a scope position. */
@@ -42,12 +41,12 @@ export interface ScopedHome {
 export function scopeHome(
   home: Pick<HomeView, 'attention' | 'changes'>,
   view: ScopeView,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): ScopedHome {
   return {
-    attention: home.attention.filter((item) => inScope(item.repos, view, homeGroups)),
+    attention: home.attention.filter((item) => inScope(item.repos, view, homeTeams)),
     changes: home.changes.filter((change) =>
-      inScope(change.repo ? [change.repo] : [], view, homeGroups),
+      inScope(change.repo ? [change.repo] : [], view, homeTeams),
     ),
   }
 }

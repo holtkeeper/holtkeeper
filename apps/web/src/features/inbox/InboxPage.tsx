@@ -326,7 +326,7 @@ function BulkErrors({ result, onDismiss }: { result: BulkResult; onDismiss: () =
 
 /**
  * Home › Inbox: every decision waiting for the viewer in two sections, what they may decide in
- * their home groups and what their teams can also decide, with a summary strip, kind segments,
+ * their home teams and what their teams can also decide, with a summary strip, kind segments,
  * inline and bulk decisions with per-row errors, a Snoozed tab and a side sheet per item. J and K
  * step through rows, A approves, R rejects and S snoozes the open one.
  */

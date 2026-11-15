@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useKnowledgeMutations } from '../../api/queries.ts'
+import { useFamilies, useKnowledgeMutations } from '../../api/queries.ts'
 import {
   type KnowledgeDraft,
   draftOf,
@@ -28,14 +28,12 @@ import { MarkdownEditor } from './parts.tsx'
 export function NoteEditor({
   entry,
   initialScope,
-  groups,
   onSaved,
   onCancel,
 }: {
   entry?: KnowledgeEntry
   /** Scope of a new note; defaults to everything. */
   initialScope?: Scope
-  groups: readonly string[]
   onSaved: (entry: KnowledgeEntry) => void
   onCancel: () => void
 }) {
@@ -114,9 +112,9 @@ export function NoteEditor({
           <ScopeEditor
             value={draft.scope}
             onChange={(scope) => set({ scope })}
-            groups={groups}
             label="Applies to repositories"
           />
+          <MatchEditor match={draft.match} onChange={(match) => set({ match })} />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">Used by tasks</span>
             <MultiToggle
@@ -315,5 +313,51 @@ function EvidenceEditor({
         Add link
       </Button>
     </fieldset>
+  )
+}
+
+const validateFileGlob = (glob: string): string | undefined =>
+  /\s/.test(glob)
+    ? 'Globs cannot contain spaces'
+    : glob.startsWith('/')
+      ? 'Relative to the repository root, without a leading "/"'
+      : undefined
+
+/** Optional narrowing within the scope: repository families and touched files. */
+function MatchEditor({
+  match,
+  onChange,
+}: {
+  match: KnowledgeDraft['match']
+  onChange: (match: KnowledgeDraft['match']) => void
+}) {
+  const families = useFamilies()
+  const list = families.data?.families ?? []
+  const nameOf = (id: string) => list.find((family) => family.id === id)?.name ?? id
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <TagInput
+        label="Only in families"
+        values={match.families}
+        onChange={(next) => onChange({ ...match, families: next })}
+        suggestions={list.map((family) => family.id)}
+        labelOf={nameOf}
+        placeholder="Any family"
+        validate={(id) =>
+          families.isSuccess && !list.some((family) => family.id === id)
+            ? 'Pick a family from the list'
+            : undefined
+        }
+        description="Repositories in the scope that belong to one of these families."
+      />
+      <TagInput
+        label="Only for files"
+        values={match.files}
+        onChange={(next) => onChange({ ...match, files: next })}
+        placeholder="e.g. src/**/*.tsx"
+        validate={validateFileGlob}
+        description="Tasks touching a matching file; tasks that do not name their files still get it."
+      />
+    </div>
   )
 }

@@ -18,7 +18,7 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: { web: { forge: 'work', include: ['acme/*'] } },
+  teams: { web: { owns: ['work:acme/*'] } },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
 const at = '2026-11-06T00:00:00.000Z'
@@ -202,7 +202,7 @@ test('the licenses table reads no record data, violation details included', asyn
       verdict: 'denied',
       culprits: ['GPL-3.0-only'],
       dev: false,
-      repos: [{ repo: 'work:acme/admin', groups: ['web'] }],
+      repos: [{ repo: 'work:acme/admin', teams: ['web'] }],
     },
   ])
   expect(reads).toEqual([])

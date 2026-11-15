@@ -1,18 +1,18 @@
-import { type RepoTarget, isSubgroup } from '@holtkeeper/access'
+import type { RepoTarget } from '@holtkeeper/access'
 import { defineAnalyzer } from '@holtkeeper/analyzer'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import {
   KnowledgeValidationError,
   type Placement,
   type PlacementLevel,
+  type Neighbourhood,
   bootstrapMarker,
   describeScope,
-  entriesInRoots,
-  entryGroups,
+  entriesNearRepo,
   mergeEvidence,
+  nearRepo,
   placeLessons,
   proposeEntry,
-  reachesRepoRoots,
   scopeNamesRepo,
 } from '@holtkeeper/knowledge'
 import { listFiles } from '@holtkeeper/quality-tests'
@@ -69,7 +69,11 @@ export interface KnowledgeBootstrapData {
   prompt?: string
 }
 
-const levels = z.enum(['repo', 'subgroup', 'group', 'library'])
+const levels = z.enum(['repo', 'family', 'shape', 'folder', 'team', 'library'])
+
+/** Whether a placement level lies above the repository (a promotion; library homes are not). */
+const promotedLevel = (level: PlacementLevel | undefined) =>
+  level !== undefined && level !== 'repo' && level !== 'library'
 
 const dataSchema: z.ZodType<KnowledgeBootstrapData> = z.object({
   outcome: z.enum(['proposed', 'skipped']),
@@ -110,8 +114,7 @@ const summarize = (data: KnowledgeBootstrapData): Metric[] => [
   metric(
     'promoted',
     'Proposed above the repository',
-    created(data).filter((lesson) => lesson.level === 'subgroup' || lesson.level === 'group')
-      .length,
+    created(data).filter((lesson) => promotedLevel(lesson.level)).length,
   ),
   metric('cost', 'Cost (USD)', Math.round((data.call?.costUsd ?? 0) * 10_000) / 10_000, {
     unit: 'text',
@@ -181,7 +184,7 @@ const optionsSchema = z.object({
   months: z.coerce.number().int().min(1).max(24).default(6),
   /** Most lessons proposed. */
   maxEntries: z.coerce.number().int().min(1).max(10).default(10),
-  /** Place lessons a sibling repository shares at subgroup or group level. */
+  /** Place lessons sibling repositories share at family, shape, folder or team level. */
   promote: z.boolean().default(true),
   /** Most merged merge requests listed. */
   maxMergeRequests: z.coerce.number().int().min(0).max(200).default(60),
@@ -215,10 +218,13 @@ export interface BootstrapMark {
 
 /** What the `knowledge-bootstrap` analyzer needs from the server. */
 export interface KnowledgeBootstrapDeps {
-  /** The knowledge base and the marker store; with `audit`, proposals are audited. */
-  store?: Pick<Store, 'knowledge' | 'kv'> & Partial<Pick<Store, 'audit'>>
-  /** Config groups of a repository, subgroups and roots. */
-  groupsOf?: (repo: RepoRef) => string[]
+  /**
+   * The knowledge base and the marker store; with `audit`, proposals are audited, and with
+   * `families` lessons are compared and promoted across a repository's family.
+   */
+  store?: Pick<Store, 'knowledge' | 'kv'> & Partial<Pick<Store, 'audit' | 'families'>>
+  /** Owner teams of a fleet repository (`resolveRepo(config, repo).teams`). */
+  teamsOf?: (repo: RepoRef) => string[]
   /** Holtkeeper's own account on the repository's forge. */
   botUsername?: (repo: RepoRef) => string | undefined
   /** Packages fleet repositories own, for library lessons. */
@@ -239,7 +245,7 @@ const markSchema = z.object({
 /**
  * Why the repository needs no starter knowledge, or `undefined` when it does: `marked` when a run
  * (or an earlier skip) left its `bootstrapMarker`, `has-entries` when a proposed or accepted entry
- * names it exactly (`forge:path` or the bare path; group, glob and `all` scopes do not count).
+ * names it exactly (`forge:path` or the bare path; team, glob and `all` scopes do not count).
  * Library lessons other repositories' runs scoped to it (by `BOOTSTRAP_ACTOR`, with a `subject`)
  * do not count: they say how to use its library, not what its own code and merge requests teach.
  */
@@ -267,19 +273,24 @@ export async function bootstrapBlocker(
     : undefined
 }
 
+/**
+ * The existing entries the prompt lists: the repository's neighbourhood (`entriesNearRepo`), its
+ * family and folders first (what `nearRepo` finds without teams), then team entries, then the
+ * entries of other repositories of its teams; newest first within each.
+ */
 function existingLines(
   entries: readonly KnowledgeEntry[],
   target: RepoTarget,
-  groupsOf: (repo: RepoRef) => string[],
+  around: Neighbourhood,
 ): ExistingEntryLine[] {
-  const own = new Set(target.groups.filter(isSubgroup))
+  const withoutTeams: Neighbourhood = {
+    teamsOf: () => [],
+    ...(around.familyOf && { familyOf: around.familyOf }),
+  }
+  const alone = { ...target, teams: [] }
   const rank = (entry: KnowledgeEntry) =>
-    entryGroups(entry, groupsOf, target.forge).some((group) => own.has(group))
-      ? 0
-      : entry.scope.groups?.length
-        ? 1
-        : 2
-  return entriesInRoots(entries, target, groupsOf)
+    nearRepo(entry, alone, withoutTeams) ? 0 : entry.scope.teams?.length ? 1 : 2
+  return entriesNearRepo(entries, target, around)
     .toSorted(
       (a, b) =>
         rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id),
@@ -287,7 +298,7 @@ function existingLines(
     .slice(0, EXISTING_ENTRIES)
     .map((entry) => ({
       id: entry.id,
-      scope: describeScope(entry.scope),
+      scope: describeScope(entry.scope, entry.match),
       title: entry.title,
       body: entry.body,
     }))
@@ -302,7 +313,7 @@ function levelWords(placement: Placement & { action: 'create' }): string {
   if (placement.level === 'library')
     return `library ${placement.input.subject ?? ''} → ${(scope.repos ?? []).join(', ')}`
   if (placement.level === 'repo') return 'repo'
-  return describeScope(scope)
+  return describeScope(scope, placement.input.match)
 }
 
 async function repositoryLinks(
@@ -342,8 +353,8 @@ async function repositoryLinks(
  * skip `appliesTo`; `force` runs anyway. A repository with entries is marked and skipped; without
  * an agent the run is skipped unmarked. A `BudgetExceededError` propagates, so the job ends
  * blocked with nothing stored and no marker. Without `deps.store` (outside the server) it cannot
- * run. Proposals count as duplicates only of entries of the repository's team or of the same
- * library subject. At most `DAILY_RUNS` automatic runs start per UTC day; the queue moves the rest
+ * run. Proposals count as duplicates only of entries in the repository's neighbourhood
+ * (`nearRepo`: its owner teams, family and folders) or of the same library subject. At most `DAILY_RUNS` automatic runs start per UTC day; the queue moves the rest
  * to later days.
  */
 export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = {}) {
@@ -372,8 +383,8 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
           'the knowledge-bootstrap analyzer reads only the default branch; queue it without a ref',
         )
       const step = context.step ?? (<T>(_: string, run: () => Promise<T>) => run())
-      const groupsOf = deps.groupsOf ?? (() => [])
-      const target: RepoTarget = { ...repo, groups: groupsOf(repo) }
+      const teamsOf = deps.teamsOf ?? (() => [])
+      const target: RepoTarget = { ...repo, teams: teamsOf(repo) }
       const marker = bootstrapMarker(repo)
       const mark = (value: BootstrapMark) => store.kv?.set(marker, value)
       const skipped = (reason: string): { data: KnowledgeBootstrapData } => {
@@ -427,29 +438,49 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
       )
       const evidence: BootstrapEvidence[] = [...code, ...mrs.evidence]
 
-      const { existing, libraries, dependencies, homes } = await step('read context', async () => {
-        const entries = await store.knowledge.list({ status: ['proposed', 'accepted'] })
-        const direct = await directDependencies(dir, files)
-        let fleet: FleetPackage[] = []
-        try {
-          fleet = (await deps.fleetPackages?.()) ?? []
-        } catch (error) {
-          log?.(`fleet libraries: ${message(error)}`)
-        }
-        const homeOf = new Map<string, RepoRef>()
-        for (const pkg of fleet) if (!homeOf.has(pkg.subject)) homeOf.set(pkg.subject, pkg.repo)
-        const used: LibraryLine[] = [...homeOf]
-          .filter(([subject, home]) => direct.has(subject) && keyOf(home) !== keyOf(repo))
-          .toSorted(([a], [b]) => a.localeCompare(b))
-          .slice(0, FLEET_LIBRARIES)
-          .map(([subject, home]) => ({ subject, home: keyOf(home) }))
-        return {
-          existing: existingLines(entries, target, groupsOf),
-          libraries: used,
-          dependencies: [...direct].toSorted(),
-          homes: homeOf,
-        }
-      })
+      const { existing, libraries, dependencies, homes, around, family } = await step(
+        'read context',
+        async () => {
+          const entries = await store.knowledge.list({ status: ['proposed', 'accepted'] })
+          let familyOfKey = new Map<string, string>()
+          try {
+            const families = (await store.families?.list()) ?? []
+            familyOfKey = new Map(
+              families.flatMap((item) => item.members.map((member) => [member, item.id] as const)),
+            )
+          } catch (error) {
+            log?.(`families: ${message(error)}`)
+          }
+          const neighbourhood: Neighbourhood = {
+            teamsOf,
+            ...(familyOfKey.size && {
+              familyOf: (other: RepoRef) => familyOfKey.get(keyOf(other)),
+            }),
+          }
+          const direct = await directDependencies(dir, files)
+          let fleet: FleetPackage[] = []
+          try {
+            fleet = (await deps.fleetPackages?.()) ?? []
+          } catch (error) {
+            log?.(`fleet libraries: ${message(error)}`)
+          }
+          const homeOf = new Map<string, RepoRef>()
+          for (const pkg of fleet) if (!homeOf.has(pkg.subject)) homeOf.set(pkg.subject, pkg.repo)
+          const used: LibraryLine[] = [...homeOf]
+            .filter(([subject, home]) => direct.has(subject) && keyOf(home) !== keyOf(repo))
+            .toSorted(([a], [b]) => a.localeCompare(b))
+            .slice(0, FLEET_LIBRARIES)
+            .map(([subject, home]) => ({ subject, home: keyOf(home) }))
+          return {
+            existing: existingLines(entries, target, neighbourhood),
+            libraries: used,
+            dependencies: [...direct].toSorted(),
+            homes: homeOf,
+            around: neighbourhood,
+            family: familyOfKey.get(keyOf(repo)),
+          }
+        },
+      )
 
       const links = await repositoryLinks(context.forge, repo, sha, mrs.mergeRequests, log)
       const generated = await step('generate', () =>
@@ -460,7 +491,8 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
           links,
           prompt: {
             repo: keyOf(repo),
-            groups: target.groups,
+            teams: target.teams,
+            ...(family !== undefined && { family }),
             since: since.toISOString().slice(0, 10),
             maxEntries: options.maxEntries,
             evidence,
@@ -486,7 +518,7 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
           repo: target,
           lessons: generated.lessons,
           entries: await store.knowledge.list({ status: ['proposed', 'accepted', 'rejected'] }),
-          groupsOf,
+          ...around,
           libraryHome: (subject) => homes.get(subject),
           promote: options.promote,
         })
@@ -511,7 +543,7 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
               repo: keyOf(repo),
               now,
             })
-            const scope = describeScope(existingEntry.scope)
+            const scope = describeScope(existingEntry.scope, existingEntry.match)
             log?.(
               `covered by ${short(existingEntry.id)} [${scope}] "${placement.lesson.title}" — evidence merged (${merged.added.length} new)`,
             )
@@ -537,13 +569,13 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
               autoAccept: [],
               notDuplicates: placement.generalises ?? [],
               duplicateScope: (entry) =>
-                reachesRepoRoots(entry, target, groupsOf) ||
+                nearRepo(entry, target, around) ||
                 (subject !== undefined && entry.subject === subject),
             })
             const record: LessonRecord = {
               title: result.entry.title,
               level: placement.level,
-              scope: describeScope(placement.input.scope ?? {}),
+              scope: describeScope(placement.input.scope ?? {}, placement.input.match),
               outcome: result.created ? 'created' : 'duplicate',
               entryId: result.entry.id,
               ...(result.duplicateOf && { duplicateOf: result.duplicateOf }),
@@ -571,8 +603,7 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
 
       const proposedCount = lessons.filter((lesson) => lesson.outcome === 'created').length
       const promoted = lessons.filter(
-        (lesson) =>
-          lesson.outcome === 'created' && (lesson.level === 'subgroup' || lesson.level === 'group'),
+        (lesson) => lesson.outcome === 'created' && promotedLevel(lesson.level),
       ).length
       await mark({
         at: now().toISOString(),

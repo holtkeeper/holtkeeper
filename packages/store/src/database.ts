@@ -26,6 +26,7 @@ const domainOf: Record<string, DatabaseDomain> = {
   ai_usage: 'ai',
   knowledge: 'knowledge',
   knowledge_history: 'knowledge',
+  embeddings: 'knowledge',
   guides: 'knowledge',
   guide_history: 'knowledge',
   guide_generated: 'knowledge',

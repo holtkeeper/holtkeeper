@@ -15,7 +15,7 @@ export interface ResolvedRepoAnalyzers {
 
 /**
  * `repo.analyzers` for `repo`: the most specific covering entry, so a repository entry with
- * `off: []` lifts a group one. A secret or invalid winning value counts as the default (nothing
+ * `off: []` lifts a folder one. A secret or invalid winning value counts as the default (nothing
  * off), with no entry. Kinds no analyzer has are kept; they match nothing.
  */
 export function resolveRepoAnalyzers(

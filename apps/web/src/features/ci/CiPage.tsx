@@ -2,7 +2,7 @@ import type { CiRepoCard } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Timer } from 'lucide-react'
 
-import { useCiOverview, useGroupTitles } from '../../api/queries.ts'
+import { useCiOverview, useTeamTitles } from '../../api/queries.ts'
 import {
   type CiKpis,
   type CiSearch,
@@ -90,7 +90,7 @@ function RepoName({ card }: { card: CiRepoCard }) {
           <span className="font-medium">{name}</span>
         </Link>
         <span className="mono text-[11px] text-dim">
-          {[...card.groups, card.ref].filter(Boolean).join(' · ')}
+          {[...card.teams, card.ref].filter(Boolean).join(' · ')}
         </span>
       </div>
     </div>
@@ -225,8 +225,8 @@ export function CiPage() {
   const search = useSearch({ from: '/app/quality/ci' })
   const navigate = useNavigate({ from: '/quality/ci' })
   const setSearch = (next: CiSearch) => void navigate({ search: next, replace: true })
-  const { view, setView, homeGroups } = useScope()
-  const titleOf = useGroupTitles()
+  const { view, setView, homeTeams } = useScope()
+  const titleOf = useTeamTitles()
   const settings = useConfigure('CI settings', pageSettingKeys.ci)
   const run = useRunJob({ analyzer: 'ci-jobs', label: 'Run CI analysis' })
 
@@ -235,7 +235,7 @@ export function CiPage() {
   const rows = sortRows(worstCiFirst(filterCiCards(all, search, titleOf)), sort, ciSortValue)
   const filtered = Boolean(search.q || search.status?.length || search.problems)
 
-  const folded = foldScope(rows, view, homeGroups, (card) => card.groups)
+  const folded = foldScope(rows, view, homeTeams, (card) => card.teams)
   const order = [...folded.shown, ...folded.others]
   const selected = parseRepoKey(search.repo)
   const index = selected ? order.findIndex((card) => repoKey(card.repo) === repoKey(selected)) : -1
@@ -255,7 +255,7 @@ export function CiPage() {
         value: search.q ?? '',
         onChange: (q) => setSearch({ ...search, q: q || undefined }),
         'aria-label': 'Filter repositories',
-        placeholder: 'Filter by path or group',
+        placeholder: 'Filter by path or team',
       }}
       configure={settings.configure}
       primary={run.action}
@@ -272,7 +272,7 @@ export function CiPage() {
           columns={columns}
           sort={sort}
           onSort={(nextSort) => setSearch(withCiSort(search, nextSort))}
-          scope={{ value: view, onChange: setView, homeGroups }}
+          scope={{ value: view, onChange: setView, homeTeams }}
           strip={(shown) => kpiCells(ciKpis(shown))}
           toolbar={
             <>
@@ -328,10 +328,10 @@ export function CiPage() {
       )}
       {overview.data ? (
         <CiFleetJobs
-          groupsOf={(key) =>
-            overview.data.repos.find((card) => repoKey(card.repo) === key)?.groups ?? []
+          teamsOf={(key) =>
+            overview.data.repos.find((card) => repoKey(card.repo) === key)?.teams ?? []
           }
-          scope={{ value: view, onChange: setView, homeGroups }}
+          scope={{ value: view, onChange: setView, homeTeams }}
         />
       ) : null}
       <CiSheet

@@ -108,7 +108,7 @@ const counting = (analyses: AnalysisStore) => {
 const setup = () => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
-    config: parseConfig({ forges: {}, groups: {} }),
+    config: parseConfig({ forges: {}, teams: {} }),
     auth: noAuth(),
     store,
     vault,

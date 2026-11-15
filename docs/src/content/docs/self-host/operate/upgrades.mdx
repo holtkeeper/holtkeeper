@@ -55,7 +55,7 @@ Migrations only go forward. To roll back a release, restore the backup you took 
 
 Releases retire things gracefully:
 
-- Config keys that moved to the panel (`forges`, `groups`, `jobs.schedules` and the like) log one warning each and are ignored.
+- Config keys that moved to the panel (`forges`, `groups`, `teams`, `jobs.schedules` and the like) log one warning each and are ignored.
 - Retired setting keys are dropped everywhere; old rows never fail validation.
 - Settings with option keys an analyzer no longer takes are flagged in the panel.
 

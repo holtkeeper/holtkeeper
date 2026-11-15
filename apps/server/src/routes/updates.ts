@@ -1,10 +1,11 @@
-import { can, parentGroup } from '@holtkeeper/access'
+import { can } from '@holtkeeper/access'
 import type {
-  GroupListingView,
+  FleetListingView,
   RepoPollResult,
   RepoUpdatesView,
   RepoWebhookInput,
 } from '@holtkeeper/api'
+import { fleetPatterns } from '@holtkeeper/core'
 import { type RepoRef, webhookEvents } from '@holtkeeper/forge'
 import type { RegisteredWebhook } from '@holtkeeper/store'
 import { Hono } from 'hono'
@@ -54,11 +55,13 @@ const audit = (c: AppContext, action: string, repo: RepoRef, details: Record<str
  * `POST /repos/updates/webhook/reenable` checks Holtkeeper's hooks that reach the repository now and
  * re-enables those the forge disabled, without waiting for the next check (audited); forge-wide
  * hooks that cover it are included only for callers with global `settings:write`.
- * `GET /repos/updates/groups/:group` shows the repositories polling knows for a group, what its
- * include patterns matched before excludes, when it lists next and its recent listings; `POST /repos/updates/groups/:group/list` lists them on the forge now.
- * A subgroup shows its parent's listing narrowed to its own patterns, and listing it lists the parent.
- * Reading needs `settings:read` on the repository (or group), the rest `settings:write`; the webhook URL is
- * only shown to callers with `settings:write`. All answer 503 without a key-value store.
+ * `GET /repos/updates/fleet/:forge` shows the repositories polling knows for a forge's fleet (its
+ * `fleetPatterns`), what those patterns matched before the forge's excludes, when it lists next and
+ * its recent listings; `POST /repos/updates/fleet/:forge/list` lists them on the forge now. A
+ * fleet spans every team on the forge, so its listing needs global `settings:read` to read and
+ * global `settings:write` to list (and to see `matched`). Repository endpoints need
+ * `settings:read` on the repository to read, the rest `settings:write`; the webhook URL is only
+ * shown to callers with `settings:write`. All answer 503 without a key-value store.
  */
 export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
   const app = new Hono<Env>()
@@ -161,55 +164,40 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
     return c.json<RepoUpdatesView>(await view(c, repo, canWrite(c, repo)))
   })
 
-  const groupOf = (c: AppContext, action: 'settings:read' | 'settings:write') => {
-    const group = c.req.param('group') ?? ''
-    const definition = deps.config.groups[group]
-    if (!definition) throw new HTTPException(404, { message: `group ${group} is not configured` })
-    const principal = authorize(c, action, { kind: 'scope', scope: { groups: [group] } })
-    const parent = parentGroup(group)
-    return {
-      group,
-      parent,
-      forge: definition.forge,
-      withMatched: can(principal, 'settings:write', { kind: 'global' }),
-      withAttempts:
-        parent === undefined ||
-        can(principal, 'settings:read', { kind: 'scope', scope: { groups: [parent] } }),
-    }
+  const fleetOf = (c: AppContext, action: 'settings:read' | 'settings:write') => {
+    const forge = c.req.param('forge') ?? ''
+    const principal = authorize(c, action, { kind: 'global' })
+    if (!(forge in deps.config.forges))
+      throw new HTTPException(404, { message: `forge ${forge} is not configured` })
+    return { forge, withMatched: can(principal, 'settings:write', { kind: 'global' }) }
   }
 
   const listingView = async ({
-    group,
-    parent,
     forge,
     withMatched,
-    withAttempts,
-  }: ReturnType<typeof groupOf>): Promise<GroupListingView> => {
+  }: ReturnType<typeof fleetOf>): Promise<FleetListingView> => {
     const { poller } = parts()
-    const listing = await poller.listing(group)
+    const listing = await poller.listing(forge)
     const nextAt = poller.nextListingAt(listing)
     return {
-      group,
       forge,
-      ...(parent !== undefined && { parent }),
+      patterns: fleetPatterns(deps.config, forge).include,
       repos: listing?.repos ?? [],
       ...(withMatched && { matched: listing?.matched ?? listing?.repos ?? [] }),
       ...(listing?.listedAt && { listedAt: listing.listedAt }),
       ...(nextAt && { nextAt }),
-      attempts: withAttempts ? (listing?.attempts ?? []) : [],
+      attempts: listing?.attempts ?? [],
     }
   }
 
-  app.get('/repos/updates/groups/:group', async (c) => {
-    return c.json<GroupListingView>(await listingView(groupOf(c, 'settings:read')))
+  app.get('/repos/updates/fleet/:forge', async (c) => {
+    return c.json<FleetListingView>(await listingView(fleetOf(c, 'settings:read')))
   })
 
-  app.post('/repos/updates/groups/:group/list', async (c) => {
-    const scope = groupOf(c, 'settings:write')
-    if (scope.parent !== undefined)
-      authorize(c, 'settings:write', { kind: 'scope', scope: { groups: [scope.parent] } })
-    await parts().poller.listGroup(scope.parent ?? scope.group)
-    return c.json<GroupListingView>(await listingView(scope))
+  app.post('/repos/updates/fleet/:forge/list', async (c) => {
+    const scope = fleetOf(c, 'settings:write')
+    await parts().poller.listFleet(scope.forge)
+    return c.json<FleetListingView>(await listingView(scope))
   })
 
   app.post('/repos/updates/poll', async (c) => {

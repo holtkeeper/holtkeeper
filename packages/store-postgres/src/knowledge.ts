@@ -53,7 +53,7 @@ export function knowledgeFilterParams(filter: KnowledgeFilter = {}): KnowledgeFi
 }
 
 const columns = (sql: SQL) => sql`k.id, k.title, k.body, k.kind, k.status, k.source, k.author,
-  k.scope, k.topics, k.applies_to, k.packages, k.visibility, k.subject, k.evidence, k.supersedes, k.created_at, k.updated_at,
+  k.scope, k.matches, k.topics, k.applies_to, k.packages, k.visibility, k.subject, k.evidence, k.supersedes, k.created_at, k.updated_at,
   k.updated_by, k.version`
 
 const jsonList = (sql: SQL, value: string[] | null) => (value === null ? null : sql.json(value))
@@ -73,7 +73,7 @@ function where(sql: SQL, filter?: KnowledgeFilter) {
       OR (lower(${p.scope}::text) = 'all' AND k.scope -> 'all' = 'true'::jsonb)
       OR EXISTS (
         SELECT 1 FROM jsonb_array_elements_text(
-          COALESCE(k.scope -> 'groups', '[]'::jsonb) || COALESCE(k.scope -> 'repos', '[]'::jsonb)
+          COALESCE(k.scope -> 'teams', '[]'::jsonb) || COALESCE(k.scope -> 'repos', '[]'::jsonb)
         ) AS pattern (value)
         WHERE strpos(lower(pattern.value), lower(${p.scope}::text)) > 0))
     AND (${p.packageName}::text IS NULL OR EXISTS (
@@ -102,20 +102,21 @@ export function postgresKnowledge(db: () => Promise<Db>, schema: string): Knowle
         const [stored]: KnowledgeRow[] = await tx`
           INSERT INTO ${t.knowledge} AS k (id, title, body, kind, status, source, author, scope, topics,
             applies_to, packages, visibility, subject, evidence, supersedes, tags, created_at, updated_at,
-            updated_by, version)
+            updated_by, version, matches)
           VALUES (${input.id}, ${input.title}, ${input.body}, ${input.kind}, ${input.status},
             ${input.source}, ${input.author}, ${tx.json(input.scope)}, ${tx.json(input.topics)},
             ${tx.json(input.appliesTo)}, ${input.packages ? tx.json(input.packages) : null},
             ${input.visibility ?? null}, ${input.subject ?? null}, ${tx.json(input.evidence)}, ${input.supersedes ?? null}, ${knowledgeTags(input)},
             ${input.createdAt}, ${input.updatedAt}, ${input.updatedBy ?? null},
-            ${(previous?.version ?? 0) + 1})
+            ${(previous?.version ?? 0) + 1}, ${input.match ? tx.json(input.match) : null})
           ON CONFLICT (id) DO UPDATE SET title = excluded.title, body = excluded.body,
             kind = excluded.kind, status = excluded.status, source = excluded.source,
             author = excluded.author, scope = excluded.scope, topics = excluded.topics,
             applies_to = excluded.applies_to, packages = excluded.packages,
             visibility = excluded.visibility, subject = excluded.subject, evidence = excluded.evidence, supersedes = excluded.supersedes, tags = excluded.tags,
             created_at = excluded.created_at, updated_at = excluded.updated_at,
-            updated_by = excluded.updated_by, version = excluded.version
+            updated_by = excluded.updated_by, version = excluded.version,
+            matches = excluded.matches
           RETURNING ${columns(tx)}`
         if (!stored) throw new Error('knowledge upsert returned nothing')
         return toKnowledgeEntry(stored)

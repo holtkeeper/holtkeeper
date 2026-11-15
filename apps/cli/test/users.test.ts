@@ -11,7 +11,7 @@ const setup = (publicUrl?: string) => {
   const store = memoryStore()
   const config = {
     forges: {},
-    groups: {},
+    teams: {},
     server: { auth: noAuth(), store, vaultKey: 'v'.repeat(32), ...(publicUrl && { publicUrl }) },
   } as unknown as HoltkeeperFileConfig
   const run = async (args: string[], flags: UsersFlags = {}) => {

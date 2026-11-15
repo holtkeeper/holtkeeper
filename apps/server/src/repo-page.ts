@@ -1,4 +1,5 @@
 import type { Action, RepoTarget } from '@holtkeeper/access'
+import { pathAncestors } from '@holtkeeper/access/paths'
 import { metricsOf } from '@holtkeeper/analyzer'
 import { auditAnalysis } from '@holtkeeper/analyzers'
 import type {
@@ -60,7 +61,7 @@ import {
   readHealthSources,
   repoHealth,
 } from './repo-health.ts'
-import { repoDependencies, stackGroupViews } from './stack.ts'
+import { repoDependencies, stackTeamViews } from './stack.ts'
 import { tasksWriteSettings } from './write-tasks.ts'
 
 const REVIEWS_30D_READ = 200
@@ -111,14 +112,14 @@ interface Toolchain {
   toolchain: RepoToolchainEntry[]
 }
 
-/** The repository's stack and toolchain from the newest `stack` records of the groups that list it. */
+/** The repository's stack and toolchain from the newest `stack` records of the teams that list it. */
 async function repoStack(
   analyses: Store['analyses'],
   repo: RepoRef,
-  groupsOf: (repo: RepoRef) => string[],
+  teamsOf: (repo: RepoRef) => string[],
 ): Promise<Toolchain> {
   const views = (
-    await stackGroupViews(analyses, { canRead: (other) => sameRepo(other, repo), groupsOf })
+    await stackTeamViews(analyses, { canRead: (other) => sameRepo(other, repo), teamsOf })
   ).filter((view) => view.forge === repo.forge && view.repos.some((r) => r.path === repo.path))
   if (!views.length) return { toolchain: [] }
   const tools = new Map<string, RepoStackView['tools'][number]>()
@@ -289,14 +290,23 @@ const hasContent = (section: {
 async function knowledgeSummary(
   store: Store,
   repo: RepoTarget,
-  titleOf: (group: string) => string,
+  titleOf: (team: string) => string,
 ): Promise<RepoKnowledgeSummary> {
   const key = repoKey(repo)
   const family = familyOf(await store.families.list(), key)
-  const groupScopes = repo.groups.map((group) => ({
-    label: `group ${titleOf(group)}`,
-    scope: guideScopeKey({ kind: 'group', group }),
-  }))
+  // Broad to narrow: owner teams, then the folders holding the repository, shallowest first.
+  const broader = [
+    ...repo.teams.map((team) => ({
+      label: `team ${titleOf(team)}`,
+      scope: guideScopeKey({ kind: 'team', team }),
+    })),
+    ...pathAncestors(repo.path)
+      .toReversed()
+      .map((folder) => ({
+        label: `path ${folder}`,
+        scope: guideScopeKey({ kind: 'path', forge: repo.forge, folder }),
+      })),
+  ]
   const familyScope = family
     ? [
         {
@@ -307,7 +317,7 @@ async function knowledgeSummary(
     : []
   const own = guideScopeKey({ kind: 'repo', forge: repo.forge, path: repo.path })
   const [sections, notes, proposed] = await Promise.all([
-    store.guides.list({ scopes: [own, ...[...groupScopes, ...familyScope].map((s) => s.scope)] }),
+    store.guides.list({ scopes: [own, ...[...broader, ...familyScope].map((s) => s.scope)] }),
     store.knowledge.list({ status: ['accepted', 'proposed'] }),
     store.learnings.list({ repos: [key], status: ['proposed'] }),
   ])
@@ -316,7 +326,7 @@ async function knowledgeSummary(
     sections: sections.filter((section) => section.scope === own && hasContent(section)).length,
     notes: notes.filter((entry) => entry.scope.repos?.includes(key) === true).length,
     proposed: proposed.length,
-    inherits: [...groupScopes, ...familyScope]
+    inherits: [...broader, ...familyScope]
       .filter(({ scope }) => filled.has(scope))
       .map(({ label }) => label),
   }
@@ -856,9 +866,9 @@ export async function repoOverview(
   options: {
     access: HealthAccess
     releases?: () => Promise<ReleaseCard[]>
-    groupsOf: (repo: RepoRef) => string[]
-    /** What people see for a group key; default the key. */
-    groupTitle?: (group: string) => string
+    teamsOf: (repo: RepoRef) => string[]
+    /** What people see for a team key; default the key. */
+    teamTitle?: (team: string) => string
   },
 ): Promise<RepoOverview> {
   const { store } = deps
@@ -883,14 +893,14 @@ export async function repoOverview(
         ...(labels.size && { known: (kind: string) => labels.has(kind) }),
       }),
       repoDependencies(store.analyses, ref),
-      repoStack(store.analyses, ref, options.groupsOf),
+      repoStack(store.analyses, ref, options.teamsOf),
       reviewTotals(store, ref, now),
       workSummary(store, ref, now, {
         tasks: may('repos:read'),
         spend: may('ai:read') || may('ai:admin'),
       }),
       may('knowledge:read')
-        ? knowledgeSummary(store, repo, options.groupTitle ?? ((group) => group))
+        ? knowledgeSummary(store, repo, options.teamTitle ?? ((team) => team))
         : undefined,
       accessSummary(store, repo, now),
     ])
@@ -906,7 +916,7 @@ export async function repoOverview(
   const defaultBranch = defaultBranchOf(latest)
   return {
     repo: ref,
-    groups: repo.groups,
+    teams: repo.teams,
     health,
     cells,
     cards: overviewCards({

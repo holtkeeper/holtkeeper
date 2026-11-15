@@ -46,7 +46,7 @@ export const analyzerArea = (kind: string): AnalyzerArea => areas[kind] ?? 'othe
 
 /**
  * Whether an analyzer runs on its own, read from Automation: `on` when freshness or an enabled
- * rule covers every repository, `some` when enabled rules cover some groups only, `off` when it
+ * rule covers every repository, `some` when enabled rules cover some teams only, `off` when it
  * runs only when someone starts it. There is no separate switch.
  */
 export type AnalyzerState = 'on' | 'some' | 'off'
@@ -67,7 +67,7 @@ export interface AnalyzerRow {
   /** It may call an LLM. */
   ai: boolean
   state: AnalyzerState
-  /** Where it runs on its own: "Every repository", the groups, or "Only when started". */
+  /** Where it runs on its own: "Every repository", the teams, or "Only when started". */
   where: string
   /** What makes it run: freshness and the titles of the rules that queue it. */
   when: string[]
@@ -106,7 +106,7 @@ export function analyzerRows(input: {
       )
       const fresh = analyzer.refresh !== undefined && !freshnessOff
       const everywhere = fresh || automatic.some((rule) => rule.lanes.includes(ALL_LANE))
-      const groups = [...new Set(automatic.flatMap((rule) => rule.lanes))].filter(
+      const teams = [...new Set(automatic.flatMap((rule) => rule.lanes))].filter(
         (lane) => lane !== ALL_LANE,
       )
       const state: AnalyzerState = everywhere ? 'on' : automatic.length ? 'some' : 'off'
@@ -123,7 +123,7 @@ export function analyzerRows(input: {
           state === 'on'
             ? 'Every repository'
             : state === 'some'
-              ? groups.toSorted().join(', ')
+              ? teams.toSorted().join(', ')
               : 'Only when started',
         when: [
           ...(fresh && analyzer.refresh ? [`Freshness ${describeRefresh(analyzer.refresh)}`] : []),

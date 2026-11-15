@@ -1,10 +1,11 @@
-import type {
-  ConfigEntryView,
-  CredentialView,
-  ForgeSshKeyInput,
-  ForgeSshKeyView,
-  ForgeWebhookResult,
-  IntegrationForgeView,
+import {
+  type ConfigEntryView,
+  type CredentialView,
+  type ForgeSshKeyInput,
+  type ForgeSshKeyView,
+  type ForgeWebhookResult,
+  type IntegrationForgeView,
+  globMatches,
 } from '@holtkeeper/api'
 import {
   Fingerprint,
@@ -19,7 +20,14 @@ import {
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentials, useForgeMutations, useForges } from '../../api/queries.ts'
+import {
+  useCredentials,
+  useFleetListing,
+  useForgeMutations,
+  useForges,
+  useListFleet,
+  useRepos,
+} from '../../api/queries.ts'
 import { useIntegrationForges, useReenableForgeWebhooks } from '../../api/settings-ai.ts'
 import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
 import { webhookHealthLine } from '../../lib/webhook-health.ts'
@@ -36,13 +44,21 @@ import {
   Placeholder,
   Select,
   Switch,
+  TagInput,
   TextField,
   notify,
 } from '../../ui/index.ts'
+import { ListingAttempts } from '../repos/Attempts.tsx'
 import { useSectionHeader } from '../settings/section-header.ts'
 import { useSession } from '../shell/session.ts'
 import { BotAccount } from './BotAccount.tsx'
-import { type ForgeDraft, toForgeDraft, toForgeInput, validateForgeDraft } from './forge-form.ts'
+import {
+  type ForgeDraft,
+  toForgeDraft,
+  toForgeInput,
+  validateFleetPattern,
+  validateForgeDraft,
+} from './forge-form.ts'
 
 type ForgeEntry = ConfigEntryView<'forge'>
 
@@ -230,6 +246,7 @@ export function ForgesSection() {
                   forge={forge}
                   {...(writable ? { onIssue: () => setHooking(forge) } : {})}
                 />
+                <FleetListingSummary forgeId={forge.id} writable={writable} />
               </li>
             )
           })}
@@ -267,8 +284,8 @@ export function ForgesSection() {
           })
         }
       >
-        Its webhook and SSH key are removed from the forge as well. Groups that use it must be moved
-        or deleted first.
+        Its webhook and SSH key are removed from the forge as well. Team patterns and schedules that
+        name it must be changed first.
       </ConfirmDialog>
       <ConfirmDialog
         isOpen={unkeying !== null}
@@ -322,6 +339,59 @@ function SshKeySummary({ sshKey, actions }: { sshKey: ForgeSshKeyView; actions: 
         ) : null}
       </div>
       <CopyField value={sshKey.publicKey} label="public key" />
+    </div>
+  )
+}
+
+/** The forge's fleet listing: when it was listed, how many repositories, recent attempts. */
+function FleetListingSummary({ forgeId, writable }: { forgeId: string; writable: boolean }) {
+  const listing = useFleetListing(forgeId)
+  const listNow = useListFleet(forgeId)
+  const [open, setOpen] = useState(false)
+  const data = listing.data
+  if (!data) return null
+  const failed = data.attempts[0]?.error
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-default/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <GitBranch className="size-4 text-muted" />
+          Fleet
+          <Chip>{plural(data.repos.length, 'repository', 'repositories')}</Chip>
+          {data.listedAt ? (
+            <span className="text-xs text-muted">listed {formatRelative(data.listedAt)}</span>
+          ) : (
+            <span className="text-xs text-muted">not listed yet</span>
+          )}
+          {failed ? <Chip tone="danger">Last listing failed</Chip> : null}
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onPress={() => setOpen((value) => !value)}>
+            {open ? 'Hide listings' : 'Listings'}
+          </Button>
+          {writable ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              isPending={listNow.isPending}
+              onPress={() =>
+                listNow.mutate(undefined, {
+                  onSuccess: (result) =>
+                    notify.success(
+                      'Fleet listed',
+                      plural(result.repos.length, 'repository', 'repositories'),
+                    ),
+                  onError: (error) => notify.error('Listing failed', messageOf(error)),
+                })
+              }
+            >
+              <RefreshCw className="size-3.5" />
+              List now
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {open ? <ListingAttempts attempts={data.attempts} /> : null}
     </div>
   )
 }
@@ -513,6 +583,15 @@ function ForgeDialog({
   const [draft, setDraft] = useState<ForgeDraft>(() => toForgeDraft(forge))
   const [submitted, setSubmitted] = useState(false)
   const { put } = useForgeMutations()
+  const repos = useRepos()
+  const onForge = (repos.data?.repos ?? []).filter(
+    (summary) => summary.repo.forge === draft.id.trim(),
+  )
+  const included = onForge.filter(
+    (summary) =>
+      draft.include.some((pattern) => globMatches(pattern, summary.repo.path)) &&
+      !draft.exclude.some((pattern) => globMatches(pattern, summary.repo.path)),
+  )
   const errors = submitted ? validateForgeDraft(draft, isNew ? taken : []) : {}
   const set = <K extends keyof ForgeDraft>(key: K, value: ForgeDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }))
@@ -636,6 +715,45 @@ function ForgeDialog({
           onChange={(on) => set('cachePackages', on)}
           description="The egress proxy keeps the npm, Maven, PyPI and generic package files jobs download from this forge, so repeated installs skip the forge. Every job gets a cached copy until it goes unused for the packages TTL, even after this token loses access or the package is deleted. Generic files re-uploaded under the same version keep the cached copy until it expires or is removed under Caches."
         />
+        <section aria-labelledby="forge-fleet" className="flex flex-col gap-3">
+          <div className="flex flex-col gap-0.5">
+            <h3 id="forge-fleet" className="text-sm font-semibold">
+              Fleet
+            </h3>
+            <p className="text-xs text-muted">
+              Holtkeeper works on the repositories teams own or consume, plus the folders included
+              here, e.g. while no team owns them yet.
+            </p>
+          </div>
+          <TagInput
+            label="Include"
+            values={draft.include}
+            onChange={(include) => set('include', include)}
+            placeholder="e.g. acme/round/**"
+            validate={validateFleetPattern}
+            description={
+              errors.include ? (
+                <span className="text-danger">{errors.include}</span>
+              ) : (
+                `Path patterns on this forge. ${plural(included.length, 'listed repository matches', 'listed repositories match')} now.`
+              )
+            }
+          />
+          <TagInput
+            label="Exclude"
+            values={draft.exclude}
+            onChange={(exclude) => set('exclude', exclude)}
+            placeholder="e.g. acme/round/sandbox-*"
+            validate={validateFleetPattern}
+            description={
+              errors.exclude ? (
+                <span className="text-danger">{errors.exclude}</span>
+              ) : (
+                'Repositories these match stay out of the include list above.'
+              )
+            }
+          />
+        </section>
         <button type="submit" hidden />
       </form>
     </Dialog>

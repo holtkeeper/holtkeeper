@@ -8,7 +8,7 @@ import {
   can,
   canCatalog,
   canGlobal,
-  canInGroup,
+  canInTeam,
   roleLabel,
   summarizeGrants,
   visibleSettingsSections,
@@ -37,8 +37,8 @@ describe('can', () => {
 
   test('checks every grant', () => {
     const p = principal([
-      { scope: { groups: ['a'] }, actions: ['repos:read'] },
-      { scope: { groups: ['b'] }, actions: ['settings:write'] },
+      { scope: { teams: ['a'] }, actions: ['repos:read'] },
+      { scope: { teams: ['b'] }, actions: ['settings:write'] },
     ])
     expect(can(p, 'settings:write')).toBe(true)
     expect(can(p, 'credentials:read')).toBe(false)
@@ -52,7 +52,7 @@ describe('summarizeGrants', () => {
     expect(
       summarizeGrants([
         { scope: { all: true }, actions: ['repos:read'] },
-        { scope: { groups: ['x'] }, actions: ['repos:read', 'audits:read'] },
+        { scope: { teams: ['x'] }, actions: ['repos:read', 'audits:read'] },
       ]),
     ).toBe('2 grants, 2 actions')
   })
@@ -65,7 +65,7 @@ describe('summarizeGrants', () => {
 describe('canGlobal', () => {
   test('needs a grant over everything that allows the action', () => {
     expect(canGlobal(null, 'settings:read')).toBe(false)
-    const scoped = principal([{ scope: { groups: ['games'] }, actions: ['settings:read'] }])
+    const scoped = principal([{ scope: { teams: ['games'] }, actions: ['settings:read'] }])
     expect(canGlobal(scoped, 'settings:read')).toBe(false)
     expect(canGlobal(principal([{ scope: { all: true }, actions: ['*'] }]), 'settings:read')).toBe(
       true,
@@ -76,18 +76,18 @@ describe('canGlobal', () => {
   })
 })
 
-describe('canInGroup', () => {
-  test('needs a grant over everything or one naming the group on its own', () => {
+describe('canInTeam', () => {
+  test('needs a grant over everything or one naming the team', () => {
     const scoped = principal([
-      { scope: { groups: ['games', ['web', 'pay']] }, actions: ['settings:write'] },
+      { scope: { teams: ['games'], repos: ['acme/web/**'] }, actions: ['settings:write'] },
     ])
-    expect(canInGroup(scoped, 'settings:write', 'games')).toBe(true)
-    expect(canInGroup(scoped, 'settings:write', 'web')).toBe(false)
-    expect(canInGroup(scoped, 'settings:read', 'games')).toBe(false)
+    expect(canInTeam(scoped, 'settings:write', 'games')).toBe(true)
+    expect(canInTeam(scoped, 'settings:write', 'web')).toBe(false)
+    expect(canInTeam(scoped, 'settings:read', 'games')).toBe(false)
     expect(
-      canInGroup(principal([{ scope: { all: true }, actions: ['*'] }]), 'settings:write', 'x'),
+      canInTeam(principal([{ scope: { all: true }, actions: ['*'] }]), 'settings:write', 'x'),
     ).toBe(true)
-    expect(canInGroup(null, 'settings:write', 'games')).toBe(false)
+    expect(canInTeam(null, 'settings:write', 'games')).toBe(false)
   })
 })
 
@@ -95,7 +95,7 @@ const holder = (action: Principal['grants'][number]['actions'][number]): Princip
   id: 'p',
   name: 'P',
   provider: 'users',
-  grants: [{ scope: { groups: ['games'] }, actions: [action] }],
+  grants: [{ scope: { teams: ['games'] }, actions: [action] }],
 })
 
 describe('canCatalog', () => {
@@ -114,7 +114,7 @@ describe('canCatalog', () => {
 
 describe('visibleSettingsSections', () => {
   test('a repository reader sees only the Audit log', () => {
-    const reader = principal([{ scope: { groups: ['shop'] }, actions: ['repos:read'] }])
+    const reader = principal([{ scope: { teams: ['shop'] }, actions: ['repos:read'] }])
     expect(visibleSettingsSections(reader)).toEqual(['audit'])
   })
 
@@ -125,9 +125,7 @@ describe('visibleSettingsSections', () => {
       ),
     ).toEqual(['people'])
     expect(
-      visibleSettingsSections(
-        principal([{ scope: { groups: ['a'] }, actions: ['settings:read'] }]),
-      ),
+      visibleSettingsSections(principal([{ scope: { teams: ['a'] }, actions: ['settings:read'] }])),
     ).toEqual(['people', 'ai', 'integrations', 'analyzers', 'policies'])
     expect(
       visibleSettingsSections(principal([{ scope: { all: true }, actions: ['settings:read'] }])),
@@ -142,7 +140,7 @@ describe('visibleSettingsSections', () => {
       visibleSettingsSections(principal([{ scope: { all: true }, actions: ['audit:read'] }])),
     ).toEqual(['audit'])
     expect(
-      visibleSettingsSections(principal([{ scope: { groups: ['a'] }, actions: ['audit:read'] }])),
+      visibleSettingsSections(principal([{ scope: { teams: ['a'] }, actions: ['audit:read'] }])),
     ).toEqual([])
   })
 
@@ -165,13 +163,13 @@ describe('roleLabel', () => {
   test('names the People preset, Custom or No access', () => {
     expect(roleLabel([])).toBe('No access')
     expect(roleLabel([{ scope: { all: true }, actions: ['*'] }])).toBe('Admin')
-    expect(roleLabel([{ scope: { groups: ['a'] }, actions: ['*'] }])).toBe('Custom')
-    expect(roleLabel(grantsForRole('developer', { groups: ['a'] }))).toBe('Developer')
-    expect(roleLabel(grantsForRole('maintainer', { groups: ['a'] }))).toBe('Maintainer')
+    expect(roleLabel([{ scope: { teams: ['a'] }, actions: ['*'] }])).toBe('Custom')
+    expect(roleLabel(grantsForRole('developer', { teams: ['a'] }))).toBe('Developer')
+    expect(roleLabel(grantsForRole('maintainer', { teams: ['a'] }))).toBe('Maintainer')
     expect(roleLabel(grantsForRole('viewer', { all: true }))).toBe('Viewer')
     expect(
       roleLabel([
-        { scope: { groups: ['a'] }, actions: ['repos:read', 'analyses:read'] },
+        { scope: { teams: ['a'] }, actions: ['repos:read', 'analyses:read'] },
         { scope: { all: true }, actions: ['audit:read'] },
       ]),
     ).toBe('Custom')
@@ -179,8 +177,8 @@ describe('roleLabel', () => {
 
   test('says the same as People for every preset', () => {
     for (const id of rolePresetIds)
-      expect(roleLabel(grantsForRole(id, { groups: ['a'] }))).toBe(
-        roleNames[roleOf(grantsForRole(id, { groups: ['a'] })).role],
+      expect(roleLabel(grantsForRole(id, { teams: ['a'] }))).toBe(
+        roleNames[roleOf(grantsForRole(id, { teams: ['a'] })).role],
       )
   })
 })

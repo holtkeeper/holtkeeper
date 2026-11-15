@@ -7,7 +7,7 @@ sidebar:
 
 import { Facts, Screen, Toolbar } from '@ui'
 
-`holtkeeper.config.ts` is a TypeScript module that describes the infrastructure of one instance: how people sign in, where data and artifacts live, and how workers run jobs. It is read once at start. Everything about your repositories — forges, groups, schedules, analyzer options, budgets — lives in the panel and the database instead.
+`holtkeeper.config.ts` is a TypeScript module that describes the infrastructure of one instance: how people sign in, where data and artifacts live, and how workers run jobs. It is read once at start. Everything about your repositories — forges, teams, schedules, analyzer options, budgets — lives in the panel and the database instead.
 
 ## Where the file lives
 
@@ -147,7 +147,7 @@ The job engine always runs, with these defaults when the file has no `jobs` sect
 
 ## What does not belong here
 
-`forges`, `groups`, `repos`, `plugins`, `jobs.schedules`, `jobs.on*`, `jobs.commands`, `jobs.botUsername` and `jobs.webhooks` were moved to the panel. A file that still has them starts, logs one warning per key and ignores it. Add forges and groups in [Settings › Integrations](/guide/settings/integrations/); tool versions, polling intervals and the other runtime settings are under **Settings › System › Background work**.
+`forges`, `groups`, `teams`, `repos`, `plugins`, `jobs.schedules`, `jobs.on*`, `jobs.commands`, `jobs.botUsername` and `jobs.webhooks` were moved to the panel (groups were replaced by teams). A file that still has them starts, logs one warning per key and ignores it. Add forges and their fleet in [Settings › Integrations](/guide/settings/integrations/) and teams on [Repos › Teams](/guide/repos/teams/); tool versions, polling intervals and the other runtime settings are under **Settings › System › Background work**.
 
 ## Related
 

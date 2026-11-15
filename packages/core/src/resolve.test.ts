@@ -14,32 +14,35 @@ const forge: ForgeDefinition = {
 }
 
 const config = parseConfig({
-  forges: { work: forge },
-  groups: {
-    'shapes.round': { forge: 'work', include: ['shapes/circle-*', 'other/circle-*'] },
-    shapes: { forge: 'work', include: ['shapes/*'], exclude: ['shapes/legacy-*'] },
-    tools: { forge: 'work', include: ['shapes/circle-*'] },
-    'shapes.flat': { forge: 'work', include: ['shapes/**'], exclude: ['shapes/circle-big'] },
+  forges: { work: forge, home: forge },
+  teams: {
+    gizmo: { owns: ['acme/round/**', 'acme/shared/ui-kit'], consumes: ['acme/shared/**'] },
+    kit: { owns: ['work:acme/shared/**'], exclude: ['acme/shared/legacy-*'] },
   },
+  repos: { 'acme/round/**': { traits: { ssr: false } } },
 })
 
-const groupsOf = (path: string) => resolveRepo(config, { forge: 'work', path }).groups
+const resolve = (path: string, forgeId = 'work') => resolveRepo(config, { forge: forgeId, path })
 
-describe('resolveRepo with subgroups', () => {
-  test('lists each subgroup directly before its parent', () => {
-    expect(groupsOf('shapes/circle-small')).toEqual([
-      'shapes.round',
-      'shapes.flat',
-      'shapes',
-      'tools',
-    ])
-    expect(groupsOf('shapes/circle-big')).toEqual(['shapes.round', 'shapes', 'tools'])
-    expect(groupsOf('shapes/square')).toEqual(['shapes.flat', 'shapes'])
+describe('resolveRepo', () => {
+  test('lists every owner team in config order', () => {
+    expect(resolve('acme/shared/ui-kit').teams).toEqual(['gizmo', 'kit'])
+    expect(resolve('acme/round/web').teams).toEqual(['gizmo'])
+    expect(resolve('tools/cli').teams).toEqual([])
   })
 
-  test('keeps a subgroup within its parent', () => {
-    expect(groupsOf('other/circle-a')).toEqual([])
-    expect(groupsOf('shapes/legacy-circle')).toEqual([])
-    expect(groupsOf('shapes/a/b')).toEqual([])
+  test('honours exclusions and forge prefixes', () => {
+    expect(resolve('acme/shared/legacy-x').teams).toEqual([])
+    expect(resolve('acme/shared/icons', 'home').teams).toEqual([])
+  })
+
+  test('lists consumers that do not own the repository', () => {
+    expect(resolve('acme/shared/icons').consumers).toEqual(['gizmo'])
+    expect(resolve('acme/shared/ui-kit').consumers).toEqual([])
+  })
+
+  test('merges traits by path glob', () => {
+    expect(resolve('acme/round/web').traits).toEqual({ ssr: false })
+    expect(resolve('acme/square/web').traits).toEqual({})
   })
 })

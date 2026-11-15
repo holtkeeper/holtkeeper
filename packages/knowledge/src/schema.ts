@@ -1,4 +1,5 @@
 import { scopeSchema } from '@holtkeeper/access'
+import type { KnowledgeMatch } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { knowledgeKinds, knowledgeStatuses } from './model.ts'
@@ -16,6 +17,36 @@ export const knowledgePackageSchema = z.object({
 /** Validates a `KnowledgeLink`. */
 export const knowledgeLinkSchema = z.object({ label: text, url: z.url() })
 
+const list = <T extends z.ZodType<string>>(item: T) =>
+  z
+    .array(item)
+    .optional()
+    .transform((values) => (values?.length ? [...new Set(values)] : undefined))
+
+/** A repository-relative glob: not absolute and never climbing out with `..`. */
+const relativeGlob = (pattern: string) =>
+  !pattern.startsWith('/') && !pattern.split('/').includes('..')
+
+/**
+ * Validates a `KnowledgeMatch`: `families` are family ids, `files` non-empty repository-relative
+ * path globs (`Bun.Glob`). Lists come out unique; empty lists are dropped, and a match left with
+ * neither comes out `undefined`, so a stored match always narrows something.
+ */
+export const knowledgeMatchSchema = z
+  .object({
+    families: list(text),
+    files: list(text.refine(relativeGlob, 'must be a repository-relative path glob')),
+  })
+  .optional()
+  .transform((match) =>
+    match?.families || match?.files
+      ? {
+          ...(match.families && { families: match.families }),
+          ...(match.files && { files: match.files }),
+        }
+      : undefined,
+  )
+
 const tags = z
   .array(text)
   .default([])
@@ -24,7 +55,8 @@ const tags = z
 /**
  * Validates the editable part of an entry and enforces the rules every stored entry obeys: the
  * scope covers something, `appliesTo` names at least one task kind (or `*`), and a `migration`
- * names the packages it is about. Topics come out lowercase and unique.
+ * names the packages it is about. Topics come out lowercase and unique; `match` is normalised by
+ * `knowledgeMatchSchema` (absent when it narrows nothing).
  */
 export const knowledgeDraftSchema = z
   .object({
@@ -32,6 +64,7 @@ export const knowledgeDraftSchema = z
     body: text.max(20_000),
     kind: z.enum(knowledgeKinds),
     scope: scopeSchema,
+    match: knowledgeMatchSchema,
     topics: tags,
     appliesTo: z.array(text).min(1, 'must name at least one task kind or *'),
     packages: z.array(knowledgePackageSchema).optional(),
@@ -42,8 +75,8 @@ export const knowledgeDraftSchema = z
     supersedes: text.optional(),
   })
   .superRefine((draft, ctx) => {
-    const { all, groups = [], repos = [] } = draft.scope
-    if (!all && !groups.length && !repos.length)
+    const { all, teams = [], repos = [] } = draft.scope
+    if (!all && !teams.length && !repos.length)
       ctx.addIssue({ code: 'custom', path: ['scope'], message: 'scope must not be empty' })
     if (draft.kind === 'migration' && !draft.packages?.length)
       ctx.addIssue({
@@ -52,6 +85,9 @@ export const knowledgeDraftSchema = z
         message: 'a migration must name its packages',
       })
   })
+  .transform(({ match, ...draft }): typeof draft & { match?: KnowledgeMatch } =>
+    match ? { ...draft, match } : draft,
+  )
 
 /** A validated entry draft: what people and agents write, before the store adds ids and versions. */
 export type KnowledgeDraft = z.output<typeof knowledgeDraftSchema>

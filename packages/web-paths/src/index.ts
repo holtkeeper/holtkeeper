@@ -60,7 +60,7 @@ interface TasksSearch {
 type KnowledgeSection = 'guide' | 'notes' | 'learnings'
 
 /**
- * What a Knowledge link opens: a space (a Guide scope key: `all`, `group:<g>`, `family:<id>`,
+ * What a Knowledge link opens: a space (a Guide scope key: `all`, `team:<t>`, `path:<forge>:<folder>`, `family:<id>`,
  * `repo:<forge>:<path>`), a Guide section of it, a note by id.
  */
 interface KnowledgeSearch {
@@ -98,7 +98,7 @@ export const webPaths = {
   inbox: (search: InboxSearch = {}) => withSearch('/inbox', { ...search }),
   repos: () => '/repos',
   repo: (repo: string, search: RepoHubSearch = {}) => withSearch(repoHubPath(repo), { ...search }),
-  groups: () => '/repos/groups',
+  teams: () => '/repos/teams',
   security: () => '/supply/security',
   securityRun: (runId: string) => `/supply/security/runs/${segment(runId)}`,
   releaseTimeline: (repo: string) => withSearch('/releases/timeline', { repo }),

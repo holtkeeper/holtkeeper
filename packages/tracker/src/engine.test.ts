@@ -23,7 +23,7 @@ const run = (definition = featureFlags, files = forgeFiles) => {
       forge,
       forgeId: 'work',
       repos: gameRepos,
-      group: 'games',
+      team: 'games',
       documents: { confluence: documents },
       now,
     }),
@@ -247,7 +247,7 @@ describe('runTracker problems', () => {
     expect(data.errors[0]?.message).toContain('maxFiles')
   })
 
-  test('resolves groups and rejects unknown ones', async () => {
+  test('resolves teams and rejects unknown ones', async () => {
     const forge = fakeForge({ x: { 'flags.json': '{"a": 1}' }, y: { 'flags.json': '{"b": 1}' } })
     const data = await runTracker(
       {
@@ -256,7 +256,7 @@ describe('runTracker problems', () => {
           {
             kind: 'files',
             role: 'definition',
-            groups: ['other', 'nope'],
+            teams: ['other', 'nope'],
             paths: ['flags.json'],
             extract: { kind: 'json-path', path: '$.*' },
           },
@@ -265,12 +265,12 @@ describe('runTracker problems', () => {
       {
         forge,
         repos: [{ forge: 'f', path: 'x' }],
-        groupRepos: (group) => (group === 'other' ? [{ forge: 'f', path: 'y' }] : undefined),
+        teamRepos: (team) => (team === 'other' ? [{ forge: 'f', path: 'y' }] : undefined),
         now,
       },
     )
     expect(data.entities.map((entity) => entity.key)).toEqual(['b'])
-    expect(data.errors).toEqual([{ source: 'files-1', message: 'group nope is unknown' }])
+    expect(data.errors).toEqual([{ source: 'files-1', message: 'team nope is unknown' }])
   })
 
   test('rejects invalid definitions', async () => {

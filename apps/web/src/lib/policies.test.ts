@@ -19,7 +19,7 @@ describe('normalizePolicies', () => {
       {
         id: 'bots',
         name: 'Bots',
-        scope: { groups: ['web'] },
+        scope: { teams: ['web'] },
         when: {
           event: 'open',
           author: 'renovate-bot',
@@ -35,7 +35,7 @@ describe('normalizePolicies', () => {
       id: 'bots',
       name: 'Bots',
       enabled: true,
-      scope: { groups: ['web'] },
+      scope: { teams: ['web'] },
       when: {
         event: ['open'],
         author: { users: ['renovate-bot'] },
@@ -170,12 +170,12 @@ describe('saving one policy of an entry', () => {
     expect(withoutPolicy(stored, 'a').map((p) => p.id)).toEqual(['b'])
   })
 
-  test('a new policy of a team goes to the entry scoped to exactly that group', () => {
+  test('a new policy of a team goes to the entry scoped to exactly that team', () => {
     const entries = [
-      { id: '1', key: 'mergeRequests.policies', scope: { groups: ['toys', 'games'] } },
-      { id: '2', key: 'mergeRequests.policies', scope: { groups: ['toys'] } },
+      { id: '1', key: 'mergeRequests.policies', scope: { teams: ['toys', 'games'] } },
+      { id: '2', key: 'mergeRequests.policies', scope: { teams: ['toys'] } },
       { id: '3', key: 'mergeRequests.policies', scope: { all: true } },
-      { id: '4', key: 'other', scope: { groups: ['games'] } },
+      { id: '4', key: 'other', scope: { teams: ['games'] } },
     ]
     expect(policiesEntryFor(entries, 'mergeRequests.policies', 'toys')?.id).toBe('2')
     expect(policiesEntryFor(entries, 'mergeRequests.policies', undefined)?.id).toBe('3')

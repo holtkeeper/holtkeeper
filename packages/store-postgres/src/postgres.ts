@@ -8,6 +8,7 @@ import { postgresChat } from './chat.ts'
 import { postgresCiJobs } from './ci-jobs.ts'
 import { postgresConfig, postgresKv } from './config.ts'
 import { postgresDatabase } from './database.ts'
+import { postgresEmbeddings } from './embeddings.ts'
 import { postgresFamilies, postgresGuides } from './guides.ts'
 import { postgresJobs } from './jobs.ts'
 import { postgresKnowledge } from './knowledge.ts'
@@ -115,6 +116,7 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
     ...coreStores(db),
     jobs: postgresJobs(db),
     knowledge: postgresKnowledge(db, schema),
+    embeddings: postgresEmbeddings(db),
     guides: postgresGuides(db, schema),
     families: postgresFamilies(db, schema),
     learnings: postgresLearnings(db),

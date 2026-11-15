@@ -60,7 +60,7 @@ import { useScope } from '../shell/scope.ts'
 import { BumpTag } from './parts.tsx'
 import { QueueCard } from './QueueCard.tsx'
 
-type Row = ReleaseCard & { groups: string[] }
+type Row = ReleaseCard & { teams: string[] }
 
 const queueLabels: Record<QueueFilter, string> = {
   action: 'Needs action',
@@ -288,7 +288,7 @@ export function ReleasesPage() {
   const overview = useReleaseOverview()
   const repos = useRepos()
   const actions = useReleaseActions()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const settings = useConfigure('Release settings', pageSettingKeys.releases)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
@@ -297,14 +297,14 @@ export function ReleasesPage() {
   const [sort, setSort] = useState<SortState<OverviewSortKey>>(null)
   const [chosenQueue, setQueue] = useState<QueueFilter>('action')
 
-  const groupsOf = new Map(
-    (repos.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.groups]),
+  const teamsOf = new Map(
+    (repos.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.teams]),
   )
   const cards: Row[] = (overview.data?.cards ?? []).map((card) => ({
     ...card,
-    groups: groupsOf.get(repoKey(card.repo)) ?? [],
+    teams: teamsOf.get(repoKey(card.repo)) ?? [],
   }))
-  const inScope = foldScope(cards, view, homeGroups, (card) => card.groups).shown
+  const inScope = foldScope(cards, view, homeTeams, (card) => card.teams).shown
   const counts = queueCounts(inScope)
   const queueFilter = counts[chosenQueue] ? chosenQueue : 'action'
   const queue = queueRows(inScope, queueFilter)
@@ -419,7 +419,7 @@ export function ReleasesPage() {
             columns={columns}
             sort={sort}
             onSort={setSort}
-            scope={{ value: view, onChange: setView, homeGroups }}
+            scope={{ value: view, onChange: setView, homeTeams }}
             legend={legend}
             toolbar={
               <>

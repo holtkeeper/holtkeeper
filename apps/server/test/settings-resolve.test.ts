@@ -53,9 +53,9 @@ const widgetSetting = defineSetting({
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    tools: { owns: ['work:tools/*'] },
   },
 })
 
@@ -64,10 +64,10 @@ beforeEach(() => {
   store = memoryStore()
 })
 
-const setup = (auth: AuthProvider = noAuth(), groupsConfig = config) => {
+const setup = (auth: AuthProvider = noAuth(), teamsConfig = config) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
-    config: groupsConfig,
+    config: teamsConfig,
     auth,
     store,
     vault,
@@ -117,7 +117,7 @@ describe('setting defaults', () => {
 describe('GET /api/settings/resolve', () => {
   test('gives one row per defined key with its winner, source and what it replaces', async () => {
     await put('all', 'acme.widget', { all: true }, { size: 1, color: 'red' })
-    await put('group', 'acme.widget', { groups: ['shapes'] }, { size: 2 })
+    await put('team', 'acme.widget', { teams: ['shapes'] }, { size: 2 })
     await put('repo', 'acme.widget', { repos: ['shapes/circle'] }, { size: 5 })
     await put('orphan', 'acme.unknown', { all: true }, 1)
     await put('retired', 'llm.model', { all: true }, 'old')
@@ -136,7 +136,7 @@ describe('GET /api/settings/resolve', () => {
       section: 'Test',
       value: { size: 5 },
       source: { layer: 'repo', entry: { id: 'repo' } },
-      replaces: { layer: 'group', groups: ['shapes'], value: { size: 2 }, entry: { id: 'group' } },
+      replaces: { layer: 'team', teams: ['shapes'], value: { size: 2 }, entry: { id: 'team' } },
       entry: { id: 'repo' },
       overrides: 2,
     })
@@ -156,7 +156,7 @@ describe('GET /api/settings/resolve', () => {
     await put('all', 'acme.widget', { all: true }, { size: 1 })
     const body = (await (await resolve(setup())).json()) as ResolvedSettings
     for (const row of body.rows) {
-      expect(['default', 'org', 'group', 'repo']).toContain(row.source.layer)
+      expect(['default', 'org', 'team', 'repo']).toContain(row.source.layer)
       expect('value' in row).toBe(true)
       expect(row.source.layer === 'default').toBe(row.entry === undefined)
     }
@@ -210,7 +210,7 @@ describe('GET /api/settings/resolve', () => {
   })
 
   test('global settings count only entries for everything', async () => {
-    await put('narrow', 'llm.provider', { groups: ['shapes'] }, 'Narrow')
+    await put('narrow', 'llm.provider', { teams: ['shapes'] }, 'Narrow')
     const body = (await (await resolve(setup())).json()) as ResolvedSettings
     expect(body.rows.find((row) => row.key === 'llm.provider')).toMatchObject({
       value: null,
@@ -219,74 +219,81 @@ describe('GET /api/settings/resolve', () => {
     })
   })
 
-  test('a group focus applies entries for everything and the group, never path patterns', async () => {
+  test('a team focus applies entries for everything and the team, never path patterns', async () => {
     await put('all', 'acme.widget', { all: true }, { size: 1 })
     await put(
-      'group',
+      'team',
       'acme.widget',
-      { groups: ['shapes', 'tools'], repos: ['shapes/*'] },
+      { teams: ['shapes', 'tools'], repos: ['shapes/*'] },
       {
         size: 2,
       },
     )
     await put('repo', 'acme.widget', { repos: ['shapes/circle'] }, { size: 5 })
-    await put('both', 'audit.fix', { groups: [['shapes', 'tools']] }, true)
-    const response = await setup().request('/api/settings/resolve?group=shapes')
+    await put('other', 'audit.fix', { teams: ['tools'] }, true)
+    const response = await setup().request('/api/settings/resolve?team=shapes')
     expect(response.status).toBe(200)
     const body = (await response.json()) as ResolvedSettings
-    expect(body.group).toBe('shapes')
+    expect(body.team).toBe('shapes')
     expect(body.repo).toBeUndefined()
-    expect(body.groups).toEqual(['shapes'])
+    expect(body.teams).toEqual(['shapes'])
     expect(body.rows.find((row) => row.key === 'acme.widget')).toMatchObject({
       value: { size: 2 },
       source: {
-        layer: 'group',
-        groups: ['shapes'],
-        entry: { id: 'group', scope: { repos: ['shapes/*'] } },
+        layer: 'team',
+        teams: ['shapes'],
+        entry: { id: 'team', scope: { repos: ['shapes/*'] } },
       },
       replaces: { layer: 'org', value: { size: 1 } },
     })
     expect(body.rows.find((row) => row.key === 'audit.fix')?.source.layer).toBe('default')
-    expect((await setup().request('/api/settings/resolve?group=nope')).status).toBe(404)
-    expect((await setup().request('/api/settings/resolve')).status).toBe(400)
+    const missing = await setup().request('/api/settings/resolve?team=nope')
+    expect(missing.status).toBe(404)
+    expect(await missing.text()).toContain('team nope is not configured')
+    const neither = await setup().request('/api/settings/resolve')
+    expect(neither.status).toBe(400)
+    expect(await neither.text()).toContain('repo or team is required')
   })
 
-  test('a subgroup focus inherits its parent and its own entries win', async () => {
-    const nested = parseConfig({
+  test('a repository of overlapping teams takes entries of every owner team; folder patterns win', async () => {
+    const overlapping = parseConfig({
       forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'] },
-        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      teams: {
+        shapes: { owns: ['work:shapes/**'] },
+        round: { owns: ['work:shapes/round/**'] },
       },
     })
     await put('all', 'acme.widget', { all: true }, { size: 1 })
-    await put('parent', 'acme.widget', { groups: ['shapes'] }, { size: 2 })
-    await put('parent-only', 'audit.fix', { groups: ['shapes'] }, true)
+    await put('owner', 'acme.widget', { teams: ['round'] }, { size: 2 })
+    await put('parent-only', 'audit.fix', { teams: ['shapes'] }, true)
     const focus = async () =>
       (await (
-        await setup(noAuth(), nested).request('/api/settings/resolve?group=shapes.round')
+        await resolve(setup(noAuth(), overlapping), 'work:shapes/round/disc')
       ).json()) as ResolvedSettings
-    const inherited = await focus()
-    expect(inherited.groups).toEqual(['shapes.round', 'shapes'])
-    expect(inherited.rows.find((row) => row.key === 'acme.widget')).toMatchObject({
+    const owned = await focus()
+    expect(owned.teams.toSorted()).toEqual(['round', 'shapes'])
+    expect(owned.rows.find((row) => row.key === 'acme.widget')).toMatchObject({
       value: { size: 2 },
-      source: { layer: 'group', groups: ['shapes'] },
+      source: { layer: 'team', teams: ['round'] },
     })
-    expect(inherited.rows.find((row) => row.key === 'audit.fix')?.value).toBe(true)
+    expect(owned.rows.find((row) => row.key === 'audit.fix')).toMatchObject({
+      value: true,
+      source: { layer: 'team', teams: ['shapes'] },
+    })
 
-    await put('sub', 'acme.widget', { groups: ['shapes.round'] }, { size: 3 })
+    await put('folder', 'acme.widget', { repos: ['work:shapes/round/**'] }, { size: 3 })
     expect((await focus()).rows.find((row) => row.key === 'acme.widget')).toMatchObject({
       value: { size: 3 },
-      source: { layer: 'group', groups: ['shapes.round'] },
-      replaces: { layer: 'group', value: { size: 2 } },
+      source: { layer: 'repo', entry: { id: 'folder' } },
+      replaces: { layer: 'team', value: { size: 2 } },
     })
   })
 
-  test('needs settings:read on the repository or the group', async () => {
+  test('needs settings:read on the repository or the team', async () => {
     const app = setup(
       headerAuth({
         roles: {
-          shapes: [{ scope: { groups: ['shapes'] }, actions: ['settings:read'] }],
+          shapes: [{ scope: { teams: ['shapes'] }, actions: ['settings:read'] }],
           circle: [{ scope: { repos: ['work:shapes/circle'] }, actions: ['settings:read'] }],
         },
       }),
@@ -294,14 +301,14 @@ describe('GET /api/settings/resolve', () => {
     const member = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'shapes' }
     expect((await resolve(app, 'work:shapes/circle', member)).status).toBe(200)
     expect((await resolve(app, 'work:tools/hammer', member)).status).toBe(403)
-    const group = (name: string, headers: Record<string, string>) =>
-      app.request(`/api/settings/resolve?group=${name}`, { headers })
-    expect((await group('shapes', member)).status).toBe(200)
-    expect((await group('tools', member)).status).toBe(403)
+    const team = (name: string, headers: Record<string, string>) =>
+      app.request(`/api/settings/resolve?team=${name}`, { headers })
+    expect((await team('shapes', member)).status).toBe(200)
+    expect((await team('tools', member)).status).toBe(403)
 
     const narrow = { 'x-forwarded-user': 'joe', 'x-forwarded-groups': 'circle' }
     expect((await resolve(app, 'work:shapes/circle', narrow)).status).toBe(200)
     expect((await resolve(app, 'work:shapes/square', narrow)).status).toBe(403)
-    expect((await group('shapes', narrow)).status).toBe(403)
+    expect((await team('shapes', narrow)).status).toBe(403)
   })
 })

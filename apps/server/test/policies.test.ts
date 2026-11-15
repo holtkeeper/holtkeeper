@@ -32,9 +32,9 @@ const forge: ConventionsForge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => forge as never } },
-  groups: {
-    web: { forge: 'work', include: ['acme/web-*'] },
-    pay: { forge: 'work', include: ['acme/pay-*'] },
+  teams: {
+    web: { owns: ['work:acme/web-*'] },
+    pay: { owns: ['work:acme/pay-*'] },
   },
 })
 
@@ -42,9 +42,9 @@ const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['settings:read', 'settings:write'] }],
     web: [
-      { scope: { groups: ['web'] }, actions: ['settings:read', 'settings:write', 'analyses:read'] },
+      { scope: { teams: ['web'] }, actions: ['settings:read', 'settings:write', 'analyses:read'] },
     ],
-    pay: [{ scope: { groups: ['pay'] }, actions: ['analyses:read'] }],
+    pay: [{ scope: { teams: ['pay'] }, actions: ['analyses:read'] }],
   },
 })
 const as = (role: string) => ({ 'x-forwarded-user': role, 'x-forwarded-groups': role })
@@ -74,7 +74,7 @@ const allowlist = (expires: string | undefined, reason = 'Not reachable from wid
   { id: 'GHSA-1', reason, ...(expires && { expires }) },
 ]
 
-const put = (value: unknown, scope: object = { groups: ['web'] }) =>
+const put = (value: unknown, scope: object = { teams: ['web'] }) =>
   send('PUT', '/api/settings', { key: 'audit.allowlist', scope, value }, 'admin')
 
 const renew = (body: object) =>
@@ -105,18 +105,18 @@ beforeEach(() => {
 
 describe('POST /api/settings/draft', () => {
   test('saves several keys at once and writes one audit event', async () => {
-    await entry('fix-web', 'audit.fix', { groups: ['web'] }, false)
-    await entry('upgrade-web', 'audit.upgrade', { groups: ['web'] }, 'minor')
+    await entry('fix-web', 'audit.fix', { teams: ['web'] }, false)
+    await entry('upgrade-web', 'audit.upgrade', { teams: ['web'] }, 'minor')
     const response = await send(
       'POST',
       '/api/settings/draft',
       {
         changes: [
-          { op: 'put', id: 'fix-web', key: 'audit.fix', scope: { groups: ['web'] }, value: true },
+          { op: 'put', id: 'fix-web', key: 'audit.fix', scope: { teams: ['web'] }, value: true },
           {
             op: 'put',
             key: 'audit.allowlistPolicy',
-            scope: { groups: ['web'] },
+            scope: { teams: ['web'] },
             value: { maxDays: 90, requireReason: true },
           },
           { op: 'remove', id: 'upgrade-web' },
@@ -157,13 +157,13 @@ describe('POST /api/settings/draft', () => {
   })
 
   test('stores nothing when one change is refused', async () => {
-    await entry('fix-pay', 'audit.fix', { groups: ['pay'] }, false)
+    await entry('fix-pay', 'audit.fix', { teams: ['pay'] }, false)
     const refused = await send(
       'POST',
       '/api/settings/draft',
       {
         changes: [
-          { op: 'put', key: 'audit.fix', scope: { groups: ['web'] }, value: true },
+          { op: 'put', key: 'audit.fix', scope: { teams: ['web'] }, value: true },
           { op: 'remove', id: 'fix-pay' },
         ],
       },
@@ -175,8 +175,8 @@ describe('POST /api/settings/draft', () => {
       '/api/settings/draft',
       {
         changes: [
-          { op: 'put', key: 'audit.fix', scope: { groups: ['web'] }, value: true },
-          { op: 'put', key: 'audit.upgrade', scope: { groups: ['web'] }, value: 'huge' },
+          { op: 'put', key: 'audit.fix', scope: { teams: ['web'] }, value: true },
+          { op: 'put', key: 'audit.upgrade', scope: { teams: ['web'] }, value: 'huge' },
         ],
       },
       'web',
@@ -189,13 +189,13 @@ describe('POST /api/settings/draft', () => {
   })
 
   test('refuses changing one entry twice and unknown keys', async () => {
-    await entry('fix-web', 'audit.fix', { groups: ['web'] }, false)
+    await entry('fix-web', 'audit.fix', { teams: ['web'] }, false)
     const twice = await send(
       'POST',
       '/api/settings/draft',
       {
         changes: [
-          { op: 'put', id: 'fix-web', key: 'audit.fix', scope: { groups: ['web'] }, value: true },
+          { op: 'put', id: 'fix-web', key: 'audit.fix', scope: { teams: ['web'] }, value: true },
           { op: 'remove', id: 'fix-web' },
         ],
       },
@@ -217,7 +217,7 @@ describe('allowlist rules', () => {
     await entry(
       'policy-web',
       'audit.allowlistPolicy',
-      { groups: ['web'] },
+      { teams: ['web'] },
       {
         maxDays: 30,
         requireReason: true,
@@ -232,18 +232,18 @@ describe('allowlist rules', () => {
     expect((await put(allowlist(undefined))).status).toBe(400)
     expect((await put(allowlist('2026-12-01', '   '))).status).toBe(400)
     expect((await put(allowlist('2026-12-01'))).status).toBe(200)
-    expect((await put(allowlist(undefined), { groups: ['pay'] })).status).toBe(200)
+    expect((await put(allowlist(undefined), { teams: ['pay'] })).status).toBe(200)
   })
 
   test('entries already stored pass unchanged; a draft checks against its own policy', async () => {
-    await entry('a-web', 'audit.allowlist', { groups: ['web'] }, allowlist('2027-06-01'))
+    await entry('a-web', 'audit.allowlist', { teams: ['web'] }, allowlist('2027-06-01'))
     const keep = await send(
       'PUT',
       '/api/settings',
       {
         id: 'a-web',
         key: 'audit.allowlist',
-        scope: { groups: ['web'] },
+        scope: { teams: ['web'] },
         value: [
           ...allowlist('2027-06-01'),
           { id: 'GHSA-2', reason: 'Dev only.', expires: '2026-11-20' },
@@ -262,13 +262,13 @@ describe('allowlist rules', () => {
             op: 'put',
             id: 'policy-web',
             key: 'audit.allowlistPolicy',
-            scope: { groups: ['web'] },
+            scope: { teams: ['web'] },
             value: { maxDays: 365, requireReason: true },
           },
           {
             op: 'put',
             key: 'audit.allowlist',
-            scope: { groups: ['web'] },
+            scope: { teams: ['web'] },
             value: [{ id: 'GHSA-3', reason: 'Fixed upstream soon.', expires: '2027-03-01' }],
           },
         ],
@@ -286,7 +286,7 @@ describe('allowlist rules', () => {
       '/api/settings',
       {
         key: 'audit.allowlistPolicy',
-        scope: { groups: ['web'] },
+        scope: { teams: ['web'] },
         value: { requireReason: false },
       },
       'web',
@@ -295,7 +295,7 @@ describe('allowlist rules', () => {
     const late = await send(
       'PUT',
       '/api/settings',
-      { key: 'audit.allowlist', scope: { groups: ['web'] }, value: allowlist('2027-02-10') },
+      { key: 'audit.allowlist', scope: { teams: ['web'] }, value: allowlist('2027-02-10') },
       'web',
     )
     expect(late.status).toBe(400)
@@ -307,13 +307,13 @@ describe('allowlist rules', () => {
           {
             op: 'put',
             key: 'audit.allowlistPolicy',
-            scope: { groups: ['web'] },
+            scope: { teams: ['web'] },
             value: { maxDays: 365, requireReason: false },
           },
           {
             op: 'put',
             key: 'audit.allowlist',
-            scope: { groups: ['web'] },
+            scope: { teams: ['web'] },
             value: allowlist('2027-02-10'),
           },
         ],
@@ -324,7 +324,7 @@ describe('allowlist rules', () => {
   })
 
   test('renew keeps to maxDays and may replace the reason', async () => {
-    await entry('a-web', 'audit.allowlist', { groups: ['web'] }, allowlist('2026-11-20'))
+    await entry('a-web', 'audit.allowlist', { teams: ['web'] }, allowlist('2026-11-20'))
     const late = await renew({ expires: '2027-02-01' })
     expect(late.status).toBe(400)
     expect(await late.text()).toContain('at most 30 days')

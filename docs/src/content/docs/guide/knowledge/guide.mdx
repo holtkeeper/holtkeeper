@@ -1,6 +1,6 @@
 ---
 title: Team guide
-description: Write the rules every agent task follows — per team, family and repository — see how the layers stack up in the order an agent reads them, and check the exact prompt a review or task gets.
+description: Write the rules every agent task follows — per team, folder, family and repository — see how the layers stack up in the order an agent reads them, and check the exact prompt a review or task gets.
 panel: Knowledge › Guide
 route: /knowledge/guide
 permission: knowledge:read
@@ -25,12 +25,12 @@ import {
   Ui,
 } from '@ui'
 
-Write the rules every agent task follows — per team, family and repository — see how the layers stack up in the order an agent reads them, and check the exact prompt a review or task gets.
+Write the rules every agent task follows — per team, folder, family and repository — see how the layers stack up in the order an agent reads them, and check the exact prompt a review or task gets.
 
 The Guide is the single place for the rules agents follow. Reviews, replies in review threads, agent tasks, release notes, chat and coding agents over MCP all read it. People write rules per scope and section; Holtkeeper adds rules learned from review replies, your policies as plain facts, and text generated from repository signals, always ranked below what people wrote.
 
 <Screen title="Knowledge › Guide" caption="The spaces sidebar on the left; the chosen space's sections on the right.">
-  <Toolbar crumbs={['Knowledge', 'All', 'storefront']} title="checkout-web">
+  <Toolbar crumbs={['Knowledge', 'All', 'Widgets', 'Web apps']} title="acme/round/web">
     <Segmented slot="start" items={['Guide', 'Notes:12', 'Learnings:3']} />
     <Button>Effective prompt</Button>
     <Button ghost>Configure</Button>
@@ -38,17 +38,18 @@ The Guide is the single place for the rules agents follow. Reviews, replies in r
   <Split>
     <Rows>
       <Row title="All repositories"><span class="hk-dim">9</span></Row>
-      <Row title="storefront" sub="team"><span class="hk-dim">14</span> <Tag tone="warn">2</Tag></Row>
-      <Row title="Storefront apps" sub="family · 3 repositories"><span class="hk-dim">4</span></Row>
-      <Row title="acme/checkout-web" selected><span class="hk-dim">18</span> <Tag tone="warn">3</Tag></Row>
-      <Row title="acme/admin-ui"><span class="hk-dim">6</span></Row>
+      <Row title="Widgets" sub="team"><span class="hk-dim">14</span> <Tag tone="warn">2</Tag></Row>
+      <Row title="Web apps" sub="family · 3 repositories"><span class="hk-dim">4</span></Row>
+      <Row title="acme/round/web" selected><span class="hk-dim">18</span> <Tag tone="warn">3</Tag></Row>
+      <Row title="acme/round/api"><span class="hk-dim">6</span></Row>
+      <Row title="Folders" sub="acme › round · square · kit" />
       <Row title="Other teams · 21 repositories" />
     </Rows>
     <Stack>
       <Facts
         items={[
-          ['Space', 'acme/checkout-web · repository · GitLab'],
-          ['Inherits from', 'All repositories › storefront › Storefront apps'],
+          ['Space', 'acme/round/web · repository · GitLab'],
+          ['Inherits from', 'All repositories › Widgets › Web apps'],
         ]}
       />
       <div class="hk-dim">5 sections in use · 11 team rules · 4 learned rules · 1 proposal waiting · you can edit</div>
@@ -56,11 +57,11 @@ The Guide is the single place for the rules agents follow. Reviews, replies in r
 
 | Section  | Layers      | Rules | Version | Last edit            | Status                                  |
 | -------- | ----------- | ----- | ------- | -------------------- | --------------------------------------- |
-| General  | `D O G R A` | 6     | 4       | Mira K. · 3 days ago | <Tag>Set here</Tag>                     |
-| Review   | `D G R L`   | 3     | 7       | Ivo P. · 1 week ago  | <Tag>Set here</Tag>                     |
-| Testing  | `G A`       | 0     | 2       | generated            | <Tag tone="warn">Proposal waiting</Tag> |
+| General  | `D O T R A` | 6     | 4       | Mira K. · 3 days ago | <Tag>Set here</Tag>                     |
+| Review   | `D S T R L` | 3     | 7       | Ivo P. · 1 week ago  | <Tag>Set here</Tag>                     |
+| Testing  | `T A`       | 0     | 2       | generated            | <Tag tone="warn">Proposal waiting</Tag> |
 | Test ids | `O`         | 0     | —       | —                    | <Tag>Inherited</Tag>                    |
-| Assets   | `G`         | 0     | —       | —                    | <Tag>Inherited</Tag>                    |
+| Assets   | `T`         | 0     | —       | —                    | <Tag>Inherited</Tag>                    |
 | Commits  | `A`         | 0     | 1       | generated            | <Tag>Inherited</Tag>                    |
 | Releases |             | 0     | —       | —                    | <Tag>Not set</Tag>                      |
 
@@ -72,11 +73,23 @@ The Guide is the single place for the rules agents follow. Reviews, replies in r
 
 ## Pick a space
 
-The **spaces sidebar** lists _All repositories_, then teams (top-level groups) with their subgroups, families and repositories. A repository sits under its deepest group. Each row shows the space's Guide sections plus notes as a quiet number, and learnings waiting as a warning badge. A team shows five children, then "N more".
+The **spaces sidebar** lists _All repositories_, then teams with their families and repositories, then a **Folders** section with the folder tree of the repositories in view. A repository shows under every team that owns it, and a family under every team owning one of its members. Each row shows the space's Guide sections plus notes as a quiet number, and learnings waiting as a warning badge. A team shows five children, then "N more".
 
-The scope switch at the top chooses _My teams_ (other teams fold into one "Other teams" row that expands in place), _All I can see_, or one group. _Not in a team_ shows on _All I can see_ only.
+The scope switch at the top chooses _My teams_ (other teams fold into one "Other teams" row that expands in place), _All I can see_, or one team. _Not in a team_ shows on _All I can see_ only.
 
-The trail above the title follows the space from _All_ down to the current one; each step is a link. Switching between **Guide**, **Notes** and **Learnings** keeps the space.
+The trail above the title follows the space from _All_ down to the current one (All › team › family › repository, or All › parent folders › folder); each step is a link.
+
+### Which space to write in
+
+| Space      | Write here                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| All        | Rules for every repository.                                                                     |
+| Team       | The team's process: how it reviews, commits, branches and releases.                             |
+| Folder     | Code rules for the repositories under a folder, such as `acme/round`.                           |
+| Family     | Code rules for alike repositories wherever they live, such as every web app built the same way. |
+| Repository | What only this repository needs.                                                                |
+
+A repository reads, most specific first: itself, its family, its folders from the deepest up, its owner teams (several for a shared library), then all repositories. Switching between **Guide**, **Notes** and **Learnings** keeps the space.
 
 ### Families
 
@@ -104,20 +117,21 @@ In the sections table, the **Layers** column shows which layers give a section t
 | ------ | -------------------------------------------------------------------------- |
 | D      | Repository files: `REVIEW.md`, `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` |
 | O      | All repositories                                                           |
-| G      | Group (team)                                                               |
-| S      | Subgroup                                                                   |
+| T      | Team                                                                       |
+| S      | Folder                                                                     |
 | F      | Family                                                                     |
 | R      | Repository                                                                 |
 | L      | Learned rules, accepted from review replies                                |
 | A      | Generated from repository signals                                          |
+| K      | Knowledge from similar repositories                                        |
 
 The status reads _Proposal waiting_ (generated text waits for a person), _Set here_ (this space has its own rules), _Inherited_ (a broader space gives the text) or _Not set_. Click a row to open the section; click it again to close it.
 
 ## Open a section
 
-In a repository space the open section lists its layers **in the order the agent reads them**, numbered: repository files, this repository, family, subgroups, teams, all repositories, learned rules, policies, generated text, notes. Each layer shows its size in characters and **cut** when the budget shortened it. Inherited layers show their text with a link to their space.
+In a repository space the open section lists its layers **in the order the agent reads them**, numbered: repository files, this repository, family, folders (deepest first), teams (several in config order), all repositories, learned rules, policies, generated text, notes, and last knowledge from similar repositories. Each layer shows its size in characters and **cut** when the budget shortened it. Inherited layers show their text with a link to their space.
 
-<Screen title="Knowledge › Guide › checkout-web › Review">
+<Screen title="Knowledge › Guide › acme/round/web › Review">
   <Stack>
     <Toolbar title="Review">
       <Tag slot="start">Version 7</Tag>
@@ -134,22 +148,25 @@ In a repository space the open section lists its layers **in the order the agent
       <Row title="2 · This repository" sub="Edited by Ivo P. · 1 week ago">
         <Tag>640 chars</Tag>
       </Row>
-      <Row title="3 · Family Storefront apps">
+      <Row title="3 · Family Web apps">
         <Tag>410 chars</Tag>
       </Row>
-      <Row title="4 · Team storefront">
-        <Tag>1,880 chars</Tag>
+      <Row title="4 · Folder acme/round">
+        <Tag>520 chars</Tag>
       </Row>
-      <Row title="5 · All repositories">
+      <Row title="5 · Team Widgets">
+        <Tag>1,360 chars</Tag>
+      </Row>
+      <Row title="6 · All repositories">
         <Tag>790 chars</Tag>
       </Row>
-      <Row title="6 · Learned rules" sub="2 candidates in Learnings">
+      <Row title="7 · Learned rules" sub="2 candidates in Learnings">
         <Tag>310 chars</Tag>
       </Row>
-      <Row title="7 · Policies">
+      <Row title="8 · Policies">
         <Tag>220 chars</Tag>
       </Row>
-      <Row title="8 · Notes">
+      <Row title="9 · Notes">
         <Tag tone="warn">1,160 chars · cut</Tag>
       </Row>
     </Rows>
@@ -161,8 +178,14 @@ In a repository space the open section lists its layers **in the order the agent
 Everything a task reads from the Guide shares 12,000 characters. The bar splits it into **Human**, **Generated**, **Notes** and **Free**, for the whole prompt the section goes into (a review reads General, Review, Testing, Test ids and Assets together). Rules files in the repository get at most 4,800 characters and are cut with a pointer to the file, so they never crowd out the rules people accepted. Warnings from the budget show under the bar.
 
 :::tip
-If the repository's `AGENTS.md` or `REVIEW.md` is cut, move the parts every repository shares into a team rule. Team rules are stored once and keep their room.
+If the repository's `AGENTS.md` or `REVIEW.md` is cut, move the parts its siblings share into a folder or family rule. Those are stored once and keep their room.
 :::
+
+### Knowledge from similar repositories
+
+Repositories with the same framework, the same toolchain and mostly the same dependencies are similar even when they sit in different folders, like `acme/round/web` and `acme/square/web`. A lesson written for one of them often holds for the other before anyone promotes it to a family, folder or team note. So the last layer of a review's or agent task's Guide holds accepted notes written for up to five similar repositories (members of the repository's own family are left out: they share family notes already). Each note says which repository it was written for, and the agent is told to apply one only when it clearly holds here too and to cite it.
+
+This layer gets at most 15% of the budget and is cut first. It holds only notes the repository's own teams can read anyway, or notes marked **shared** while cross-team access is not off. A team-only note of another team never reaches it. In the chain, you see only the notes you may read yourself.
 
 ### Repository files
 
@@ -170,13 +193,13 @@ If the repository's `AGENTS.md` or `REVIEW.md` is cut, move the parts every repo
 
 ## Write rules for a space
 
-1. Pick the space in the sidebar: _All repositories_, a team, a family or a repository.
+1. Pick the space in the sidebar: _All repositories_, a team, a folder, a family or a repository.
 2. Open the section.
 3. Under **This space's rules**, edit the Markdown and save.
 
 Write short imperative lines an agent can follow, and say why when it is not obvious:
 
-```md title="Review · team storefront"
+```md title="Review · folder acme/round"
 - Money amounts are integers in minor units; flag any float arithmetic on prices.
 - Do not flag missing `aria-label` on icons from @acme/widget-kit; the kit adds it.
 - New API routes need a contract test in `test/contract/`.
@@ -204,7 +227,7 @@ Holtkeeper writes the General, Testing, Test ids and Commits sections of each re
 
 New text waits as a proposal. Until someone accepts it, agents keep the accepted text; text that was never accepted reaches agents only when a section has no human rules and the repository has no rules files.
 
-<Screen title="Knowledge › Guide › checkout-web › Testing › Generated">
+<Screen title="Knowledge › Guide › acme/round/web › Testing › Generated">
   <Stack>
     <Toolbar title="Generated">
       <Tag slot="start" tone="warn">
@@ -257,7 +280,7 @@ repository gets from the Guide, block by block, with the repository's rules file
 
 <Screen title="Knowledge › Guide › Effective prompt">
   <Toolbar title="Effective prompt">
-    <Tag slot="start">acme/checkout-web</Tag>
+    <Tag slot="start">acme/round/web</Tag>
     <Segmented slot="start" items={['Review', 'Chat', 'Release notes', 'Agent task']} />
     <Button>Copy text</Button>
     <Button primary>Ask in chat</Button>
@@ -272,8 +295,11 @@ repository gets from the Guide, block by block, with the repository's rules file
       <Row title="This repository" sub="Review">
         <Tag>640</Tag>
       </Row>
-      <Row title="Team storefront" sub="General · Review · Testing">
-        <Tag>1,880</Tag>
+      <Row title="Folder acme/round" sub="Review · Testing">
+        <Tag>520</Tag>
+      </Row>
+      <Row title="Team Widgets" sub="General · Review">
+        <Tag>1,360</Tag>
       </Row>
       <Row title="Policies" sub="Test ids · Assets">
         <Tag>220</Tag>
@@ -300,9 +326,9 @@ a rule.
 
 The ghost <Ui>Configure</Ui> (with `settings:read`) opens **Settings › Analyzers** at the guide generator. Its runs come from the schedule and from <Ui>Regenerate</Ui>. Whether generated text is accepted without a person is the `guide.autoAccept` policy in [Settings › Policies](/guide/settings/policies/).
 
-## In a repository or group
+## In a repository or team
 
-The repository hub's **Knowledge** tab and the group page show the same Guide, with the effective prompt for a repository and links to its Notes and Learnings.
+The repository hub's **Knowledge** tab and the team page's **Knowledge** tab show the same Guide, with the effective prompt for a repository and links to its Notes and Learnings.
 
 ## Related
 

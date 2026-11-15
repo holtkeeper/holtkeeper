@@ -17,7 +17,7 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 - Search parameters that are `undefined` or empty are left out; values are URL-encoded. Repository keys are `forge:path`.
 - Single path segments (ids) are encoded whole.
 - `repo` puts the `forge:path` key in the path, `/repos/<forge>/<path>`, encoding each segment on its own. `tab` is one of `overview`, `supply`, `quality`, `releases`, `activity`, `knowledge`, `settings`; `section` names an area of the tab (`assets` on Quality, `updates` on Settings).
-- `knowledge` takes the tab (`guide`, `notes`, `learnings`) and what to open in it: `space` is a Guide scope key (`all`, `group:<g>`, `family:<id>`, `repo:<forge>:<path>`), `section` a Guide section, `note` a note id.
+- `knowledge` takes the tab (`guide`, `notes`, `learnings`) and what to open in it: `space` is a Guide scope key (`all`, `team:<t>`, `path:<forge>:<folder>`, `family:<id>`, `repo:<forge>:<path>`), `section` a Guide section, `note` a note id.
 - `tasks` drops `task` without `group`, as the Tasks page only selects a task inside its group.
 
 ## Paths
@@ -27,7 +27,7 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 | `inbox({ item?, kind?, tab? })`                                               | `/inbox?item=&kind=&tab=` (`tab`: `snoozed`)                             |
 | `repos()`                                                                     | `/repos`                                                                 |
 | `repo(repo, { tab?, section?, file?, ref? })`                                 | `/repos/<forge>/<path>?tab=&section=&file=&ref=` (hub)                   |
-| `groups()`                                                                    | `/repos/groups`                                                          |
+| `teams()`                                                                     | `/repos/teams`                                                           |
 | `security()`                                                                  | `/supply/security`                                                       |
 | `securityRun(runId)`                                                          | `/supply/security/runs/<runId>`                                          |
 | `releaseTimeline(repo)`                                                       | `/releases/timeline?repo=`                                               |

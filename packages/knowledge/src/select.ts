@@ -1,6 +1,7 @@
-import { scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
-import type { KnowledgeEntry } from '@holtkeeper/store'
+import { patternWithin, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
+import type { KnowledgeEntry, KnowledgeMatch } from '@holtkeeper/store'
 
+import { fusedRelevance } from './embeddings.ts'
 import type { KnowledgeTask } from './model.ts'
 import { describePackage, packagesOverlap } from './semver.ts'
 import { estimateTokens, relevance } from './text.ts'
@@ -9,14 +10,70 @@ import { estimateTokens, relevance } from './text.ts'
 export const appliesToTask = (entry: KnowledgeEntry, kind: string): boolean =>
   entry.appliesTo.includes('*') || entry.appliesTo.includes(kind)
 
+const relative = (file: string) => file.replace(/^(\.\/|\/)+/, '')
+
+/**
+ * Whether an entry's `match` holds for a task: `families` needs the task's family among them (a
+ * task without a family fails it), `files` needs one task file to match one of the globs
+ * (`Bun.Glob`, repository-relative) — but only when the task says which files it touches. An absent
+ * match, and empty lists, hold for everything. Deterministic: no similarity is involved.
+ */
+export function matchHolds(
+  match: KnowledgeMatch | undefined,
+  task: Pick<KnowledgeTask, 'family' | 'files'>,
+): boolean {
+  const families = match?.families ?? []
+  if (families.length && (task.family === undefined || !families.includes(task.family)))
+    return false
+  const files = match?.files ?? []
+  if (files.length && task.files !== undefined) {
+    const globs = files.map((pattern) => new Bun.Glob(relative(pattern)))
+    if (!task.files.some((file) => globs.some((glob) => glob.match(relative(file))))) return false
+  }
+  return true
+}
+
+/**
+ * Whether `inner` applies nowhere `outer` does not: each narrowing of `outer` is at least as narrow
+ * in `inner` (its families a subset, each of its file globs equal to or within one of `outer`'s).
+ * An absent match applies everywhere, so it is only within another absent or empty one.
+ */
+export function matchWithin(
+  inner: KnowledgeMatch | undefined,
+  outer: KnowledgeMatch | undefined,
+): boolean {
+  const outerFamilies = outer?.families ?? []
+  const innerFamilies = inner?.families ?? []
+  if (
+    outerFamilies.length &&
+    (!innerFamilies.length || !innerFamilies.every((family) => outerFamilies.includes(family)))
+  )
+    return false
+  const outerFiles = (outer?.files ?? []).map(relative)
+  const innerFiles = (inner?.files ?? []).map(relative)
+  return (
+    !outerFiles.length ||
+    (innerFiles.length > 0 &&
+      innerFiles.every((glob) =>
+        outerFiles.some((candidate) => candidate === glob || patternWithin(glob, candidate)),
+      ))
+  )
+}
+
+/** Whether the entry narrows where it applies (`match` with families or files). */
+export const isNarrowed = (entry: Pick<KnowledgeEntry, 'match'>): boolean =>
+  Boolean(entry.match?.families?.length || entry.match?.files?.length)
+
 /**
  * Whether an accepted entry belongs in the context of `task`: its scope covers the repository,
- * it applies to the task kind, and — for migrations — one of the task's packages overlaps the
- * entry's version ranges. Migrations never match tasks without packages.
+ * its `match` holds (`matchHolds`: the task's family, the files it touches), it applies to the
+ * task kind, and — for migrations — one of the task's packages overlaps the entry's version
+ * ranges. Migrations never match tasks without packages.
  */
 export function matchesTask(entry: KnowledgeEntry, task: KnowledgeTask): boolean {
   if (entry.status !== 'accepted') return false
   if (!scopeCoversRepo(entry.scope, task.repo)) return false
+  if (!matchHolds(entry.match, task)) return false
   if (!appliesToTask(entry, task.kind)) return false
   if (entry.kind === 'migration') return packagesOverlap(entry.packages ?? [], task.packages ?? [])
   return true
@@ -49,12 +106,22 @@ export interface SelectForTaskInput {
   task: KnowledgeTask
   /** Upper bound for the rendered block, estimated at four characters per token. */
   budgetTokens: number
+  /**
+   * Entry id → cosine between the entry's vector and the task's query vector. Only ranks: entries
+   * still have to match the task, and entries without a vector are not left out.
+   */
+  semantic?: ReadonlyMap<string, number>
 }
 
 export interface SelectedKnowledge {
   entry: KnowledgeEntry
-  /** Text relevance to the task query and packages; 0 without a query. */
+  /**
+   * Relevance to the task: the text relevance to the task query and packages (0 without a query);
+   * with `semantic`, the reciprocal rank fusion of the text ranking and the vector ranking among
+   * the matching entries (Σ 1/(60 + rank), so at most 2/61; 0 when in neither ranking).
+   */
   score: number
+  /** `scopeSpecificity` of the entry's scope. */
   specificity: number
 }
 
@@ -71,18 +138,23 @@ export interface KnowledgeSelection {
 
 /**
  * Picks the knowledge an agent should read for a task. Entries must pass `matchesTask`; entries
- * superseded by another match are dropped. Ranking: more specific scope first (exact repository
- * over globs over groups over everything, like settings), then relevance to `task.query` and the
- * task's packages, then the most recently updated. Entries are added in that order while the
- * rendered block stays within `budgetTokens`; an entry too large to fit is skipped, not cut.
+ * superseded by another match are dropped. Ranking: more specific scope first
+ * (`scopeSpecificity`: exact repository > folder glob, deeper first > team > everything, like
+ * settings), then among equally specific scopes an entry narrowed by `match` first, then relevance
+ * to `task.query` and the task's packages, then the most recently updated. With `semantic`,
+ * relevance fuses the text ranking with the ranking by cosine (`fusedRelevance`: entries without a
+ * vector rank last in the latter); applicability never depends on it. Entries are added in
+ * that order while the rendered block stays within `budgetTokens`; an entry too large to fit is
+ * skipped, not cut.
  */
 export function selectForTask({
   entries,
   task,
   budgetTokens,
+  semantic,
 }: SelectForTaskInput): KnowledgeSelection {
   const query = [task.query ?? '', ...(task.packages ?? []).map((pkg) => pkg.name)].join(' ')
-  const ranked = withoutSuperseded(
+  const matching = withoutSuperseded(
     entries
       .filter((entry) => matchesTask(entry, task))
       .map((entry) => ({
@@ -90,9 +162,21 @@ export function selectForTask({
         score: relevance(entry, query),
         specificity: scopeSpecificity(entry.scope),
       })),
-  ).toSorted(
+  )
+  if (semantic) {
+    // Ties of the text ranking go to the newer entry, as in the final order.
+    const fused = fusedRelevance(
+      matching
+        .toSorted((a, b) => b.entry.updatedAt.localeCompare(a.entry.updatedAt))
+        .map((item) => ({ id: item.entry.id, lexical: item.score })),
+      semantic,
+    )
+    for (const item of matching) item.score = fused.get(item.entry.id) ?? 0
+  }
+  const ranked = matching.toSorted(
     (a, b) =>
       b.specificity - a.specificity ||
+      Number(isNarrowed(b.entry)) - Number(isNarrowed(a.entry)) ||
       b.score - a.score ||
       b.entry.updatedAt.localeCompare(a.entry.updatedAt),
   )

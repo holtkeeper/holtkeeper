@@ -9,8 +9,8 @@ const user = (patch: Partial<User> = {}): User => ({
   id: 'u1',
   name: 'Widget Dev',
   grants: [
-    { scope: { groups: ['widgets', ['gadgets', 'shapes']] }, actions: ['repos:read'] },
-    { scope: { groups: ['widgets'] }, actions: ['analyses:run'] },
+    { scope: { teams: ['widgets', 'gizmo'] }, actions: ['repos:read'] },
+    { scope: { teams: ['widgets'] }, actions: ['analyses:run'] },
   ],
   disabled: false,
   sessionVersion: 1,
@@ -20,12 +20,23 @@ const user = (patch: Partial<User> = {}): User => ({
 
 const now = () => new Date('2026-10-29T12:00:00.000Z')
 
+const teams = () => ({
+  gadgets: { owns: ['acme/round/**'], members: [{ id: 'u1', role: 'member' as const }] },
+  gizmo: { owns: ['acme/square/**'], members: [{ id: 'u2', role: 'member' as const }] },
+})
+
 describe('people views', () => {
   test('teams come from the grants without a kv store', async () => {
     const store = memoryStore()
-    expect(await teamsOf({ store: store.users, now }, user())).toEqual([
+    expect(await teamsOf({ store: store.users, now }, user())).toEqual(['widgets', 'gizmo'])
+  })
+
+  test('teams the user is a member of come first', async () => {
+    const store = memoryStore()
+    expect(await teamsOf({ store: store.users, teams, now }, user())).toEqual([
+      'gadgets',
       'widgets',
-      'gadgets + shapes',
+      'gizmo',
     ])
   })
 
@@ -61,7 +72,7 @@ describe('people views', () => {
     const mixed = user({
       grants: [
         { scope: { all: true }, actions: ['*'] },
-        { scope: { groups: ['widgets'] }, actions: ['repos:read'] },
+        { scope: { teams: ['widgets'] }, actions: ['repos:read'] },
       ],
     })
     const summary = await peopleSummary(

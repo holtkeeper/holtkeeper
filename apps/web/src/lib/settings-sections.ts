@@ -34,7 +34,7 @@ export const settingsSections: Readonly<
   ai: {
     label: 'AI',
     description: 'The provider agents use, the weekly budget and AI credentials',
-    keys: ['llm.provider', 'llm.budget', 'agent.tools'],
+    keys: ['llm.provider', 'llm.budget', 'agent.tools', 'knowledge.embeddings'],
   },
   integrations: {
     label: 'Integrations',
@@ -102,6 +102,12 @@ const sharedSectionKeys: Readonly<Partial<Record<SettingsSectionId, (key: string
 
 /** Keys of a section shown under Advanced: rarely changed, their defaults are constants. */
 export const advancedSettingKeys: ReadonlySet<string> = new Set(['agent.tools'])
+
+/**
+ * Keys a section edits in a block of its own rather than in its list of entries per scope:
+ * `knowledge.embeddings` (Settings › AI › Semantic search, global only).
+ */
+export const blockSettingKeys: ReadonlySet<string> = new Set(['knowledge.embeddings'])
 
 /**
  * Search parameters of `/settings/$section`: `item` opens a record's sheet (a user, a credential,

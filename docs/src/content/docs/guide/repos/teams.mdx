@@ -1,0 +1,175 @@
+---
+title: Teams
+description: See the teams that own and consume your repositories, open one to read its repositories, stack, Guide and settings, and edit what it owns and who is in it.
+panel: Repos › Teams
+route: /repos/teams
+permission: repos:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See the teams that own and consume your repositories, open one to read its repositories, stack, Guide and settings, and edit what it owns and who is in it. A team is a key and a title, the path patterns it **owns** (minus those it **excludes**), the patterns it **consumes**, and its members. Membership gives access on its own: nobody needs a separate grant for their team's repositories.
+
+<Screen title="Repos › Teams" caption="A shared library can have several owner teams; repositories nobody owns are counted at the end of the strip.">
+  <Toolbar title="Teams">
+    <Segmented slot="start" items={['My teams:2', 'All I can see:5']} />
+    <Button primary>New team</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 3, label: 'teams' },
+      { value: 21, label: 'repositories' },
+      { value: 1, label: 'with failing repositories', tone: 'bad' },
+    ]}
+    end="2 owned by no team"
+  />
+  <Scroll>
+
+| Team                      | Patterns                                                                      | Members                                      | Repositories    | Health                                  |
+| ------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------- | --------------- | --------------------------------------- |
+| **Widgets** · `widgets`   | owns `acme/round/**` · exclude `acme/round/legacy-*` · consumes `acme/kit/**` | `mira@acme.dev · maintainer`, `jon@acme.dev` | 9 · +2 consumed | 6 healthy · 2 with warnings · 1 failing |
+| **Gizmo** · `gizmo`       | owns `acme/square/**`, `acme/kit/ui-kit`                                      | `ana@acme.dev · maintainer`                  | 8               | 7 healthy · 1 with warnings             |
+| **Platform** · `platform` | owns `acme/kit/**`                                                            | `lee@acme.dev · maintainer`, `kai@acme.dev`  | 4               | 4 healthy                               |
+
+  </Scroll>
+</Screen>
+
+## What the list shows
+
+Every team you can see: all configured teams when you may read settings for everything, otherwise the owner teams of the repositories you can read. Each row shows the team's title and key, its patterns, its members with their role, how many fleet repositories it owns (and consumes) and their health. The filter matches a title, key, pattern or member.
+
+The strip counts the teams shown, the repositories they own and the teams with a failing repository, and ends with the fleet repositories **owned by no team**. Those still get analysed; they are in the fleet through the forge's include list (see [The fleet](/start/concepts/fleet/#what-is-in-the-fleet)).
+
+A team's **title**, such as _Widgets_, is what the panel shows everywhere: lists, the scope switch, tags in tables, Knowledge and chat. The **key** (`widgets`) is the identity: grants, settings, home teams, schedules, Guide spaces and links always use the key.
+
+## Owners, consumers and members
+
+| Part       | What it does                                                                                                                                                                                                          |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owns       | Path patterns of the repositories the team answers for: `acme/round/**`, `acme/*/web`, `work:acme/kit/ui-kit`. Every matching repository is in the fleet and lists the team as an owner.                              |
+| Exclude    | Patterns cut out of **Owns**: `acme/round/legacy-*`.                                                                                                                                                                  |
+| Consumes   | Patterns of repositories the team depends on without answering for them, such as a shared library. They show as context and the members may read them.                                                                |
+| Maintainer | Everything on the team's repositories, and may edit the team's title and members.                                                                                                                                     |
+| Member     | The day-to-day actions on the team's repositories: read repositories, analyses, audits and releases; run analyzers, audits and releases; approve tasks; read and write knowledge; read settings, AI spend and people. |
+
+Every member, whatever the role, may read the repositories the team consumes: the repository, its analyses, releases and knowledge. These permissions come from membership alone and apply as soon as the person signs in; personal grants in [People & access](/guide/settings/people/) add to them. A member is a user id or an e-mail address.
+
+A repository can have **several owner teams**, for example a UI kit that `widgets` and `gizmo` both own. It then appears on both teams, counts for both on _My teams_, and "same team" rules such as the cross-team catalog treat both as its team. A consuming team is never the same team.
+
+Patterns follow the forge's folders: `*` stands for one folder or name, `**` for any number of folders. A pattern without a forge prefix matches on every forge; with several forges write `work:acme/round/**`. **Owns** and **Consumes** patterns must start with a folder (`acme/**`, not `**/web`), because Holtkeeper lists the forge folder by folder.
+
+## Open a team
+
+Click a team to open its page. The header names the key and the patterns, a strip sums the repositories and their health, and segmented tabs split the rest.
+
+<Screen title="Repos › Teams › Widgets">
+  <Toolbar title="Widgets" crumbs={['Repos', 'Teams']}>
+    <Tag mono slot="start">
+      widgets
+    </Tag>
+    <Tag mono slot="start">
+      acme/round/**
+    </Tag>
+    <Tag mono slot="start">
+      not acme/round/legacy-*
+    </Tag>
+    <Button>Edit</Button>
+    <Button>Run job for team</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 9, label: 'repositories' },
+      { value: 2, label: 'consumed' },
+      { value: 1, label: 'failing', tone: 'bad' },
+      { value: 2, label: 'with warnings', tone: 'warn' },
+      { value: 6, label: 'healthy', tone: 'ok' },
+    ]}
+    end="2 members · 1 maintaining"
+  />
+  <Stack>
+    <Segmented items={['Repositories:9', 'Stack & conventions', 'Knowledge', 'Settings']} />
+  </Stack>
+</Screen>
+
+| Tab                 | What it shows                                                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Repositories        | The repositories the team owns as the [Repositories](/guide/repos/repositories/) table, with every health cell, then the repositories it consumes.                       |
+| Stack & conventions | Runtimes, package managers and images of its repositories. See [Stack](/guide/supply-chain/stack/).                                                                      |
+| Knowledge           | The team's [Guide](/guide/knowledge/guide/): process rules agents read for its repositories, such as how the team reviews, commits and releases.                         |
+| Settings            | Every setting as it applies to the team, where it comes from, and overrides. Works like [repository settings](/guide/repos/repository-settings/). Needs `settings:read`. |
+
+<Ui>Run job for team</Ui> starts an analyzer job for the team's repositories.
+
+## Create or edit a team
+
+1. On **Repos › Teams**, click <Ui>New team</Ui>, or <Ui>Edit</Ui> on a team's row or page.
+2. Enter the **key** (lowercase, such as `widgets`; it cannot change later) and a **title** of 1–60 characters.
+3. Add the **Owns** patterns, at least one, and any **Exclude** and **Consumes** patterns. The field says how many visible repositories **Owns** matches.
+4. Add members with their role.
+5. While editing an existing team, the dialog previews the change: _Unsaved: 2 join, 1 leave_ with the paths that gain or lose the team as an owner. Save.
+
+<Screen title="Repos › Teams › Edit Widgets">
+  <Sheet title="Edit Widgets">
+    <Button primary slot="actions">
+      Save
+    </Button>
+    <Fields>
+      <Field label="Key" value="widgets" mono />
+      <Field label="Title" value="Widgets" />
+      <Field
+        label="Owns"
+        value="acme/round/**"
+        mono
+        wide
+        hint="Path patterns, optionally with a forge: work:acme/round/**. Matches 10 visible repositories."
+      />
+      <Field label="Exclude" value="acme/round/legacy-*" mono wide />
+      <Field label="Consumes" value="acme/kit/**" mono wide />
+      <Field label="Members" value="mira@acme.dev · Maintainer, jon@acme.dev · Member" wide />
+    </Fields>
+
+**Unsaved: 1 join** · + acme/round/sandbox-web
+
+  </Sheet>
+</Screen>
+
+:::caution
+**Owns**, **Exclude** and **Consumes** decide who may see and change which repositories, so creating a team, changing its patterns or deleting it needs `settings:write` over everything. A team's maintainers may edit its title and members; their dialog leaves the patterns out. Team edits are recorded in the [audit log](/guide/settings/audit-log/).
+:::
+
+Deleting a team removes it as an owner from its repositories. Grants, settings and notes that name the team stop matching; the confirmation says how many repositories lose the owner.
+
+## Teams and folders
+
+Teams say who answers for a repository. **Folders** say where it lives: the forge's own tree (`acme/round/web` sits in `acme/round` and `acme`), shown as a tree beside the [Repositories](/guide/repos/repositories/) table. Use each for what it is good at:
+
+- Settings and code rules follow folders, so give them a path pattern such as `acme/round/**`. A repository with two owner teams would otherwise get two conflicting team values.
+- Process rules, notifications and the Inbox follow teams.
+- Alike repositories in different folders (`acme/round/web` and `acme/square/web`) are reached with a pattern (`acme/*/web`) or a family in [Knowledge](/guide/knowledge/guide/).
+
+:::tip
+Pick the teams you work in on [Account › My teams](/guide/account/profile/#choose-your-teams); every list page then opens on them.
+:::
+
+## Related
+
+- [Repositories](/guide/repos/repositories/) — every repository, the folder tree and **Add repository**.
+- [Repository settings](/guide/repos/repository-settings/) — the same settings view for one repository.
+- [Guide](/guide/knowledge/guide/) — the rules a team's repositories inherit.
+- [The fleet](/start/concepts/fleet/) — paths, teams and scopes.
+- [Permissions](/start/concepts/permissions/) — what membership and grants allow.

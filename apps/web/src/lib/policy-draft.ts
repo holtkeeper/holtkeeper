@@ -1,20 +1,17 @@
 import type { PolicyDraftChange, Scope, SettingView, UnknownSettingKeyView } from '@holtkeeper/api'
 
-/** The scope Policies edits for: the organization or one group. */
-export type PolicyFocus = { kind: 'org' } | { kind: 'group'; group: string }
+/** The scope Policies edits for: the organization or one team. */
+export type PolicyFocus = { kind: 'org' } | { kind: 'team'; team: string }
 
 /** The stored scope of a focus. */
 const focusScope = (focus: PolicyFocus): Scope =>
-  focus.kind === 'org' ? { all: true } : { groups: [focus.group] }
+  focus.kind === 'org' ? { all: true } : { teams: [focus.team] }
 
 /** Whether `scope` is exactly the focus's scope, not a broader or overlapping one. */
 function isFocusScope(scope: Scope, focus: PolicyFocus): boolean {
   if (focus.kind === 'org') return scope.all === true
   return (
-    !scope.all &&
-    !scope.repos?.length &&
-    scope.groups?.length === 1 &&
-    scope.groups[0] === focus.group
+    !scope.all && !scope.repos?.length && scope.teams?.length === 1 && scope.teams[0] === focus.team
   )
 }
 
@@ -48,13 +45,13 @@ export function draftValue(
     return { value: draft[key], inherited: false, edited: true }
   const own = draft[key] === null ? undefined : focusEntry(entries, key, focus)
   if (own) return { value: own.value, inherited: false, edited: false }
-  const org = focus.kind === 'group' ? focusEntry(entries, key, { kind: 'org' }) : undefined
+  const org = focus.kind === 'team' ? focusEntry(entries, key, { kind: 'org' }) : undefined
   return { value: org ? org.value : fallback, inherited: true, edited: key in draft }
 }
 
 /**
  * Keys the server flagged as ignored (`unknownKeys`) on the entries `keys` show at the focus: the
- * focus's own entry, else (for a group) the organization's; entries the draft removes are skipped.
+ * focus's own entry, else (for a team) the organization's; entries the draft removes are skipped.
  * Each key is prefixed with its setting, e.g. `assets.policy › legacy`.
  */
 export function focusUnknownKeys(
@@ -67,7 +64,7 @@ export function focusUnknownKeys(
     if (draft[key] === null) return []
     const entry =
       focusEntry(entries, key, focus) ??
-      (focus.kind === 'group' ? focusEntry(entries, key, { kind: 'org' }) : undefined)
+      (focus.kind === 'team' ? focusEntry(entries, key, { kind: 'org' }) : undefined)
     return (entry?.unknownKeys ?? []).map((unknown) => ({
       ...unknown,
       key: `${key} › ${unknown.key}`,

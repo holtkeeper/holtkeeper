@@ -43,9 +43,9 @@ const config = parseConfig({
         }) as never,
     },
   },
-  groups: {
-    games: { forge: 'work', include: ['games/a', 'games/b'] },
-    libs: { forge: 'work', include: ['libs/ui'] },
+  teams: {
+    games: { owns: ['work:games/a', 'work:games/b'] },
+    libs: { owns: ['work:libs/ui'] },
   },
   jobs: {},
 })
@@ -53,7 +53,7 @@ const config = parseConfig({
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['analyses:read', 'analyses:run'] }],
-    games: [{ scope: { groups: ['games'] }, actions: ['analyses:run'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['analyses:run'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -139,7 +139,7 @@ describe('analysis backfill', () => {
     expect(await backfilled({ repo: 'work:games/a' })).toMatchObject({ queued: 0, skipped: 3 })
   })
 
-  test('every repository of every group', async () => {
+  test('every repository of the fleet', async () => {
     expect(await backfilled({ analyzer: 'api-surface', limit: 2 })).toMatchObject({
       repos: 3,
       releases: 6,
@@ -192,7 +192,7 @@ describe('analysis backfill', () => {
 
   test('validates before answering', async () => {
     expect((await backfill({}, asGames)).status).toBe(403)
-    expect((await backfill({ group: 'nope' })).status).toBe(400)
+    expect((await backfill({ team: 'nope' })).status).toBe(400)
     expect((await backfill({ analyzer: 'fleet' })).status).toBe(400)
     expect((await backfill({ analyzer: 'unknown' })).status).toBe(400)
     expect((await backfill({ repo: 'work:games/a' }, asGames)).status).toBe(202)

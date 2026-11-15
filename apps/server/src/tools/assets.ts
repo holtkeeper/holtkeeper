@@ -1,4 +1,5 @@
 import type { RepoTarget, Scope } from '@holtkeeper/access'
+import { isExactPattern } from '@holtkeeper/access/paths'
 import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
 import type { AssetsPolicySource, RepoAssetsView } from '@holtkeeper/api'
 import { formatBytes } from '@holtkeeper/api'
@@ -25,13 +26,13 @@ export interface AssetToolsAccess {
   ) => Promise<{ policy: AssetsPolicy; source: AssetsPolicySource } | undefined>
   /** The Assets view of a `forge:path` the caller may read; `undefined` otherwise. */
   assets: (repo: string) => Promise<RepoAssetsView | undefined>
-  /** How a group key is named in tool output; default the key itself. */
-  groupLabel?: (key: string) => string
+  /** How a team key is named in tool output; default the key itself. */
+  teamLabel?: (key: string) => string
 }
 
 /**
  * `AssetToolsAccess` over stored settings and records: a repository is served when `canRead`
- * allows its target (with config groups from `targetOf`); the policy's entry is named only when
+ * allows its target (with owner teams from `targetOf`); the policy's entry is named only when
  * `canReadScope` allows its scope.
  */
 export function storedAssetTools(
@@ -40,7 +41,7 @@ export function storedAssetTools(
     targetOf: (repo: RepoRef) => RepoTarget
     canRead: (target: RepoTarget) => boolean
     canReadScope: (scope: Scope) => boolean
-    groupLabel?: (key: string) => string
+    teamLabel?: (key: string) => string
   },
 ): AssetToolsAccess {
   const readable = (value: string) => {
@@ -63,7 +64,7 @@ export function storedAssetTools(
       const found = readable(value)
       return found && repoAssetsView(store, found.ref, found.target, access.canReadScope)
     },
-    ...(access.groupLabel && { groupLabel: access.groupLabel }),
+    ...(access.teamLabel && { teamLabel: access.teamLabel }),
   }
 }
 
@@ -76,11 +77,16 @@ const parseRepo = (value: string): RepoRef | undefined => {
 const fromText = (source: AssetsPolicySource, label: (key: string) => string) => {
   if (source.level === 'default') return 'the default policy (nothing set)'
   if (source.level === 'all') return 'the entry for every repository'
-  if (source.level === 'repo') return `the repository's own entry`
-  const groups = source.entry?.scope.groups
-  return groups?.length
-    ? `the entry of group ${groups.map((group) => (typeof group === 'string' ? label(group) : group.map(label).join(' & '))).join(', ')}`
-    : 'an inherited group entry'
+  if (source.level === 'repo') {
+    const patterns = source.entry?.scope.repos ?? []
+    return patterns.length && !patterns.every(isExactPattern)
+      ? `the entry for ${patterns.map((pattern) => `\`${pattern}\``).join(', ')}`
+      : `the repository's own entry`
+  }
+  const teams = source.entry?.scope.teams
+  return teams?.length
+    ? `the entry of team ${teams.map(label).join(', ')}`
+    : 'an inherited team entry'
 }
 
 /** What the policy says about one file path: ignored, allowed, limits and siblings it needs. */
@@ -183,7 +189,7 @@ export function assetsToolset(access: AssetToolsAccess): RegistryToolset {
           const effective = await access.policy(repo)
           if (!effective) throw new ToolError(`No repository ${repo} you can read.`)
           const lines = [
-            `# Asset policy of \`${repo}\`, from ${fromText(effective.source, access.groupLabel ?? ((key) => key))}`,
+            `# Asset policy of \`${repo}\`, from ${fromText(effective.source, access.teamLabel ?? ((key) => key))}`,
             assetsPolicyFacts(effective.policy),
             ...(path
               ? [

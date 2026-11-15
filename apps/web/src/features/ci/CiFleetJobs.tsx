@@ -16,7 +16,7 @@ import {
   Tag,
 } from '../../ui/index.ts'
 
-type Row = CiFleetJobRow & { groups: readonly string[] }
+type Row = CiFleetJobRow & { teams: readonly string[] }
 
 const sorts: readonly { id: CiFleetJobSort; label: string }[] = [
   { id: 'slowest', label: 'Slowest' },
@@ -105,21 +105,21 @@ const columns: readonly FleetColumn<Row>[] = [
 
 /**
  * The worst CI jobs across the readable repositories from `GET /api/ci/jobs/fleet`, switched
- * between slowest, least reliable and got slower; `groupsOf` gives each repository's groups for
+ * between slowest, least reliable and got slower; `teamsOf` gives each repository's owner teams for
  * the scope switch's folding.
  */
 export function CiFleetJobs({
-  groupsOf,
+  teamsOf,
   scope,
 }: {
-  groupsOf: (repo: string) => readonly string[]
+  teamsOf: (repo: string) => readonly string[]
   scope: Parameters<typeof FleetTable>[0]['scope']
 }) {
   const [sort, setSort] = useState<CiFleetJobSort>('slowest')
   const jobs = useCiFleetJobs(sort)
   if (jobs.isPending) return <Placeholder className="h-48" />
   if (jobs.isError) return <ErrorState error={jobs.error} />
-  const rows: Row[] = jobs.data.jobs.map((job) => ({ ...job, groups: groupsOf(repoKey(job.repo)) }))
+  const rows: Row[] = jobs.data.jobs.map((job) => ({ ...job, teams: teamsOf(repoKey(job.repo)) }))
   return (
     <section aria-label="Jobs across repositories" className="flex flex-col gap-2">
       <h2 className="text-[13px] font-semibold">

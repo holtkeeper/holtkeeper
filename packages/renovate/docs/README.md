@@ -46,7 +46,7 @@ The `analyzers.renovate` setting, edited in the panel with a dedicated form (`ed
 
 Presets (`renovatePresets`): **Report only**, **Calm** (minor and patch together, 7 days of release age, 5 open, weekly lockfile maintenance), **Stay current** (one per dependency, 1 day, 20 open), **Security fixes only**.
 
-As with every analyzer setting, the most specific entry covering a repository wins as a whole: a group entry that switches to `merge-requests` keeps the defaults for everything it does not set.
+As with every analyzer setting, the most specific entry covering a repository wins as a whole: a folder or team entry that switches to `merge-requests` keeps the defaults for everything it does not set.
 
 ## Data and report
 

@@ -59,7 +59,7 @@ export async function openLink(
 const linkGone = (message: string, state: LinkGone['state'], at: string) =>
   new HttpError(410, message, { state, at } satisfies Omit<LinkGone, 'error'>)
 
-/** What the holder of a live link may see before signing in: no scopes or group names. */
+/** What the holder of a live link may see before signing in: no scopes or team names. */
 export function linkInfo({ link, user }: { link: LinkToken; user: User }): LinkInfo {
   return {
     purpose: link.purpose === 'recover' ? 'recover' : 'enroll',

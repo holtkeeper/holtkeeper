@@ -3,7 +3,7 @@ import { Archive, BellOff, Bot, FolderGit2, Plus, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useChatMutations, useGroupTitles, useRepos } from '../../api/queries.ts'
+import { useChatMutations, useTeamTitles, useRepos } from '../../api/queries.ts'
 import { isNaming, newThreadTitle, threadBadge, threadScope } from '../../lib/chat.ts'
 import { formatRelative } from '../../lib/format.ts'
 import type { ScopeCounts, ScopeView } from '../../lib/home-scope.ts'
@@ -25,29 +25,29 @@ import {
   notify,
 } from '../../ui/index.ts'
 
-type ScopeKind = 'team' | 'repo' | 'group'
+type ScopeKind = 'everyone' | 'repo' | 'team'
 
 /** Creates a chat thread; `onCreated` gets the new thread's id after the dialog closes. */
 export function NewThreadDialog({
   isOpen,
   onOpenChange,
-  groups,
+  teams,
   onCreated,
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  groups: readonly string[]
+  teams: readonly string[]
   onCreated: (id: string) => void
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const repos = useRepos(isOpen)
   const { create } = useChatMutations()
   const [title, setTitle] = useState('')
-  const [kind, setKind] = useState<ScopeKind>('team')
+  const [kind, setKind] = useState<ScopeKind>('everyone')
   const [repo, setRepo] = useState<string>()
-  const [group, setGroup] = useState<string>()
+  const [team, setTeam] = useState<string>()
   const [autoReply, setAutoReply] = useState(false)
-  const target = kind === 'repo' ? repo : kind === 'group' ? group : 'team'
+  const target = kind === 'repo' ? repo : kind === 'team' ? team : 'everyone'
   const ready = target !== undefined && !create.isPending
 
   const submit = () => {
@@ -57,7 +57,7 @@ export function NewThreadDialog({
         ...newThreadTitle(title),
         autoReply,
         ...(kind === 'repo' && repo && { repo }),
-        ...(kind === 'group' && group && { group }),
+        ...(kind === 'team' && team && { team }),
       },
       {
         onSuccess: (thread) => {
@@ -103,9 +103,9 @@ export function NewThreadDialog({
             value={kind}
             onChange={setKind}
             options={[
-              { id: 'team', label: 'Whole team' },
+              { id: 'everyone', label: 'Everyone' },
               { id: 'repo', label: 'Repository' },
-              ...(groups.length ? [{ id: 'group' as const, label: 'Group' }] : []),
+              ...(teams.length ? [{ id: 'team' as const, label: 'Team' }] : []),
             ]}
           />
         </div>
@@ -122,13 +122,13 @@ export function NewThreadDialog({
             }))}
           />
         ) : null}
-        {kind === 'group' ? (
+        {kind === 'team' ? (
           <Select
-            aria-label="Group"
-            placeholder="Pick a group"
-            value={group}
-            onChange={setGroup}
-            options={groups.map((id) => ({ id, label: titleOf(id) }))}
+            aria-label="Team"
+            placeholder="Pick a team"
+            value={team}
+            onChange={setTeam}
+            options={teams.map((id) => ({ id, label: titleOf(id) }))}
           />
         ) : null}
         <Switch
@@ -143,7 +143,7 @@ export function NewThreadDialog({
 }
 
 function ScopeIcon({ thread }: { thread: ChatThreadView }) {
-  const Icon = thread.repo ? FolderGit2 : thread.group ? Users : Bot
+  const Icon = thread.repo ? FolderGit2 : thread.team ? Users : Bot
   return <Icon className="size-3 shrink-0" aria-hidden />
 }
 
@@ -157,7 +157,7 @@ function ThreadRow({
   onSelect: () => void
 }) {
   const badge = threadBadge(thread)
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   return (
     <li>
       <button
@@ -231,7 +231,7 @@ export function ThreadList({
   archived,
   onArchived,
   archivedCount,
-  groups,
+  teams,
   selected,
   onSelect,
   isPending,
@@ -243,14 +243,14 @@ export function ThreadList({
   counts: ScopeCounts | undefined
   view: ScopeView
   onView: (view: ScopeView) => void
-  /** *My teams* without home groups: the empty list links to choosing them. */
+  /** *My teams* without home teams: the empty list links to choosing them. */
   noTeams?: boolean
   query: string
   onQuery: (query: string) => void
   archived: boolean
   onArchived: (archived: boolean) => void
   archivedCount: number
-  groups: readonly string[]
+  teams: readonly string[]
   selected: string | undefined
   onSelect: (id: string) => void
   isPending: boolean
@@ -316,7 +316,7 @@ export function ThreadList({
       <NewThreadDialog
         isOpen={creating}
         onOpenChange={setCreating}
-        groups={groups}
+        teams={teams}
         onCreated={onSelect}
       />
     </aside>

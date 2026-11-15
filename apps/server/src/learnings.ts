@@ -65,8 +65,8 @@ const triggerOf = (candidate: LearningCandidate, origin: LearningAutoAcceptSourc
 /**
  * Accepts a `proposed` candidate without review when the `learnings.autoAccept` entry of its
  * repository lists `origin`: into its target or suggested scope (`defaultLearningScope`) when that
- * entry's own scope covers it, else into the repository, so an entry never reaches a group or
- * family wider than itself. The acceptance is made by `AUTO_ACCEPT_ACTOR` and audited as
+ * entry's own scope covers it, else into the repository, so an entry never reaches a team,
+ * folder or family wider than itself. The acceptance is made by `AUTO_ACCEPT_ACTOR` and audited as
  * `learning.accept` with `details.auto` and what triggered it (`proposedBy`, or the replying
  * `author`, `mergeRequest` and `url`). Callers check who may trigger an origin. Returns the accepted
  * candidate; `undefined` when the policy leaves it proposed or accepting failed (logged, so the

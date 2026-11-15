@@ -142,8 +142,8 @@ export function TriggerForm({
         where={
           grouped ? (
             <GroupPicker
-              value={draft.groups}
-              onChange={(v) => set('groups', v)}
+              value={draft.teams}
+              onChange={(v) => set('teams', v)}
               description="None selected: every repository."
             />
           ) : (

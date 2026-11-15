@@ -6,7 +6,7 @@ import { resolveSetting } from './resolve.ts'
 
 /**
  * The Slack channel ids `slack.reviews` binds to `repo`: those of the most specific covering
- * entry, so a group entry overrides the global one and an entry without channels turns it off
+ * entry, so a folder or team entry overrides the global one and an entry without channels turns it off
  * there. No entry, a secret or an invalid winning value bind none.
  */
 export function resolveSlackReviewChannels(

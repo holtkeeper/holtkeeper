@@ -14,11 +14,14 @@ import {
   cleanRule,
   defaultLearningScope,
   editLearning,
+  learningScopeKindOf,
+  learningScopes,
   looksLikeFeedback,
   normalizeRule,
   proposeRule,
   rejectLearning,
 } from './learnings.ts'
+import { scopesFor } from './model.ts'
 
 const now = () => new Date('2026-11-03T08:00:00.000Z')
 
@@ -203,7 +206,7 @@ describe('captureLearning', () => {
     const store = memoryStore()
     const { agent, tasks } = fakeAgent([
       { rule: 'Do not flag magic numbers in tween presets.', section: 'review', scope: 'repo' },
-      { rule: 'do not flag magic numbers in tween presets', section: 'review', scope: 'group' },
+      { rule: 'do not flag magic numbers in tween presets', section: 'review', scope: 'team' },
     ])
     let id = 0
     const deps = { store, agent, now, newId: () => `c${++id}` }
@@ -290,15 +293,15 @@ describe('accept, edit and reject', () => {
     ])
 
     await acceptLearning(store, accepted, {
-      scope: 'group:toys',
+      scope: 'team:widgets',
       rule: 'Do not flag numbers in tween presets.',
       by: 'lee',
       at: '2026-11-03T09:05:00.000Z',
     })
     expect((await store.guides.get('repo:work:toys/kite', 'review'))?.learnings).toEqual([])
-    expect((await store.guides.get('group:toys', 'review'))?.learnings.map((l) => l.rule)).toEqual([
-      'Do not flag numbers in tween presets.',
-    ])
+    expect(
+      (await store.guides.get('team:widgets', 'review'))?.learnings.map((l) => l.rule),
+    ).toEqual(['Do not flag numbers in tween presets.'])
   })
 
   test('editing an accepted candidate updates its Guide entry; rejecting removes it', async () => {
@@ -380,15 +383,12 @@ describe('proposeRule', () => {
 })
 
 describe('target scopes', () => {
-  const scopes = [
-    'repo:work:toys/kite',
-    'family:fliers',
-    'group:toys.flying',
-    'group:toys',
-    'all',
-  ] as const
+  const scopes = scopesFor(
+    { forge: 'work', path: 'acme/round/web', teams: ['widgets', 'gizmo'] },
+    'fliers',
+  )
   const proposal = {
-    repo: 'work:toys/kite',
+    repo: 'work:acme/round/web',
     rule: 'Keep spool sizes in SpoolSize.',
     section: 'general' as const,
     reason: 'Every team toy repeats it.',
@@ -396,15 +396,49 @@ describe('target scopes', () => {
     at: now().toISOString(),
   }
 
-  test('a proposal may name an exact scope of its repository and nothing else', async () => {
+  test('the scopes a learning may go to are the repository, family, folders and owner teams', () => {
+    expect(learningScopes(scopes)).toEqual([
+      'repo:work:acme/round/web',
+      'family:fliers',
+      'path:work:acme/round',
+      'path:work:acme',
+      'team:widgets',
+      'team:gizmo',
+    ])
+    expect(learningScopes(scopes).map(learningScopeKindOf)).toEqual([
+      'repo',
+      'family',
+      'path',
+      'path',
+      'team',
+      'team',
+    ])
+    expect(learningScopeKindOf('all')).toBeUndefined()
+  })
+
+  test('a proposal may go straight to an owner team or a folder of its repository', async () => {
     const store = memoryStore()
-    const outcome = await proposeRule(
+    const toTeam = await proposeRule(
       store,
-      { ...proposal, targetScope: 'group:toys', scopes },
+      { ...proposal, targetScope: 'team:gizmo', scopes },
       () => 'p1',
     )
-    expect(outcome.candidate).toMatchObject({ suggestedScope: 'group', targetScope: 'group:toys' })
-    for (const targetScope of ['group:sheds', 'all'] as const) {
+    expect(toTeam.candidate).toMatchObject({ suggestedScope: 'team', targetScope: 'team:gizmo' })
+    const toFolder = await proposeRule(
+      store,
+      {
+        ...proposal,
+        rule: 'Name round widgets after their radius.',
+        targetScope: 'path:work:acme/round',
+        scopes,
+      },
+      () => 'p2',
+    )
+    expect(toFolder.candidate).toMatchObject({
+      suggestedScope: 'path',
+      targetScope: 'path:work:acme/round',
+    })
+    for (const targetScope of ['team:sprockets', 'path:work:acme/square', 'all'] as const) {
       const refused = await proposeRule(store, {
         ...proposal,
         rule: `Another rule for ${targetScope}.`,
@@ -413,18 +447,25 @@ describe('target scopes', () => {
       }).catch((error: unknown) => error)
       expect(refused).toBeInstanceOf(LearningScopeError)
     }
-    expect(await store.learnings.list()).toHaveLength(1)
+    expect(await store.learnings.list()).toHaveLength(2)
   })
 
-  test('accepting without a scope prefers the target over the nearest group of the kind', () => {
-    expect(defaultLearningScope({ suggestedScope: 'group' }, scopes)).toBe('group:toys.flying')
+  test('accepting without a scope prefers the target over the nearest scope of the kind', () => {
+    expect(defaultLearningScope({ suggestedScope: 'repo' }, scopes)).toBe(
+      'repo:work:acme/round/web',
+    )
+    expect(defaultLearningScope({ suggestedScope: 'path' }, scopes)).toBe('path:work:acme/round')
+    expect(defaultLearningScope({ suggestedScope: 'team' }, scopes)).toBe('team:widgets')
     expect(
-      defaultLearningScope({ suggestedScope: 'group', targetScope: 'group:toys' }, scopes),
-    ).toBe('group:toys')
+      defaultLearningScope({ suggestedScope: 'team', targetScope: 'team:gizmo' }, scopes),
+    ).toBe('team:gizmo')
     expect(
-      defaultLearningScope({ suggestedScope: 'group', targetScope: 'group:sheds' }, scopes),
-    ).toBe('group:toys.flying')
-    expect(defaultLearningScope({ suggestedScope: 'family' }, ['repo:work:toys/kite'])).toBe(
+      defaultLearningScope(
+        { suggestedScope: 'path', targetScope: 'path:work:acme/square' },
+        scopes,
+      ),
+    ).toBe('path:work:acme/round')
+    expect(defaultLearningScope({ suggestedScope: 'family' }, ['repo:work:acme/round/web'])).toBe(
       undefined,
     )
   })
@@ -441,14 +482,20 @@ describe('target scopes', () => {
     expect(targeted).toMatchObject({ suggestedScope: 'family', targetScope: 'family:fliers' })
     const kept = await editLearning(store, targeted, { section: 'review', by: 'header:lee', at })
     expect(kept.targetScope).toBe('family:fliers')
-    const regrouped = await editLearning(store, kept, {
-      suggestedScope: 'group',
+    const toTeam = await editLearning(store, kept, {
+      suggestedScope: 'team',
       by: 'header:lee',
       at,
     })
-    expect(regrouped.suggestedScope).toBe('group')
-    expect(regrouped).not.toHaveProperty('targetScope')
-    const refused = await editLearning(store, regrouped, {
+    expect(toTeam.suggestedScope).toBe('team')
+    expect(toTeam).not.toHaveProperty('targetScope')
+    const toFolder = await editLearning(store, toTeam, {
+      targetScope: 'path:work:acme',
+      by: 'header:lee',
+      at,
+    })
+    expect(toFolder).toMatchObject({ suggestedScope: 'path', targetScope: 'path:work:acme' })
+    const refused = await editLearning(store, toFolder, {
       targetScope: 'all',
       by: 'header:lee',
       at,

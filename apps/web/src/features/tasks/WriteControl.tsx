@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useRepos, useSettingMutations, useSettings, useWriteTasks } from '../../api/queries.ts'
+import { useSettingMutations, useSettings, useWriteTasks } from '../../api/queries.ts'
 import { canReadSpend } from '../../lib/access.ts'
 import { formatUsd } from '../../lib/ai-usage.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
@@ -97,7 +97,6 @@ export function WriteControl() {
   const readable = canGlobal('settings:read')
   const writable = canGlobal('settings:write')
   const settings = useSettings(readable)
-  const repos = useRepos(writable && can('repos:read'))
   const { put } = useSettingMutations()
   const now = useNow()
   const [confirming, setConfirming] = useState(false)
@@ -280,7 +279,6 @@ export function WriteControl() {
         <EntryDialog
           definition={definition}
           {...(entry ? { entry } : { initialScope: { all: true } })}
-          groups={[...new Set((repos.data?.repos ?? []).flatMap((repo) => repo.groups))].toSorted()}
           onClose={() => setEditing(false)}
         />
       ) : null}

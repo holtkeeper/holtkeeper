@@ -89,11 +89,11 @@ export const parseVerdict = (value: string): LicenseVerdictName | undefined =>
 export const violationKey = (violation: LicenseViolation): string =>
   `${violation.ecosystem}:${violation.package}`
 
-/** A violation as fleet tables take it: `groups` joins the groups of its repositories. */
+/** A violation as fleet tables take it: `teams` joins the owner teams of its repositories. */
 export interface ViolationRow {
   key: string
   violation: LicenseViolation
-  groups: string[]
+  teams: string[]
 }
 
 /** Wraps violations as rows; one belongs to every team one of its repositories belongs to. */
@@ -101,7 +101,7 @@ export const violationRows = (violations: readonly LicenseViolation[]): Violatio
   violations.map((violation) => ({
     key: violationKey(violation),
     violation,
-    groups: [...new Set(violation.repos.flatMap((repo) => repo.groups))].toSorted(),
+    teams: [...new Set(violation.repos.flatMap((repo) => repo.teams))].toSorted(),
   }))
 
 const matchesText = (violation: LicenseViolation, q: string): boolean => {

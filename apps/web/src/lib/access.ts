@@ -60,15 +60,15 @@ export function canGlobal(principal: Principal | null | undefined, action: Actio
  * naming the group on its own, as the server checks writes scoped `{ groups: [group] }`. Only
  * decides what the UI shows.
  */
-export function canInGroup(
+export function canInTeam(
   principal: Principal | null | undefined,
   action: Action,
-  group: string,
+  team: string,
 ): boolean {
   if (!principal) return false
   return principal.grants.some(
     (grant) =>
-      (grant.scope.all === true || (grant.scope.groups ?? []).includes(group)) &&
+      (grant.scope.all === true || (grant.scope.teams ?? []).includes(team)) &&
       (grant.actions.includes('*') || grant.actions.includes(action)),
   )
 }

@@ -27,8 +27,8 @@ const factors = [2, 3, 5, 10].map((factor) => ({
 
 type Counts = { stale: number; waiting: number; fresh: number }
 
-const teamCounts = (overview: FreshnessOverview | undefined, group: string | undefined): Counts =>
-  (overview?.teams.find((team) => team.group === group)?.analyzers ?? []).reduce(
+const teamCounts = (overview: FreshnessOverview | undefined, team: string | undefined): Counts =>
+  (overview?.teams.find((row) => row.team === team)?.analyzers ?? []).reduce(
     (sum, row) => ({
       stale: sum.stale + row.stale,
       waiting: sum.waiting + row.waiting,
@@ -37,34 +37,34 @@ const teamCounts = (overview: FreshnessOverview | undefined, group: string | und
     { stale: 0, waiting: 0, fresh: 0 },
   )
 
-/** Lane ids → the group a freshness row edits; `all` is every repository. */
+/** Lane ids → the team a freshness row edits; `all` is every repository. */
 const groupOf = (lane: string) => (lane === ALL_LANE ? undefined : lane)
 
 /** A team's freshness override (on, slower, off) with the slowdown factor, saved on change. */
 function ModeControl({
-  group,
+  team,
   settings,
   writable,
 }: {
-  group: string | undefined
+  team: string | undefined
   settings: readonly SettingView[]
   writable: boolean
 }) {
   const { put } = useSettingMutations()
-  const override = laneFreshness(settings, group)
+  const override = laneFreshness(settings, team)
   const own = override.inherited ? undefined : override.entry
-  const name = group ?? 'all repositories'
+  const name = team ?? 'all repositories'
   if (!writable) return <Tag>{override.mode}</Tag>
   const save = (value: { mode: string; factor?: number }) =>
     put.mutate(
       {
         ...(own ? { id: own.id } : {}),
         key: FRESHNESS_KEY,
-        scope: group === undefined ? { all: true } : { groups: [group] },
+        scope: team === undefined ? { all: true } : { teams: [team] },
         value,
       },
       {
-        onSuccess: () => notify.success('Freshness saved', group ?? 'All repositories'),
+        onSuccess: () => notify.success('Freshness saved', team ?? 'All repositories'),
         onError: (error) => notify.error('Not saved', messageOf(error)),
       },
     )
@@ -92,22 +92,22 @@ function ModeControl({
 
 /** Where a team's freshness comes from, with a way back to the every-repository setting. */
 function SettingSource({
-  group,
+  team,
   settings,
   writable,
 }: {
-  group: string | undefined
+  team: string | undefined
   settings: readonly SettingView[]
   writable: boolean
 }) {
   const { remove } = useSettingMutations()
-  const override = laneFreshness(settings, group)
-  if (group === undefined) return <span className="text-muted">Every-repository setting</span>
+  const override = laneFreshness(settings, team)
+  if (team === undefined) return <span className="text-muted">Every-repository setting</span>
   if (override.inherited)
     return (
       <span className="text-muted">
         {override.entry && !override.entry.scope.all
-          ? 'Inherited from a setting shared with other groups'
+          ? 'Inherited from a setting shared with other teams'
           : 'Inherited from every repository'}
       </span>
     )
@@ -154,16 +154,16 @@ export function FreshnessTeams({
       </thead>
       <tbody>
         {lanes.map((lane) => {
-          const group = groupOf(lane.id)
-          const counts = teamCounts(overview, group)
+          const team = groupOf(lane.id)
+          const counts = teamCounts(overview, team)
           return (
             <tr key={lane.id}>
               <Td>{lane.label}</Td>
               <Td>
-                <ModeControl group={group} settings={settings} writable={writable} />
+                <ModeControl team={team} settings={settings} writable={writable} />
               </Td>
               <Td>
-                <SettingSource group={group} settings={settings} writable={writable} />
+                <SettingSource team={team} settings={settings} writable={writable} />
               </Td>
               <Td align="right" className="mono">
                 {counts.stale}
@@ -184,26 +184,26 @@ export function FreshnessTeams({
 
 /** Per analyzer that refreshes: its policy and what the last sweep found for one team. */
 export function FreshnessAnalyzers({
-  group,
+  team,
   analyzers,
   overview,
 }: {
-  group: string | undefined
+  team: string | undefined
   analyzers: readonly JobAnalyzerView[]
   overview: FreshnessOverview | undefined
 }) {
   const counts = new Map(
-    (overview?.teams.find((team) => team.group === group)?.analyzers ?? []).map((row) => [
+    (overview?.teams.find((row) => row.team === team)?.analyzers ?? []).map((row) => [
       row.analyzer,
       row,
     ]),
   )
   const rows = analyzers.filter(
     (analyzer) =>
-      analyzer.refresh !== undefined && (group !== undefined || analyzer.scope === 'repo'),
+      analyzer.refresh !== undefined && (team !== undefined || analyzer.scope === 'repo'),
   )
   return (
-    <Table label={`Analyzers kept fresh for ${group ?? 'every repository'}`}>
+    <Table label={`Analyzers kept fresh for ${team ?? 'every repository'}`}>
       <thead>
         <tr>
           <Th>Analyzer</Th>

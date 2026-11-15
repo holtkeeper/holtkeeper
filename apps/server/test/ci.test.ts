@@ -22,17 +22,17 @@ import { CI_JOBS_MAX } from '../src/routes/ci.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/circle', 'shapes/square'] },
-    tools: { forge: 'work', include: ['tools/lint'] },
+  teams: {
+    shapes: { owns: ['work:shapes/circle', 'work:shapes/square'] },
+    tools: { owns: ['work:tools/lint'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
-    releases: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read', 'releases:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
+    releases: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read', 'releases:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -116,7 +116,7 @@ const add = async (path: string, data: unknown, createdAt = '2026-10-30T03:00:00
   return store.analyses.add({ ...record, ...(metrics ? { metrics } : {}) })
 }
 
-const releases = (value: unknown, scope: { groups: string[] } | { all: true } = { all: true }) =>
+const releases = (value: unknown, scope: { teams: string[] } | { all: true } = { all: true }) =>
   store.settings.put({
     id: `releases-${JSON.stringify(scope)}`,
     key: 'releases',
@@ -184,7 +184,7 @@ describe('CI routes', () => {
       change: 12,
       weeks: [280, null],
       problems: 1,
-      groups: ['shapes'],
+      teams: ['shapes'],
       status: 'failing',
       flakyJobs: 0,
       queueMedian: 12,
@@ -222,7 +222,7 @@ describe('CI routes', () => {
     await add('shapes/circle', ciData('2026-10-29T10:00:00.000Z'))
     await add('shapes/square', ciData('2026-10-29T10:00:00.000Z'))
     await add('tools/lint', ciData('2026-10-29T10:00:00.000Z'))
-    await releases({ enabled: true, flow: { target: 'stable' } }, { groups: ['shapes'] })
+    await releases({ enabled: true, flow: { target: 'stable' } }, { teams: ['shapes'] })
     await releases({ enabled: false })
 
     const gate = { pipeline: true, branch: 'stable' }
@@ -234,7 +234,7 @@ describe('CI routes', () => {
     ])
     expect((await overview(asReleases)).repos.map((r) => r.releaseGate)).toEqual([gate, gate])
 
-    await releases({ enabled: true, gates: { pipeline: false } }, { groups: ['shapes'] })
+    await releases({ enabled: true, gates: { pipeline: false } }, { teams: ['shapes'] })
     expect((await overview(asReleases)).repos.map((r) => r.releaseGate)).toEqual([
       { pipeline: false, branch: 'main' },
       { pipeline: false, branch: 'main' },

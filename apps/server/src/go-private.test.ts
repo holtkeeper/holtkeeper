@@ -4,7 +4,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 
 import { egressJobEnv, goPrivate, goPrivateJobEnv } from './go-private.ts'
 
-test('narrows to the top-level groups the config groups include', () => {
+test('narrows to the top-level namespaces the fleet includes', () => {
   expect(
     goPrivate(
       [{ id: 'work', kind: 'gitlab', url: 'https://gitlab.example' }],
@@ -45,7 +45,7 @@ test('leaves out forges the proxy adds no token for', () => {
   ).toBeUndefined()
 })
 
-test('reads panel forges and the groups of the panel and the config file', async () => {
+test('reads panel forges and the fleet and teams of the panel and the config file', async () => {
   const store = memoryStore()
   const updatedAt = '2026-11-13T12:00:00.000Z'
   await store.config?.put({
@@ -55,17 +55,17 @@ test('reads panel forges and the groups of the panel and the config file', async
     data: { kind: 'gitlab', url: 'https://gitlab.example', credentialId: 'c1' },
   })
   await store.config?.put({
-    type: 'group',
+    type: 'team',
     id: 'shapes',
     updatedAt,
-    data: { forge: 'work', include: ['shapes/*'], exclude: [] },
+    data: { owns: ['work:shapes/**'], exclude: [], consumes: ['work:gizmos/core'], members: [] },
   })
   expect(
-    await egressJobEnv(store, {
-      groups: { widgets: { forge: 'work', include: ['widgets/*'], exclude: [] } },
-    }),
-  ).toEqual({ GOPRIVATE: 'gitlab.example/shapes,gitlab.example/widgets' })
-  expect(await egressJobEnv(memoryStore(), { groups: {} })).toEqual({})
+    await egressJobEnv(store, { fleet: { work: { include: ['widgets/*'], exclude: [] } } }),
+  ).toEqual({
+    GOPRIVATE: 'gitlab.example/gizmos,gitlab.example/shapes,gitlab.example/widgets',
+  })
+  expect(await egressJobEnv(memoryStore(), { teams: {}, fleet: {} })).toEqual({})
 })
 
 test('job GOPRIVATE joins the egress patterns, config-file forges, analyzed repositories and the setting', async () => {
@@ -92,7 +92,7 @@ test('job GOPRIVATE joins the egress patterns, config-file forges, analyzed repo
   const env = await goPrivateJobEnv(
     store,
     {
-      groups: { shapes: { forge: 'saas', include: ['shapes/*'], exclude: [] } },
+      fleet: { saas: { include: ['shapes/*'], exclude: [] } },
       forges: { self: { url: 'https://git.example.com' } },
     },
     ['example.org/hidden', 'git.example.com/sub'],
@@ -100,5 +100,5 @@ test('job GOPRIVATE joins the egress patterns, config-file forges, analyzed repo
   expect(env).toEqual({
     GOPRIVATE: 'example.org/hidden,git.example.com,github.com/acme-private,gitlab.com/shapes',
   })
-  expect(await goPrivateJobEnv(memoryStore(), { groups: {} }, [])).toEqual({})
+  expect(await goPrivateJobEnv(memoryStore(), { teams: {}, fleet: {} }, [])).toEqual({})
 })

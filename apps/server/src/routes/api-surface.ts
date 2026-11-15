@@ -1,4 +1,4 @@
-import { type Principal, can, leafGroups, outerGroups } from '@holtkeeper/access'
+import { type Principal, can } from '@holtkeeper/access'
 import type {
   CreateMcpTokenInput,
   CreateMcpTokenResult,
@@ -31,12 +31,13 @@ import {
   type ServerDeps,
   authorize,
   forgeFor,
-  groupLabeler,
+  teamLabeler,
   principalOf,
   publicUrlOf,
   parseRepo,
   readBody,
   repoTarget,
+  withTeams,
 } from '../context.ts'
 import { createFleetCache } from '../fleet-cache.ts'
 import { autoAcceptLearning } from '../learnings.ts'
@@ -73,7 +74,7 @@ import {
   scopeOwner,
 } from '../visibility.ts'
 import { dependencyRoutes } from './dependencies.ts'
-import { homeGroupsOf } from './preferences.ts'
+import { homeTeamsOf } from './preferences.ts'
 import { usageRoutes } from './usages.ts'
 
 const GLOBAL = { kind: 'global' } as const
@@ -164,9 +165,9 @@ export function createApiSurface(
     : undefined
   const targetOf = (repo: RepoRef) => repoTarget(config, repo)
   const reach = catalogReach(store.settings, targetOf)
-  const groupsOf = (repo: RepoRef) => targetOf(repo).groups
-  const groupLabel = groupLabeler(config)
-  const ownerOf = (repo: RepoRef) => leafGroups(groupsOf(repo)).map(groupLabel)
+  const teamsOf = (repo: RepoRef) => targetOf(repo).teams
+  const teamLabel = teamLabeler(config)
+  const ownerOf = (repo: RepoRef) => teamsOf(repo).map(teamLabel)
   const readable = async (principal: Principal) => (await reach(principal)).catalog
   const analysesOf = (principal: Principal) => (repo: RepoRef) =>
     canSee(principal, 'analyses:read', targetOf(repo))
@@ -227,9 +228,8 @@ export function createApiSurface(
     store,
     canReadScope: (scope) => can(principal, 'knowledge:read', { kind: 'scope', scope }),
     canReadShared: (scope) => canReadShared(principal, scope, reached.policy),
-    ownerOf: (scope) =>
-      outerGroups(scopeOwner(scope, (other) => leafGroups(groupsOf(other)))).map(groupLabel),
-    groupLabel,
+    ownerOf: (scope) => scopeOwner(scope, teamsOf).map(teamLabel),
+    teamLabel,
     repoOf: (value) => {
       const separator = value.indexOf(':')
       if (separator < 1 || separator === value.length - 1) return undefined
@@ -241,9 +241,10 @@ export function createApiSurface(
     },
     actor: principal.id,
     now: deps.now,
+    ...(deps.embeddings && { semantics: deps.embeddings }),
   })
 
-  const resolveGuide = createGuideResolver({ store, groupTitle: groupLabel })
+  const resolveGuide = createGuideResolver({ store, teamTitle: teamLabel })
   const testIdsOf = testIdsReader({ store })
   const rulesContext = (
     principal: Principal,
@@ -307,7 +308,7 @@ export function createApiSurface(
   })
 
   const routes = new Hono<Env>()
-  routes.route('/', usageRoutes({ catalog, usages, reach, groupsOf }))
+  routes.route('/', usageRoutes({ catalog, usages, reach, teamsOf }))
   routes.route(
     '/',
     dependencyRoutes(deps, { catalog, usages, reach, libraryIndex: libraryContext, cache }),
@@ -473,10 +474,19 @@ export function createApiSurface(
     person: McpPersonCalls,
     self: Principal,
   ): Promise<McpPersonUsage> => {
-    const grants =
-      person.id === self.id ? self.grants : (await store.users?.getUser(person.id))?.grants
+    const user = person.id === self.id ? undefined : await store.users?.getUser(person.id)
+    const principal: Principal | undefined =
+      person.id === self.id
+        ? self
+        : user && {
+            id: user.id,
+            name: user.id,
+            provider: self.provider,
+            grants: user.grants,
+            ...(user.email ? { email: user.email } : {}),
+          }
     const [teams, activeTokens] = await Promise.all([
-      grants ? homeGroupsOf(deps, { ...self, id: person.id, grants }) : [],
+      principal ? homeTeamsOf(deps, principal) : [],
       tokens ? tokens.active(person.id) : 0,
     ])
     return { ...person, teams, activeTokens }
@@ -556,7 +566,7 @@ export function createApiSurface(
         canRead: (target) => canSee(principal, 'analyses:read', target),
         canReadScope: (entryScope) =>
           can(principal, 'settings:read', { kind: 'scope', scope: entryScope }),
-        groupLabel,
+        teamLabel,
       }),
       supply: supplyFor(principal),
       principal,
@@ -566,8 +576,8 @@ export function createApiSurface(
       stack: storedStackTools(store.analyses, {
         canRead: scope.catalog,
         canDetail: analysesOf(principal),
-        groupsOf,
-        groupLabel,
+        teamsOf,
+        teamLabel,
       }),
       ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
       canReadAnalyses: analysesOf(principal),
@@ -594,8 +604,11 @@ export function createApiSurface(
           path.startsWith('/api/dependencies/')))
     const found = allowed ? await tokens.authenticate(request) : undefined
     if (!found) return undefined
-    fromToken.set(found.principal, found.token)
-    return found.principal
+    // Team grants are added here rather than by the app middleware so the principal remembered
+    // for the token is the very object handlers see.
+    const principal = withTeams(deps.config, found.principal)
+    fromToken.set(principal, found.token)
+    return principal
   }
 
   return { routes, mcp, tokenPrincipal, flush: usage.flush }

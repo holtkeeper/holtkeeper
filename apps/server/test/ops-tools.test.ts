@@ -15,9 +15,9 @@ import { mcpToolsets } from '../src/tools/registry.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
@@ -56,11 +56,11 @@ const addMetrics = (kind: string, metrics: object) =>
     metrics,
   })
 
-const spend = (path: string, group: string, costUsd: number, extra: object = {}) =>
+const spend = (path: string, team: string, costUsd: number, extra: object = {}) =>
   store.aiUsage.append({
     at: '2026-05-05T12:00:00.000Z',
     repo: { forge: 'work', path },
-    groups: [group],
+    teams: [team],
     taskKind: 'review',
     actor: 'system',
     provider: 'anthropic',
@@ -87,7 +87,7 @@ describe('ops toolset', () => {
     const mine = await enqueue('shapes/circle', 1)
     await enqueue('colors/red', 2)
     const ops = opsToolset(
-      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/square', groups: ['shapes'] }),
+      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/square', teams: ['shapes'] }),
       now,
     )
     expect(ops.tools.map((tool) => [tool.name, tool.readOnly ?? true])).toEqual([
@@ -112,13 +112,13 @@ describe('ops toolset', () => {
   test('a chat agent reads only what the asking person may read too', async () => {
     const circle = await enqueue('shapes/circle', 1)
     const square = await enqueue('shapes/square', 2)
-    const target = { forge: 'work', path: 'shapes/circle', groups: ['shapes'] }
+    const target = { forge: 'work', path: 'shapes/circle', teams: ['shapes'] }
     const asker: Principal = {
       id: 'header:kim',
       name: 'Kim',
       provider: 'header',
       grants: [
-        { scope: { groups: ['shapes'] }, actions: ['repos:read'] },
+        { scope: { teams: ['shapes'] }, actions: ['repos:read'] },
         { scope: { repos: ['work:shapes/circle'] }, actions: ['analyses:read'] },
       ],
     }
@@ -137,7 +137,7 @@ describe('ops toolset', () => {
 
     const reader: Principal = {
       ...asker,
-      grants: [...asker.grants, { scope: { groups: ['shapes'] }, actions: ['ai:read'] }],
+      grants: [...asker.grants, { scope: { teams: ['shapes'] }, actions: ['ai:read'] }],
     }
     const budgets = await call(
       opsToolset(agentOpsAccess(deps(), target, reader), now),
@@ -156,7 +156,7 @@ describe('ops toolset', () => {
       id: 'header:kim',
       name: 'Kim',
       provider: 'header',
-      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
     const narrow = principalOpsAccess(deps(), narrowPrincipal)
     const stats = await narrow.stats()
@@ -175,7 +175,7 @@ describe('ops toolset', () => {
     expect(all).toContain('Queued 3, running 0')
     expect(all).toContain('worker-a (0 running')
 
-    const agent = agentOpsAccess(deps(), { forge: 'work', path: 'colors/red', groups: ['colors'] })
+    const agent = agentOpsAccess(deps(), { forge: 'work', path: 'colors/red', teams: ['colors'] })
     expect((await agent.stats()).queue.queued).toBe(1)
     expect((await agent.stats()).workers).toBeUndefined()
   })
@@ -194,7 +194,7 @@ describe('ops toolset', () => {
     const waiting = await enqueue('shapes/circle', 6)
 
     const ops = opsToolset(
-      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/circle', groups: ['shapes'] }),
+      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/circle', teams: ['shapes'] }),
       now,
     )
     const text = await call(ops, 'job_log', { job: graph.id })
@@ -216,13 +216,13 @@ describe('ops toolset', () => {
     await store.settings.put({
       id: 'colors-budget',
       key: 'llm.budget',
-      scope: { groups: ['colors'] },
+      scope: { teams: ['colors'] },
       value: { weeklyUsd: 40 },
       secret: false,
       updatedAt: '2026-05-01T00:00:00.000Z',
     })
     const agent = opsToolset(
-      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/circle', groups: ['shapes'] }),
+      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/circle', teams: ['shapes'] }),
       now,
     )
     const budgets = await call(agent, 'budget_status', {})
@@ -233,7 +233,7 @@ describe('ops toolset', () => {
       id: 'header:sam',
       name: 'Sam',
       provider: 'header',
-      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
     const toolsets = mcpToolsets({ ops: principalOpsAccess(deps(), reader) } as never)
     expect(toolsets.find((toolset) => toolset.name === 'ops')?.tools.map((t) => t.name)).toEqual([
@@ -252,7 +252,7 @@ describe('ops toolset', () => {
     await spend('colors/red', 'colors', 50, { taskKind: 'triage', provider: 'gateway' })
 
     const agent = opsToolset(
-      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/circle', groups: ['shapes'] }),
+      agentOpsAccess(deps(), { forge: 'work', path: 'shapes/circle', teams: ['shapes'] }),
       now,
     )
     const text = await call(agent, 'budget_status', {})
@@ -268,7 +268,7 @@ describe('ops toolset', () => {
       id: 'header:sam',
       name: 'Sam',
       provider: 'header',
-      grants: [{ scope: { groups: ['colors'] }, actions: ['analyses:read', 'ai:read'] }],
+      grants: [{ scope: { teams: ['colors'] }, actions: ['analyses:read', 'ai:read'] }],
     }
     const mcp = await call(opsToolset(principalOpsAccess(deps(), reader), now), 'budget_status', {})
     expect(mcp).toContain('No AI budget you may read applies.')
@@ -306,7 +306,7 @@ describe('ops toolset', () => {
       id: 'header:sam',
       name: 'Sam',
       provider: 'header',
-      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
     const mcp = opsToolset(principalOpsAccess({ ...deps(), analyzers: known }, reader), now)
     const text = await call(mcp, 'analysis_status', { repo: 'work:shapes/circle' })
@@ -319,7 +319,7 @@ describe('ops toolset', () => {
     const agent = opsToolset(
       agentOpsAccess(
         { ...deps(), analyzers: known },
-        { forge: 'work', path: 'shapes/circle', groups: ['shapes'] },
+        { forge: 'work', path: 'shapes/circle', teams: ['shapes'] },
       ),
       now,
     )
@@ -328,12 +328,12 @@ describe('ops toolset', () => {
     )
     expect(await call(agent, 'analysis_status', { repo: 'work:shapes' })).not.toContain('Health')
   })
-  test('tool output names a titled group as Title (key)', async () => {
+  test('tool output names a titled team as Title (key)', async () => {
     const titled = parseConfig({
       forges: config.forges,
-      groups: { ...config.groups, shapes: { ...config.groups.shapes, title: 'Shape studio' } },
+      teams: { ...config.teams, shapes: { ...config.teams.shapes, title: 'Shape studio' } },
     })
-    await store.kv?.set('poll-group:shapes', {
+    await store.kv?.set('poll-fleet:work', {
       repos: [{ forge: 'work', path: 'shapes/circle' }],
       listedAt: '2026-05-06T11:00:00.000Z',
       attempts: [],
@@ -342,25 +342,25 @@ describe('ops toolset', () => {
       id: 'header:sam',
       name: 'Sam',
       provider: 'header',
-      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
     const mcp = opsToolset(principalOpsAccess({ ...deps(), config: titled }, reader), now)
     expect(await call(mcp, 'fleet_health', {})).toContain(
-      '- work:shapes/circle · groups Shape studio (shapes) · ',
+      '- work:shapes/circle · teams Shape studio (shapes) · ',
     )
-    expect(await call(mcp, 'fleet_health', { group: 'shapes' })).toContain('work:shapes/circle')
+    expect(await call(mcp, 'fleet_health', { team: 'shapes' })).toContain('work:shapes/circle')
   })
 
-  test('fleet_health names the innermost group and filters by subgroup keys', async () => {
-    const nested = parseConfig({
+  test('fleet_health names every owner team and filters by any of them', async () => {
+    const overlapping = parseConfig({
       forges: config.forges,
-      groups: {
-        ...config.groups,
-        shapes: { ...config.groups.shapes, title: 'Shape studio' },
-        'shapes.round': { forge: 'work', include: ['shapes/circle'], title: 'Round' },
+      teams: {
+        ...config.teams,
+        shapes: { ...config.teams.shapes, title: 'Shape studio' },
+        round: { owns: ['work:shapes/circle'], title: 'Round' },
       },
     })
-    await store.kv?.set('poll-group:shapes', {
+    await store.kv?.set('poll-fleet:work', {
       repos: [
         { forge: 'work', path: 'shapes/circle' },
         { forge: 'work', path: 'shapes/square' },
@@ -372,29 +372,27 @@ describe('ops toolset', () => {
       id: 'header:sam',
       name: 'Sam',
       provider: 'header',
-      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
-    const mcp = opsToolset(principalOpsAccess({ ...deps(), config: nested }, reader), now)
+    const mcp = opsToolset(principalOpsAccess({ ...deps(), config: overlapping }, reader), now)
     const all = await call(mcp, 'fleet_health', {})
-    expect(all).toContain('- work:shapes/circle · groups Shape studio › Round (shapes.round) · ')
-    expect(all).toContain('- work:shapes/square · groups Shape studio (shapes) · ')
-    const round = await call(mcp, 'fleet_health', { group: 'shapes.round' })
+    expect(all).toMatch(
+      /- work:shapes\/circle · teams (Shape studio \(shapes\), Round \(round\)|Round \(round\), Shape studio \(shapes\)) · /,
+    )
+    expect(all).toContain('- work:shapes/square · teams Shape studio (shapes) · ')
+    const round = await call(mcp, 'fleet_health', { team: 'round' })
     expect(round).toContain('work:shapes/circle')
     expect(round).not.toContain('work:shapes/square')
-    expect(await call(mcp, 'fleet_health', { group: 'shapes' })).toContain('work:shapes/square')
+    expect(await call(mcp, 'fleet_health', { team: 'shapes' })).toContain('work:shapes/square')
   })
 
-  test('fleet_health lists every readable member with the cells the caller may read', async () => {
-    await store.kv?.set('poll-group:shapes', {
+  test('fleet_health lists every readable fleet repository with the cells the caller may read', async () => {
+    await store.kv?.set('poll-fleet:work', {
       repos: [
         { forge: 'work', path: 'shapes/circle' },
         { forge: 'work', path: 'shapes/square' },
+        { forge: 'work', path: 'colors/red' },
       ],
-      listedAt: '2026-05-06T11:00:00.000Z',
-      attempts: [],
-    })
-    await store.kv?.set('poll-group:colors', {
-      repos: [{ forge: 'work', path: 'colors/red' }],
       listedAt: '2026-05-06T11:00:00.000Z',
       attempts: [],
     })
@@ -415,15 +413,15 @@ describe('ops toolset', () => {
       id: 'header:sam',
       name: 'Sam',
       provider: 'header',
-      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+      grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
     const mcp = opsToolset(principalOpsAccess({ ...deps(), analyzers: known }, reader), now)
     const text = await call(mcp, 'fleet_health', {})
     expect(text).toContain('# 2 repositories: 1 failing, 1 not analysed')
-    expect(text).toContain('- work:shapes/circle · groups shapes · failing · dependencies')
+    expect(text).toContain('- work:shapes/circle · teams shapes · failing · dependencies')
     expect(text).toContain(' · coverage 42% (below 60%) bad · ')
     expect(text).toContain('current records 2 of 2 · last analysed 2026-05-06T09:00:00.000Z')
-    expect(text).toContain('- work:shapes/square · groups shapes · not analysed')
+    expect(text).toContain('- work:shapes/square · teams shapes · not analysed')
     expect(text).not.toContain('security')
     expect(text).not.toContain('release')
     expect(text).not.toContain('colors/red')
@@ -436,7 +434,7 @@ describe('ops toolset', () => {
     const agent = opsToolset(
       agentOpsAccess(
         { ...deps(), analyzers: known },
-        { forge: 'work', path: 'shapes/circle', groups: ['shapes'] },
+        { forge: 'work', path: 'shapes/circle', teams: ['shapes'] },
         reader,
       ),
       now,

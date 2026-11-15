@@ -27,7 +27,7 @@ import {
   trendValues,
   withCoverageSort,
 } from './coverage.ts'
-import { groupTitleOf } from './group-titles.ts'
+import { teamTitleOf } from './team-titles.ts'
 
 const now = new Date('2026-11-12T12:00:00.000Z')
 
@@ -38,7 +38,7 @@ const card = (
   extra: Partial<CoverageRepoCard> = {},
 ): CoverageRepoCard => ({
   repo: { forge: 'acme', path },
-  groups: ['Web'],
+  teams: ['Web'],
   analysisId: `id-${path}`,
   createdAt: '2026-11-11T00:00:00.000Z',
   tools: ['vitest'],
@@ -137,8 +137,8 @@ test('rows: lowest coverage first, empty records next, unmeasured repositories l
   const rows = coverageRows(
     [card('acme/a', 9, 10), card('acme/b', 0, 0), card('acme/c', 1, 10)],
     [
-      { repo: { forge: 'acme', path: 'acme/a' }, groups: ['Web'] },
-      { repo: { forge: 'acme', path: 'acme/z' }, groups: ['Platform'] },
+      { repo: { forge: 'acme', path: 'acme/a' }, teams: ['Web'] },
+      { repo: { forge: 'acme', path: 'acme/z' }, teams: ['Platform'] },
     ],
   )
   expect(rows.map((row) => [row.repo.path, Boolean(row.card)])).toEqual([
@@ -147,13 +147,13 @@ test('rows: lowest coverage first, empty records next, unmeasured repositories l
     ['acme/b', true],
     ['acme/z', false],
   ])
-  expect(rows[3]?.groups).toEqual(['Platform'])
+  expect(rows[3]?.teams).toEqual(['Platform'])
 })
 
 test('freshness of rows and their labels', () => {
   const [behind, never] = coverageRows(
     [card('acme/a', 1, 2, { sha: 'a1', head: 'b2' })],
-    [{ repo: { forge: 'acme', path: 'acme/n' }, groups: [] }],
+    [{ repo: { forge: 'acme', path: 'acme/n' }, teams: [] }],
   )
   expect(behind && coverageFreshness(behind, now)).toBe('behind')
   expect(never && coverageFreshness(never, now)).toBe('never')
@@ -175,7 +175,7 @@ test('KPIs: medians over measured rows, below target, untested and freshness cou
       card('acme/b', 7, 10, { createdAt: '2026-10-01T00:00:00.000Z' }),
       card('acme/c', 9, 10),
     ],
-    [{ repo: { forge: 'acme', path: 'acme/n' }, groups: [] }],
+    [{ repo: { forge: 'acme', path: 'acme/n' }, teams: [] }],
   )
   const kpis = coverageKpis(rows, 60, now)
   expect(kpis).toMatchObject({
@@ -192,8 +192,8 @@ test('KPIs: medians over measured rows, below target, untested and freshness cou
 
 test('filters by text, freshness and below target', () => {
   const rows = coverageRows(
-    [card('acme/checkout-web', 4, 10), card('acme/ledger-api', 9, 10, { groups: ['Payments'] })],
-    [{ repo: { forge: 'acme', path: 'acme/notify-svc' }, groups: ['Platform'] }],
+    [card('acme/checkout-web', 4, 10), card('acme/ledger-api', 9, 10, { teams: ['Payments'] })],
+    [{ repo: { forge: 'acme', path: 'acme/notify-svc' }, teams: ['Platform'] }],
   )
   const paths = (search: Parameters<typeof filterCoverageRows>[1]) =>
     filterCoverageRows(rows, search, 60, undefined, now).map((row) => row.repo.path)
@@ -201,7 +201,7 @@ test('filters by text, freshness and below target', () => {
   expect(paths({ q: 'platform' })).toEqual(['acme/notify-svc'])
   expect(paths({ freshness: ['never'] })).toEqual(['acme/notify-svc'])
   expect(paths({ below: true })).toEqual(['acme/checkout-web'])
-  const titleOf = groupTitleOf({ Payments: 'Money Desk' })
+  const titleOf = teamTitleOf({ Payments: 'Money Desk' })
   expect(
     filterCoverageRows(rows, { q: 'money' }, 60, titleOf, now).map((row) => row.repo.path),
   ).toEqual(['acme/ledger-api'])
@@ -210,7 +210,7 @@ test('filters by text, freshness and below target', () => {
 test('sort values keep unmeasured rows empty', () => {
   const [row, none] = coverageRows(
     [card('acme/a', 1, 4, { change: -2 })],
-    [{ repo: { forge: 'acme', path: 'acme/n' }, groups: [] }],
+    [{ repo: { forge: 'acme', path: 'acme/n' }, teams: [] }],
   )
   if (!row || !none) throw new Error('rows missing')
   expect(coverageSortValue(row, 'lines', now)).toBe(25)
@@ -236,7 +236,7 @@ test('coverage search keeps known values only', () => {
       repo: 'acme:acme/widgets',
       tab: 'x',
       q: 'web',
-      group: 'Web,Payments',
+      team: 'Web,Payments',
       freshness: ['never', 'odd'],
       below: 'true',
       sort: 'lines',
@@ -265,9 +265,9 @@ test('repositories with no tests by design sort last and stay out of the figures
   const rows = coverageRows(
     [card('shapes/widget', 1, 10), card('shapes/gadget', 6, 10), card('shapes/widget-core', 9, 10)],
     [
-      { repo: { forge: 'acme', path: 'shapes/widget' }, groups: ['Web'], noTests },
-      { repo: { forge: 'acme', path: 'shapes/docs' }, groups: ['Web'], noTests: {} },
-      { repo: { forge: 'acme', path: 'shapes/new' }, groups: ['Web'] },
+      { repo: { forge: 'acme', path: 'shapes/widget' }, teams: ['Web'], noTests },
+      { repo: { forge: 'acme', path: 'shapes/docs' }, teams: ['Web'], noTests: {} },
+      { repo: { forge: 'acme', path: 'shapes/new' }, teams: ['Web'] },
     ],
   )
   expect(rows.map((row) => [row.repo.path, row.noTests])).toEqual([
@@ -303,7 +303,7 @@ test('repositories with no tests by design sort last and stay out of the figures
 
 test('the tests toggle marks, removes the own entry or overrides a broader one', () => {
   expect(testsToggle(undefined)).toBeUndefined()
-  expect(testsToggle({ expected: false, scope: { groups: ['shapes'] } })).toBeUndefined()
+  expect(testsToggle({ expected: false, scope: { teams: ['shapes'] } })).toBeUndefined()
   expect(testsToggle({ expected: true, configurable: true })).toEqual({ kind: 'mark' })
   expect(
     testsToggle({ expected: true, entryId: 'e0', inherited: false, configurable: true }),
@@ -327,8 +327,8 @@ test('the tests toggle marks, removes the own entry or overrides a broader one',
     }),
   ).toEqual({ kind: 'override', entryId: 'e1', overrides: { repos: ['acme:shapes/widget'] } })
   expect(
-    testsToggle({ expected: false, scope: { groups: ['shapes'] }, configurable: true }),
-  ).toEqual({ kind: 'override', overrides: { groups: ['shapes'] } })
+    testsToggle({ expected: false, scope: { teams: ['shapes'] }, configurable: true }),
+  ).toEqual({ kind: 'override', overrides: { teams: ['shapes'] } })
   expect(testsToggle({ expected: false, configurable: true })).toEqual({ kind: 'override' })
   expect(testsEntryValue(false, ' Config only ')).toEqual({
     expected: false,

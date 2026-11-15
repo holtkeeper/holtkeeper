@@ -29,7 +29,7 @@ export function TagInput({
   /** Keeps the label for screen readers only, for inputs labelled by their surroundings. */
   hideLabel?: boolean
   isDisabled?: boolean
-  /** What people read for a value, e.g. a group's title; shown with the value as secondary text. */
+  /** What people read for a value, e.g. a team's title; shown with the value as secondary text. */
   labelOf?: (value: string) => string
 }) {
   const [draft, setDraft] = useState('')

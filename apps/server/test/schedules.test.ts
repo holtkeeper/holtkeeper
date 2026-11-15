@@ -20,7 +20,7 @@ const config = parseConfig({
       create: () => ({ getRepository: () => createRepo() }) as never,
     },
   },
-  groups: { games: { forge: 'work', include: ['games/a', 'games/b'] } },
+  teams: { games: { owns: ['work:games/a', 'work:games/b'] } },
   jobs: {
     schedules: [{ name: 'nightly', cron: '0 3 * * *', analyzers: ['ci-jobs'] }],
   },

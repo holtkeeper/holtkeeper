@@ -19,7 +19,7 @@ const echo: AnyAnalyzer = {
 const now = () => new Date()
 
 const forge = { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never }
-const base = { forges: { work: forge }, groups: { games: { forge: 'work', include: ['games/*'] } } }
+const base = { forges: { work: forge }, teams: { games: { owns: ['work:games/*'] } } }
 
 describe('server jobs', () => {
   test('analyzerSettings validates partial options without adding defaults', () => {
@@ -59,7 +59,7 @@ describe('server jobs', () => {
     await store.settings.put({
       id: 's2',
       key: 'analyzers.echo',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: { depth: 5 },
       secret: false,
       updatedAt: at,
@@ -82,7 +82,7 @@ describe('server jobs', () => {
     await store.settings.put({
       id: 'p1',
       key: 'assets.policy',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: { maxDimension: 4096 },
       secret: false,
       updatedAt: at,
@@ -179,7 +179,7 @@ describe('server jobs', () => {
     await store.settings.put({
       id: 'a',
       key: 'audit.allowlist',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: allowlist,
       secret: false,
       updatedAt: at,

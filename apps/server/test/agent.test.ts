@@ -38,7 +38,7 @@ type Options = NonNullable<Parameters<ClaudeQuery>[0]['options']>
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
 })
 const repo = { forge: 'work', path: 'games/chess' }
 const vault = aesVault('v'.repeat(32))
@@ -73,7 +73,7 @@ const knowledge = (overrides: Partial<KnowledgeEntryInput> = {}): KnowledgeEntry
   title: 'Use the chess engine facade',
   body: 'Never import the engine directly.',
   kind: 'convention',
-  scope: { groups: ['games'] },
+  scope: { teams: ['games'] },
   topics: [],
   appliesTo: ['*'],
   status: 'accepted',
@@ -162,7 +162,7 @@ describe('settingsAgentFor', () => {
     await anthropic('sk-anthropic')
     await store.knowledge.put(knowledge())
     await store.knowledge.put(
-      knowledge({ id: 'k2', title: 'Other group', scope: { groups: ['tools'] } }),
+      knowledge({ id: 'k2', title: 'Other group', scope: { teams: ['tools'] } }),
     )
 
     const agent = await agentFor()(repo, { jobId: 'j1', analyzer: 'review' })
@@ -190,7 +190,7 @@ describe('settingsAgentFor', () => {
       taskKind: 'review',
       jobId: 'j1',
       analyzer: 'review',
-      groups: ['games'],
+      teams: ['games'],
       outcome: 'ok',
       costUsd: 0.01,
       inputTokens: 10,
@@ -253,7 +253,7 @@ describe('settingsAgentFor', () => {
       name: 'Corp gateway',
       kind: 'anthropic-compatible',
       url: 'https://llm.corp.test/anthropic',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       secret: 'corp-token',
       options: {
         authHeader: 'bearer',
@@ -325,7 +325,7 @@ describe('settingsAgentFor', () => {
     await store.settings.put({
       id: 'group-provider',
       key: 'llm.provider',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       value: 'Anthropic',
       secret: false,
       updatedAt: '2026-10-01T00:00:00.000Z',
@@ -404,7 +404,7 @@ describe('settingsAgentFor', () => {
     await setting('knowledge.autoAccept', ['quirk'])
     await store.knowledge.put(knowledge())
     const rules = (
-      scope: 'all' | `group:${string}`,
+      scope: 'all' | `team:${string}`,
       section: 'general' | 'review' | 'releases',
       text: string,
     ) =>
@@ -418,8 +418,8 @@ describe('settingsAgentFor', () => {
         learnings: [],
       })
     await rules('all', 'general', 'Answer in English.')
-    await rules('group:games', 'review', 'Flag raw SQL.')
-    await rules('group:games', 'releases', 'Keep public APIs.')
+    await rules('team:games', 'review', 'Flag raw SQL.')
+    await rules('team:games', 'releases', 'Keep public APIs.')
     const agent = await agentFor()(repo)
     await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review' })
     const append = appendOf(calls[0] ?? {})
@@ -437,8 +437,24 @@ describe('settingsAgentFor', () => {
   })
 })
 
+const near = (id: string) => ({
+  id,
+  title: `Note ${id}`,
+  body: 'Load sprites lazily.',
+  kind: 'convention' as const,
+  scope: { repos: ['work:acme/square/web'] },
+  topics: [],
+  appliesTo: ['*'],
+  status: 'accepted' as const,
+  evidence: [],
+  source: 'human' as const,
+  author: 'jane',
+  createdAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-01T00:00:00.000Z',
+})
+
 describe('withServerDefaults', () => {
-  const target = { ...repo, groups: ['games'] }
+  const target = { ...repo, teams: ['games'] }
 
   test('adds the libraries toolset with the task repository', async () => {
     const seen: AgentTask[] = []
@@ -473,6 +489,44 @@ describe('withServerDefaults', () => {
     const versions = toolset?.tools.find((tool) => tool.name === 'libraries.versions')
     await versions?.run({ package: 'zod' }, { dir: '/r', signal: new AbortController().signal })
     expect(asked).toEqual([`${repo.forge}:${repo.path}`])
+  })
+
+  test('the Guide ends with knowledge of similar repositories the task may read', async () => {
+    const seen: AgentTask[] = []
+    const inner: Agent = {
+      name: 'fake',
+      async run(task) {
+        seen.push(task)
+        return { text: 'ok', turns: 1 }
+      },
+    }
+    await store.knowledge.put(near('kn-open'))
+    await store.knowledge.put(near('kn-hidden'))
+    const asked: unknown[] = []
+    const agent = withServerDefaults(inner, {
+      repo: target,
+      store,
+      now,
+      neighbours: async (askedRepo, requester) => {
+        asked.push([askedRepo.path, requester])
+        return {
+          repos: [
+            {
+              repo: { forge: 'work', path: 'acme/square/web', teams: ['shapes'] },
+              similarity: 0.8,
+            },
+          ],
+          readable: (entry) => entry.id !== 'kn-hidden',
+        }
+      },
+    })
+    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'review' })
+    expect(seen[0]?.context).toContain('## Knowledge from similar repositories')
+    expect(seen[0]?.context).toContain('[kb:kn-open]')
+    expect(seen[0]?.context).not.toContain('[kb:kn-hidden]')
+    expect(asked).toEqual([[target.path, undefined]])
+    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'review', context: 'Own context' })
+    expect(asked).toHaveLength(1)
   })
 
   test('hands the task estimate to the budget check; a bootstrap task mounts no toolsets', async () => {
@@ -625,7 +679,7 @@ describe('withServerDefaults', () => {
         usages: createUsageIndex({ analyses: store.analyses }),
         store,
         repo: target,
-        targetOf: (other) => ({ ...other, groups: [] }),
+        targetOf: (other) => ({ ...other, teams: [] }),
         policy: 'metadata',
         now,
       }),
@@ -728,7 +782,7 @@ describe('withServerDefaults', () => {
     const base = { url: 'https://x.test', secret: 's', createdAt: 'now', updatedAt: 'now' }
     const credentials = [
       { ...base, id: 'a', name: 'gw', kind: 'gitlab', scope: { all: true } },
-      { ...base, id: 'b', name: 'gw', kind: 'ai-sdk', scope: { groups: ['tools'] } },
+      { ...base, id: 'b', name: 'gw', kind: 'ai-sdk', scope: { teams: ['tools'] } },
       { ...base, id: 'c', name: 'gw', kind: 'ai-sdk', scope: { all: true } },
       { ...base, id: 'd', name: 'gw', kind: 'openai-compatible', scope: { all: true } },
       { ...base, id: 'gw', name: 'other', kind: 'anthropic', scope: { all: true } },

@@ -354,22 +354,22 @@ export const withoutPolicy = (stored: unknown, id: string): PolicyValue[] =>
   serializePolicies(normalizePolicies(stored).filter((policy) => policy.id !== id))
 
 /**
- * The policies entry a new policy of a team goes to: the one scoped to exactly that group (every
- * repository when `group` is absent), or `undefined` when a new entry is needed.
+ * The policies entry a new policy goes to: the one scoped to exactly team `team` (every
+ * repository when `team` is absent), or `undefined` when a new entry is needed.
  */
 export function policiesEntryFor<E extends { key: string; scope: Scope }>(
   entries: readonly E[],
   key: string,
-  group: string | undefined,
+  team: string | undefined,
 ): E | undefined {
   return entries.find(
     (entry) =>
       entry.key === key &&
-      (group === undefined
+      (team === undefined
         ? entry.scope.all === true
         : !entry.scope.all &&
           !entry.scope.repos?.length &&
-          entry.scope.groups?.length === 1 &&
-          entry.scope.groups[0] === group),
+          entry.scope.teams?.length === 1 &&
+          entry.scope.teams[0] === team),
   )
 }

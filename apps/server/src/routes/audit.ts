@@ -99,7 +99,7 @@ const reachable = (principal: Principal) =>
  * The audit log as Settings › Audit log reads it, plus the compliance tools. `GET /history` pages
  * through the events the caller may see: everything with global `audit:read`; otherwise only events
  * about repositories it can `repos:read`, never instance-level ones. `GET /history/scope` lists those
- * repositories with their groups. `GET /history/summary` counts the same events by day, action,
+ * repositories with their owner teams. `GET /history/summary` counts the same events by day, action,
  * actor and repository. CSV/NDJSON export (itself audited as `audit.export`), hash chain
  * verification and the last daily check (`GET /audit/verify/last`) need global `audit:read`.
  */
@@ -112,7 +112,7 @@ export function auditLogRoutes(deps: ServerDeps) {
       const ref = parseRepo(key)
       if (!ref) return []
       const target = repoTarget(deps.config, ref)
-      return canSee(principal, 'repos:read', target) ? [{ repo: key, groups: target.groups }] : []
+      return canSee(principal, 'repos:read', target) ? [{ repo: key, teams: target.teams }] : []
     })
 
   /** The caller's filter, narrowed to the repositories it can read without global `audit:read`. */

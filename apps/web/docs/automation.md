@@ -12,7 +12,7 @@ The search params are parsed by `parseAutomationSearch` in `lib/automation.ts`:
 | ---------- | ---------------------------------------------------------------------------------------------- |
 | `view`     | `map`; the list is the default and is left out                                                 |
 | `tab`      | the list's rule kind: `triggers`, `policies` or `freshness`; schedules are the default         |
-| `lane`     | the map's team (a group id); every repository when absent                                      |
+| `lane`     | the map's team (a team key); every repository when absent                                      |
 | `schedule` | the schedule whose sheet is open in the list                                                   |
 | `rule`     | the rule node id (`rule:trigger:push`, `rule:policy:<setting>:<policy>`, …) whose form is open |
 | `job`      | a job whose path the map highlights (Runs' **Show on Automation**); implies the map            |
@@ -25,7 +25,7 @@ Crumbs Ops › Automation (› Map), a List | Map switch, a ghost **Configure** 
 
 ### List
 
-The toolbar has the scope switch (_My teams_ keeps rules that cover every repository or sit in a home group, `inMyTeams`; a picked group keeps rules that cover every repository or sit in that group, `laneInView`, counted by `laneScopeCounts`), a text filter (name, id, analyzer), the rule kind segments with counts (Triggers, Schedules, MR policies, Freshness with its stale count) and filter pills: Team, and on Schedules also Status and **Problems only**.
+The toolbar has the scope switch (_My teams_ keeps rules that cover every repository or sit in a home team, `inMyTeams`; a picked team keeps rules that cover every repository or sit in that team's lane, `laneInView`, counted by `laneScopeCounts`), a text filter (name, id, analyzer), the rule kind segments with counts (Triggers, Schedules, MR policies, Freshness with its stale count) and filter pills: Team, and on Schedules also Status and **Problems only**.
 
 - **Schedules**: a `Strip` (schedules, enabled and paused, the next run, scheduled jobs this budget week from `GET /api/jobs/count?trigger=schedule` narrowed to the scope, automatic AI spent this week and its forecast from `GET /api/ai/overview?period=week` (the same numbers as AI spend) with a link to AI spend for `ai:read` or `ai:admin`, then failing, blocked, partly failed and healthy counts), the run legend and a table worst first (`filterSchedules`): name and id, cron or interval with its words (`describeCadence`) and time zone, teams, analyzers with an AI tag, the last 14 runs as ticks, health, last run with its job counts, next run, an on/off switch (`settings:write`, saves the whole schedule with `enabled` flipped) and **Run now**. Other teams' schedules fold into one row. Below it, **Freshness** per team.
 - **Triggers** and **MR policies**: one row per rule with what fires it (`describeTrigger`) or its conditions and status, its teams and actions. A row opens the rule's form in a sheet with Rule and Activity tabs.
@@ -51,6 +51,6 @@ A schedule row opens a sheet (J/K step through the shown rows) with the last run
 
 ### Map
 
-One canvas (`FlowCanvas` with zoom controls and a legend) of `mergedLane(lanes, lane)` in `lib/automation-flow.ts`: the every-repository lane merged with the picked team's lane (`automationLanes`, one per config group), so a team sees its own rules and those covering every repository; nodes both share appear once with the team's version, so its freshness override shows. The team segments count each lane's rules (`laneRuleCounts`). `filterLane` narrows it by rule kind (Triggers, Schedules, Policies, Built in; `ruleKind`), **Calls AI only** and a text that matches titles, chips and linked events or actions.
+One canvas (`FlowCanvas` with zoom controls and a legend) of `mergedLane(lanes, lane)` in `lib/automation-flow.ts`: the every-repository lane merged with the picked team's lane (`automationLanes`, one per team; rules limited to path patterns sit in the every-repository lane with an `only <patterns>` chip), so a team sees its own rules and those covering every repository; nodes both share appear once with the team's version, so its freshness override shows. The team segments count each lane's rules (`laneRuleCounts`). `filterLane` narrows it by rule kind (Triggers, Schedules, Policies, Built in; `ruleKind`), **Calls AI only** and a text that matches titles, chips and linked events or actions.
 
 Rule nodes show an AI tag, then Off, a status badge (a failing, partly failed or budget-blocked schedule, stale freshness) or their kind. Clicking one opens its form in the canvas drawer, whose footer (Remove, unsaved changes, Discard, Save rule) stays pinned at the bottom; a schedule also has Health (the overview above) and Activity tabs, and **Open in the schedules list**. With `?job=` a floating notice explains why the job ran (`GET /api/jobs/:id/why`) and the path that could have queued it (`whyPath`) is highlighted; without a `lane` the map opens on the job's team.

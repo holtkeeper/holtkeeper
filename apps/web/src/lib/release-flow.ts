@@ -538,7 +538,7 @@ export function repoReleaseEntry(
     (entry) =>
       entry.key === 'releases' &&
       !entry.scope.all &&
-      !entry.scope.groups?.length &&
+      !entry.scope.teams?.length &&
       entry.scope.repos?.length === 1 &&
       names.has(entry.scope.repos[0]!),
   )

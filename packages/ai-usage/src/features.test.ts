@@ -10,6 +10,7 @@ describe('featureOf', () => {
     expect(featureOf('chat-summary')).toBe('chat')
     expect(featureOf('learning')).toBe('knowledge')
     expect(featureOf('knowledge-bootstrap')).toBe('knowledge')
+    expect(featureOf('embedding')).toBe('knowledge')
     expect(featureOf('release-notes')).toBe('releases')
     expect(featureOf('widget-digest')).toBe('other')
     expect(featureOf('')).toBe('other')

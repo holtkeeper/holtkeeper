@@ -56,7 +56,7 @@ docker run -d --name holtkeeper -p 7420:7420 --env-file .env --read-only --tmpfs
 
 The config must sit inside `/app` so its `@holtkeeper/*` imports resolve. The image runs as uid 10001, works with a read-only root filesystem and has a health check on `/healthz`.
 
-Open `http://localhost:7420` (or your public URL) and sign in as `root` with `HOLTKEEPER_ROOT_PASSWORD`. Then add your GitLab forge and its groups in [Settings › Integrations](/guide/settings/integrations/).
+Open `http://localhost:7420` (or your public URL) and sign in as `root` with `HOLTKEEPER_ROOT_PASSWORD`. Then add your GitLab forge and its fleet in [Settings › Integrations](/guide/settings/integrations/), and teams on [Repos › Teams](/guide/repos/teams/).
 
 :::note
 Session cookies are `Secure` by default, so the browser drops them over plain HTTP and sign-in seems to do nothing. Serve the panel over HTTPS, or set `HOLTKEEPER_INSECURE_COOKIES=1` for a local test only.

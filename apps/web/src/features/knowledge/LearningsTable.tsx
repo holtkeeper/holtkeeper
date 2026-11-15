@@ -15,13 +15,12 @@ import { useEffect, useEffectEvent, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import {
   useAcceptLearnings,
-  useGroupTitles,
+  useTeamTitles,
   useLearningMutations,
   useLearnings,
   useRepos,
 } from '../../api/queries.ts'
 import { plural } from '../../lib/format.ts'
-import { type GroupTitleOf } from '../../lib/group-titles.ts'
 import { type Space, guideSections, scopeLabel, sectionLabel, spaceKey } from '../../lib/guide.ts'
 import { foldOtherTeams } from '../../lib/home-scope.ts'
 import {
@@ -45,6 +44,7 @@ import {
 } from '../../lib/learnings.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { isEditableTarget } from '../../lib/slash-focus.ts'
+import { type TeamTitleOf } from '../../lib/team-titles.ts'
 import {
   Button,
   Count,
@@ -100,7 +100,7 @@ export function LearningsTable({
   repos: readonly string[]
 }) {
   const { can } = useSession()
-  const { homeGroups } = useScope()
+  const { homeTeams } = useScope()
   const learnings = useLearnings(space.kind === 'repo' ? { repo: space.repo } : {})
   const repoList = useRepos(can('repos:read'))
   const acceptMany = useAcceptLearnings()
@@ -129,13 +129,13 @@ export function LearningsTable({
     { ...(source ? { source } : {}), sections, confidence },
     sort,
   )
-  const groupsOf = new Map(
-    (repoList.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.groups]),
+  const teamsOf = new Map(
+    (repoList.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.teams]),
   )
   const folded = foldOtherTeams(
     shown,
-    space.kind === 'all' ? homeGroups : [],
-    (candidate) => groupsOf.get(candidate.repo) ?? [],
+    space.kind === 'all' ? homeTeams : [],
+    (candidate) => teamsOf.get(candidate.repo) ?? [],
   )
   const ids = selectableIds(shown)
   const chosen = shown.filter((c) => selected.has(c.id) && ids.includes(c.id))
@@ -508,13 +508,14 @@ export function LearningsTable({
 const suggestedKinds: Record<LearningCandidateView['suggestedScope'], string> = {
   repo: 'the repository',
   family: 'its family',
-  group: 'its team',
+  path: 'its folder',
+  team: 'its team',
 }
 
 const suggestedLabel = (
   candidate: LearningCandidateView,
   families: readonly Family[],
-  titleOf: GroupTitleOf,
+  titleOf: TeamTitleOf,
 ) => {
   const key = candidate.targetScope ?? suggestedScopeOf(candidate)
   return key ? scopeLabel(key, families, titleOf) : suggestedKinds[candidate.suggestedScope]
@@ -617,7 +618,7 @@ function CandidateRow({
   onScope: (scope: GuideScopeKey) => void
   error?: string
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { accept, edit, reject } = useLearningMutations()
   const [draft, setDraft] = useState<{ rule: string; section: GuideSectionName } | null>(null)
   const pending = accept.isPending || edit.isPending || reject.isPending

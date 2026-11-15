@@ -7,7 +7,6 @@ import {
   type PersonView,
   type RepoHealthCellKey,
   type RepoRef,
-  leafGroups,
 } from '@holtkeeper/api'
 import { Link, type LinkProps, useNavigate } from '@tanstack/react-router'
 import {
@@ -34,7 +33,7 @@ import { type MouseEvent, type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
-  useGroupTitles,
+  useTeamTitles,
   useHome,
   useInboxCount,
   useRepos,
@@ -43,7 +42,6 @@ import {
 } from '../../api/queries.ts'
 import { automaticLimit, budgetBar, budgetTone, formatUsd } from '../../lib/ai-usage.ts'
 import { formatRelative, plural } from '../../lib/format.ts'
-import { groupPathTitle } from '../../lib/group-titles.ts'
 import { type ScopeView, scopeLabel } from '../../lib/home-scope.ts'
 import {
   type AttentionGrouping,
@@ -416,7 +414,7 @@ function WorstRepos({
   view: ScopeView
   noTeams: boolean
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const worst = ranked.slice(0, 10)
   const columns = healthCells.filter((column) =>
     worst.some((entry) => entry.summary.cells[column.key] !== undefined),
@@ -446,7 +444,7 @@ function WorstRepos({
           <thead>
             <tr>
               <Th>Repository</Th>
-              <Th>Group</Th>
+              <Th>Teams</Th>
               <Th>Health</Th>
               {columns.map((column) => (
                 <Th key={column.key}>{column.label}</Th>
@@ -469,9 +467,7 @@ function WorstRepos({
                   </LinkButton>
                 </Td>
                 <Td className="text-muted">
-                  {leafGroups(summary.groups)
-                    .map((group) => groupPathTitle(titleOf, group))
-                    .join(', ') || '—'}
+                  {summary.teams.map((team) => titleOf(team)).join(', ') || '—'}
                 </Td>
                 <Td>
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
@@ -685,7 +681,7 @@ export function HomePage() {
     )
 
   const scoped =
-    home.data && scope.ready ? scopeHome(home.data, scope.view, scope.homeGroups) : undefined
+    home.data && scope.ready ? scopeHome(home.data, scope.view, scope.homeTeams) : undefined
   const scopedRepos = repos.data && scope.ready ? scope.scope(repos.data.repos) : undefined
   const ranked = scopedRepos ? repoHealth(scopedRepos.shown) : undefined
   const fleet = ranked ? fleetCounts(ranked.map((entry) => entry.summary)) : undefined

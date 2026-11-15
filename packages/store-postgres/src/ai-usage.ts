@@ -21,7 +21,7 @@ export function dimensionFlags(
     week: on('week'),
     month: on('month'),
     repo: on('repo'),
-    group: on('group'),
+    team: on('team'),
     model: on('model'),
     provider: on('provider'),
     taskKind: on('taskKind'),
@@ -30,16 +30,16 @@ export function dimensionFlags(
   }
 }
 
-/** A (forge, path, groups) triple a scope filter lets through, as compared in SQL. */
-export type AllowedRepo = [forge: string, path: string, groups: string[]]
+/** A (forge, path, teams) triple a scope filter lets through, as compared in SQL. */
+export type AllowedRepo = [forge: string, path: string, teams: string[]]
 
 /** The triples of `candidates` that at least one of `scopes` covers. */
 export function coveredRepos(
   candidates: readonly AllowedRepo[],
   scopes: NonNullable<AiUsageFilter['scopes']>,
 ): AllowedRepo[] {
-  return candidates.filter(([forge, path, groups]) =>
-    scopes.some((scope) => scopeCoversRepo(scope, { forge, path, groups })),
+  return candidates.filter(([forge, path, teams]) =>
+    scopes.some((scope) => scopeCoversRepo(scope, { forge, path, teams })),
   )
 }
 
@@ -48,7 +48,7 @@ export interface AggregateRow {
   k_week: string
   k_month: string
   k_repo: string
-  k_group: string
+  k_team: string
   k_model: string
   k_provider: string
   k_task_kind: string
@@ -71,7 +71,7 @@ const keyColumn: Record<AiUsageDimension, keyof AggregateRow> = {
   week: 'k_week',
   month: 'k_month',
   repo: 'k_repo',
-  group: 'k_group',
+  team: 'k_team',
   model: 'k_model',
   provider: 'k_provider',
   taskKind: 'k_task_kind',
@@ -107,10 +107,10 @@ const plainWhere = (sql: SQL, f: AiUsageFilter) => sql`
   AND (${f.to ?? null}::timestamptz IS NULL OR r.at < ${f.to ?? null}::timestamptz)
   AND (${f.repo?.forge ?? null}::text IS NULL
     OR (r.repo_forge = ${f.repo?.forge ?? null}::text AND r.repo_path = ${f.repo?.path ?? null}::text))
-  AND (${f.group ?? null}::text IS NULL OR r.groups @> jsonb_build_array(${f.group ?? null}::text))
-  AND (${f.groups === undefined ? null : sql.json(f.groups)}::jsonb IS NULL
-    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.groups) rg(name)
-      WHERE rg.name IN (SELECT jsonb_array_elements_text(${f.groups === undefined ? null : sql.json(f.groups)}::jsonb))))
+  AND (${f.team ?? null}::text IS NULL OR r.teams @> jsonb_build_array(${f.team ?? null}::text))
+  AND (${f.teams === undefined ? null : sql.json(f.teams)}::jsonb IS NULL
+    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.teams) rt(name)
+      WHERE rt.name IN (SELECT jsonb_array_elements_text(${f.teams === undefined ? null : sql.json(f.teams)}::jsonb))))
   AND (${f.actor ?? null}::text IS NULL OR r.actor = ${f.actor ?? null}::text)
   AND (${originValue(f.origin)}::boolean IS NULL OR r.interactive = ${originValue(f.origin)}::boolean)
   AND (${f.model ?? null}::text IS NULL OR r.model = ${f.model ?? null}::text)
@@ -130,16 +130,16 @@ async function where(sql: SQL, t: Tables, filter: AiUsageFilter): Promise<SQL.Qu
   if (scopes === undefined || scopes.some((scope) => scope.all)) return [plain]
   let allowed: AllowedRepo[] = []
   if (scopes.length) {
-    const candidates: { repo_forge: string; repo_path: string; groups: string[] }[] = await sql`
-      SELECT DISTINCT r.repo_forge, r.repo_path, r.groups FROM ${t.aiUsage} r
+    const candidates: { repo_forge: string; repo_path: string; teams: string[] }[] = await sql`
+      SELECT DISTINCT r.repo_forge, r.repo_path, r.teams FROM ${t.aiUsage} r
       WHERE ${plainWhere(sql, filter)}`
     allowed = coveredRepos(
-      candidates.map((row) => [row.repo_forge, row.repo_path, row.groups]),
+      candidates.map((row) => [row.repo_forge, row.repo_path, row.teams]),
       scopes,
     )
   }
   return [
-    sql`${plain} AND jsonb_build_array(r.repo_forge, r.repo_path, r.groups)
+    sql`${plain} AND jsonb_build_array(r.repo_forge, r.repo_path, r.teams)
       IN (SELECT jsonb_array_elements(${sql.json(allowed)}::jsonb))`,
   ]
 }
@@ -148,7 +148,7 @@ async function where(sql: SQL, t: Tables, filter: AiUsageFilter): Promise<SQL.Qu
  * An `AiUsageStore` on the `ai_usage` table. Every query is static: unused filters are `NULL`
  * parameters and unused dimensions collapse to `''`, so one prepared statement serves every
  * grouping. Scope filters use path globs that SQL cannot match the way `scopeCoversRepo` does, so
- * they first resolve to the covered (repository, groups) pairs among those passing the other
+ * they first resolve to the covered (repository, teams) pairs among those passing the other
  * filters.
  */
 export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
@@ -156,12 +156,12 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
     async append(record) {
       const { sql, t } = await db()
       const [row]: AiUsageRow[] = await sql`
-        INSERT INTO ${t.aiUsage} (id, at, repo_forge, repo_path, groups, task_kind, analyzer, job_id,
+        INSERT INTO ${t.aiUsage} (id, at, repo_forge, repo_path, teams, task_kind, analyzer, job_id,
           analysis_id, actor, interactive, subject, provider, model, input_tokens, output_tokens,
           cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome,
           error, transcript_ref)
         VALUES (${crypto.randomUUID()}, ${record.at}, ${record.repo.forge}, ${record.repo.path},
-          ${sql.json(record.groups)}, ${record.taskKind}, ${record.analyzer ?? null},
+          ${sql.json(record.teams)}, ${record.taskKind}, ${record.analyzer ?? null},
           ${record.jobId ?? null}, ${record.analysisId ?? null}, ${record.actor},
           ${record.interactive ?? false}, ${record.subject ?? null}, ${record.provider}, ${record.model}, ${record.inputTokens}, ${record.outputTokens},
           ${record.cacheReadTokens}, ${record.cacheWriteTokens}, ${record.costUsd}::float8,
@@ -191,7 +191,7 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
             THEN to_char(date_trunc('week', r.at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') ELSE '' END AS k_week,
           CASE WHEN ${on.month}::boolean THEN to_char(r.at AT TIME ZONE 'UTC', 'YYYY-MM') ELSE '' END AS k_month,
           CASE WHEN ${on.repo}::boolean THEN r.repo_forge || ':' || r.repo_path ELSE '' END AS k_repo,
-          g.name AS k_group,
+          g.name AS k_team,
           CASE WHEN ${on.model}::boolean THEN r.model ELSE '' END AS k_model,
           CASE WHEN ${on.provider}::boolean THEN r.provider ELSE '' END AS k_provider,
           CASE WHEN ${on.taskKind}::boolean THEN r.task_kind ELSE '' END AS k_task_kind,
@@ -210,9 +210,9 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
           (AVG(r.duration_ms) FILTER (WHERE r.outcome <> 'denied-budget'))::float8 AS avg_duration_ms
         FROM ${t.aiUsage} r
         CROSS JOIN LATERAL (
-          SELECT value AS name FROM jsonb_array_elements_text(r.groups) WHERE ${on.group}::boolean
+          SELECT value AS name FROM jsonb_array_elements_text(r.teams) WHERE ${on.team}::boolean
           UNION ALL
-          SELECT '' WHERE NOT ${on.group}::boolean OR jsonb_array_length(r.groups) = 0
+          SELECT '' WHERE NOT ${on.team}::boolean OR jsonb_array_length(r.teams) = 0
         ) g
         WHERE ${await where(sql, t, aggregateFilter(query))}
         GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10`

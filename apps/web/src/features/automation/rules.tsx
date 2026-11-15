@@ -33,18 +33,18 @@ export function ruleId(ref: RuleRef): string | undefined {
 }
 
 /**
- * The form of one rule: a trigger, schedule or policy form, the freshness override of `group`
+ * The form of one rule: a trigger, schedule or policy form, the freshness override of `team`
  * (every repository when absent), or a note on the release assistant.
  */
 export function RuleEditor({
   rule,
   model,
-  group,
+  team,
   onDone,
 }: {
   rule: RuleRef
   model: AutomationModel
-  group?: string | undefined
+  team?: string | undefined
   onDone: () => void
 }) {
   const { writable } = model
@@ -87,16 +87,12 @@ export function RuleEditor({
       return (
         <div className="flex flex-col gap-4">
           <FreshnessTeams
-            lanes={[{ id: group ?? 'all', label: group ?? 'All repositories' }]}
+            lanes={[{ id: team ?? 'all', label: team ?? 'All repositories' }]}
             settings={model.settings}
             overview={model.freshness}
             writable={writable}
           />
-          <FreshnessAnalyzers
-            group={group}
-            analyzers={model.analyzers}
-            overview={model.freshness}
-          />
+          <FreshnessAnalyzers team={team} analyzers={model.analyzers} overview={model.freshness} />
           <SweepLimitsNote settings={model.settings} />
         </div>
       )

@@ -1,11 +1,5 @@
-import {
-  type Action,
-  type Principal,
-  type RepoTarget,
-  type Scope,
-  can,
-  groupNames,
-} from '@holtkeeper/access'
+import { type Action, type Principal, type RepoTarget, type Scope, can } from '@holtkeeper/access'
+import { isExactPattern, splitPattern } from '@holtkeeper/access/paths'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type CrossTeamCatalog, crossTeamLevels, defaultCrossTeam } from '@holtkeeper/settings'
 import type { KnowledgeEntry, SettingEntry, SettingStore } from '@holtkeeper/store'
@@ -72,7 +66,7 @@ export interface CatalogReach {
   snippets: (repo: RepoRef) => boolean
 }
 
-/** `CatalogReach` of a principal under `policy`, resolving groups with `targetOf`. */
+/** `CatalogReach` of a principal under `policy`, resolving owner teams with `targetOf`. */
 export const reachOf = (
   principal: Principal,
   policy: CrossTeamCatalog,
@@ -106,20 +100,16 @@ export const canReadShared = (
   (policy !== 'off' && readsSomething(principal))
 
 /**
- * The teams an entry of `scope` belongs to: the config groups it names, plus the groups of the
- * exact repositories it names. Empty for scopes covering everything.
+ * The teams an entry of `scope` belongs to: the teams it names, plus the owner teams of the exact
+ * repositories it names (`forge:path`). Empty for scopes covering everything.
  */
-export function scopeOwner(scope: Scope, groupsOf: (repo: RepoRef) => string[]): string[] {
+export function scopeOwner(scope: Scope, teamsOf: (repo: RepoRef) => string[]): string[] {
   if (scope.all) return []
-  const owners = new Set(groupNames(scope.groups ?? []))
+  const owners = new Set(scope.teams ?? [])
   for (const pattern of scope.repos ?? []) {
-    const separator = pattern.indexOf(':')
-    if (separator < 1 || /[*?[{]/.test(pattern)) continue
-    for (const group of groupsOf({
-      forge: pattern.slice(0, separator),
-      path: pattern.slice(separator + 1),
-    }))
-      owners.add(group)
+    const { forge, glob } = splitPattern(pattern)
+    if (forge === undefined || !isExactPattern(pattern)) continue
+    for (const team of teamsOf({ forge, path: glob })) owners.add(team)
   }
   return [...owners]
 }

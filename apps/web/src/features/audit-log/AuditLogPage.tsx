@@ -148,7 +148,7 @@ function EventRow({
  */
 export function AuditLogPage() {
   const scope = useHistoryScope()
-  const { view, setView, homeGroups, ready: scopeReady, noTeams } = useScope()
+  const { view, setView, homeTeams, ready: scopeReady, noTeams } = useScope()
   const search = useSearch({ from: '/app/settings/$section' })
   const [filters, setFilters] = useState<HistoryFilters>(() => ({
     ...emptyHistoryFilters,
@@ -158,7 +158,7 @@ export function AuditLogPage() {
   const [openId, setOpenId] = useState<string>()
   const [section, setSection] = useState<EventSection>('event')
   const [now] = useState(() => new Date())
-  const repos = scopeRepos(view, scope.data, homeGroups)
+  const repos = scopeRepos(view, scope.data, homeTeams)
   const query = historyQueryOf(filters, repos, now)
   const nothingInScope = scopeReady && repos !== undefined && repos.length === 0 && !filters.repo
   const ready = scope.isSuccess && scopeReady && !nothingInScope

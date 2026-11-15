@@ -112,6 +112,7 @@ export interface RepoOutcome {
 
 /** Everything the `propagation` analysis stores for one wave. */
 export interface PropagationData {
+  /** Key of the team whose repositories the wave covered. */
   group: string
   packages: PackageTarget[]
   dryRun: boolean
@@ -194,7 +195,7 @@ export interface FixProposer {
    * (`forge:path`) task id, or `undefined` when nothing was proposed.
    */
   propose(input: {
-    /** Config group of the rollout. */
+    /** Key of the team the rollout covers. */
     group: string
     /** Merge request title, the same for every repository. */
     title: string

@@ -13,43 +13,43 @@ describe('roleOf', () => {
       role: 'admin',
       scope: { all: true },
     })
-    expect(roleOf(grantsForRole('viewer', { groups: ['widgets'] }))).toEqual({
+    expect(roleOf(grantsForRole('viewer', { teams: ['widgets'] }))).toEqual({
       role: 'viewer',
-      scope: { groups: ['widgets'] },
+      scope: { teams: ['widgets'] },
     })
   })
 
   test('ignores action order and merges the scopes of several preset grants', () => {
     const grants: Grant[] = [
-      { scope: { groups: ['widgets'] }, actions: developer.toReversed() },
+      { scope: { teams: ['widgets'] }, actions: developer.toReversed() },
       { scope: { repos: ['acme/widget-kit'] }, actions: developer },
     ]
     expect(roleOf(grants)).toEqual({
       role: 'developer',
-      scope: { groups: ['widgets'], repos: ['acme/widget-kit'] },
+      scope: { teams: ['widgets'], repos: ['acme/widget-kit'] },
     })
   })
 
   test('grants matching no preset stay custom', () => {
-    expect(roleOf([{ scope: { groups: ['widgets'] }, actions: ['repos:read'] }])).toEqual({
+    expect(roleOf([{ scope: { teams: ['widgets'] }, actions: ['repos:read'] }])).toEqual({
       role: 'custom',
     })
     expect(
-      roleOf([{ scope: { groups: ['widgets'] }, actions: [...developer, 'credentials:read'] }]),
+      roleOf([{ scope: { teams: ['widgets'] }, actions: [...developer, 'credentials:read'] }]),
     ).toEqual({ role: 'custom' })
-    expect(roleOf([{ scope: { groups: ['widgets'] }, actions: ['*'] }])).toEqual({
+    expect(roleOf([{ scope: { teams: ['widgets'] }, actions: ['*'] }])).toEqual({
       role: 'custom',
     })
     expect(
       roleOf([
         { scope: { all: true }, actions: ['*'] },
-        { scope: { groups: ['widgets'] }, actions: ['repos:read'] },
+        { scope: { teams: ['widgets'] }, actions: ['repos:read'] },
       ]),
     ).toEqual({ role: 'admin', scope: { all: true } })
     expect(
       roleOf([
-        { scope: { groups: ['widgets'] }, actions: developer },
-        { scope: { groups: ['gadgets'] }, actions: [...rolePresets.viewer.actions] },
+        { scope: { teams: ['widgets'] }, actions: developer },
+        { scope: { teams: ['gadgets'] }, actions: [...rolePresets.viewer.actions] },
       ]),
     ).toEqual({ role: 'custom' })
   })
@@ -57,11 +57,11 @@ describe('roleOf', () => {
 
 describe('grantsForRole', () => {
   test('admin always covers everything; other presets keep the scope', () => {
-    expect(grantsForRole('admin', { groups: ['widgets'] })).toEqual([
+    expect(grantsForRole('admin', { teams: ['widgets'] })).toEqual([
       { scope: { all: true }, actions: ['*'] },
     ])
-    expect(grantsForRole('maintainer', { groups: ['widgets', 'widgets'], repos: [] })).toEqual([
-      { scope: { groups: ['widgets'] }, actions: [...rolePresets.maintainer.actions] },
+    expect(grantsForRole('maintainer', { teams: ['widgets', 'widgets'], repos: [] })).toEqual([
+      { scope: { teams: ['widgets'] }, actions: [...rolePresets.maintainer.actions] },
     ])
   })
 
@@ -74,7 +74,7 @@ describe('grantsForRole', () => {
 
 describe('abilityChanges', () => {
   test('marks what a role change gains and loses', () => {
-    const scope = { groups: ['widgets'] }
+    const scope = { teams: ['widgets'] }
     const changes = abilityChanges(
       grantsForRole('developer', scope),
       grantsForRole('maintainer', scope),
@@ -91,21 +91,19 @@ describe('abilityChanges', () => {
 describe('sameAccess', () => {
   test('reads a split preset with reordered actions as the preset it matches', () => {
     const split = [
-      { scope: { groups: ['widgets'] }, actions: rolePresets.viewer.actions.toReversed() },
-      { scope: { groups: ['gadgets'] }, actions: [...rolePresets.viewer.actions] },
+      { scope: { teams: ['widgets'] }, actions: rolePresets.viewer.actions.toReversed() },
+      { scope: { teams: ['gadgets'] }, actions: [...rolePresets.viewer.actions] },
     ]
-    expect(sameAccess(grantsForRole('viewer', { groups: ['gadgets', 'widgets'] }), split)).toBe(
-      true,
-    )
-    expect(sameAccess(grantsForRole('viewer', { groups: ['widgets'] }), split)).toBe(false)
-    expect(sameAccess(grantsForRole('developer', { groups: ['gadgets', 'widgets'] }), split)).toBe(
+    expect(sameAccess(grantsForRole('viewer', { teams: ['gadgets', 'widgets'] }), split)).toBe(true)
+    expect(sameAccess(grantsForRole('viewer', { teams: ['widgets'] }), split)).toBe(false)
+    expect(sameAccess(grantsForRole('developer', { teams: ['gadgets', 'widgets'] }), split)).toBe(
       false,
     )
   })
 
   test('custom grants match only themselves', () => {
-    const custom = [{ scope: { groups: ['widgets'] }, actions: ['repos:read' as const] }]
+    const custom = [{ scope: { teams: ['widgets'] }, actions: ['repos:read' as const] }]
     expect(sameAccess(custom, [...custom])).toBe(true)
-    expect(sameAccess(custom, [{ ...custom[0]!, scope: { groups: ['gadgets'] } }])).toBe(false)
+    expect(sameAccess(custom, [{ ...custom[0]!, scope: { teams: ['gadgets'] } }])).toBe(false)
   })
 })

@@ -10,9 +10,9 @@ import { Plus, RotateCcw, X } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../../api/client.ts'
-import { useGroupNames, useGroupTitles, useRepos, useSettings } from '../../../api/queries.ts'
+import { useTeamNames, useTeamTitles, useRepos, useSettings } from '../../../api/queries.ts'
 import { useCheckCommitConventions, useSavePolicyDraft } from '../../../api/settings-analyzers.ts'
-import { canInGroup } from '../../../lib/access.ts'
+import { canInTeam } from '../../../lib/access.ts'
 import { analyzerOptions, analyzersOffValue, readAnalyzersOff } from '../../../lib/analyzers-off.ts'
 import { isoDay } from '../../../lib/format.ts'
 import {
@@ -944,7 +944,7 @@ const CARD_KEYS: Readonly<Record<string, readonly string[]>> = {
 }
 
 function PoliciesBody({ data }: { data: SettingList }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { can, canGlobal, principal } = useSession()
   const repos = useRepos(can('repos:read'))
   const save = useSavePolicyDraft()
@@ -954,12 +954,12 @@ function PoliciesBody({ data }: { data: SettingList }) {
   const writable =
     focus.kind === 'org'
       ? canGlobal('settings:write')
-      : canInGroup(principal, 'settings:write', focus.group)
+      : canInTeam(principal, 'settings:write', focus.team)
   const entries: readonly SettingView[] = data.settings
   const today = isoDay(new Date())
-  const groups = useGroupNames(can('repos:read'))
-  const focusId = focus.kind === 'org' ? 'org' : `group:${focus.group}`
-  const focusLabel = focus.kind === 'org' ? 'Organization' : `Group ${titleOf(focus.group)}`
+  const teams = useTeamNames(can('repos:read'))
+  const focusId = focus.kind === 'org' ? 'org' : `team:${focus.team}`
+  const focusLabel = focus.kind === 'org' ? 'Organization' : `Team ${titleOf(focus.team)}`
   const count = draftCount(draft)
 
   const bind = (definition: SettingDefinitionView): Bound => {
@@ -1000,21 +1000,21 @@ function PoliciesBody({ data }: { data: SettingList }) {
 
   const storedAllowlist = allowlistRows(focusEntry(entries, ALLOWLIST, focus)?.value)
   const focusRepos = (repos.data?.repos ?? [])
-    .filter((repo) => focus.kind === 'org' || repo.groups.includes(focus.group))
+    .filter((repo) => focus.kind === 'org' || repo.teams.includes(focus.team))
     .map((repo) => `${repo.repo.forge}:${repo.repo.path}`)
 
   return (
     <div className="flex flex-col gap-5">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-line bg-background/95 py-2 backdrop-blur">
         <span className="text-xs text-muted">Editing for</span>
-        {groups.length ? (
+        {teams.length ? (
           <Segmented
             aria-label="Editing for"
             options={[
               { id: 'org', label: 'Organization defaults' },
-              ...groups.map((group) => ({
-                id: `group:${group}`,
-                label: `Group ${titleOf(group)}`,
+              ...teams.map((team) => ({
+                id: `team:${team}`,
+                label: `Team ${titleOf(team)}`,
               })),
             ]}
             value={focusId}
@@ -1023,7 +1023,7 @@ function PoliciesBody({ data }: { data: SettingList }) {
                 notify.error('Save or discard first', 'Unsaved changes belong to one scope.')
                 return
               }
-              setFocus(id === 'org' ? { kind: 'org' } : { kind: 'group', group: id.slice(6) })
+              setFocus(id === 'org' ? { kind: 'org' } : { kind: 'team', team: id.slice(5) })
               setGeneration((n) => n + 1)
             }}
           />
@@ -1047,8 +1047,8 @@ function PoliciesBody({ data }: { data: SettingList }) {
         ) : null}
       </div>
       <p className="text-xs text-muted">
-        Groups override the organization; a repository can override its groups in the Resolver.
-        Merge request policies and freshness live in{' '}
+        Teams override the organization; a repository can override its teams in the Resolver. Merge
+        request policies and freshness live in{' '}
         <Link to="/ops/automation" className="underline">
           Ops › Automation
         </Link>
@@ -1202,7 +1202,7 @@ function PoliciesBody({ data }: { data: SettingList }) {
  * reviews (`mergeRequests.comments`), test ids) and
  * which agent knowledge needs no review
  * (`knowledge.autoAccept`, `learnings.autoAccept`, `guide.autoAccept`, one card),
- * for the organization or one group. Edits gather into one draft over several keys, saved at once
+ * for the organization or one team. Edits gather into one draft over several keys, saved at once
  * through `POST /api/settings/draft`; their pages keep editing the same entries.
  */
 export function PoliciesSection() {

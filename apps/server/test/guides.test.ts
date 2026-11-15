@@ -31,9 +31,9 @@ import { rulesToolset } from '../src/tools/rules.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    shop: { forge: 'work', include: ['shop/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    shop: { owns: ['work:shop/*'] },
   },
 })
 
@@ -55,10 +55,10 @@ const setup = (auth: AuthProvider = noAuth()) => {
 
 const teams = headerAuth({
   roles: {
-    member: [{ scope: { groups: ['games'] }, actions: ['knowledge:read', 'knowledge:write'] }],
+    member: [{ scope: { teams: ['games'] }, actions: ['knowledge:read', 'knowledge:write'] }],
     lead: [
       {
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         actions: ['knowledge:read', 'knowledge:write', 'settings:write', 'repos:read'],
       },
     ],
@@ -102,7 +102,7 @@ const pkg = (name: string) => ({
 })
 
 describe('guide sections', () => {
-  test('editing needs settings:write for all, groups and families, knowledge:write for repos', async () => {
+  test('editing needs settings:write for all, teams and families, knowledge:write for repos', async () => {
     const app = setup(teams)
     const member = as('member')
     const lead = as('lead')
@@ -110,9 +110,9 @@ describe('guide sections', () => {
       200,
     )
     expect((await put(app, 'repo:work:shop/b', 'general', { rules: 'R' }, member)).status).toBe(403)
-    expect((await put(app, 'group:games', 'general', { rules: 'G' }, member)).status).toBe(403)
-    expect((await put(app, 'group:games', 'general', { rules: 'G' }, lead)).status).toBe(200)
-    expect((await put(app, 'group:shop', 'general', { rules: 'G' }, lead)).status).toBe(403)
+    expect((await put(app, 'team:games', 'general', { rules: 'G' }, member)).status).toBe(403)
+    expect((await put(app, 'team:games', 'general', { rules: 'G' }, lead)).status).toBe(200)
+    expect((await put(app, 'team:shop', 'general', { rules: 'G' }, lead)).status).toBe(403)
     expect((await put(app, 'all', 'general', { rules: 'A' }, lead)).status).toBe(403)
     expect((await put(setup(), 'all', 'general', { rules: 'A' })).status).toBe(200)
     const denied = (await store.audit.list({ outcome: 'denied' })).events
@@ -125,9 +125,9 @@ describe('guide sections', () => {
     expect(await store.audit.count({ repo: 'work:games/a' })).toBe(1)
 
     const view = (await (
-      await app.request('/api/guide?scope=group:games', { headers: member })
+      await app.request('/api/guide?scope=team:games', { headers: member })
     ).json()) as GuideScopeView
-    expect(view).toMatchObject({ scope: 'group:games', label: 'Team games', canEdit: false })
+    expect(view).toMatchObject({ scope: 'team:games', label: 'Team games', canEdit: false })
     expect(view.sections.map((s) => s.section)).toEqual([
       'general',
       'review',
@@ -140,11 +140,12 @@ describe('guide sections', () => {
     expect(view.sections[0]).toMatchObject({ rules: 'G', version: 1, editedBy: 'header:lead' })
     expect(view.sections[1]).toMatchObject({ rules: '', version: 0 })
     expect((await app.request('/api/guide?scope=all', { headers: member })).status).toBe(200)
-    expect((await app.request('/api/guide?scope=group:shop', { headers: member })).status).toBe(403)
+    expect((await app.request('/api/guide?scope=team:shop', { headers: member })).status).toBe(403)
 
     for (const [path, status] of [
-      ['/api/guide?scope=team:x', 400],
-      ['/api/guide?scope=group:nope', 404],
+      ['/api/guide?scope=group:games', 400],
+      ['/api/guide?scope=path:nope:games', 404],
+      ['/api/guide?scope=team:nope', 404],
       ['/api/guide?scope=family:nope', 404],
       ['/api/guide/section?scope=all&section=nope', 400],
     ] as const)
@@ -214,7 +215,7 @@ describe('effective prompt preview', () => {
   test('resolves rules of every scope in precedence order with the budget', async () => {
     const app = setup()
     await put(app, 'all', 'general', { rules: 'ALL rule.' })
-    await put(app, 'group:games', 'review', { rules: 'GAMES rule.' })
+    await put(app, 'team:games', 'review', { rules: 'GAMES rule.' })
     await put(app, 'repo:work:games/a', 'general', { rules: 'REPO rule.' })
     await put(app, 'repo:work:games/a', 'releases', { rules: 'RELEASE rule.' })
     const preview = (await (
@@ -327,7 +328,7 @@ describe('generated text', () => {
     })
     const body = { scope: 'repo:work:games/a', section: 'general', inputHash: waiting.inputHash }
     expect((await reject({ ...body, scope: 'repo:work:shop/b' }, 'member')).status).toBe(403)
-    expect((await reject({ ...body, scope: 'group:games' }, 'lead')).status).toBe(400)
+    expect((await reject({ ...body, scope: 'team:games' }, 'lead')).status).toBe(400)
     expect((await reject({ ...body, inputHash: 'hash:other' }, 'member')).status).toBe(409)
 
     const response = await reject(body, 'member')
@@ -461,13 +462,13 @@ describe('generated text', () => {
   test('regenerating queues a forced guide job with the extra prompt', async () => {
     const jobsConfig = parseConfig({
       forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-      groups: { games: { forge: 'work', include: ['games/*'] } },
+      teams: { games: { owns: ['work:games/*'] } },
       jobs: {},
     })
     const runner = headerAuth({
       roles: {
-        writer: [{ scope: { groups: ['games'] }, actions: ['knowledge:write'] }],
-        runner: [{ scope: { groups: ['games'] }, actions: ['knowledge:write', 'analyses:run'] }],
+        writer: [{ scope: { teams: ['games'] }, actions: ['knowledge:write'] }],
+        runner: [{ scope: { teams: ['games'] }, actions: ['knowledge:write', 'analyses:run'] }],
       },
     })
     const vault = aesVault('v'.repeat(32))
@@ -721,10 +722,10 @@ const setupWithForge = (forge: unknown, auth: AuthProvider = noAuth()) => {
   return createApp({
     config: parseConfig({
       forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => forge as never } },
-      groups: {
-        games: { forge: 'work', include: ['games/*'] },
-        web: { forge: 'work', include: ['games/a'] },
-        shop: { forge: 'work', include: ['shop/*'] },
+      teams: {
+        games: { owns: ['work:games/*'] },
+        web: { owns: ['work:games/a'] },
+        shop: { owns: ['work:shop/*'] },
       },
     }),
     auth,
@@ -740,7 +741,7 @@ const setupWithForge = (forge: unknown, auth: AuthProvider = noAuth()) => {
 const json = async <T>(response: Response | Promise<Response>) => (await response).json() as T
 
 describe('guide chain and repository files', () => {
-  test('layers per section in agent reading order with several groups and the budget', async () => {
+  test('layers per section in agent reading order with several owner teams and the budget', async () => {
     const { forge } = filesForge({
       'REVIEW.md': 'Flag raw fooUtil calls.',
       'AGENTS.md': 'Run checks.',
@@ -753,8 +754,8 @@ describe('guide chain and repository files', () => {
       }),
     )
     await put(app, 'all', 'review', { rules: 'ALL review.' })
-    await put(app, 'group:web', 'review', { rules: 'WEB review.' })
-    await put(app, 'group:games', 'review', { rules: 'GAMES review.' })
+    await put(app, 'team:web', 'review', { rules: 'WEB review.' })
+    await put(app, 'team:games', 'review', { rules: 'GAMES review.' })
     await put(app, `family:${family.id}`, 'review', { rules: 'FAMILY review.' })
     await put(app, 'repo:work:games/a', 'review', { rules: 'REPO review.' })
     await store.guides.put({
@@ -772,8 +773,8 @@ describe('guide chain and repository files', () => {
       [1, 'repo-file', 'REVIEW.md · AGENTS.md'],
       [2, 'repo', 'This repository'],
       [3, 'family', 'Family Widget apps'],
-      [4, 'group', 'Team games'],
-      [5, 'group', 'Team web'],
+      [4, 'team', 'Team games'],
+      [5, 'team', 'Team web'],
       [6, 'all', 'All repositories'],
       [7, 'generated', 'Generated Review'],
     ])
@@ -846,8 +847,8 @@ describe('guide chain and repository files', () => {
     const { forge } = filesForge({})
     const app = setupWithForge(forge)
     await put(app, 'all', 'testing', { rules: 'ALL testing.' })
-    await put(app, 'group:games', 'testing', { rules: 'GAMES testing.' })
-    await put(app, 'group:web', 'testing', { rules: 'WEB testing.' })
+    await put(app, 'team:games', 'testing', { rules: 'GAMES testing.' })
+    await put(app, 'team:web', 'testing', { rules: 'WEB testing.' })
     await put(app, 'repo:work:games/a', 'testing', { rules: 'REPO testing.' })
     const chain = await json<GuideChainView>(
       app.request('/api/guide/chain?repo=work:games/a&section=testing'),
@@ -857,7 +858,7 @@ describe('guide chain and repository files', () => {
       guide: {
         resolve: (_repo, request) =>
           resolve({
-            repo: { forge: 'work', path: 'games/a', groups: ['games', 'web'] },
+            repo: { forge: 'work', path: 'games/a', teams: ['games', 'web'] },
             ...request,
           }),
       },
@@ -963,11 +964,11 @@ describe('knowledge counts', () => {
   test('counts guide sections, notes and proposed learnings per space, narrowed to the grant', async () => {
     const app = setup()
     await put(app, 'all', 'general', { rules: 'ALL.' })
-    await put(app, 'group:games', 'review', { rules: 'GAMES.' })
-    await put(app, 'group:shop', 'review', { rules: 'SHOP.' })
+    await put(app, 'team:games', 'review', { rules: 'GAMES.' })
+    await put(app, 'team:shop', 'review', { rules: 'SHOP.' })
     await put(app, 'repo:work:games/a', 'testing', { rules: 'A.' })
     await put(app, 'repo:work:shop/b', 'testing', { rules: 'B.' })
-    await note('n1', { groups: ['games'] })
+    await note('n1', { teams: ['games'] })
     await note('n2', { repos: ['work:shop/b'] })
     await note('n3', { all: true })
     await candidate('c1', 'work:games/a')
@@ -976,8 +977,10 @@ describe('knowledge counts', () => {
     const everything = await json<KnowledgeCounts>(app.request('/api/knowledge/counts'))
     expect(everything.spaces).toEqual({
       all: { guide: 1, notes: 3, learnings: 2 },
-      'group:games': { guide: 1, notes: 1, learnings: 1 },
-      'group:shop': { guide: 1, notes: 0, learnings: 1 },
+      'team:games': { guide: 1, notes: 1, learnings: 1 },
+      'team:shop': { guide: 1, notes: 0, learnings: 1 },
+      'path:work:games': { guide: 0, notes: 1, learnings: 1 },
+      'path:work:shop': { guide: 0, notes: 1, learnings: 1 },
       'repo:work:games/a': { guide: 1, notes: 2, learnings: 1 },
       'repo:work:shop/b': { guide: 1, notes: 2, learnings: 1 },
     })
@@ -987,7 +990,7 @@ describe('knowledge counts', () => {
     )
     expect(narrow.spaces).toEqual({
       all: { guide: 1, notes: 1, learnings: 1 },
-      'group:games': { guide: 1, notes: 1, learnings: 1 },
+      'team:games': { guide: 1, notes: 1, learnings: 1 },
       'repo:work:games/a': { guide: 1, notes: 2, learnings: 1 },
     })
   })
@@ -1004,7 +1007,7 @@ describe('knowledge counts', () => {
     })
     await note('n1', { repos: ['work:games/a'] })
     await note('n2', { all: true })
-    await note('n3', { groups: ['shop'] })
+    await note('n3', { teams: ['shop'] })
     await store.knowledge.put({
       ...(await store.knowledge.get('n3'))!,
       id: 'n4',
@@ -1019,18 +1022,15 @@ describe('knowledge counts', () => {
     const counts = await json<KnowledgeCounts>(app.request('/api/knowledge/counts'))
     expect(counts.spaces['all']?.notes).toBe(4)
     expect(counts.spaces['family:f1']?.notes).toBe(2)
-    expect(counts.spaces['group:shop']?.notes).toBe(1)
+    expect(counts.spaces['team:shop']?.notes).toBe(1)
     expect(counts.spaces['repo:work:shop/b']?.notes).toBe(3)
   })
 })
 
-describe('subgroups', () => {
+describe('folders', () => {
   const nested = parseConfig({
     forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-    groups: {
-      shapes: { forge: 'work', include: ['shapes/*'], title: 'Shapes' },
-      'shapes.round': { forge: 'work', include: ['shapes/disc*'], title: 'Round' },
-    },
+    teams: { shapes: { title: 'Shapes', owns: ['work:shapes/**'] } },
   })
   const nestedApp = (auth: AuthProvider = noAuth()) => {
     const vault = aesVault('v'.repeat(32))
@@ -1047,42 +1047,49 @@ describe('subgroups', () => {
   }
   const grants = headerAuth({
     roles: {
-      round: [{ scope: { groups: ['shapes.round'] }, actions: ['knowledge:read'] }],
-      shapes: [{ scope: { groups: ['shapes'] }, actions: ['knowledge:read'] }],
+      round: [{ scope: { repos: ['work:shapes/round/**'] }, actions: ['knowledge:read'] }],
+      shapes: [{ scope: { teams: ['shapes'] }, actions: ['knowledge:read'] }],
     },
   })
 
-  test('the chain shows the subgroup layer before its parent, with path titles', async () => {
+  test('the chain shows folder layers deepest first, then the owner team', async () => {
     const app = nestedApp()
-    await put(app, 'group:shapes', 'review', { rules: 'PARENT review.' })
-    await put(app, 'group:shapes.round', 'review', { rules: 'SUB review.' })
+    await put(app, 'team:shapes', 'review', { rules: 'TEAM review.' })
+    await put(app, 'path:work:shapes', 'review', { rules: 'SHAPES review.' })
+    await put(app, 'path:work:shapes/round', 'review', { rules: 'ROUND review.' })
     const chain = await json<GuideChainView>(
-      app.request('/api/guide/chain?repo=work:shapes/disc&section=review'),
+      app.request('/api/guide/chain?repo=work:shapes/round/disc&section=review'),
     )
-    expect(chain.sections[0]?.layers.map((l) => [l.kind, l.scope, l.source])).toEqual([
-      ['subgroup', 'group:shapes.round', 'Team Shapes › Round (shapes.round)'],
-      ['group', 'group:shapes', 'Team Shapes (shapes)'],
+    expect(chain.sections[0]?.layers.map((l) => [l.kind, l.scope])).toEqual([
+      ['path', 'path:work:shapes/round'],
+      ['path', 'path:work:shapes'],
+      ['team', 'team:shapes'],
     ])
+    expect(chain.sections[0]?.layers.at(-1)?.source).toBe('Team Shapes (shapes)')
     const flat = await json<GuideChainView>(
       app.request('/api/guide/chain?repo=work:shapes/cube&section=review'),
     )
-    expect(flat.sections[0]?.layers.map((l) => l.scope)).toEqual(['group:shapes'])
+    expect(flat.sections[0]?.layers.map((l) => l.scope)).toEqual([
+      'path:work:shapes',
+      'team:shapes',
+    ])
   })
 
-  test('counts give a subgroup its own space, readable from its own or its parent grant', async () => {
+  test('counts give every folder its own space, readable from a grant covering it', async () => {
     const app = nestedApp()
-    await put(app, 'group:shapes', 'review', { rules: 'PARENT.' })
-    await put(app, 'group:shapes.round', 'review', { rules: 'SUB.' })
-    await note('n1', { groups: ['shapes.round'] })
-    await note('n2', { groups: ['shapes'] })
-    await candidate('c1', 'work:shapes/disc')
+    await put(app, 'team:shapes', 'review', { rules: 'TEAM.' })
+    await put(app, 'path:work:shapes/round', 'review', { rules: 'ROUND.' })
+    await note('n1', { repos: ['shapes/round/**'] })
+    await note('n2', { teams: ['shapes'] })
+    await candidate('c1', 'work:shapes/round/disc')
 
     const everything = await json<KnowledgeCounts>(app.request('/api/knowledge/counts'))
     expect(everything.spaces).toEqual({
       all: { guide: 0, notes: 2, learnings: 1 },
-      'group:shapes': { guide: 1, notes: 1, learnings: 1 },
-      'group:shapes.round': { guide: 1, notes: 1, learnings: 1 },
-      'repo:work:shapes/disc': { guide: 0, notes: 2, learnings: 1 },
+      'team:shapes': { guide: 1, notes: 1, learnings: 1 },
+      'path:work:shapes': { guide: 0, notes: 1, learnings: 1 },
+      'path:work:shapes/round': { guide: 1, notes: 2, learnings: 1 },
+      'repo:work:shapes/round/disc': { guide: 0, notes: 2, learnings: 1 },
     })
 
     const counts = (role: string) =>
@@ -1091,15 +1098,23 @@ describe('subgroups', () => {
       )
     expect(Object.keys((await counts('round')).spaces).toSorted()).toEqual([
       'all',
-      'group:shapes.round',
-      'repo:work:shapes/disc',
+      'path:work:shapes/round',
+      'repo:work:shapes/round/disc',
     ])
-    expect((await counts('round')).spaces['group:shapes.round']?.notes).toBe(1)
+    expect((await counts('round')).spaces['path:work:shapes/round']?.notes).toBe(2)
     expect(Object.keys((await counts('shapes')).spaces).toSorted()).toEqual([
       'all',
-      'group:shapes',
-      'group:shapes.round',
-      'repo:work:shapes/disc',
+      'path:work:shapes',
+      'path:work:shapes/round',
+      'repo:work:shapes/round/disc',
+      'team:shapes',
     ])
+  })
+
+  test('a note scoped to a folder pattern gives the folder a space, not a repository one', async () => {
+    await note('n1', { repos: ['work:shapes/round/**'] })
+    const counts = await json<KnowledgeCounts>(nestedApp().request('/api/knowledge/counts'))
+    expect(Object.keys(counts.spaces).filter((key) => key.startsWith('repo:'))).toEqual([])
+    expect(counts.spaces['path:work:shapes/round']?.notes).toBe(1)
   })
 })

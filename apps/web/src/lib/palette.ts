@@ -8,10 +8,10 @@ import type {
 } from '@holtkeeper/api'
 import type { LinkProps } from '@tanstack/react-router'
 
-import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { healthCells } from './home.ts'
 import { repoKey, repoSplat } from './repo.ts'
 import type { SettingsSearchEntry } from './settings-search.ts'
+import { keyAsTitle, type TeamTitleOf } from './team-titles.ts'
 
 /** Where a result comes from; also the palette's filter chips, in display order. */
 export const paletteKinds = [
@@ -40,7 +40,7 @@ export interface PaletteRepoState {
   key: string
   forge: string
   path: string
-  groups: string[]
+  teams: string[]
   tone: PaletteTone
   cells: RepoHealthCells
 }
@@ -244,12 +244,12 @@ export const toneLabels: Record<PaletteTone, string> = {
 }
 
 /**
- * One result per readable repository, toned by its overall health. The subtitle names its groups
+ * One result per readable repository, toned by its overall health. The subtitle names its teams
  * and the health cells that need attention.
  */
 export function repoItems(
   repos: readonly RepoSummary[],
-  titleOf: GroupTitleOf = keyAsTitle,
+  titleOf: TeamTitleOf = keyAsTitle,
 ): PaletteItem[] {
   return repos.map((summary): PaletteItem => {
     const key = repoKey(summary.repo)
@@ -262,15 +262,15 @@ export function repoItems(
       id: `repos:${key}`,
       kind: 'repos',
       title: summary.repo.path,
-      subtitle: [summary.groups.map(titleOf).join(', '), toneLabels[tone], ...notes]
+      subtitle: [summary.teams.map(titleOf).join(', '), toneLabels[tone], ...notes]
         .filter(Boolean)
         .join(' · '),
       meta: toneLabels[tone],
       tone,
       mono: true,
-      keywords: `${summary.repo.forge} ${summary.groups.map((group) => `${group} ${titleOf(group)}`).join(' ')}`,
+      keywords: `${summary.repo.forge} ${summary.teams.map((group) => `${group} ${titleOf(group)}`).join(' ')}`,
       link: { to: '/repos/$', params: { _splat: repoSplat(summary.repo) } },
-      repo: { key, ...summary.repo, groups: summary.groups, tone, cells: summary.cells },
+      repo: { key, ...summary.repo, teams: summary.teams, tone, cells: summary.cells },
     }
   })
 }

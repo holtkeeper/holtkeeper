@@ -1,4 +1,4 @@
-import { type Principal, type RepoTarget, can, groupLineage } from '@holtkeeper/access'
+import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
 import type {
   AgentTranscriptView,
   AnalyzerHealthList,
@@ -15,7 +15,7 @@ import type {
   JobWhy,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import { readJobLog } from '@holtkeeper/jobs'
+import { readJobLog, teamForges } from '@holtkeeper/jobs'
 import type { JobSearch } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -91,7 +91,7 @@ function narrowRepos(
 const createSchema = z.object({
   analyzer: z.string().min(1),
   repo: z.string().min(1).optional(),
-  group: z.string().min(1).optional(),
+  team: z.string().min(1).optional(),
   ref: z.string().min(1).optional(),
   options: z.record(z.string(), z.unknown()).optional(),
 })
@@ -121,14 +121,15 @@ const RUN_ONLY_ENDPOINTS: Record<string, string> = {
  */
 export const RUN_ONLY_ANALYZERS: ReadonlySet<string> = new Set(Object.keys(RUN_ONLY_ENDPOINTS))
 
-/** The repository a job's permissions are checked on; group jobs count as their group. */
+/**
+ * The repository a job's permissions are checked on; group-scope jobs (`Job.group` holds a team
+ * key) count as a repository of that team.
+ */
 export const jobTarget = (
   config: ServerDeps['config'],
   job: { repo: RepoRef; group?: string },
 ): RepoTarget =>
-  job.group !== undefined
-    ? { ...job.repo, groups: groupLineage(job.group) }
-    : repoTarget(config, job.repo)
+  job.group !== undefined ? { ...job.repo, teams: [job.group] } : repoTarget(config, job.repo)
 
 /** The jobs whose agent cost `principal` may read: `ai:read` or `ai:admin` on the job's target. */
 export function costReaderOf(config: ServerDeps['config'], principal: Principal): CostReader {
@@ -147,7 +148,7 @@ export function costReaderOf(config: ServerDeps['config'], principal: Principal)
  * wait hints for queued rows and agent cost per row), count, queue stats, group failures, health
  * per analyzer over seven days (`/jobs/analyzers/health`), inspect (log with steps, why it ran or
  * waits, agent runs), queue and cancel.
- * Lists, counts and stats only cover repositories (and groups) the caller may read; stats list
+ * Lists, counts and stats only cover repositories (and teams of group-scope jobs) the caller may read; stats list
  * workers only for callers with `analyses:read` over everything. A job's agent runs
  * and transcripts (`/jobs/:id/runs`, `/jobs/:id/transcripts/:ref`) are readable by whoever may
  * read the job, and only transcripts its own runs recorded. Agent cost in lists and stats needs
@@ -281,8 +282,8 @@ export function jobRoutes(deps: ServerDeps) {
       return [
         {
           repo: keyOf(target.repo),
-          ...(target.group !== undefined && { group: target.group }),
-          groups: scoped.groups,
+          ...(target.group !== undefined && { team: target.group }),
+          teams: scoped.teams,
         },
       ]
     })
@@ -378,17 +379,22 @@ export function jobRoutes(deps: ServerDeps) {
 
     let target: { repo: RepoRef; group?: string }
     if (analyzer.scope === 'group') {
-      if (!input.group || input.repo)
+      if (!input.team || input.repo)
         throw new HTTPException(400, {
-          message: `${analyzer.kind} runs on a group: pass group, not repo`,
+          message: `${analyzer.kind} runs on a team: pass team, not repo`,
         })
-      const group = config.groups[input.group]
-      if (!group) throw new HTTPException(400, { message: `unknown group ${input.group}` })
-      target = { repo: { forge: group.forge, path: input.group }, group: input.group }
+      if (!config.teams[input.team])
+        throw new HTTPException(400, { message: `unknown team ${input.team}` })
+      // A team spanning several forges runs on the first one in config order, as schedules
+      // queue one job per forge but a manual run names none.
+      const forge = teamForges(config, input.team)[0]
+      if (forge === undefined)
+        throw new HTTPException(400, { message: `team ${input.team} owns nothing on a forge` })
+      target = { repo: { forge, path: input.team }, group: input.team }
     } else {
-      if (!input.repo || input.group)
+      if (!input.repo || input.team)
         throw new HTTPException(400, {
-          message: `${analyzer.kind} runs on a repository: pass repo, not group`,
+          message: `${analyzer.kind} runs on a repository: pass repo, not team`,
         })
       const repo = parseRepo(input.repo)
       if (!repo) throw new HTTPException(400, { message: 'repo is required' })

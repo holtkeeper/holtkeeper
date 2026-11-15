@@ -13,18 +13,18 @@ const store = sqliteStore({ path: join(import.meta.dir, 'holtkeeper.db') })
 const scanner = osvScanner()
 const at = new Date().toISOString()
 
-/** A forge without a stored credential (its tasks fail) and two groups on it. */
+/** A forge without a stored credential (its tasks fail) and two teams owning its folders. */
 await store.config?.put({
   type: 'forge',
   id: 'work',
   data: { kind: 'gitlab', url: 'https://gitlab.example.com', credentialId: 'dev-none' },
   updatedAt: at,
 })
-for (const group of ['games', 'tools'])
+for (const team of ['games', 'tools'])
   await store.config?.put({
-    type: 'group',
-    id: group,
-    data: { forge: 'work', include: [`${group}/*`], exclude: [] },
+    type: 'team',
+    id: team,
+    data: { owns: [`work:${team}/*`], exclude: [], consumes: [], members: [] },
     updatedAt: at,
   })
 

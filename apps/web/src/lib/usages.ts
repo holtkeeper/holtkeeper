@@ -94,7 +94,7 @@ const fromRecord = (entry: PackageUsageRepo | undefined) =>
 /** One repository of a library's Used by table. */
 export interface ConsumerRow {
   repo: RepoRef
-  groups: string[]
+  teams: string[]
   /** Versions in use, from the usage record when there is one, else from the lockfile. */
   versions: string[]
   majorsBehind: number
@@ -112,7 +112,7 @@ export interface ConsumerRow {
  * behind first, then by `forge:path`.
  */
 export function consumerRows(
-  usedBy: readonly { repo: RepoRef; groups: string[]; versions: string[]; majorsBehind: number }[],
+  usedBy: readonly { repo: RepoRef; teams: string[]; versions: string[]; majorsBehind: number }[],
   usage: readonly PackageUsageRepo[] = [],
 ): ConsumerRow[] {
   const records = new Map(usage.map((entry) => [repoKey(entry.repo), entry]))
@@ -121,7 +121,7 @@ export function consumerRows(
     records.delete(repoKey(user.repo))
     return {
       repo: user.repo,
-      groups: user.groups,
+      teams: user.teams,
       versions: record?.versions.length ? record.versions : user.versions,
       majorsBehind: user.majorsBehind,
       ...fromRecord(record),
@@ -130,7 +130,7 @@ export function consumerRows(
   for (const record of records.values())
     rows.push({
       repo: record.repo,
-      groups: record.groups,
+      teams: record.teams,
       versions: record.versions.length ? record.versions : record.ranges,
       majorsBehind: 0,
       ...fromRecord(record),

@@ -1,31 +1,53 @@
 import type { Scope } from '@holtkeeper/api'
-import { Globe2, Layers } from 'lucide-react'
+import { folderPattern } from '@holtkeeper/api'
+import { FolderPlus, Globe2, Layers } from 'lucide-react'
+import { useMemo } from 'react'
 
-import { useDescribeScope, useGroupTitles } from '../../api/queries.ts'
-import { groupMatchTitle } from '../../lib/group-titles.ts'
+import { useDescribeScope, useRepos, useTeamNames, useTeamTitles } from '../../api/queries.ts'
+import { repoKey } from '../../lib/repo.ts'
 import {
-  formatGroupMatch,
-  parseGroupMatch,
-  validateGroupMatch,
+  folderPatterns,
+  previewPatterns,
+  reposMatching,
   validateRepoPattern,
 } from '../../lib/scope.ts'
-import { Chip, Segmented, TagInput } from '../../ui/index.ts'
+import { validateTeamKey } from '../../lib/team-titles.ts'
+import { Button, Chip, Segmented, TagInput } from '../../ui/index.ts'
 
-/** Which repositories something applies to: everything, or groups plus `forge:path/**` patterns. */
+/**
+ * Which repositories something applies to: everything, or owner teams plus path patterns
+ * (`forge:folder/**`). Patterns preview live how many visible repositories they match.
+ */
 export function ScopeEditor({
   value,
   onChange,
-  groups = [],
+  teams,
+  allowTeams = true,
+  folder,
   label = 'Scope',
 }: {
   value: Scope
   onChange: (scope: Scope) => void
-  /** Known groups, offered as suggestions. */
-  groups?: readonly string[]
+  /** Known teams, offered as suggestions; defaults to the owner teams of visible repositories. */
+  teams?: readonly string[]
+  /**
+   * Whether teams are offered at all. Settings pass `false`: they are scoped by paths, and a team
+   * field only shows when the entry already names teams.
+   */
+  allowTeams?: boolean
+  /** The folder the editor was opened from, offered as a one-click "this folder" pattern. */
+  folder?: { forge: string; folder: string }
   label?: string
 }) {
   const mode = value.all ? 'all' : 'some'
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
+  const known = useTeamNames(teams === undefined)
+  const repos = useRepos().data?.repos
+  const patterns = value.repos ?? []
+  const showTeams = allowTeams || (value.teams?.length ?? 0) > 0
+  const suggestions = useMemo(() => folderPatterns((repos ?? []).map((repo) => repo.repo)), [repos])
+  const preview = repos ? previewPatterns(patterns, repos) : undefined
+  const here = folder ? folderPattern(folder.folder, folder.forge) : undefined
   return (
     <fieldset className="flex flex-col gap-3">
       <legend className="mb-2 text-sm font-medium">{label}</legend>
@@ -46,34 +68,63 @@ export function ScopeEditor({
             label: (
               <span className="flex items-center gap-1.5">
                 <Layers className="size-3.5" />
-                Groups and repositories
+                {showTeams ? 'Teams and paths' : 'Paths'}
               </span>
             ),
           },
         ]}
         value={mode}
-        onChange={(next) => onChange(next === 'all' ? { all: true } : { groups: [], repos: [] })}
+        onChange={(next) => onChange(next === 'all' ? { all: true } : { teams: [], repos: [] })}
       />
       {mode === 'some' ? (
         <div className="flex flex-col gap-3 rounded-xl border border-separator p-3">
+          {showTeams ? (
+            <TagInput
+              label="Teams"
+              values={value.teams ?? []}
+              onChange={(next) => onChange({ ...value, teams: next })}
+              placeholder="e.g. widgets"
+              suggestions={teams ?? known}
+              labelOf={titleOf}
+              validate={validateTeamKey}
+              description="Repositories any of these teams own"
+            />
+          ) : null}
           <TagInput
-            label="Groups"
-            values={(value.groups ?? []).map(formatGroupMatch)}
-            onChange={(next) => onChange({ ...value, groups: next.map(parseGroupMatch) })}
-            placeholder="e.g. games"
-            suggestions={groups}
-            labelOf={(text) => groupMatchTitle(parseGroupMatch(text), titleOf)}
-            validate={validateGroupMatch}
-            description="Join groups with + to require all of them: frontend + storefront"
-          />
-          <TagInput
-            label="Repository patterns"
-            values={value.repos ?? []}
+            label="Path patterns"
+            values={patterns}
             onChange={(next) => onChange({ ...value, repos: next })}
-            placeholder="e.g. work:games/**"
+            placeholder="e.g. acme/round/**"
+            suggestions={suggestions}
+            labelOf={
+              repos
+                ? (pattern) => `${pattern} · ${reposMatching(pattern, repos).length}`
+                : undefined
+            }
             validate={validateRepoPattern}
-            description="Path globs, optionally prefixed by a forge id: work:games/**, tools/cli"
+            description="Path globs, optionally prefixed by a forge id: work:acme/**, tools/cli"
           />
+          {here && !patterns.includes(here) ? (
+            <div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => onChange({ ...value, repos: [...patterns, here] })}
+              >
+                <FolderPlus className="size-3.5" />
+                This folder: {here}
+              </Button>
+            </div>
+          ) : null}
+          {preview && patterns.length > 0 ? (
+            <p className="text-xs text-muted" aria-live="polite">
+              {preview.total === 0
+                ? 'The patterns match no repository you can see yet.'
+                : `Matches ${preview.total} ${preview.total === 1 ? 'repository' : 'repositories'}: ${preview.sample
+                    .map((repo) => repoKey(repo.repo))
+                    .join(', ')}${preview.total > preview.sample.length ? ', …' : ''}`}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </fieldset>

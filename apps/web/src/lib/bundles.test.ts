@@ -95,7 +95,7 @@ const overview: BundlesOverview = {
   repos: [
     {
       repo: { forge: 'acme', path: 'acme/storefront' },
-      groups: ['Web'],
+      teams: ['Web'],
       analysisId: 'rec-1',
       createdAt: '2026-01-05T00:00:00Z',
       ref: 'v4.12.0',
@@ -109,7 +109,7 @@ const overview: BundlesOverview = {
     },
     {
       repo: { forge: 'acme', path: 'acme/widget-kit' },
-      groups: ['Platform'],
+      teams: ['Platform'],
       analysisId: 'rec-2',
       createdAt: '2026-01-04T00:00:00Z',
       ref: 'a'.repeat(40),
@@ -139,7 +139,7 @@ test('overview rows carry their repository, groups and ref', () => {
     'acme:acme/widget-kit#widget-kit',
     'acme:acme/widget-kit#docs',
   ])
-  expect(rows[0]).toMatchObject({ repoKey: 'acme:acme/storefront', groups: ['Web'] })
+  expect(rows[0]).toMatchObject({ repoKey: 'acme:acme/storefront', teams: ['Web'] })
   expect(rows.map(rowRelease)).toEqual(['v4.12.0', 'v4.12.0', '2.1.0', 'aaaaaaaa'])
 })
 

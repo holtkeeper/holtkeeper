@@ -146,9 +146,9 @@ function paceLine(budget: AiBudgetStatus): string {
 }
 
 const scopeKind = (cap: AiScopeCapView) => {
-  const { groups = [], repos = [] } = cap.scope
-  if (groups.length && !repos.length) return 'Group'
-  if (repos.length && !groups.length) return 'Repository'
+  const { teams = [], repos = [] } = cap.scope
+  if (teams.length && !repos.length) return 'Team'
+  if (repos.length && !teams.length) return 'Paths'
   return 'Mixed'
 }
 
@@ -180,7 +180,7 @@ function CapsTable({ overview, editable }: { overview: AiBudgetOverview; editabl
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h3 className="text-[12.5px] font-medium">Caps for groups, repositories and features</h3>
+        <h3 className="text-[12.5px] font-medium">Caps for teams, paths and features</h3>
         <span className="mono text-xs text-dim">{overview.scopes.length + features.length}</span>
         <span className="text-xs text-muted">
           The tightest matching cap wins. Each also counts toward the org budget.

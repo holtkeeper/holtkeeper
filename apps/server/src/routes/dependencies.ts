@@ -206,7 +206,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
       if (scope.catalog(repo)) visibility.push(`catalog:${origin}`)
       if (audits(repo)) visibility.push(`audits:${origin}`)
       if (analyses(repo)) visibility.push(`analyses:${origin}`)
-      visibility.push(`groups:${origin}:${repoTarget(config, repo).groups.join(',')}`)
+      visibility.push(`teams:${origin}:${repoTarget(config, repo).teams.join(',')}`)
     }
     const checked = [...(latest ?? [])].map(
       ([library, entry]) => `latest:${library}:${entry.latest}:${entry.checkedAt}`,
@@ -250,7 +250,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     const repos = new Map<string, DependencyRepo>()
     const repoEntry = (repo: RepoRef) => ({
       repo,
-      groups: repoTarget(config, repo).groups,
+      teams: repoTarget(config, repo).teams,
       dependencies: counts.get(`${repo.forge}:${repo.path}`) ?? 0,
     })
     for (const [key, { record }] of depgraphs)
@@ -383,7 +383,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
             can(principal, 'knowledge:read', { kind: 'scope', scope: entry.scope }) ||
             knowledgeRepos.some((target) => scopeCoversRepo(entry.scope, target)),
           canReadShared: (entry) => canReadShared(principal, entry.scope, scope.policy),
-          ownerOf: (entry) => scopeOwner(entry.scope, (repo) => repoTarget(config, repo).groups),
+          ownerOf: (entry) => scopeOwner(entry.scope, (repo) => repoTarget(config, repo).teams),
         },
         ref,
       ),
@@ -405,7 +405,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
         const repo = parseKey(origin)
         return {
           repo,
-          groups: repoTarget(config, repo).groups,
+          teams: repoTarget(config, repo).teams,
           versions: used,
           majorsBehind: newestRelease
             ? Math.max(0, ...used.map((version) => majorsBehind(version, newestRelease)))

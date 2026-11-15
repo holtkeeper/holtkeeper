@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronRight, ListChecks, Map as MapIcon, Play } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
-import { useAiOverview, useGroupTitles, useJobCount, useJobTargets } from '../../api/queries.ts'
+import { useAiOverview, useTeamTitles, useJobCount, useJobTargets } from '../../api/queries.ts'
 import { canReadSpend } from '../../lib/access.ts'
 import { formatUsd } from '../../lib/ai-usage.ts'
 import { ALL_LANE, type AutomationRule, ruleNodeId } from '../../lib/automation-flow.ts'
@@ -23,7 +23,7 @@ import {
 } from '../../lib/automation.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { type ScopeView, scopeLabel, viewGroup } from '../../lib/home-scope.ts'
+import { type ScopeView, scopeLabel, viewTeam } from '../../lib/home-scope.ts'
 import { jobScopeRepos } from '../../lib/jobs.ts'
 import {
   Button,
@@ -143,7 +143,7 @@ export function AutomationList({
   setSearch: (patch: Partial<AutomationSearch>) => void
 }) {
   const { can } = useSession()
-  const { view: scopeView, setView, homeGroups } = useScope()
+  const { view: scopeView, setView, homeTeams } = useScope()
   const [query, setQuery] = useState('')
   const [teams, setTeams] = useState<string[]>([])
   const [states, setStates] = useState<ScheduleState[]>([])
@@ -152,8 +152,8 @@ export function AutomationList({
   const toggle = useToggleSchedule()
   const tab: AutomationTab = search.tab ?? 'schedules'
   const needle = query.trim().toLowerCase()
-  const mine = (lanes: readonly string[]) => inMyTeams(lanes, homeGroups)
-  const inScope = (lanes: readonly string[]) => laneInView(lanes, scopeView, homeGroups)
+  const mine = (lanes: readonly string[]) => inMyTeams(lanes, homeTeams)
+  const inScope = (lanes: readonly string[]) => laneInView(lanes, scopeView, homeTeams)
 
   const lanes = model.lanes.map((lane) => ({ id: lane.id, label: lane.label }))
   const visibleLanes = lanes.filter((lane) => inScope([lane.id]))
@@ -183,7 +183,7 @@ export function AutomationList({
   const stale = staleCount(visibleLanes, model.freshness)
 
   const scopeCounts = (lanesOf: readonly (readonly string[])[]) =>
-    laneScopeCounts(lanesOf, homeGroups)
+    laneScopeCounts(lanesOf, homeTeams)
   const counts =
     tab === 'schedules'
       ? scopeCounts(allSchedules.map((row) => row.lanes))
@@ -427,12 +427,12 @@ function SchedulesTab({
   onToggle: ((row: ScheduleRow, on: boolean) => void) | undefined
   showSpend: boolean
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const now = new Date()
-  const { homeGroups } = useScope()
+  const { homeTeams } = useScope()
   const targets = useJobTargets()
   const overview = useAiOverview(showSpend, { period: 'week' })
-  const repos = jobScopeRepos(scopeView, targets.data?.targets, homeGroups)
+  const repos = jobScopeRepos(scopeView, targets.data?.targets, homeTeams)
   const weekFrom = overview.data?.current.from ?? utcWeekStart(now)
   const jobCount = useJobCount(
     { trigger: 'schedule', since: weekFrom, ...(repos && { repos }) },
@@ -583,7 +583,7 @@ function SchedulesTab({
       <header className="flex flex-wrap items-center gap-2">
         <h2 className="text-[13px] font-semibold">Schedules</h2>
         <span className="text-xs text-muted">
-          {viewGroup(scopeView) !== undefined
+          {viewTeam(scopeView) !== undefined
             ? scopeLabel(scopeView, titleOf)
             : scopeLabel(scopeView).toLowerCase()}{' '}
           · worst first
@@ -714,7 +714,7 @@ function FreshnessTab({
             ) : null}
           </header>
           <FreshnessAnalyzers
-            group={picked.id === ALL_LANE ? undefined : picked.id}
+            team={picked.id === ALL_LANE ? undefined : picked.id}
             analyzers={model.analyzers}
             overview={model.freshness}
           />

@@ -4,7 +4,7 @@ import { Pause, Play } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useConfigMutations, useGroupTitles, useRunSchedule } from '../../api/queries.ts'
+import { useConfigMutations, useTeamTitles, useRunSchedule } from '../../api/queries.ts'
 import {
   cronFields,
   describeCadence,
@@ -17,7 +17,6 @@ import {
   toScheduleInput,
 } from '../../lib/automation.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { groupMatchTitle } from '../../lib/group-titles.ts'
 import { jobStatusLabel, jobStatusTone, scheduleRunShares } from '../../lib/jobs.ts'
 import {
   KeyValue,
@@ -211,7 +210,7 @@ const tagList = (items: readonly string[], mono = false) =>
  * breakdown, the next five run times and the rule in When / Where / If / Then / Limits terms.
  */
 export function ScheduleOverview({ row }: { row: ScheduleRow }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const data = row.entry.data
   const fields = data.cron ? cronFields(data.cron) : undefined
   const windows = describeWindows(data.windows)
@@ -287,9 +286,9 @@ export function ScheduleOverview({ row }: { row: ScheduleRow }) {
               value: data.jitterMinutes ? `${data.jitterMinutes} min` : null,
             },
             {
-              label: 'Groups',
-              value: data.groups?.length
-                ? tagList(data.groups.map((entry) => groupMatchTitle(entry, titleOf)))
+              label: 'Teams',
+              value: data.teams?.length
+                ? tagList(data.teams.map((entry) => titleOf(entry)))
                 : 'Every repository',
             },
             { label: 'Repositories', value: tagList(data.repos ?? [], true) },

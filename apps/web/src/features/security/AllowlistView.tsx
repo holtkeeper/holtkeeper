@@ -228,15 +228,15 @@ export function AllowlistView({ repo }: { repo?: RepoRef }) {
   if (settings.isError) return <ErrorState error={settings.error} />
   const all = allowlistRows(settings.data?.settings ?? [], groups)
   const key = repo ? repoKey(repo) : undefined
-  const repoGroups = key
-    ? (repos.data?.repos.find((entry) => repoKey(entry.repo) === key)?.groups ??
-      groups.flatMap((group) => group.repos).find((entry) => entry.repo === key)?.groups ??
+  const repoTeams = key
+    ? (repos.data?.repos.find((entry) => repoKey(entry.repo) === key)?.teams ??
+      groups.flatMap((group) => group.repos).find((entry) => entry.repo === key)?.teams ??
       [])
     : []
   const rows = key
     ? all.filter(
         (row) =>
-          row.covers.includes(key) || scopeCovers(row.scope, { repo: key, groups: repoGroups }),
+          row.covers.includes(key) || scopeCovers(row.scope, { repo: key, teams: repoTeams }),
       )
     : all
   const count = (state: AllowlistState) => rows.filter((row) => row.state === state).length

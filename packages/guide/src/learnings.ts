@@ -180,13 +180,19 @@ export const learningSourceKey = (
   source: Pick<LearningSource, 'repo' | 'mergeRequest' | 'noteId'>,
 ) => `learning:${source.repo}!${source.mergeRequest}#${source.noteId}`
 
-const scopeKinds = ['repo', 'family', 'group'] as const satisfies readonly LearningScopeKind[]
+/** Every learning scope kind, narrowest first: the order the panel offers them in. */
+export const learningScopeKinds = [
+  'repo',
+  'family',
+  'path',
+  'team',
+] as const satisfies readonly LearningScopeKind[]
 
 const extractionOutput = z.object({
   /** Empty when the reply teaches no lasting rule. */
   rule: z.string(),
   section: z.enum(guideSections),
-  scope: z.enum(scopeKinds),
+  scope: z.enum(learningScopeKinds),
 })
 
 /** System prompt of the extraction call. */
@@ -195,7 +201,7 @@ export const LEARNING_SYSTEM = [
   'Answer with rule "" unless the reply states a convention, a deliberate design decision or something reviews should not flag, beyond this one change. Thanks, agreeing to fix, questions and one-off explanations give "".',
   `The rule is one imperative English sentence of at most ${LEARNING_RULE_MAX} characters about the code. Never name or mention a person, a username or an @handle.`,
   'section: review for what reviews should or should not flag (most rules); general, testing, testids, assets, commits or releases when the rule is about that.',
-  'scope: repo when it is about this repository; family when it fits every similar repository of the same kind; group when it is a practice of the team or subteam that owns the repository. Prefer repo when unsure.',
+  'scope: repo when it is about this repository; family when it fits every similar repository of the same kind; path when it fits every repository in the folder holding this one; team when it is a process practice of the team that owns the repository (how it reviews, commits or releases). Prefer repo when unsure.',
   'When the reply only restates one of the known rules, return that rule exactly as written.',
 ].join('\n')
 
@@ -329,16 +335,28 @@ export async function captureLearning(
   return { status: 'proposed', candidate }
 }
 
-/** The learning scope kind of a `group:`, `family:` or `repo:` key; `undefined` for others. */
+/**
+ * The learning scope kind of a `repo:`, `family:`, `path:` or `team:` key; `undefined` for `all`
+ * and malformed keys.
+ */
 export function learningScopeKindOf(key: string): LearningScopeKind | undefined {
   const kind = parseGuideScope(key)?.kind
   return kind === 'all' ? undefined : kind
 }
 
 /**
+ * The scopes a learning of a repository may be proposed to or accepted into, among `scopes`
+ * (`scopesFor` the repository), narrowest first: the repository, its family, the folders holding
+ * it (deepest first) and its owner teams. Everything but `all`.
+ */
+export const learningScopes = (scopes: readonly GuideScopeKey[]): GuideScopeKey[] =>
+  scopes.filter((key) => learningScopeKindOf(key) !== undefined)
+
+/**
  * Where accepting a candidate without a scope puts it, among `scopes` (`scopesFor` its
  * repository): its `targetScope` while that is one of them, else the first scope of its
- * `suggestedScope` kind (for `group` the nearest group). `undefined` when there is none.
+ * `suggestedScope` kind (for `path` the folder directly holding the repository, for `team` its
+ * first owner team). `undefined` when there is none.
  */
 export function defaultLearningScope(
   candidate: Pick<LearningCandidate, 'suggestedScope' | 'targetScope'>,
@@ -351,7 +369,7 @@ export function defaultLearningScope(
 /** Thrown when a proposal names a target scope that is not one of its repository's scopes. */
 export class LearningScopeError extends Error {
   constructor(scope: string, repo: string) {
-    super(`${scope} is not a group, family or repository scope of ${repo}`)
+    super(`${scope} is not a team, folder, family or repository scope of ${repo}`)
     this.name = 'LearningScopeError'
   }
 }
@@ -363,7 +381,10 @@ export interface RuleProposal {
   rule: string
   section: GuideSectionName
   suggestedScope?: LearningScopeKind
-  /** An exact scope to accept into by default; wins over `suggestedScope`. */
+  /**
+   * An exact scope to accept into by default, e.g. an owner team or a folder of the repository;
+   * wins over `suggestedScope`.
+   */
   targetScope?: GuideScopeKey
   /** The repository's scopes (`scopesFor`); a `targetScope` must be one of them. */
   scopes?: readonly GuideScopeKey[]
@@ -470,7 +491,10 @@ export interface LearningEdit {
   rule?: string
   section?: GuideSectionName
   suggestedScope?: LearningScopeKind
-  /** A `group:`, `family:` or `repo:` key; the caller checks it is one of the repository's scopes. */
+  /**
+   * A `repo:`, `family:`, `path:` or `team:` key; the caller checks it is one of the repository's
+   * scopes.
+   */
   targetScope?: GuideScopeKey
 }
 

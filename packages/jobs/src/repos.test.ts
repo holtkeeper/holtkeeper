@@ -3,7 +3,13 @@ import { describe, expect, test } from 'bun:test'
 import { parseConfig } from '@holtkeeper/core'
 import type { GitForge, Repository } from '@holtkeeper/forge'
 
-import { groupRepositories, matchesRepoGlob, staticPrefix } from './repos.ts'
+import {
+  fleetRepositories,
+  matchesRepoGlob,
+  selectionCovers,
+  staticPrefix,
+  teamForges,
+} from './repos.ts'
 
 const repository = (path: string, archived = false): Repository => ({
   path,
@@ -23,30 +29,33 @@ const all = [
 ]
 
 const listed: string[] = []
-const forge = {
+const forgeOf = (repositories: Repository[]) =>
+  ({
+    kind: 'fake',
+    async *listRepositories(namespace: string) {
+      listed.push(namespace)
+      yield* repositories.filter((r) => namespace === '' || r.path.startsWith(`${namespace}/`))
+    },
+    async getRepository(path: string) {
+      const found = repositories.find((r) => r.path === path)
+      if (!found) throw Object.assign(new Error(`404 ${path}`), { status: 404 })
+      return found
+    },
+  }) as unknown as GitForge
+
+const fake = (repositories: Repository[]) => ({
   kind: 'fake',
-  async *listRepositories(namespace: string) {
-    listed.push(namespace)
-    yield* all.filter((r) => r.path.startsWith(`${namespace}/`))
-  },
-  async getRepository(path: string) {
-    const found = all.find((r) => r.path === path)
-    if (!found) throw new Error(`404 ${path}`)
-    return found
-  },
-} as unknown as GitForge
+  url: 'https://forge.test',
+  create: () => forgeOf(repositories),
+})
 
 const config = parseConfig({
-  forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => forge } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'], exclude: ['games/legacy-*'] },
-    everything: { forge: 'work', include: ['games/**', 'tools/*'] },
-    'games.top': { forge: 'work', include: ['games/a', 'games/legacy-b', 'tools/x'] },
-    picked: {
-      forge: 'work',
-      include: ['games/deep/c', 'games/old', 'tools/*'],
-      exclude: ['tools/x'],
-    },
+  forges: { work: fake(all), lab: fake([repository('games/a'), repository('labs/z')]) },
+  fleet: { work: { include: ['tools/*'], exclude: ['tools/x'] } },
+  teams: {
+    games: { owns: ['work:games/*'], exclude: ['work:games/legacy-*'] },
+    deep: { owns: ['work:games/deep/c', 'work:games/old'] },
+    shared: { owns: ['games/a'], consumes: ['labs/*'] },
   },
 })
 
@@ -58,36 +67,57 @@ describe('repos', () => {
     expect(staticPrefix('*')).toBe('')
   })
 
-  test('groupRepositories lists include prefixes and applies the globs', async () => {
-    const resolve = groupRepositories(config)
-    expect((await resolve('games')).map((r) => r.path)).toEqual(['games/a'])
-    expect((await resolve('everything')).map((r) => r.path)).toEqual([
-      'games/a',
-      'games/deep/c',
-      'games/legacy-b',
-      'tools/x',
+  test('fleetRepositories lists what forges include and teams own or consume', async () => {
+    listed.length = 0
+    const resolve = fleetRepositories(config)
+    expect((await resolve()).map((r) => `${r.forge}:${r.path}`)).toEqual([
+      'lab:games/a',
+      'lab:labs/z',
+      'work:games/a',
+      'work:games/deep/c',
+      'work:games/legacy-b',
     ])
-    expect(listed).toContain('tools')
-    expect(resolve('nope')).rejects.toThrow('unknown group')
+    expect(listed.toSorted()).toEqual(['games', 'labs', 'labs', 'tools'])
   })
 
-  test('groupRepositories reads exact paths instead of listing them as namespaces', async () => {
+  test('fleetRepositories keeps what a selection covers and lists only what it can reach', async () => {
     listed.length = 0
-    const resolve = groupRepositories(config)
-    expect((await resolve('picked')).map((r) => r.path)).toEqual(['games/deep/c'])
-    expect(listed).toEqual(['tools'])
-  })
-
-  test('groupRepositories lists a subgroup from its parent', async () => {
-    listed.length = 0
-    const resolve = groupRepositories(config)
-    expect((await resolve('games.top')).map((r) => r.path)).toEqual(['games/a'])
+    const resolve = fleetRepositories(config)
+    expect((await resolve({ teams: ['games'] })).map((r) => `${r.forge}:${r.path}`)).toEqual([
+      'work:games/a',
+    ])
     expect(listed).toEqual(['games'])
+    listed.length = 0
+    expect((await resolve({ teams: ['deep'] })).map((r) => r.path)).toEqual(['games/deep/c'])
+    expect(listed).toEqual([])
+    expect(
+      (await resolve({ repos: ['lab:**', 'work:tools/*'] })).map((r) => `${r.forge}:${r.path}`),
+    ).toEqual(['lab:games/a', 'lab:labs/z'])
+  })
+
+  test('selectionCovers matches owner teams or patterns, everything without either', () => {
+    const repo = { forge: 'work', path: 'games/a' }
+    expect(selectionCovers(config, undefined, repo)).toBeTrue()
+    expect(selectionCovers(config, { teams: [], repos: [] }, repo)).toBeTrue()
+    expect(selectionCovers(config, { teams: ['shared'] }, repo)).toBeTrue()
+    expect(selectionCovers(config, { teams: ['deep'] }, repo)).toBeFalse()
+    expect(selectionCovers(config, { teams: ['deep'], repos: ['games/*'] }, repo)).toBeTrue()
+    expect(selectionCovers(config, { repos: ['lab:games/*'] }, repo)).toBeFalse()
+    expect(
+      selectionCovers(config, { teams: ['shared'] }, { forge: 'lab', path: 'labs/z' }),
+    ).toBeFalse()
+  })
+
+  test('teamForges names the forges of qualified patterns, every forge for bare ones', () => {
+    expect(teamForges(config, 'games')).toEqual(['work'])
+    expect(teamForges(config, 'shared')).toEqual(['work', 'lab'])
+    expect(teamForges(config, 'nope')).toEqual([])
   })
 
   test('matchesRepoGlob checks forge and path', () => {
     expect(matchesRepoGlob('work:games/*', { forge: 'work', path: 'games/a' })).toBeTrue()
     expect(matchesRepoGlob('work:games/*', { forge: 'other', path: 'games/a' })).toBeFalse()
+    expect(matchesRepoGlob('games/*', { forge: 'other', path: 'games/a' })).toBeTrue()
     expect(matchesRepoGlob('work:games/*', { forge: 'work', path: 'games/a/b' })).toBeFalse()
   })
 })

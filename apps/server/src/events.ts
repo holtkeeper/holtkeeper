@@ -1,4 +1,3 @@
-import { groupsMatch } from '@holtkeeper/access'
 import {
   type ChatCommand,
   commandOptions,
@@ -19,6 +18,7 @@ import type {
   TagPushedEvent,
 } from '@holtkeeper/forge'
 import { forgeProvider } from '@holtkeeper/identities'
+import { selectionCovers } from '@holtkeeper/jobs'
 import {
   type MergeRequestEvent,
   type MergeRequestEventAction,
@@ -58,6 +58,7 @@ const POLICY_MEMORY_TTL_SECONDS = 90 * 86_400
 interface JobRequest {
   analyzer: string
   repo: RepoRef
+  /** Team key of a group-scope job (`Job.group`). */
   group?: string
   ref?: string
   options?: Record<string, unknown>
@@ -304,7 +305,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
      */
     const runPolicies = async (
       repo: RepoRef,
-      input: Omit<MergeRequestEvent, 'repo' | 'groups' | 'mr' | 'isBot'> & {
+      input: Omit<MergeRequestEvent, 'repo' | 'teams' | 'mr' | 'isBot'> & {
         iid: number
         mr: MergeRequest & { headSha?: string }
       },
@@ -325,7 +326,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         const event: MergeRequestEvent = {
           ...rest,
           repo,
-          groups: target.groups,
+          teams: target.teams,
           mr: await loadMergeRequest(forge, repo, iid, fallback),
           isBot: botUser !== undefined && input.actor === botUser,
         }
@@ -371,15 +372,20 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
     const handleTag = async ({ repo, tag, sha }: TagPushedEvent): Promise<EventOutcome> => {
       const onTag = config.jobs?.onTag
       if (!onTag) return ignore('jobs.onTag is not configured')
-      const repoGroups = resolveRepo(config, repo).groups
-      if (onTag.groups && !groupsMatch(onTag.groups, repoGroups))
-        return ignore('repository is not in jobs.onTag.groups')
-      const groups = onTag.groups
-        ? repoGroups.filter((group) => onTag.groups?.includes(group))
-        : repoGroups
+      if (!selectionCovers(config, onTag, repo))
+        return ignore('repository is not in jobs.onTag.teams or jobs.onTag.repos')
+      // Group-scope analyzers run once per owner team of the tagged repository (the trigger's
+      // teams only, when it names some).
+      const teams = resolveRepo(config, repo).teams.filter(
+        (team) => !onTag.teams?.length || onTag.teams.includes(team),
+      )
       const requests = onTag.analyzers.flatMap((analyzer): JobRequest[] =>
         analyzers.get(analyzer)?.scope === 'group'
-          ? groups.map((group) => ({ analyzer, repo: { forge: repo.forge, path: group }, group }))
+          ? teams.map((team) => ({
+              analyzer,
+              repo: { forge: repo.forge, path: team },
+              group: team,
+            }))
           : [{ analyzer, repo, ref: releaseTarget({ name: tag, sha }) }],
       )
       const enqueued = await enqueue(await setUp(requests), trigger('tag'))
@@ -397,8 +403,8 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       if (fromBot(repo, actor)) return ignore('event from the bot user')
       if (onPush.branches && !onPush.branches.some((glob) => new Bun.Glob(glob).match(branch)))
         return ignore('branch is not in jobs.onPush.branches')
-      if (onPush.groups && !groupsMatch(onPush.groups, resolveRepo(config, repo).groups))
-        return ignore('repository is not in jobs.onPush.groups')
+      if (!selectionCovers(config, onPush, repo))
+        return ignore('repository is not in jobs.onPush.teams or jobs.onPush.repos')
       const requests = await setUp(
         repoAnalyzers(onPush.analyzers).map((analyzer) => ({
           analyzer,
@@ -460,12 +466,13 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
               ? 'update'
               : undefined
         const actions = onMergeRequest.actions ?? ['open', 'update', 'reopen']
-        const groups = resolveRepo(config, repo).groups
         if (!action) reasons.push(`action ${event.action || '(none)'} brings no new commits`)
         else if (!actions.includes(action)) reasons.push(`action ${action} is not configured`)
         else if (mr.draft && !onMergeRequest.draft) reasons.push('merge request is a draft')
-        else if (onMergeRequest.groups && !groupsMatch(onMergeRequest.groups, groups))
-          reasons.push('repository is not in jobs.onMergeRequest.groups')
+        else if (!selectionCovers(config, onMergeRequest, repo))
+          reasons.push(
+            'repository is not in jobs.onMergeRequest.teams or jobs.onMergeRequest.repos',
+          )
         else for (const kind of repoAnalyzers(onMergeRequest.analyzers)) kinds.add(kind)
       }
       for (const label of event.labelsAdded)

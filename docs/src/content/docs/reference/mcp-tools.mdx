@@ -60,7 +60,7 @@ Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type
 | `commit_conventions`   | How commit messages and branch names should look: template, rules with their source, real examples, team notes.     | `repo`, `commits?` (history to learn from, default 100)                 |
 | `check_commit_message` | Checks a commit message or merge request title and a branch name; errors break enforced rules, warnings history.    | `repo`, `message?`, `branch?`                                           |
 
-`task` is `agent` (default), `review`, `chat` or `release-notes`. `section` and `only` are `general`, `review`, `testing`, `testids`, `assets`, `commits` or `releases`. `propose_rule_change` `scope` is `repo` (default), `family`, `group`, or an exact scope such as `group:<key>`, `family:<id>` or `repo:<forge:path>`.
+`task` is `agent` (default), `review`, `chat` or `release-notes`. `section` and `only` are `general`, `review`, `testing`, `testids`, `assets`, `commits` or `releases`. `propose_rule_change` `scope` is `repo` (default), `family`, `path` (the repository's folder), `team` (its first owner team), or an exact scope such as `path:<forge>:<folder>`, `team:<key>`, `family:<id>` or `repo:<forge:path>`.
 
 ## Assets
 
@@ -95,15 +95,15 @@ Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type
 
 ## Jobs and health (ops)
 
-| Tool              | Description                                                                                                            | Arguments                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `jobs`            | Background jobs, newest first: status, analyzer, repository, ref, trigger, duration, attempts, failure signature.      | `repo?`, `analyzer?`, `status?`, `trigger?`, `signature?`, `limit?` (1–30, default 15) |
-| `job_log`         | The tail of a job attempt's log with its steps and how each ended.                                                     | `job`, `attempt?`, `tail?` (1–300, default 120), `grep?`                               |
-| `queue_stats`     | Queued and running jobs, failures and budget stops of the last 24 hours, claim latency, what the oldest jobs wait for. | none                                                                                   |
-| `why_job`         | Why a job ran or would run, how it ended, and what keeps a queued job from starting.                                   | `job`                                                                                  |
-| `analysis_status` | Health cells and the freshness of every analysis of a repository or group: last run, commit, stale or fresh and why.   | `repo` (`forge:path` or `forge:group`)                                                 |
-| `budget_status`   | This week's AI budgets: limit, reserve, spend, forecast, and spend by task kind, analyzer and provider.                | none                                                                                   |
-| `fleet_health`    | Every repository you may see, worst first, with the health the Repos page shows.                                       | `group?`, `health?`, `query?`, `limit?` (default 50)                                   |
+| Tool              | Description                                                                                                             | Arguments                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `jobs`            | Background jobs, newest first: status, analyzer, repository, ref, trigger, duration, attempts, failure signature.       | `repo?`, `analyzer?`, `status?`, `trigger?`, `signature?`, `limit?` (1–30, default 15) |
+| `job_log`         | The tail of a job attempt's log with its steps and how each ended.                                                      | `job`, `attempt?`, `tail?` (1–300, default 120), `grep?`                               |
+| `queue_stats`     | Queued and running jobs, failures and budget stops of the last 24 hours, claim latency, what the oldest jobs wait for.  | none                                                                                   |
+| `why_job`         | Why a job ran or would run, how it ended, and what keeps a queued job from starting.                                    | `job`                                                                                  |
+| `analysis_status` | Health cells and the freshness of every analysis of a repository or team: last run, commit, stale or fresh and why.     | `repo` (`forge:path` or `forge:<team key>`)                                            |
+| `budget_status`   | This week's AI budgets: limit, reserve, spend, forecast, and spend by task kind, analyzer and provider.                 | none                                                                                   |
+| `fleet_health`    | Every repository you may see, worst first, with the health the Repos page shows; `team` keeps the repositories it owns. | `team?`, `health?`, `query?`, `limit?` (default 50)                                    |
 
 `status` is `queued`, `running`, `succeeded`, `failed`, `blocked` or `canceled`. `trigger` is `schedule`, `manual`, `command`, `webhook`, `tag`, `push`, `poll`, `new-repo` or `freshness`. `health` is `failing`, `warnings`, `not-analysed` or `healthy`. `budget_status` is offered only to people who may read AI spend.
 

@@ -141,8 +141,8 @@ export type GuideGeneratorOptions = z.output<typeof optionsSchema>
 export interface GuideAnalyzerDeps {
   /** With `audit`, auto-accepted sections are audited. */
   store?: Pick<Store, 'guides' | 'families' | 'kv'> & Partial<Pick<Store, 'audit'>>
-  /** Config groups of a repository, for the team scopes whose steering and rules apply. */
-  groupsOf?: (repo: RepoRef) => string[]
+  /** Owner teams of a repository, for the team scopes whose steering and rules apply. */
+  teamsOf?: (repo: RepoRef) => string[]
   /** Whether the repository is meant to have tests (`repo.tests`); without it, always. */
   testsExpected?: (repo: RepoRef) => Promise<boolean>
   /** Sections whose new text is accepted without review (`guide.autoAccept`); without it, none. */
@@ -206,7 +206,7 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
       if (context.ref !== undefined)
         throw new Error('the guide analyzer reads only the default branch; queue it without a ref')
       const step = context.step ?? (<T>(_: string, run: () => Promise<T>) => run())
-      const target: RepoTarget = { ...repo, groups: deps.groupsOf?.(repo) ?? [] }
+      const target: RepoTarget = { ...repo, teams: deps.teamsOf?.(repo) ?? [] }
       const family = familyOf(await store.families.list(), repoKey(repo))
       const scopes = scopesFor(target, family?.id)
       const repoScope = scopes[0] ?? `repo:${repoKey(repo)}`

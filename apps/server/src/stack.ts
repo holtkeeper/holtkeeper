@@ -1,7 +1,7 @@
 import type {
   StackConventionResult,
   StackCycle,
-  StackGroupView,
+  StackTeamView,
   StackTool,
   StackUse,
 } from '@holtkeeper/api'
@@ -24,12 +24,12 @@ export interface StackAccess {
    * count only, since problems quote values from the files. Default `canFix`, then `canRead`.
    */
   canDetail?: (repo: RepoRef) => boolean
-  /** The config groups of a repository. */
-  groupsOf: (repo: RepoRef) => string[]
+  /** The owner teams of a repository. */
+  teamsOf: (repo: RepoRef) => string[]
 }
 
-/** A group's stack view without the week-over-week comparison. */
-type StackGroupBase = Omit<StackGroupView, 'changes'>
+/** A team's stack view without the week-over-week comparison. */
+type StackTeamBase = Omit<StackTeamView, 'changes'>
 
 const ending = (use: StackUse) => use.support === 'eol' || use.support === 'eol-soon'
 const failing = (result: StackConventionResult) =>
@@ -109,17 +109,17 @@ function stackConventions(
 }
 
 /**
- * One group's stack record as `access` lets it be seen: tools and uses judged at the record's
+ * One team's stack record (a group-scope run over the team's repositories) as `access` lets it be seen: tools and uses judged at the record's
  * `checkedAt`, convention results with diffs only for `canFix` repositories. `undefined` when no
  * repository of the record is readable.
  */
-function stackGroupView(
+function stackTeamView(
   record: AnalysisRecord,
   data: StackData,
   access: StackAccess,
-): StackGroupBase | undefined {
+): StackTeamBase | undefined {
   const forge = record.repo.forge
-  const groupsOf = (path: string) => access.groupsOf({ forge, path })
+  const teamsOf = (path: string) => access.teamsOf({ forge, path })
   const readable = new Set(
     data.repos.map((repo) => repo.path).filter((path) => access.canRead({ forge, path })),
   )
@@ -130,7 +130,7 @@ function stackGroupView(
   const detailed = (path: string) => canDetail({ forge, path })
   return {
     forge,
-    group: data.group || record.repo.path,
+    team: data.group || record.repo.path,
     analysisId: record.id,
     createdAt: record.createdAt,
     checkedAt: data.checkedAt,
@@ -139,7 +139,7 @@ function stackGroupView(
       .filter((repo) => keep(repo.path))
       .map((repo) => ({
         path: repo.path,
-        groups: groupsOf(repo.path),
+        teams: teamsOf(repo.path),
         ...(repo.webUrl ? { webUrl: repo.webUrl } : {}),
         ...(repo.error
           ? { error: detailed(repo.path) ? repo.error : 'The repository could not be read.' }
@@ -151,20 +151,20 @@ function stackGroupView(
   }
 }
 
-const endingLines = (view: Pick<StackGroupView, 'tools'>) =>
+const endingLines = (view: Pick<StackTeamView, 'tools'>) =>
   new Set(
     view.tools.flatMap((tool) =>
       tool.uses.filter(ending).map((use) => `${use.repo}\0${tool.id}\0${use.cycle ?? ''}`),
     ),
   )
-const driftKeys = (view: Pick<StackGroupView, 'conventions'>) =>
+const driftKeys = (view: Pick<StackTeamView, 'conventions'>) =>
   new Set(view.conventions.filter(failing).map((result) => `${result.repo}\0${result.file}`))
 const countMissing = (from: Set<string>, without: Set<string>) =>
   [...from].filter((key) => !without.has(key)).length
 
 function stackChanges(
-  current: Pick<StackGroupView, 'tools' | 'conventions'>,
-  previous: Pick<StackGroupView, 'tools' | 'conventions'>,
+  current: Pick<StackTeamView, 'tools' | 'conventions'>,
+  previous: Pick<StackTeamView, 'tools' | 'conventions'>,
 ) {
   const [eolNow, eolBefore] = [endingLines(current), endingLines(previous)]
   const [driftNow, driftBefore] = [driftKeys(current), driftKeys(previous)]
@@ -177,26 +177,26 @@ function stackChanges(
 }
 
 /**
- * The newest `stack` record of every config group with a repository `access` allows, sorted by
- * group. With `compare`, each view also says what changed since the group's record from a week
- * earlier. Reads stored records only.
+ * The newest `stack` record of every team with a repository `access` allows, sorted by team key.
+ * With `compare`, each view also says what changed since the team's record from a week earlier.
+ * Reads stored records only.
  */
-export async function stackGroupViews(
+export async function stackTeamViews(
   analyses: Pick<AnalysisStore, 'latest' | 'list'>,
   access: StackAccess,
   options: { compare?: boolean } = {},
-): Promise<StackGroupView[]> {
-  const groups: StackGroupView[] = []
+): Promise<StackTeamView[]> {
+  const teams: StackTeamView[] = []
   for (const record of await analyses.latest({ kind: 'stack' })) {
     const data = stackDataSchema.safeParse(record.data).data
     if (!data) continue
-    const view = stackGroupView(record, data, access)
+    const view = stackTeamView(record, data, access)
     if (!view) continue
     if (!options.compare) {
-      groups.push(view)
+      teams.push(view)
       continue
     }
-    // oxlint-disable-next-line no-await-in-loop -- one small lookup per group
+    // oxlint-disable-next-line no-await-in-loop -- one small lookup per team
     const [earlier] = await analyses.list({
       repo: record.repo,
       kind: 'stack',
@@ -204,15 +204,15 @@ export async function stackGroupViews(
       limit: 1,
     })
     const before = earlier && stackDataSchema.safeParse(earlier.data).data
-    const previous = before && stackGroupView(earlier, before, access)
-    groups.push({
+    const previous = before && stackTeamView(earlier, before, access)
+    teams.push({
       ...view,
       ...(previous && earlier
         ? { changes: { since: earlier.createdAt, ...stackChanges(view, previous) } }
         : {}),
     })
   }
-  return groups.toSorted((a, b) => a.group.localeCompare(b.group))
+  return teams.toSorted((a, b) => a.team.localeCompare(b.team))
 }
 
 const kindRank = { prod: 0, peer: 1, optional: 2, dev: 3 } as const

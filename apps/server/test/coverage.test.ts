@@ -17,19 +17,19 @@ import { noteHead } from '../src/freshness.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/circle', 'shapes/square'] },
-    tools: { forge: 'work', include: ['tools/lint'] },
+  teams: {
+    shapes: { owns: ['work:shapes/circle', 'work:shapes/square'] },
+    tools: { owns: ['work:tools/lint'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     'shapes-admin': [
       {
-        scope: { groups: ['shapes'] },
+        scope: { teams: ['shapes'] },
         actions: ['analyses:read', 'settings:read', 'settings:write'],
       },
     ],
@@ -136,7 +136,7 @@ describe('coverage overview', () => {
     expect(admin.repos.map((card) => card.repo.path)).toEqual(['shapes/circle', 'tools/lint'])
     const [circle] = admin.repos
     expect(circle).toMatchObject({
-      groups: ['shapes'],
+      teams: ['shapes'],
       sha: 'bbb222',
       head: 'ccc333',
       tools: ['vitest --coverage'],
@@ -230,7 +230,7 @@ describe('coverage overview', () => {
     await store.settings.put({
       ...entry,
       id: 'shapes',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       value: { target: '80' },
     })
     await store.settings.put({
@@ -308,12 +308,12 @@ describe('repository coverage', () => {
   })
 
   test('says how repo.tests applies, and who may change it', async () => {
-    await putTests('group', { groups: ['shapes'] }, { expected: false, reason: 'Config only' })
+    await putTests('team', { teams: ['shapes'] }, { expected: false, reason: 'Config only' })
     await putTests('own', { repos: ['work:shapes/square'] }, { expected: false })
     expect(await testsOf('shapes/circle')).toEqual({
       expected: false,
       reason: 'Config only',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       configurable: true,
     })
     expect(await testsOf('shapes/square')).toEqual({
@@ -334,7 +334,7 @@ describe('repository coverage', () => {
     await putTests('own', { repos: ['work:tools/lint'] }, { expected: false })
     expect(await testsOf('tools/lint')).toMatchObject({ entryId: 'own', inherited: true })
     await putTests('lifted', { repos: ['work:shapes/circle'] }, { expected: true })
-    await putTests('group', { groups: ['shapes'] }, { expected: false })
+    await putTests('team', { teams: ['shapes'] }, { expected: false })
     expect(await testsOf('shapes/circle')).toEqual({
       expected: true,
       scope: { repos: ['work:shapes/circle'] },
@@ -353,15 +353,15 @@ describe('repository coverage', () => {
     })
   })
 
-  test('a group admin cannot write a repository-scoped entry, so the toggle is not offered', async () => {
-    await putTests('group', { groups: ['shapes'] }, { expected: false })
+  test("a team admin may write repository-scoped entries of the team's repositories", async () => {
+    await putTests('team', { teams: ['shapes'] }, { expected: false })
     expect(await testsOf('shapes/circle', asShapesAdmin)).toEqual({
       expected: false,
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
+      configurable: true,
     })
-    expect(await testsOf('shapes/square', asShapesAdmin)).toEqual({
+    expect(await testsOf('shapes/circle', asShapes)).toEqual({
       expected: false,
-      scope: { groups: ['shapes'] },
     })
   })
 })

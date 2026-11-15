@@ -80,7 +80,7 @@ test('an Inbox decision on a task group approves or rejects it, never cancels', 
     groupId: 'g-1',
     taskKind: 'upgrade',
     scope: 'acme/widget-kit',
-    repos: [{ repo: 'work:acme/widget-kit', groups: [] }],
+    repos: [{ repo: 'work:acme/widget-kit', teams: [] }],
     href: '/ops/tasks',
     snoozed: false,
   }

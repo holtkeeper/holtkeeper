@@ -39,7 +39,7 @@ Your own account — profile and avatar, the teams list pages default to, passke
   <Split>
     <Rows>
       <Row title="Profile" selected />
-      <Row title="My teams" sub="2 groups" />
+      <Row title="My teams" sub="2 teams" />
       <Row title="Sign-in" sub="2 passkeys" />
       <Row title="Linked accounts" sub="1 to verify" />
       <Row title="My access" sub="Maintainer" />
@@ -73,30 +73,26 @@ With Holtkeeper's own accounts (passkey sign-in), Profile shows your stored name
 <Screen title="Account › My teams">
   <Scroll>
 
-| In My teams | Group                                            | Repositories | Health           | Forge  |
-| ----------- | ------------------------------------------------ | ------------ | ---------------- | ------ |
-| ☑           | **Web** · `web`                                  | 14           | ● 9 ● 4 ● 1      | `work` |
-| ☐           | &nbsp;&nbsp; **Web › Payments** · `web.payments` | 4            | ● 2 ● 2          | `work` |
-| ☑           | **Widgets** · `widgets`                          | 6            | ● 6              | `work` |
-| ☐           | **Docs** · `docs`                                | 1            | ● 1 not analysed | `work` |
+| In My teams | Team                      | Repositories | Health           | Forge  |
+| ----------- | ------------------------- | ------------ | ---------------- | ------ |
+| ☑           | **Widgets** · `widgets`   | 14           | ● 9 ● 4 ● 1      | `work` |
+| ☐           | **Gizmo** · `gizmo`       | 8            | ● 6 ● 2          | `work` |
+| ☑           | **Platform** · `platform` | 4            | ● 4              | `work` |
+| ☐           | **Docs** · `docs`         | 1            | ● 1 not analysed | `work` |
 
   </Scroll>
   <Stack>
-    <Fields columns={1}>
-      <Field label="Combinations" value="web + payments" hint="Join two or more groups with +; tick single groups above" mono />
-    </Fields>
 
-_My teams_ covers 20 repositories. Picked by you. <Button ghost>Use my grants</Button>
+Picked by you. My teams: 17 of 27 repositories; other teams fold under each list. <Button ghost>Use my memberships</Button>
 
   </Stack>
 </Screen>
 
-1. Tick the groups you work in. Subgroups are listed indented and can be picked on their own.
-2. To mean "repositories in both groups", type a combination such as `web + payments`.
-3. Check how many repositories _My teams_ now covers, under the table.
-4. To go back to the groups in your grants, click <Ui>Use my grants</Ui>.
+1. Tick the teams you work in. The list holds every team you know of: the teams of the repositories you can see, with their repository count, health and forges.
+2. Check how many repositories _My teams_ now covers, above the table. A repository owned by several teams counts once.
+3. To go back to your memberships, click <Ui>Use my memberships</Ui>.
 
-Until you change them, your home groups are the groups named in your grants.
+Until you change them, your home teams are the teams you are a member of plus the teams your grants name. Being in a team is set on [Repos › Teams](/guide/repos/teams/); ticking a team here gives no access.
 
 ## Sign-in
 
@@ -144,7 +140,7 @@ An unverified link never lets a bot act as you, and anyone else may claim the sa
 
 ## My access
 
-**My access** shows your role in words (_Developer_, _Maintainer_, or _Custom_ when your grants match no preset), a summary of your grants, and each grant with where it applies and what it allows. With Holtkeeper's own accounts, **Given by** names who invited you and when.
+**My access** shows your role in words (_Developer_, _Maintainer_, or _Custom_ when your grants match no preset), a summary of your grants, and each grant with where it applies and what it allows, including those your team membership gives. With Holtkeeper's own accounts, **Given by** names who invited you and when.
 
 <Screen title="Account › My access">
   <Stack>
@@ -157,11 +153,11 @@ An unverified link never lets a bot act as you, and anyone else may claim the sa
   </Stack>
   <Scroll>
 
-| Where           | Allows                                                                            |
-| --------------- | --------------------------------------------------------------------------------- |
-| Group `web`     | Read repositories, analyses and audits; run analyzers; change settings; run tasks |
-| Group `widgets` | Read repositories and analyses; read releases                                     |
-| Everything      | Read knowledge                                                                    |
+| Where          | Allows                                        |
+| -------------- | --------------------------------------------- |
+| Team `widgets` | Everything (maintainer)                       |
+| `acme/kit/**`  | Read repositories and analyses; read releases |
+| Everything     | Read knowledge                                |
 
   </Scroll>
 </Screen>
@@ -170,7 +166,7 @@ When a page refuses you, it names the permission you are missing and offers <Ui>
 
 ## Preferences
 
-**Theme** switches between System, Light and Dark. **Lists open on** picks where list pages start: _My teams_, _All I can see_ or one group. Both are kept in this browser.
+**Theme** switches between System, Light and Dark. **Lists open on** picks where list pages start: _My teams_, _All I can see_ or one team. Both are kept in this browser.
 
 ## Related
 

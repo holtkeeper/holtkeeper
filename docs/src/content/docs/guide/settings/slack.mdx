@@ -185,7 +185,7 @@ Holtkeeper calls `https://slack.com/api` from both web and worker pods: a review
 
 ## Bind channels
 
-The `slack.reviews` setting maps a scope to Slack channel ids. The most specific entry wins as a whole: an entry for everything sets the default channels, a group or repository entry replaces them for its repositories, and an entry with no channels keeps a group quiet. A message about a repository is handled only in a channel bound to it, so groups can share channels or keep their own.
+The `slack.reviews` setting maps a scope to Slack channel ids. The most specific entry wins as a whole: an entry for everything sets the default channels, a team, path or repository entry replaces them for its repositories, and an entry with no channels keeps a team quiet. A message about a repository is handled only in a channel bound to it, so teams can share channels or keep their own.
 
 <Screen title="Settings › Integrations › slack.reviews">
   <Rows>
@@ -193,12 +193,12 @@ The `slack.reviews` setting maps a scope to Slack channel ids. The most specific
       <Tag mono>C0123ABCD</Tag>
       <Tag>default</Tag>
     </Row>
-    <Row title="Group Widgets" sub="Replaces the default for its repositories">
+    <Row title="Team Widgets" sub="Replaces the default for its repositories">
       <Tag mono>C04WIDGET</Tag>
       <Tag mono>G07PRIVATE</Tag>
       <Tag tone="ok">own channels</Tag>
     </Row>
-    <Row title="Group Sandbox" sub="channels: []">
+    <Row title="Path acme/sandbox/**" sub="channels: []">
       <Tag>quiet</Tag>
     </Row>
   </Rows>
@@ -283,7 +283,7 @@ The first look at a repository records every existing tag as seen, so history is
 
 The app stays silent, and stores nothing, when:
 
-- the link's host is not a configured forge, or the repository is in no group;
+- the link's host is not a configured forge, or no team owns the repository;
 - **Merge request reviews** are off for the repository;
 - the channel is not bound to the repository, or the app was not invited to it;
 - no Slack credential is saved.

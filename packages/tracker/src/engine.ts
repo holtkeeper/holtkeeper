@@ -20,12 +20,12 @@ export interface RunTrackerOptions {
   forge?: TrackerForge
   /** Forge id for change targets, e.g. `work`. */
   forgeId?: string
-  /** Repositories of the analyzed group. */
+  /** Repositories of the analyzed team. */
   repos: RepoRef[]
-  /** Name of the analyzed group. */
-  group?: string
-  /** Repositories of other groups, for sources that name `groups`. */
-  groupRepos?: (group: string) => RepoRef[] | undefined
+  /** Key of the analyzed team. */
+  team?: string
+  /** Repositories of other teams, for sources that name `teams`. */
+  teamRepos?: (team: string) => RepoRef[] | undefined
   /** Document sources by provider. */
   documents?: Record<string, DocumentSource>
   /** Providers that have a sink, when known, so unpublishable outputs are reported early. */
@@ -61,8 +61,8 @@ export async function runTracker(
         id,
         ...(options.forge ? { forge: options.forge } : {}),
         repos: options.repos,
-        ...(options.group ? { group: options.group } : {}),
-        ...(options.groupRepos ? { groupRepos: options.groupRepos } : {}),
+        ...(options.team ? { team: options.team } : {}),
+        ...(options.teamRepos ? { teamRepos: options.teamRepos } : {}),
         documents: options.documents ?? {},
         concurrency,
       })

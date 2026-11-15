@@ -46,11 +46,11 @@ Turn what people teach Holtkeeper in replies to review comments, and rules agent
   />
   <Scroll>
 
-|     | Rule                                                                                             | Section | Evidence | Source                  | Confidence   | Promote to                        |                                                                                   |
-| --- | ------------------------------------------------------------------------------------------------ | ------- | -------- | ----------------------- | ------------ | --------------------------------- | --------------------------------------------------------------------------------- |
-| ☑   | Do not flag `any` in files under `src/legacy/`; they are typed in ABC-210. · `acme/admin-ui`     | Review  | 3        | Review reply · !1204 +2 | ▮▮▮▮▯ High   | <Tag>Team storefront</Tag>        | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
-| ☑   | Use `formatMoney` from @acme/widget-kit for prices in UI. · `acme/checkout-web`                  | General | 1        | Review reply · !318     | ▮▮▮▯▯ Medium | <Tag>This repository</Tag>        | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
-| ☐   | Snapshot tests need a stable seed. · `acme/widget-kit` · proposed by agent: flaky snapshot in CI | Testing | 1        | Over MCP                | ▮▮▯▯▯ Low    | <Tag>Family Storefront apps</Tag> | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+|     | Rule                                                                                             | Section | Evidence | Source                  | Confidence   | Promote to                   |                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------ | ------- | -------- | ----------------------- | ------------ | ---------------------------- | --------------------------------------------------------------------------------- |
+| ☑   | Do not flag `any` in files under `src/legacy/`; they are typed in ABC-210. · `acme/round/api`    | Review  | 3        | Review reply · !1204 +2 | ▮▮▮▮▯ High   | <Tag>Folder acme/round</Tag> | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+| ☑   | Use `formatMoney` from @acme/widget-kit for prices in UI. · `acme/round/web`                     | General | 1        | Review reply · !318     | ▮▮▮▯▯ Medium | <Tag>This repository</Tag>   | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+| ☐   | Snapshot tests need a stable seed. · `acme/square/web` · proposed by agent: flaky snapshot in CI | Testing | 1        | Over MCP                | ▮▮▯▯▯ Low    | <Tag>Family Web apps</Tag>   | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
 
   </Scroll>
   <div style="padding: 0.5rem 0.75rem" class="hk-dim">J / K move · X select · P accept · D reject</div>
@@ -95,12 +95,12 @@ The source tabs count proposed candidates per source. **Section** and **Confiden
 
 ## Choose the scope
 
-**Promote to** offers every scope you may edit for the candidate's repository: the repository, its family, its subgroup and team, never _All repositories_. It starts at the scope the proposer named, else at the suggested one, where a group means the repository's nearest group (a subgroup before its parent). While you pick another scope, `target:` under the picker shows your choice.
+**Promote to** offers every scope you may edit for the candidate's repository: _this repository_, _its family_, _its folder_ (the folder directly holding it) and _its team_ (its first owner team), never _All repositories_. A proposer may also name an outer folder, such as `acme/round` for `acme/round/web/app`. It starts at the scope the proposer named, else at the suggested one. While you pick another scope, `target:` under the picker shows your choice.
 
 Without the right to decide, the cell only reads `suggested:` or `target:`.
 
 :::tip
-A rule taught on one repository often holds for the whole team. Promote it to the team so every repository's reviews follow it.
+A code rule taught on one repository often holds for its siblings: promote it to the folder or the family. Promote process rules (how the team reviews, commits, releases) to the team.
 :::
 
 ## Accept, edit or reject

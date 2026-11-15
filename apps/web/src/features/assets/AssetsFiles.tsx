@@ -220,7 +220,7 @@ export function AssetsFiles({
   onOptimizeNewDone?: () => void
 }) {
   const navigate = useNavigate()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const key = repo ? repoKey(repo) : search.repo
   const assets = useAssets(toAssetsQuery({ ...search, ...(key ? { repo: key } : {}) }))
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
@@ -240,9 +240,9 @@ export function AssetsFiles({
   const narrowed = Boolean(key)
   const keyRepo = repo ?? parseRepoKey(key)
   const scoped = !narrowed
-  const kpi = assetsKpis(scoped ? foldScope(repos, view, homeGroups, (r) => r.groups).shown : repos)
+  const kpi = assetsKpis(scoped ? foldScope(repos, view, homeTeams, (r) => r.teams).shown : repos)
   const rows = searchAssetRows(assetTableRows(pages), search.q)
-  const shownRows = scoped ? foldScope(rows, view, homeGroups, (r) => r.groups).shown : rows
+  const shownRows = scoped ? foldScope(rows, view, homeTeams, (r) => r.teams).shown : rows
   const optimizable = shownRows.filter(canOptimize)
   const chosen = optimizable.filter((row) => selected.has(row.key))
   const kinds = assetKinds.filter((kind) => repos.some((r) => (r.kinds[kind] ?? 0) > 0))
@@ -431,7 +431,7 @@ export function AssetsFiles({
     },
   ]
 
-  const scope = narrowed ? {} : { scope: { value: view, onChange: setView, homeGroups } }
+  const scope = narrowed ? {} : { scope: { value: view, onChange: setView, homeTeams } }
   const bottom: ReactNode[] = []
   if (assets.hasNextPage)
     bottom.push(

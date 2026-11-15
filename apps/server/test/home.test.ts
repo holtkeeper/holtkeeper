@@ -31,7 +31,7 @@ const NOW = '2026-10-30T12:00:00.000Z'
 const now = new Date(NOW)
 const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000).toISOString()
 
-const groupsOf = (repo: string) =>
+const teamsOf = (repo: string) =>
   repo.startsWith('work:shapes/') ? ['shapes'] : repo.startsWith('work:colors/') ? ['colors'] : []
 
 const job = (patch: Partial<Job> & { path: string }): Job => {
@@ -100,7 +100,7 @@ const card = (path: string, patch: Partial<ReleaseCard>): ReleaseCard => ({
 
 const sources = (patch: Partial<HomeSources> = {}): HomeSources => ({
   now,
-  groupsOf,
+  teamsOf,
   analyzerLabel: (kind) => (kind === 'widgets' ? 'Widgets' : kind),
   failedJobs: [],
   blockedJobs: [],
@@ -176,8 +176,8 @@ describe('Needs attention rules', () => {
     ])
     expect(items[0]?.detail).toBe('boom at 1')
     expect(items[0]?.repos).toEqual([
-      { repo: 'work:shapes/circle', groups: ['shapes'] },
-      { repo: 'work:colors/red', groups: ['colors'] },
+      { repo: 'work:shapes/circle', teams: ['shapes'] },
+      { repo: 'work:colors/red', teams: ['colors'] },
     ])
     expect(items[0]?.href).toBe('/ops/runs?status=failed&analyzer=widgets&signature=sig-a')
     expect(items[1]?.href).toContain('repo=work%3Ashapes%2Fsquare')
@@ -215,15 +215,13 @@ describe('Needs attention rules', () => {
     expect(group[0]?.action.type).toBe('open')
   })
 
-  test('a subgroup analysis failure belongs to the subgroup and its parent', () => {
+  test('a team analysis failure belongs to the team it ran for', () => {
     const items = failureItems(
       sources({
-        failedJobs: [job({ path: 'shapes.round', group: 'shapes.round', errorSignature: 'sig-d' })],
+        failedJobs: [job({ path: 'round', group: 'round', errorSignature: 'sig-d' })],
       }),
     )
-    expect(items[0]?.repos).toEqual([
-      { repo: 'work:shapes.round', groups: ['shapes.round', 'shapes'] },
-    ])
+    expect(items[0]?.repos).toEqual([{ repo: 'work:round', teams: ['round'] }])
   })
 
   test('failures without a signature group per analyzer and repository', () => {
@@ -299,7 +297,7 @@ describe('Needs attention rules', () => {
     ])
     expect(items[0]).toMatchObject({
       detail: 'No fix yet',
-      repos: [{ repo: 'work:shapes/circle', groups: ['shapes'] }],
+      repos: [{ repo: 'work:shapes/circle', teams: ['shapes'] }],
       at: '2026-10-23T00:00:00.000Z',
       href: '/inbox?item=allowlist%3As1%3AGHSA-old&kind=allowlist',
     })
@@ -472,13 +470,13 @@ describe('Needs attention rules', () => {
     const [square] = notAnalysedItems(
       sources({
         ...base,
-        access: (repo) => (action) => action !== 'analyses:read' || repo.groups.includes('shapes'),
+        access: (repo) => (action) => action !== 'analyses:read' || repo.teams.includes('shapes'),
       }),
     )
     expect(square).toMatchObject({
       kind: 'not-analysed',
       severity: 'low',
-      repos: [{ repo: 'work:shapes/square', groups: ['shapes'] }],
+      repos: [{ repo: 'work:shapes/square', teams: ['shapes'] }],
       href: '/repos/work/shapes/square',
     })
   })
@@ -539,7 +537,7 @@ describe('summarizeChanges', () => {
         event('job.create', hoursAgo(1), 'work:shapes/circle'),
         { ...event('knowledge.update', hoursAgo(1)), outcome: 'denied' },
       ],
-      groupsOf,
+      teamsOf,
     )
     expect(changes).toEqual([
       {
@@ -549,7 +547,7 @@ describe('summarizeChanges', () => {
         href: '/releases/timeline?repo=work%3Ashapes%2Fcircle',
         at: hoursAgo(1),
         actor: 'u2',
-        repo: { repo: 'work:shapes/circle', groups: ['shapes'] },
+        repo: { repo: 'work:shapes/circle', teams: ['shapes'] },
       },
       {
         id: `setting.update-${hoursAgo(2)}`,
@@ -566,7 +564,7 @@ describe('summarizeChanges', () => {
         href: '/releases/timeline?repo=work%3Ashapes%2Fcircle',
         at: hoursAgo(5),
         actor: 'u1',
-        repo: { repo: 'work:shapes/circle', groups: ['shapes'] },
+        repo: { repo: 'work:shapes/circle', teams: ['shapes'] },
       },
     ])
   })
@@ -578,7 +576,7 @@ describe('summarizeChanges', () => {
         event('release.proposed', hoursAgo(2), 'work:shapes/circle', 'u1'),
         event('release.versioned', hoursAgo(3), 'work:shapes/circle', 'u1', { version: '2.0.0' }),
       ],
-      groupsOf,
+      teamsOf,
     )
     expect(changes.map((change) => change.text)).toEqual([
       'Accepted the release of shapes/circle',
@@ -597,7 +595,7 @@ describe('summarizeChanges', () => {
           advisory: 'GHSA-1234',
         }),
       ],
-      groupsOf,
+      teamsOf,
     )
     expect(changes.map((change) => [change.kind, change.text, change.href])).toEqual([
       [
@@ -629,7 +627,7 @@ describe('summarizeChanges', () => {
           target: { type: 'knowledge', id: 'n-2' },
         },
       ],
-      groupsOf,
+      teamsOf,
     )
     expect(changes.map((change) => [change.text, change.href])).toEqual([
       [
@@ -655,7 +653,7 @@ describe('summarizeChanges', () => {
         event('task.cancel', hoursAgo(2), 'work:shapes/circle'),
         event('task.approve', hoursAgo(3), 'work:shapes/circle'),
       ],
-      groupsOf,
+      teamsOf,
     )
     expect(changes.map((change) => [change.kind, change.text, change.href])).toEqual([
       ['task', 'Rejected a proposed agent task', '/ops/tasks?group=g1a2b3c4'],
@@ -672,7 +670,7 @@ describe('summarizeChanges', () => {
         }),
         event('setting.delete', hoursAgo(2), undefined, 'u1', { key: 'Robert"); drop' }),
       ],
-      groupsOf,
+      teamsOf,
     )
     expect(deploy?.text).toBe('Started deploying v1.2.0 of shapes/circle to prod')
     expect(deleted?.text).toBe('Removed a setting')
@@ -682,7 +680,7 @@ describe('summarizeChanges', () => {
     const events = Array.from({ length: 5 }, (_, index) =>
       event('repo.discover', hoursAgo(index + 1), `work:shapes/s${index}`, 'system'),
     )
-    const changes = summarizeChanges(events, groupsOf, 2)
+    const changes = summarizeChanges(events, teamsOf, 2)
     expect(changes.map((change) => [change.text, change.href])).toEqual([
       ['Found the new repository shapes/s0', '/repos/work/shapes/s0'],
       ['Found the new repository shapes/s1', '/repos/work/shapes/s1'],
@@ -693,17 +691,17 @@ describe('summarizeChanges', () => {
 describe('GET /api/home', () => {
   const config = parseConfig({
     forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-    groups: {
-      shapes: { forge: 'work', include: ['shapes/*', 'shapes/circle'] },
-      colors: { forge: 'work', include: ['colors/*'] },
+    teams: {
+      shapes: { owns: ['work:shapes/*', 'work:shapes/circle'] },
+      colors: { owns: ['work:colors/*'] },
     },
   })
   const auth = headerAuth({
     roles: {
-      shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read', 'audits:read'] }],
+      shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read', 'audits:read'] }],
       runners: [
         {
-          scope: { groups: ['shapes'] },
+          scope: { teams: ['shapes'] },
           actions: ['analyses:read', 'audits:read', 'analyses:run'],
         },
       ],
@@ -754,7 +752,7 @@ describe('GET /api/home', () => {
     store.aiUsage.append({
       at,
       repo: { forge: 'work', path: 'shapes/circle' },
-      groups: ['shapes'],
+      teams: ['shapes'],
       taskKind,
       actor: 'system',
       provider: 'anthropic',

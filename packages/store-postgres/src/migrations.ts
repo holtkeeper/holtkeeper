@@ -732,6 +732,28 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX slack_replies_created ON slack_replies (created_at);
     `,
   },
+  {
+    version: 29,
+    sql: `
+      ALTER TABLE ai_usage RENAME COLUMN groups TO teams;
+      ALTER INDEX ai_usage_groups RENAME TO ai_usage_teams;
+      ALTER TABLE knowledge ADD COLUMN matches jsonb;
+    `,
+  },
+  {
+    version: 30,
+    sql: `
+      CREATE TABLE embeddings (
+        subject text NOT NULL,
+        model text NOT NULL,
+        hash text NOT NULL,
+        vector bytea NOT NULL,
+        updated_at timestamptz NOT NULL,
+        PRIMARY KEY (subject, model)
+      );
+      CREATE INDEX embeddings_model ON embeddings (model, subject COLLATE "C");
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

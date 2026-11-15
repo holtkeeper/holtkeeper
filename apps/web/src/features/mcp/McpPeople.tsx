@@ -5,8 +5,8 @@ import { Plug } from 'lucide-react'
 import { useMcpUsage } from '../../api/queries.ts'
 import { formatCount, formatRelative } from '../../lib/format.ts'
 import { errorRate, sparkHeights } from '../../lib/mcp-usage.ts'
-import { formatGroupMatch } from '../../lib/scope.ts'
 import { Avatar, EmptyState, ErrorState, Placeholder, Table, Tag, Td, Th } from '../../ui/index.ts'
+import { TeamName } from '../../ui/TeamName.tsx'
 
 const days = 7
 
@@ -93,7 +93,9 @@ export function McpPeople() {
                   {person.teams.length ? (
                     <span className="flex flex-wrap gap-1">
                       {person.teams.map((team) => (
-                        <Tag key={formatGroupMatch(team)}>{formatGroupMatch(team)}</Tag>
+                        <Tag key={team}>
+                          <TeamName team={team} />
+                        </Tag>
                       ))}
                     </span>
                   ) : (

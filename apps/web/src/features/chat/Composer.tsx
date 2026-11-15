@@ -53,7 +53,7 @@ function SuggestionRow({ item }: { item: Suggestion }) {
 /**
  * The thread's composer. `@` opens a list of the people who can see the thread (and Holtkeeper);
  * a leading `/` switches to command mode with the commands as hints, or, in a team-wide thread
- * (no `scope`), to a note that commands run in repository and group threads. Enter sends, Shift+Enter
+ * (no `scope`), to a note that commands run in repository and team threads. Enter sends, Shift+Enter
  * starts a new line, arrows and Tab pick from a list.
  */
 export function Composer({
@@ -207,7 +207,7 @@ export function Composer({
         <div className="flex items-center gap-2 px-2 pb-2 text-[11px] text-muted">
           {refused ? (
             <span className="inline-flex items-center gap-1 text-warn">
-              <SquareSlash className="size-3.5" aria-hidden /> Commands run in a repository or group
+              <SquareSlash className="size-3.5" aria-hidden /> Commands run in a repository or team
               thread
             </span>
           ) : commandMode ? (

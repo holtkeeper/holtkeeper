@@ -15,7 +15,7 @@ interface AiUsageRow {
   at: string
   repo_forge: string
   repo_path: string
-  groups: string
+  teams: string
   task_kind: string
   analyzer: string | null
   job_id: string | null
@@ -42,7 +42,7 @@ const toRecord = (r: AiUsageRow): AiUsageRecord => ({
   id: r.id,
   at: r.at,
   repo: { forge: r.repo_forge, path: r.repo_path },
-  groups: JSON.parse(r.groups),
+  teams: JSON.parse(r.teams),
   taskKind: r.task_kind,
   ...(r.analyzer !== null && { analyzer: r.analyzer }),
   ...(r.job_id !== null && { jobId: r.job_id }),
@@ -72,7 +72,7 @@ const dimensionSql: Record<AiUsageDimension, string> = {
   week: `date(${day}, '-' || ((CAST(strftime('%w', ${day}) AS INTEGER) + 6) % 7) || ' days')`,
   month: 'substr(r.at, 1, 7)',
   repo: `r.repo_forge || ':' || r.repo_path`,
-  group: `COALESCE(g.value, '')`,
+  team: `COALESCE(g.value, '')`,
   model: 'r.model',
   provider: 'r.provider',
   taskKind: 'r.task_kind',
@@ -98,12 +98,12 @@ function plainWhere(filter: AiUsageFilter): Where {
   if (filter.from !== undefined) add('r.at >= ?', filter.from)
   if (filter.to !== undefined) add('r.at < ?', filter.to)
   if (filter.repo) add('r.repo_forge = ? AND r.repo_path = ?', filter.repo.forge, filter.repo.path)
-  if (filter.group !== undefined)
-    add('EXISTS (SELECT 1 FROM json_each(r.groups) WHERE value = ?)', filter.group)
-  if (filter.groups !== undefined)
+  if (filter.team !== undefined)
+    add('EXISTS (SELECT 1 FROM json_each(r.teams) WHERE value = ?)', filter.team)
+  if (filter.teams !== undefined)
     add(
-      'EXISTS (SELECT 1 FROM json_each(r.groups) WHERE value IN (SELECT value FROM json_each(?)))',
-      JSON.stringify(filter.groups),
+      'EXISTS (SELECT 1 FROM json_each(r.teams) WHERE value IN (SELECT value FROM json_each(?)))',
+      JSON.stringify(filter.teams),
     )
   if (filter.actor !== undefined) add('r.actor = ?', filter.actor)
   if (filter.origin !== undefined) add('r.interactive = ?', filter.origin === 'interactive' ? 1 : 0)
@@ -124,7 +124,7 @@ function plainWhere(filter: AiUsageFilter): Where {
  */
 export function sqliteAiUsage(db: Database): AiUsageStore {
   const insert = db.prepare(
-    `INSERT INTO ai_usage (id, at, repo_forge, repo_path, groups, task_kind, analyzer, job_id,
+    `INSERT INTO ai_usage (id, at, repo_forge, repo_path, teams, task_kind, analyzer, job_id,
        analysis_id, actor, interactive, subject, provider, model, input_tokens, output_tokens,
        cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error,
        transcript_ref)
@@ -137,8 +137,8 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
     if (scopes === undefined || scopes.some((scope) => scope.all)) return plain
     if (!scopes.length) return { sql: '0', params: [] }
     const candidates = db
-      .query<{ repo_forge: string; repo_path: string; groups: string }, SQLQueryBindings[]>(
-        `SELECT DISTINCT repo_forge, repo_path, groups FROM ai_usage r WHERE ${plain.sql}`,
+      .query<{ repo_forge: string; repo_path: string; teams: string }, SQLQueryBindings[]>(
+        `SELECT DISTINCT repo_forge, repo_path, teams FROM ai_usage r WHERE ${plain.sql}`,
       )
       .all(...plain.params)
     const allowed = candidates
@@ -147,16 +147,16 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
           scopeCoversRepo(scope, {
             forge: row.repo_forge,
             path: row.repo_path,
-            groups: JSON.parse(row.groups),
+            teams: JSON.parse(row.teams),
           }),
         ),
       )
-      .map((row) => [row.repo_forge, row.repo_path, row.groups])
+      .map((row) => [row.repo_forge, row.repo_path, row.teams])
     return {
       sql: `${plain.sql} AND EXISTS (
         SELECT 1 FROM json_each(?) a
         WHERE json_extract(a.value, '$[0]') = r.repo_forge AND json_extract(a.value, '$[1]') = r.repo_path
-          AND json_extract(a.value, '$[2]') = r.groups)`,
+          AND json_extract(a.value, '$[2]') = r.teams)`,
       params: [...plain.params, JSON.stringify(allowed)],
     }
   }
@@ -169,7 +169,7 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
         record.at,
         record.repo.forge,
         record.repo.path,
-        JSON.stringify(record.groups),
+        JSON.stringify(record.teams),
         record.taskKind,
         record.analyzer ?? null,
         record.jobId ?? null,
@@ -216,7 +216,7 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
              SUM(r.outcome = 'error') AS errors, SUM(r.outcome = 'denied-budget') AS denied,
              SUM(r.outcome != 'denied-budget' AND r.cost_source = 'unknown') AS unknownCost,
              AVG(CASE WHEN r.outcome != 'denied-budget' THEN r.duration_ms END) AS avgDurationMs
-           FROM ai_usage r ${groupBy.includes('group') ? 'LEFT JOIN json_each(r.groups) g' : ''}
+           FROM ai_usage r ${groupBy.includes('team') ? 'LEFT JOIN json_each(r.teams) g' : ''}
            WHERE ${sql}
            ${groupBy.length ? `GROUP BY ${groupBy.map((_, index) => `k${index}`).join(', ')}` : ''}
            HAVING COUNT(*) > 0`,

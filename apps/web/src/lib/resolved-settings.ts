@@ -7,8 +7,8 @@ import type {
   UnknownSettingKeyView,
 } from '@holtkeeper/api'
 
-import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
-import { type ScopeFocus, focusParent, namesFocus } from './scope.ts'
+import { type ScopeFocus, namesFocus } from './scope.ts'
+import { keyAsTitle, type TeamTitleOf } from './team-titles.ts'
 
 /** Which rows the resolver shows: every key, those set on the focus itself, those not at their default. */
 export type ResolvedFilter = 'all' | 'here' | 'changed'
@@ -73,60 +73,40 @@ export function rowMatches(
 
 /** How many rows each layer wins, for the layer legend. */
 export function layerCounts(rows: readonly ResolvedSettingRow[]): Record<SettingLayer, number> {
-  const counts: Record<SettingLayer, number> = { default: 0, org: 0, group: 0, repo: 0 }
+  const counts: Record<SettingLayer, number> = { default: 0, org: 0, team: 0, repo: 0 }
   for (const row of rows) counts[row.source.layer] += 1
   return counts
 }
 
 /**
- * Whether a subgroup focus inherits the source from its parent group: a group entry that matched
- * on the parent and not on the subgroup itself.
- */
-export function fromParentGroup(source: SettingSource, focus: ScopeFocus): boolean {
-  const parent = focusParent(focus)
-  return (
-    source.layer === 'group' &&
-    parent !== undefined &&
-    focus.kind === 'group' &&
-    (source.groups ?? []).includes(parent) &&
-    !(source.groups ?? []).includes(focus.group)
-  )
-}
-
-/** How many rows a subgroup focus inherits from its parent group; 0 for any other focus. */
-export const parentGroupCount = (rows: readonly ResolvedSettingRow[], focus: ScopeFocus): number =>
-  rows.filter((row) => fromParentGroup(row.source, focus)).length
-
-/**
- * Who a source is, in words: `Default`, `Org`, `Group web`, `This repo`, `This group`, and
- * `Parent group` on a subgroup focus for an entry of its parent.
+ * Who a source is, in words: `Default`, `Org`, `Team Widgets` (by `titleOf`), `This team`,
+ * `This repo`, or `Path pattern` for an entry reaching the repository through a glob.
  */
 export function sourceLabel(
   source: SettingSource,
   focus: ScopeFocus,
-  titleOf: GroupTitleOf = keyAsTitle,
+  titleOf: TeamTitleOf = keyAsTitle,
 ): string {
   if (source.layer === 'default') return 'Default'
   if (source.layer === 'org') return 'Org'
   if (source.layer === 'repo')
     return focus.kind === 'repo' && source.entry && namesFocus(source.entry.scope, focus)
       ? 'This repo'
-      : 'Repo pattern'
-  if (focus.kind === 'group' && source.groups?.includes(focus.group)) return 'This group'
-  if (fromParentGroup(source, focus)) return 'Parent group'
-  return `Group ${(source.groups ?? []).map(titleOf).join(' + ')}`.trim()
+      : 'Path pattern'
+  if (focus.kind === 'team' && source.teams?.includes(focus.team)) return 'This team'
+  return `Team ${(source.teams ?? []).map(titleOf).join(' + ')}`.trim()
 }
 
 /** A key as it applies to the whole organization, with how many narrower entries replace it somewhere. */
 export interface OrgSettingRow extends ResolvedSettingRow {
-  /** Entries scoped to groups or repositories, which win over this value where they apply. */
+  /** Entries scoped to teams or paths, which win over this value where they apply. */
   narrower: number
 }
 
 /**
  * Every non-secret key at the organization layer, in definition order: the newest entry scoped
  * `{ all: true }` wins (`org`), otherwise the definition's default applies. This is the resolver's
- * answer for a repository no group or path entry reaches.
+ * answer for a repository no team or path entry reaches.
  */
 export function orgRows(
   definitions: readonly SettingDefinitionView[],
@@ -168,7 +148,7 @@ export function orgRows(
 /** Whether an org row matches `query` by label or key and, with `changedOnly`, is not at its default. */
 export const orgRowMatches = (row: OrgSettingRow, query: string, changedOnly = false): boolean =>
   (!changedOnly || row.source.layer !== 'default' || row.narrower > 0) &&
-  rowMatches(row, { kind: 'group', group: '' }, 'all', query)
+  rowMatches(row, { kind: 'team', team: '' }, 'all', query)
 
 /**
  * A warning for an entry whose value carries keys the setting no longer reads, naming where moved

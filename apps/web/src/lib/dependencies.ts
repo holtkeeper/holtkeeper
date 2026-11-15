@@ -4,11 +4,10 @@ import type {
   DependencyMergeRequest,
   DependencyRepo,
   DependencyRow,
-  GroupMatch,
   UpgradeImpact,
 } from '@holtkeeper/api'
 
-import { type ScopeView, inHomeGroups, viewGroup } from './home-scope.ts'
+import { type ScopeView, inHomeTeams, viewTeam } from './home-scope.ts'
 import { parseEcosystem } from './libraries.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchText } from './search-params.ts'
@@ -278,40 +277,40 @@ export function filterCounts(
   return { segments, ecosystems }
 }
 
-/** A library row with the groups `FleetTable` folds it by. */
-export type LibraryFleetRow = DependencyRow & { groups: string[] }
+/** A library row with the owner teams `FleetTable` folds it by. */
+export type LibraryFleetRow = DependencyRow & { teams: string[] }
 
 /**
- * Library rows ready for `FleetTable`. Under *My teams* a library some home-group repository
- * uses is narrowed to those repositories and carries a home group's groups, and a library only
- * other teams use is narrowed to theirs and carries their groups, so the table folds it away.
- * A group position keeps the libraries that group's repositories use, narrowed to them. Under
+ * Library rows ready for `FleetTable`. Under *My teams* a library some home-team repository
+ * uses is narrowed to those repositories and carries that repository's teams, and a library only
+ * other teams use is narrowed to theirs and carries their teams, so the table folds it away.
+ * A team position keeps the libraries that team's repositories use, narrowed to them. Under
  * *All I can see* rows stay whole. A UI default, not a permission.
  */
 export function scopeLibraryRows(
   rows: readonly DependencyRow[],
   repos: readonly DependencyRepo[],
   view: ScopeView,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): LibraryFleetRow[] {
-  const groupsOf = new Map(repos.map((entry) => [repoKey(entry.repo), entry.groups]))
-  const isMine = (repo: string) => inHomeGroups(homeGroups, groupsOf.get(repo) ?? [])
-  const groupsFor = (row: DependencyRow) => {
+  const teamsOf = new Map(repos.map((entry) => [repoKey(entry.repo), entry.teams]))
+  const isMine = (repo: string) => inHomeTeams(homeTeams, teamsOf.get(repo) ?? [])
+  const teamsFor = (row: DependencyRow) => {
     const mine = row.usedBy.find((used) => isMine(used.repo))
-    if (mine) return groupsOf.get(mine.repo) ?? []
-    return [...new Set(row.usedBy.flatMap((used) => groupsOf.get(used.repo) ?? []))].toSorted()
+    if (mine) return teamsOf.get(mine.repo) ?? []
+    return [...new Set(row.usedBy.flatMap((used) => teamsOf.get(used.repo) ?? []))].toSorted()
   }
-  const group = viewGroup(view)
-  if (group !== undefined)
+  const team = viewTeam(view)
+  if (team !== undefined)
     return rows.flatMap((row) => {
-      const narrowed = narrowRow(row, (repo) => (groupsOf.get(repo) ?? []).includes(group))
-      return narrowed ? [{ ...narrowed, groups: groupsFor(narrowed) }] : []
+      const narrowed = narrowRow(row, (repo) => (teamsOf.get(repo) ?? []).includes(team))
+      return narrowed ? [{ ...narrowed, teams: teamsFor(narrowed) }] : []
     })
   return rows.flatMap((row) => {
-    if (view === 'all' || !homeGroups.length) return [{ ...row, groups: groupsFor(row) }]
+    if (view === 'all' || !homeTeams.length) return [{ ...row, teams: teamsFor(row) }]
     const usedByMine = row.usedBy.some((used) => isMine(used.repo))
     const narrowed = narrowRow(row, (repo) => isMine(repo) === usedByMine)
-    return narrowed ? [{ ...narrowed, groups: groupsFor(narrowed) }] : []
+    return narrowed ? [{ ...narrowed, teams: teamsFor(narrowed) }] : []
   })
 }
 

@@ -10,13 +10,14 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
 import { createApp } from '../src/app.ts'
-import { defaultHomeGroups } from '../src/routes/preferences.ts'
+import { defaultHomeTeams } from '../src/routes/preferences.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*'] },
+    puzzles: { owns: ['work:puzzles/*'], members: [{ id: 'widget-dev', role: 'member' }] },
   },
 })
 
@@ -32,8 +33,8 @@ const asWidget: AuthProvider = {
     name: 'Widget Dev',
     provider: 'header',
     grants: [
-      { scope: { groups: ['games'] }, actions: ['repos:read'] },
-      { scope: { groups: ['games', ['tools', 'shared']] }, actions: ['analyses:read'] },
+      { scope: { teams: ['games'] }, actions: ['repos:read'] },
+      { scope: { teams: ['games', 'tools', 'gone'] }, actions: ['analyses:read'] },
     ],
   }),
   info: () => ({ provider: 'header', methods: [] }),
@@ -67,63 +68,86 @@ const put = (app: ReturnType<typeof setup>, body: unknown) =>
 const read = async (response: Response) => (await response.json()) as UserPreferences
 
 describe('preferences', () => {
-  test('home groups default to the groups in the grants', () => {
-    expect(
-      defaultHomeGroups([
+  test('home teams default to the teams of the membership, then the configured teams the grants name', () => {
+    const principal = {
+      id: 'widget-dev',
+      grants: [
         { scope: { all: true }, actions: ['*'] },
-        { scope: { groups: ['games', ['tools', 'shared']] }, actions: ['repos:read'] },
-        { scope: { groups: [['tools', 'shared'], 'games'] }, actions: ['analyses:read'] },
-      ]),
-    ).toEqual(['games', ['tools', 'shared']])
-    expect(defaultHomeGroups([{ scope: { all: true }, actions: ['*'] }])).toEqual([])
+        { scope: { teams: ['tools', 'gone'] }, actions: ['repos:read'] },
+        { scope: { teams: ['puzzles', 'games'] }, actions: ['analyses:read'] },
+      ],
+    } satisfies Parameters<typeof defaultHomeTeams>[1]
+    expect(defaultHomeTeams(config.teams, principal)).toEqual(['puzzles', 'tools', 'games'])
+    expect(
+      defaultHomeTeams(config.teams, {
+        id: 'other',
+        email: 'Widget-Dev',
+        grants: [{ scope: { all: true }, actions: ['*'] }],
+      }),
+    ).toEqual(['puzzles'])
+    expect(
+      defaultHomeTeams(config.teams, {
+        id: 'other',
+        grants: [{ scope: { all: true }, actions: ['*'] }],
+      }),
+    ).toEqual([])
   })
 
-  test('GET answers the grant groups until the principal picks its own', async () => {
+  test('GET answers the membership and grant teams until the principal picks its own', async () => {
     const app = setup()
     expect(await read(await app.request('/api/me/preferences'))).toEqual({
-      homeGroups: ['games', ['tools', 'shared']],
-      homeGroupsFromGrants: true,
+      homeTeams: ['puzzles', 'games', 'tools'],
+      homeTeamsFromMembership: true,
     })
   })
 
-  test('PUT stores home groups per principal, deduplicated; null goes back to the grants', async () => {
+  test('PUT stores home teams per principal, deduplicated; null goes back to the default', async () => {
     const app = setup()
-    const saved = await put(app, { homeGroups: ['tools', 'tools', ['games', 'tools']] })
+    const saved = await put(app, { homeTeams: ['tools', 'tools', 'games'] })
     expect(saved.status).toBe(200)
     expect(await read(saved)).toEqual({
-      homeGroups: ['tools', ['games', 'tools']],
-      homeGroupsFromGrants: false,
+      homeTeams: ['tools', 'games'],
+      homeTeamsFromMembership: false,
     })
     expect(await read(await app.request('/api/me/preferences'))).toMatchObject({
-      homeGroups: ['tools', ['games', 'tools']],
+      homeTeams: ['tools', 'games'],
     })
-    expect(await store.kv?.get('prefs:widget-dev')).toEqual({
-      homeGroups: ['tools', ['games', 'tools']],
-    })
+    expect(await store.kv?.get('prefs:widget-dev')).toEqual({ homeTeams: ['tools', 'games'] })
     expect((await store.audit?.list({ action: 'user.preferences' }))?.events).toHaveLength(1)
 
-    expect(await read(await put(app, { homeGroups: [] }))).toEqual({
-      homeGroups: [],
-      homeGroupsFromGrants: false,
+    expect(await read(await put(app, { homeTeams: [] }))).toEqual({
+      homeTeams: [],
+      homeTeamsFromMembership: false,
     })
-    expect(await read(await put(app, { homeGroups: null }))).toEqual({
-      homeGroups: ['games', ['tools', 'shared']],
-      homeGroupsFromGrants: true,
+    expect(await read(await put(app, { homeTeams: null }))).toEqual({
+      homeTeams: ['puzzles', 'games', 'tools'],
+      homeTeamsFromMembership: true,
+    })
+  })
+
+  test('preferences stored before teams fall back to the default', async () => {
+    await store.kv?.set('prefs:widget-dev', { homeGroups: [['games', 'tools']] })
+    expect(await read(await setup().request('/api/me/preferences'))).toEqual({
+      homeTeams: ['puzzles', 'games', 'tools'],
+      homeTeamsFromMembership: true,
     })
   })
 
   test('rejects invalid input, anonymous callers and stores without kv', async () => {
-    expect((await put(setup(), { homeGroups: [''] })).status).toBe(400)
-    expect((await put(setup(), { homeGroups: 'games' })).status).toBe(400)
+    expect((await put(setup(), { homeTeams: [''] })).status).toBe(400)
+    expect((await put(setup(), { homeTeams: 'games' })).status).toBe(400)
+    expect((await put(setup(), { homeTeams: ['Games'] })).status).toBe(400)
+    const many = Array.from({ length: 101 }, (_, n) => `team-${n}`)
+    expect((await put(setup(), { homeTeams: many })).status).toBe(400)
     const anonymous: AuthProvider = {
       name: 'header',
       authenticate: async () => undefined,
       info: () => ({ provider: 'header', methods: [] }),
     }
     expect((await setup(anonymous).request('/api/me/preferences')).status).toBe(401)
-    expect((await put(setup(asWidget, false), { homeGroups: ['games'] })).status).toBe(503)
+    expect((await put(setup(asWidget, false), { homeTeams: ['games'] })).status).toBe(503)
     expect(await read(await setup(asWidget, false).request('/api/me/preferences'))).toMatchObject({
-      homeGroupsFromGrants: true,
+      homeTeamsFromMembership: true,
     })
   })
 })

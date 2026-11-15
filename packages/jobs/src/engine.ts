@@ -13,7 +13,7 @@ import {
   createContextFactory,
 } from './context.ts'
 import type { ToolchainFor } from './execution.ts'
-import { type ResolveRepos, groupRepositories } from './repos.ts'
+import { type ResolveRepos, fleetRepositories } from './repos.ts'
 import { type Scheduler, type SchedulerOptions, createScheduler } from './scheduler.ts'
 import { type Worker, type WorkerOptions, createWorker } from './worker.ts'
 
@@ -72,7 +72,7 @@ export interface JobEngine {
 export function createJobEngine(options: JobEngineOptions): JobEngine {
   const { config, store, analyzers } = options
   const jobs = config.jobs
-  const resolveRepos = options.resolveRepos ?? groupRepositories(config)
+  const resolveRepos = options.resolveRepos ?? fleetRepositories(config)
   const shared = {
     ...(options.now && { now: options.now }),
     ...(options.log && { log: options.log }),

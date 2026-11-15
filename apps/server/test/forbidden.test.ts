@@ -19,17 +19,17 @@ import { ForbiddenException, ForbiddenToolError, type ServerDeps } from '../src/
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    widgets: { forge: 'work', include: ['acme/*'] },
-    gizmos: { forge: 'work', include: ['other/*'] },
+  teams: {
+    widgets: { owns: ['work:acme/*'] },
+    gizmos: { owns: ['work:other/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
-    reader: [{ scope: { groups: ['widgets'] }, actions: ['repos:read'] }],
-    spender: [{ scope: { groups: ['widgets'] }, actions: ['ai:read'] }],
-    writer: [{ scope: { groups: ['gizmos'] }, actions: ['knowledge:write', 'knowledge:read'] }],
+    reader: [{ scope: { teams: ['widgets'] }, actions: ['repos:read'] }],
+    spender: [{ scope: { teams: ['widgets'] }, actions: ['ai:read'] }],
+    writer: [{ scope: { teams: ['gizmos'] }, actions: ['knowledge:write', 'knowledge:read'] }],
     admin: [{ scope: { all: true }, actions: ['*'] }],
   },
 })
@@ -171,7 +171,7 @@ describe('403 body', () => {
         title: 'Prefer round widgets',
         body: 'Round widgets roll.',
         kind: 'convention',
-        scope: { groups: ['gizmos'] },
+        scope: { teams: ['gizmos'] },
         topics: ['testing'],
         appliesTo: ['review'],
         visibility: 'team',

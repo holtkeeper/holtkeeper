@@ -55,7 +55,7 @@ export function assetsPolicySource(
 ): AssetsPolicySource {
   const from = effective.from
   if (!from) return { level: 'default' }
-  const level = from.scope.all ? 'all' : from.scope.repos?.length ? 'repo' : 'group'
+  const level = from.scope.all ? 'all' : from.scope.repos?.length ? 'repo' : 'team'
   return canReadScope(from.scope) ? { level, entry: from } : { level }
 }
 
@@ -122,7 +122,7 @@ interface AssetsTable {
 }
 
 /** The filters and order of `AssetsQuery`, without paging. */
-type AssetsFilters = Omit<AssetsQuery, 'group' | 'repo' | 'cursor' | 'limit'>
+type AssetsFilters = Omit<AssetsQuery, 'team' | 'repo' | 'cursor' | 'limit'>
 
 const severityRank: Record<AssetRow['severity'], number> = { error: 0, warning: 1, info: 2 }
 const policyProblem = (row: AssetRow) => row.problems.some((problem) => problem.severity !== 'info')
@@ -161,7 +161,7 @@ export function assetsTable(
     if (!metrics) continue
     repos.push({
       repo: head.repo,
-      groups: target.groups,
+      teams: target.teams,
       analysisId: head.id,
       createdAt: head.createdAt,
       files: metrics.files,

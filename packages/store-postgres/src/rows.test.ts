@@ -156,7 +156,8 @@ describe('row mapping', () => {
       status: 'accepted',
       source: 'human',
       author: 'jane',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
+      matches: null,
       topics: ['x'],
       applies_to: ['*'],
       packages: null,
@@ -172,6 +173,10 @@ describe('row mapping', () => {
     const entry = toKnowledgeEntry(row)
     expect(entry.packages).toBeUndefined()
     expect('updatedBy' in entry).toBeFalse()
+    expect('match' in entry).toBeFalse()
+    const match = { families: ['family-1'], files: ['src/**'] }
+    expect(toKnowledgeEntry({ ...row, matches: match }).match).toEqual(match)
+    expect(knowledgeContent(toKnowledgeEntry({ ...row, matches: match })).match).toEqual(match)
     const revision = toKnowledgeRevision({
       version: 1,
       content: knowledgeContent(entry),
@@ -192,7 +197,7 @@ describe('row mapping', () => {
       at,
       repo_forge: 'work',
       repo_path: 'games/a',
-      groups: ['games'],
+      teams: ['games'],
       task_kind: 'review',
       analyzer: null,
       job_id: 'j',

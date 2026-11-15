@@ -198,7 +198,7 @@ describe('mcpToolsets', () => {
 
 const target = (value: string): RepoTarget | undefined =>
   value.startsWith('work:toys/')
-    ? { forge: 'work', path: value.slice('work:'.length), groups: ['toys'] }
+    ? { forge: 'work', path: value.slice('work:'.length), teams: ['toys'] }
     : undefined
 
 describe('rules toolset', () => {
@@ -230,7 +230,7 @@ describe('rules toolset', () => {
   async function setup() {
     const store = memoryStore()
     await store.guides.put({
-      scope: 'group:toys',
+      scope: 'team:toys',
       section: 'general',
       rules: 'Widgets never fetch data themselves.',
       steering: '',
@@ -338,22 +338,22 @@ describe('rules toolset', () => {
     }
     const refused = await client.callTool({
       name: 'propose_rule_change',
-      arguments: { ...args, scope: 'group:sheds' },
+      arguments: { ...args, scope: 'team:sheds' },
     })
     expect(refused.isError).toBe(true)
     expect(textOf(refused)).toBe(
-      'Not proposed: group:sheds is not a group, family or repository scope of work:toys/kite.',
+      'Not proposed: team:sheds is not a team, folder, family or repository scope of work:toys/kite.',
     )
     expect(
       textOf(
         await client.callTool({
           name: 'propose_rule_change',
-          arguments: { ...args, scope: 'group:toys' },
+          arguments: { ...args, scope: 'team:toys' },
         }),
       ),
-    ).toContain('of `work:toys/kite` into group:toys.')
+    ).toContain('of `work:toys/kite` into team:toys.')
     expect(await store.learnings.list()).toMatchObject([
-      { suggestedScope: 'group', targetScope: 'group:toys' },
+      { suggestedScope: 'team', targetScope: 'team:toys' },
     ])
   })
 
@@ -417,7 +417,7 @@ describe('rules toolset', () => {
   test('internal agents read other repositories through rules, never their own Guide again', async () => {
     const { store } = await setup()
     await store.guides.put({
-      scope: 'group:barns',
+      scope: 'team:barns',
       section: 'general',
       rules: 'Barn doors swing outward.',
       steering: '',
@@ -432,12 +432,12 @@ describe('rules toolset', () => {
       updatedAt: '2026-10-31T08:00:00.000Z',
     })
     const access = agentRulesAccess({
-      repo: { forge: 'work', path: 'toys/kite', groups: ['toys'] },
+      repo: { forge: 'work', path: 'toys/kite', teams: ['toys'] },
       targetOf: (value) =>
         value === 'work:sheds/vault'
-          ? { forge: 'work', path: 'sheds/vault', groups: ['sheds'] }
+          ? { forge: 'work', path: 'sheds/vault', teams: ['sheds'] }
           : value === 'work:barns/kite-shop'
-            ? { forge: 'work', path: 'barns/kite-shop', groups: ['barns'] }
+            ? { forge: 'work', path: 'barns/kite-shop', teams: ['barns'] }
             : target(value),
       resolve: createGuideResolver({ store }),
       testIds: testIdsReader({ store }),

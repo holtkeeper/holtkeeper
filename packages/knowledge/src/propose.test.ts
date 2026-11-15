@@ -4,7 +4,13 @@ import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { entry, repo } from '../test/entries.ts'
-import { mergeEvidence, packageSubject, proposeEntry, sharingDefaults } from './propose.ts'
+import {
+  mergeEvidence,
+  packageSubject,
+  proposeEntry,
+  SEMANTIC_DUPLICATE,
+  sharingDefaults,
+} from './propose.ts'
 import { KnowledgeValidationError } from './schema.ts'
 
 const now = () => new Date('2026-10-30T12:00:00.000Z')
@@ -125,7 +131,7 @@ describe('proposeEntry', () => {
       input: {
         title: 'Run generators through make gen',
         body: 'Mocks come from make gen in every service.',
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         supersedes: 'narrow',
       },
       actor: 'agent:knowledge-bootstrap',
@@ -136,7 +142,7 @@ describe('proposeEntry', () => {
     expect(promoted.entry).toMatchObject({
       status: 'proposed',
       supersedes: 'narrow',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
     })
     const blocked = await proposeEntry({
       store,
@@ -166,7 +172,7 @@ describe('proposeEntry', () => {
     const input = {
       title: 'Run generators through make gen',
       body: 'Every service of the team generates code with make gen.',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       supersedes: 'sibling-a',
     }
     const swallowed = await proposeEntry({
@@ -194,10 +200,114 @@ describe('proposeEntry', () => {
       actor: 'agent:x',
       task: { repo: repo('tools/kit', ['tools']) },
       now,
-      duplicateScope: (candidate) => candidate.scope.groups?.includes('tools') ?? false,
+      duplicateScope: (candidate) => candidate.scope.teams?.includes('tools') ?? false,
     })
     expect(elsewhere.created).toBeTrue()
     expect(elsewhere.entry.scope).toEqual({ repos: ['work:tools/kit'] })
+  })
+
+  test('an entry narrowed by another match only counts with the same title and body', async () => {
+    await store.knowledge.put(
+      entry({
+        id: 'family',
+        title: 'Run generators through make gen',
+        body: 'Mocks come from make gen.',
+        scope: { teams: ['games'] },
+        match: { families: ['f-web'] },
+      }),
+    )
+    const propose = (input: Parameters<typeof proposeEntry>[0]['input']) =>
+      proposeEntry({ store, input, actor: 'agent:x', task: { repo: app }, now })
+
+    const narrower = await propose({
+      title: 'Run generators through make gen',
+      body: 'Something else.',
+      match: { families: ['f-web'], files: ['gen/**'] },
+    })
+    expect(narrower).toMatchObject({ created: false, duplicateOf: 'family' })
+
+    const otherFamily = await propose({
+      title: 'Run generators through make gen',
+      body: 'Mocks come from make gen.',
+      match: { families: ['f-api'] },
+    })
+    expect(otherFamily).toMatchObject({ created: false, duplicateOf: 'family' })
+
+    const similar = await propose({
+      title: 'Run generators through make gen',
+      body: 'Mocks come from make gen everywhere.',
+      match: { families: ['f-api'] },
+    })
+    expect(similar.created).toBeTrue()
+
+    const broader = await propose({
+      title: 'Run generators through make gen',
+      body: 'Every service generates mocks with make gen.',
+      scope: { teams: ['games'] },
+    })
+    expect(broader.created).toBeTrue()
+    expect(broader.entry.match).toBeUndefined()
+    // The broad entry now applies wherever a narrower proposal would: the usual rules again.
+    expect(
+      await propose({
+        title: 'Run generators through make gen',
+        body: 'x',
+        match: { files: ['a/**'] },
+      }),
+    ).toMatchObject({ created: false })
+  })
+
+  test('a cosine from SEMANTIC_DUPLICATE on counts as a duplicate, under the match rule', async () => {
+    expect(SEMANTIC_DUPLICATE).toBe(0.9)
+    await store.knowledge.put(
+      entry({ id: 'radius', title: 'Round widget corners', body: 'Use the radius token.' }),
+    )
+    await store.knowledge.put(
+      entry({
+        id: 'family',
+        title: 'Card shadows',
+        body: 'Use the elevation token.',
+        match: { families: ['f-web'] },
+      }),
+    )
+    await store.knowledge.put(entry({ id: 'close', title: 'Card borders', body: 'One pixel.' }))
+    const cosines: Record<string, number> = { radius: 0.93, family: 0.99, close: 0.95 }
+    const propose = (similarity: (candidate: { id: string }) => number | undefined) =>
+      proposeEntry({
+        store,
+        input: { title: 'Bordes redondeados', body: 'El token de radio para tarjetas.' },
+        actor: 'agent:x',
+        task: { repo: app },
+        now,
+        similarity,
+      })
+
+    // Different words, same meaning: the closest entry the proposal is within wins; the family
+    // entry applies elsewhere, so its high cosine does not count.
+    expect(await propose((candidate) => cosines[candidate.id])).toMatchObject({
+      created: false,
+      duplicateOf: 'close',
+    })
+    expect(
+      await propose((candidate) => (candidate.id === 'radius' ? SEMANTIC_DUPLICATE : undefined)),
+    ).toMatchObject({ created: false, duplicateOf: 'radius' })
+    const below = await propose(() => 0.89)
+    expect(below.created).toBeTrue()
+  })
+
+  test('stores the match of a proposal, normalised', async () => {
+    const result = await proposeEntry({
+      store,
+      input: {
+        title: 'Snapshot files stay small',
+        body: 'Keep snapshots under a hundred lines.',
+        match: { families: ['f-web'], files: [] },
+      },
+      actor: 'agent:x',
+      task: { repo: app },
+      now,
+    })
+    expect(result.entry.match).toEqual({ families: ['f-web'] })
   })
 
   test('archived entries do not block a new proposal', async () => {

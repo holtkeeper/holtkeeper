@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { StackGroupView, StackUse } from '@holtkeeper/api'
+import type { StackTeamView, StackUse } from '@holtkeeper/api'
 
 import {
   cellStatus,
@@ -34,16 +34,16 @@ const stackUse = (repo: string, fields: Partial<StackUse>): StackUse => ({
   ...fields,
 })
 
-const shapes: StackGroupView = {
+const shapes: StackTeamView = {
   forge: 'work',
-  group: 'shapes',
+  team: 'shapes',
   analysisId: 'a1',
   createdAt: '2026-11-10T00:00:00Z',
   checkedAt: '2026-11-10T00:00:00Z',
   soonDays: 180,
   repos: [
-    { path: 'shapes/circle', groups: ['shapes'] },
-    { path: 'shapes/square', groups: ['shapes'] },
+    { path: 'shapes/circle', teams: ['shapes'] },
+    { path: 'shapes/square', teams: ['shapes'] },
   ],
   tools: [
     {
@@ -110,11 +110,11 @@ const shapes: StackGroupView = {
 
 const { changes: _, ...unchanged } = shapes
 
-const colors: StackGroupView = {
+const colors: StackTeamView = {
   ...unchanged,
-  group: 'colors',
+  team: 'colors',
   analysisId: 'a2',
-  repos: [{ path: 'colors/red', groups: ['colors'] }],
+  repos: [{ path: 'colors/red', teams: ['colors'] }],
   tools: [
     {
       id: 'node',
@@ -140,25 +140,25 @@ test('unknown views fall back to runtimes', () => {
 })
 
 describe('scope and filters', () => {
-  test('my teams keeps the home groups', () => {
+  test('my teams keeps the home teams', () => {
     const scoped = scopeStack([colors, shapes], 'mine', ['shapes'])
-    expect(scoped.groups.map((group) => group.group)).toEqual(['shapes'])
+    expect(scoped.teams.map((team) => team.team)).toEqual(['shapes'])
     expect(scoped.counts).toMatchObject({ mine: 2, all: 3 })
   })
 
-  test('one group narrows everything to it whatever the switch says', () => {
+  test('one team narrows everything to it whatever the switch says', () => {
     const scoped = scopeStack([colors, shapes], 'mine', ['shapes'], 'colors')
-    expect(scoped.groups.map((group) => group.group)).toEqual(['colors'])
-    expect(scoped.groups[0]?.tools[0]?.uses).toHaveLength(1)
+    expect(scoped.teams.map((team) => team.team)).toEqual(['colors'])
+    expect(scoped.teams[0]?.tools[0]?.uses).toHaveLength(1)
   })
 
   test('kind and repository filters narrow tools and repositories', () => {
     const images = narrowStack([shapes, colors], { kind: ['image'] })
-    expect(images.flatMap((group) => group.tools.map((tool) => tool.id))).toEqual([
+    expect(images.flatMap((team) => team.tools.map((tool) => tool.id))).toEqual([
       'image:registry.test/shapes/base',
     ])
     const one = narrowStack([shapes, colors], { repo: 'work:shapes/square' })
-    expect(one.map((group) => group.repos.map((repo) => repo.path))).toEqual([['shapes/square']])
+    expect(one.map((team) => team.repos.map((repo) => repo.path))).toEqual([['shapes/square']])
     expect(one[0]?.conventions.map((result) => result.file)).toEqual(['.nvmrc', 'tsconfig.json'])
     expect(narrowStack([shapes], {})).toEqual([shapes])
   })
@@ -171,7 +171,7 @@ test('version lines prefer the release line, then the major', () => {
   expect(versionLine({})).toBe('floating')
 })
 
-test('versionLines merges groups, one cell per line with its worst support', () => {
+test('versionLines merges teams, one cell per line with its worst support', () => {
   const rows = versionLines([shapes, colors])
   expect(rows.map((row) => [row.id, row.repos])).toEqual([
     ['node', 3],
@@ -235,7 +235,7 @@ describe('repoMatrix', () => {
   })
 
   test('repositories without uses stay without a segment', () => {
-    const empty: StackGroupView = { ...colors, tools: [] }
+    const empty: StackTeamView = { ...colors, tools: [] }
     expect(repoMatrix([empty]).rows.map((row) => Object.keys(row.cells).length)).toEqual([0])
     expect(repoMatrix([empty], 'eol').rows).toEqual([])
   })
@@ -288,7 +288,7 @@ describe('suggestedSteps', () => {
 test('the matching convention is the one of a file the line is declared in, failing first', () => {
   expect(
     matchingConvention([shapes], 'work:shapes/circle', ['.nvmrc', 'Dockerfile']),
-  ).toMatchObject({ file: '.nvmrc', status: 'drifts', analysisId: 'a1', group: 'shapes' })
+  ).toMatchObject({ file: '.nvmrc', status: 'drifts', analysisId: 'a1', team: 'shapes' })
   expect(matchingConvention([shapes], 'work:shapes/circle', ['Dockerfile'])).toBeUndefined()
 })
 
@@ -303,9 +303,9 @@ test('line keys keep tool ids with colons', () => {
 })
 
 test('the sheet steps through cells from the matrix and lines from the table', () => {
-  const groups = [colors, shapes]
-  const matrix = repoMatrix(groups)
-  const lines = versionLines(groups)
+  const teams = [colors, shapes]
+  const matrix = repoMatrix(teams)
+  const lines = versionLines(teams)
   expect(sheetItems(matrix, lines, true)).toEqual([
     { line: 'node:18', repo: 'work:shapes/circle' },
     { line: 'image:registry.test/shapes/base:2', repo: 'work:shapes/circle' },
@@ -324,7 +324,7 @@ test('the sheet steps through cells from the matrix and lines from the table', (
 test('the conventions grid puts failing repositories first and counts statuses', () => {
   const grid = conventionGrid([shapes])
   expect(grid.files).toEqual(['.nvmrc', 'tsconfig.json'])
-  expect(grid.rows.map((row) => [row.key, row.groups])).toEqual([
+  expect(grid.rows.map((row) => [row.key, row.teams])).toEqual([
     ['work:shapes/circle', ['shapes']],
     ['work:shapes/square', ['shapes']],
   ])
@@ -341,7 +341,7 @@ test('the conventions grid puts failing repositories first and counts statuses',
   ])
 })
 
-test('weekly changes sum the groups that have an earlier record', () => {
+test('weekly changes sum the teams that have an earlier record', () => {
   expect(weeklyChanges([colors])).toBeUndefined()
   expect(weeklyChanges([shapes, colors])).toEqual({
     since: '2026-11-03T00:00:00Z',
@@ -358,7 +358,7 @@ test('parseStackSearch keeps known values and drops the rest', () => {
       tab: 'conventions',
       segment: 'eol',
       kind: 'runtime,image,robot',
-      group: 'Web,Payments',
+      team: 'Web,Payments',
       line: 'node:20',
       repo: 'gitlab:acme/storefront',
       pane: 'cell',

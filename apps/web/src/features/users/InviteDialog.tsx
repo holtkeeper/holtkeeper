@@ -2,7 +2,7 @@ import type { Grant, LinkResponse, Scope } from '@holtkeeper/api'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useGroupNames, useUserMutations } from '../../api/queries.ts'
+import { useUserMutations } from '../../api/queries.ts'
 import { type RolePresetId, grantsForRole } from '../../lib/roles.ts'
 import { isEmptyScope, normalizeScope } from '../../lib/scope.ts'
 import { Button, Dialog, Notice, Switch, TextField } from '../../ui/index.ts'
@@ -25,20 +25,17 @@ export function InviteDialog({
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<RolePresetId>('viewer')
-  const [scope, setScope] = useState<Scope>({ groups: [] })
+  const [scope, setScope] = useState<Scope>({ teams: [] })
   const [custom, setCustom] = useState(false)
-  const [grants, setGrants] = useState<Grant[]>([
-    { scope: { groups: [] }, actions: ['repos:read'] },
-  ])
+  const [grants, setGrants] = useState<Grant[]>([{ scope: { teams: [] }, actions: ['repos:read'] }])
   const { invite } = useUserMutations()
-  const groups = useGroupNames()
   const chosen = custom ? cleanGrants(grants) : grantsForRole(role, scope)
   const problem = !name.trim()
     ? 'Name is required'
     : chosen.some((g) => g.actions.length === 0)
       ? 'Every grant needs at least one action'
       : chosen.some((g) => isEmptyScope(g.scope))
-        ? 'Pick the groups or repositories it applies to'
+        ? 'Pick the teams or paths it applies to'
         : undefined
 
   const save = () =>
@@ -92,14 +89,14 @@ export function InviteDialog({
       </div>
       <Switch label="Exact grants instead of a role" isSelected={custom} onChange={setCustom} />
       {custom ? (
-        <GrantsEditor value={grants} onChange={setGrants} groups={groups} />
+        <GrantsEditor value={grants} onChange={setGrants} />
       ) : (
         <>
           <RolePicker label="Role" value={role} onChange={setRole} />
           {role === 'admin' ? (
             <p className="text-xs text-muted">Admin always applies to every repository.</p>
           ) : (
-            <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+            <ScopeEditor value={scope} onChange={setScope} label="Applies to" />
           )}
         </>
       )}

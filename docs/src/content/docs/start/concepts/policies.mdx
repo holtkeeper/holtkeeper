@@ -7,7 +7,7 @@ sidebar:
 
 import { Button, Field, Fields, Screen, Scroll, Toolbar } from '@ui'
 
-Almost everything you tune in Holtkeeper is a **setting**: analyzer options, the AI budget, the license policy, commit conventions, whether merge requests get reviewed, whether a repository may be changed at all. A setting can have one entry for everything, others for groups, globs or single repositories, and the [most specific entry wins](/start/concepts/fleet/#the-most-specific-entry-wins). The config file holds infrastructure only; settings live in the database and are edited in the panel, and every change is recorded in the audit log.
+Almost everything you tune in Holtkeeper is a **setting**: analyzer options, the AI budget, the license policy, commit conventions, whether merge requests get reviewed, whether a repository may be changed at all. A setting can have one entry for everything, others for teams, path patterns or single repositories, and the [most specific entry wins](/start/concepts/fleet/#the-most-specific-entry-wins). The config file holds infrastructure only; settings live in the database and are edited in the panel, and every change is recorded in the audit log.
 
 ## Entries and scopes
 
@@ -22,7 +22,7 @@ Each setting has a default that applies where no entry covers a repository. You 
 | Scope                | Value   | Changed              |
 | -------------------- | ------- | -------------------- |
 | Everything           | `minor` | system · on install  |
-| Group `web.payments` | `patch` | Mira K. · 2 days ago |
+| Path `acme/round/**` | `patch` | Mira K. · 2 days ago |
 
   </Scroll>
 </Screen>
@@ -33,7 +33,7 @@ You meet settings in three places:
 
 - **On the page that owns them.** Analysis pages have a <Button ghost>Configure</Button> button that opens their analyzer's options.
 - **In Settings.** Sections for People & access, AI, Integrations, Analyzers, Policies and System; **Search settings** finds any key.
-- **On a repository or group.** Its **Settings** tab shows every setting as it applies there, with the source of each value and **Override** to add an entry for just that scope.
+- **On a repository or team.** Its **Settings** tab shows every setting as it applies there, with the source of each value and **Override** to add an entry for just that scope.
 
 ## Policies
 
@@ -64,13 +64,13 @@ A few settings answer yes-or-no questions about a repository, each with an optio
 
 ## Freezes
 
-**Read-only** freezes a repository, a glob, a group or everything: Holtkeeper still analyses it but never changes it. No comments, reviews, branches, merge requests or pushes, and merge request events are ignored. A freeze needs a reason and may have an end date, after which it lapses on its own.
+**Read-only** freezes a repository, a path pattern, a team or everything: Holtkeeper still analyses it but never changes it. No comments, reviews, branches, merge requests or pushes, and merge request events are ignored. A freeze needs a reason and may have an end date, after which it lapses on its own.
 
-A narrower entry with **frozen** switched off **lifts** a broader freeze for its scope, for example one repository of a frozen group. Anyone with `settings:write` on that repository or group may lift a freeze set above it, even one for everything.
+A narrower entry with **frozen** switched off **lifts** a broader freeze for its scope, for example one repository of a frozen folder. Anyone with `settings:write` on that repository, folder or team may lift a freeze set above it, even one for everything.
 
 <Screen title="Settings › People & access › Read-only repositories">
   <Fields>
-    <Field label="Scope" value="Group tools" />
+    <Field label="Scope" value="Path acme/kit/**" />
     <Field label="Frozen" toggle />
     <Field label="Reason" value="Code freeze until the platform migration lands" wide />
     <Field label="Until" value="2026-12-01 18:00" mono />

@@ -18,9 +18,9 @@ const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000).
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'], title: 'Shape Studio' },
-    colors: { forge: 'work', include: ['colors/*', 'colors/red'], title: 'Palette' },
+  teams: {
+    shapes: { title: 'Shape Studio', owns: ['work:shapes/*'] },
+    colors: { title: 'Palette', owns: ['work:colors/*', 'work:colors/red'] },
   },
 })
 
@@ -39,11 +39,11 @@ const auth = headerAuth({
         ],
       },
     ],
-    viewer: [{ scope: { groups: ['shapes'] }, actions: ['repos:read'] }],
-    auditor: [{ scope: { groups: ['shapes'] }, actions: ['audits:read'] }],
-    analyst: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    viewer: [{ scope: { teams: ['shapes'] }, actions: ['repos:read'] }],
+    auditor: [{ scope: { teams: ['shapes'] }, actions: ['audits:read'] }],
+    analyst: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     circle: [
-      { scope: { groups: ['shapes'] }, actions: ['repos:read'] },
+      { scope: { teams: ['shapes'] }, actions: ['repos:read'] },
       { scope: { repos: ['work:shapes/circle'] }, actions: ['settings:read', 'analyses:read'] },
     ],
   },
@@ -76,7 +76,7 @@ const list = async (role: string) => {
 const titles = async (role: string) => {
   const response = await app().request('/api/me', { headers: as(role) })
   expect(response.status).toBe(200)
-  return ((await response.json()) as MeResponse).groupTitles
+  return ((await response.json()) as MeResponse).teamTitles
 }
 
 const coverage = (path: string, percent: number) =>
@@ -105,7 +105,7 @@ const audit = (path: string, high: number) =>
 
 beforeEach(async () => {
   store = memoryStore()
-  await store.kv?.set('poll-group:shapes', {
+  await store.kv?.set('poll-fleet:work', {
     repos: [
       { forge: 'work', path: 'shapes/circle' },
       { forge: 'work', path: 'shapes/square' },
@@ -116,30 +116,33 @@ beforeEach(async () => {
 })
 
 describe('GET /api/me', () => {
-  test('lists every group title with global settings:read', async () => {
+  test('lists every team title with global settings:read', async () => {
     expect(await titles('admin')).toEqual({ shapes: 'Shape Studio', colors: 'Palette' })
   })
 
-  test('reaches the subgroups of a granted group and the parent of a granted subgroup', async () => {
-    const nested = parseConfig({
+  test('reaches the teams of the membership, the grants and the owners of readable repositories', async () => {
+    const overlapping = parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'], title: 'Shape Studio' },
-        'shapes.round': { forge: 'work', include: ['shapes/circle'], title: 'Round' },
-        'shapes.flat': { forge: 'work', include: ['shapes/square'], title: 'Flat' },
-        colors: { forge: 'work', include: ['colors/*'], title: 'Palette' },
+      teams: {
+        shapes: { title: 'Shape Studio', owns: ['work:shapes/*'] },
+        round: {
+          title: 'Round',
+          owns: ['work:shapes/circle'],
+          members: [{ id: 'header:mia', role: 'member' }],
+        },
+        colors: { title: 'Palette', owns: ['work:colors/*'] },
+        bare: { owns: ['work:bare/*'], members: [{ id: 'header:mia', role: 'member' }] },
       },
     })
     const roles = headerAuth({
       roles: {
-        team: [{ scope: { groups: ['shapes'] }, actions: ['knowledge:read'] }],
-        sub: [{ scope: { groups: ['shapes.round'] }, actions: ['knowledge:read'] }],
-        member: [{ scope: { groups: ['shapes.round'] }, actions: ['repos:read'] }],
+        named: [{ scope: { teams: ['colors'] }, actions: ['knowledge:read'] }],
+        circle: [{ scope: { repos: ['work:shapes/circle'] }, actions: ['repos:read'] }],
       },
     })
     const vault = aesVault('v'.repeat(32))
-    const nestedApp = createApp({
-      config: nested,
+    const overlappingApp = createApp({
+      config: overlapping,
       auth: roles,
       store,
       vault,
@@ -148,29 +151,29 @@ describe('GET /api/me', () => {
       analyses: [],
       now: () => NOW,
     })
-    const reach = async (role: string) =>
-      ((await (await nestedApp.request('/api/me', { headers: as(role) })).json()) as MeResponse)
-        .groupTitles
-    expect(await reach('team')).toEqual({
+    const reach = async (headers: Record<string, string>) =>
+      ((await (await overlappingApp.request('/api/me', { headers })).json()) as MeResponse)
+        .teamTitles
+    expect(await reach(as('named'))).toEqual({ colors: 'Palette' })
+    expect(await reach(as('circle'))).toEqual({ shapes: 'Shape Studio', round: 'Round' })
+    // Untitled teams have no title to show; the key stays the identity.
+    expect(await reach({ 'x-forwarded-user': 'mia' })).toEqual({
       shapes: 'Shape Studio',
-      'shapes.round': 'Round',
-      'shapes.flat': 'Flat',
+      round: 'Round',
     })
-    expect(await reach('sub')).toEqual({ shapes: 'Shape Studio', 'shapes.round': 'Round' })
-    expect(await reach('member')).toEqual({ shapes: 'Shape Studio', 'shapes.round': 'Round' })
   })
 
-  test('limits titles to the groups a team viewer can reach', async () => {
+  test('limits titles to the teams a team viewer can reach', async () => {
     expect(await titles('viewer')).toEqual({ shapes: 'Shape Studio' })
     expect(await titles('nobody')).toEqual({})
   })
 })
 
 describe('GET /api/repos', () => {
-  test('lists every group member from stored listings and exact paths, not only audited ones', async () => {
+  test('lists every fleet repository from stored listings and exact paths, not only audited ones', async () => {
     await coverage('shapes/circle', 81)
     const repos = await list('admin')
-    expect(repos.map((r) => [`${r.repo.forge}:${r.repo.path}`, r.groups, r.health])).toEqual([
+    expect(repos.map((r) => [`${r.repo.forge}:${r.repo.path}`, r.teams, r.health])).toEqual([
       ['work:colors/red', ['colors'], 'not-analysed'],
       ['work:shapes/circle', ['shapes'], 'healthy'],
       ['work:shapes/square', ['shapes'], 'not-analysed'],
@@ -197,7 +200,7 @@ describe('GET /api/repos', () => {
     await store.settings.put({
       id: 'tests',
       key: 'repo.tests',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       value: { expected: false, reason: 'Config only' },
       secret: false,
       updatedAt: hoursAgo(3),
@@ -218,7 +221,7 @@ describe('GET /api/repos', () => {
     expect(viewer.map((r) => r.repo.path)).toEqual(['shapes/circle', 'shapes/square'])
     expect(viewer[0]).toEqual({
       repo: { forge: 'work', path: 'shapes/circle' },
-      groups: ['shapes'],
+      teams: ['shapes'],
       health: 'not-analysed',
       cells: {},
     })
@@ -286,5 +289,90 @@ describe('GET /api/repos', () => {
 
   test('callers without any grant on a repository do not see it', async () => {
     expect(await list('nobody')).toEqual([])
+  })
+})
+
+const user = (id: string, email?: string) => ({
+  'x-forwarded-user': id,
+  ...(email && { 'x-forwarded-email': email }),
+})
+
+describe('team membership', () => {
+  const teams = parseConfig({
+    forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
+    teams: {
+      shapes: {
+        owns: ['work:shapes/*'],
+        members: [
+          { id: 'header:mia', role: 'member' },
+          { id: 'header:max', role: 'maintainer' },
+        ],
+      },
+      colors: {
+        owns: ['work:colors/*', 'work:colors/red'],
+        consumes: ['work:shapes/circle'],
+        members: [{ id: 'pia@colors.test', role: 'member' }],
+      },
+    },
+  })
+  const teamsApp = () => {
+    const vault = aesVault('v'.repeat(32))
+    return createApp({
+      config: teams,
+      auth: headerAuth({ roles: {} }),
+      store,
+      vault,
+      credentials: createCredentialService({ credentials: store.credentials, vault }),
+      settings: builtinSettings,
+      analyses: [auditAnalysis, coverageAnalysis],
+      now: () => NOW,
+    })
+  }
+  const listAs = async (headers: Record<string, string>) => {
+    const response = await teamsApp().request('/api/repos', { headers })
+    expect(response.status).toBe(200)
+    return ((await response.json()) as RepoList).repos
+  }
+
+  test('a member sees the team repositories without any grant of its own', async () => {
+    await coverage('shapes/circle', 81)
+    await audit('shapes/circle', 1)
+    const repos = await listAs(user('mia'))
+    expect(repos.map((r) => [r.repo.path, r.teams])).toEqual([
+      ['shapes/circle', ['shapes']],
+      ['shapes/square', ['shapes']],
+    ])
+    expect(repos[0]?.cells.coverage?.value).toBe('81%')
+    expect(repos[0]?.cells.security?.value).toBe('1 high')
+    expect(repos[0]?.updates).toEqual({ via: 'off' })
+    expect(repos.every((r) => r.configurable === undefined)).toBe(true)
+
+    expect((await listAs(user('max'))).map((r) => [r.repo.path, r.configurable])).toEqual([
+      ['shapes/circle', true],
+      ['shapes/square', true],
+    ])
+    expect(await listAs(user('nobody'))).toEqual([])
+  })
+
+  test('a consumer reads the consumed repository and nothing more', async () => {
+    await coverage('shapes/circle', 81)
+    await audit('shapes/circle', 1)
+    const repos = await listAs(user('pia', 'pia@colors.test'))
+    expect(repos.map((r) => [r.repo.path, r.teams])).toEqual([
+      ['colors/red', ['colors']],
+      ['shapes/circle', ['shapes']],
+    ])
+    const circle = repos[1]
+    expect(circle?.cells.coverage?.value).toBe('81%')
+    expect(circle?.cells.security).toBeUndefined()
+    expect(circle?.updates).toBeUndefined()
+    expect(circle?.configurable).toBeUndefined()
+    expect(repos[0]?.updates).toEqual({ via: 'off' })
+
+    const served = teamsApp()
+    const updates = (repo: string) =>
+      served.request(`/api/repos/updates?repo=${repo}`, { headers: user('pia', 'pia@colors.test') })
+    expect((await updates('work:colors/red')).status).toBe(200)
+    expect((await updates('work:shapes/circle')).status).toBe(403)
   })
 })

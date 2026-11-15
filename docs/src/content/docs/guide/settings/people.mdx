@@ -1,6 +1,6 @@
 ---
 title: People & access
-description: Invite people, give them a role on the groups and repositories they work on, see who can do what, and set how far everyone reads other teams' catalog.
+description: Invite people, give them a role on the teams and folders they work on, see who can do what, and set how far everyone reads other teams' catalog.
 panel: Settings › People & access
 route: /settings/people
 permission: users:read
@@ -28,7 +28,7 @@ import {
   Ui,
 } from '@ui'
 
-Invite people, give them a role on the groups and repositories they work on, see who can do what, and set how far everyone reads other teams' catalog.
+Invite people, give them a role on the teams and folders they work on, see who can do what, and set how far everyone reads other teams' catalog.
 
 <Screen title="Settings › People & access" caption="Status starts at Active and Invited; disabled people fold into a button under the table.">
   <Toolbar title="People & access" crumbs={['Settings']}>
@@ -58,13 +58,13 @@ Invite people, give them a role on the groups and repositories they work on, see
   </Toolbar>
   <Scroll>
 
-| Person                              | Teams                                  | Role                        | Applies to | Last seen  | Sign-in | Status                                                |
-| ----------------------------------- | -------------------------------------- | --------------------------- | ---------- | ---------- | ------- | ----------------------------------------------------- |
-| **Mira K.** · mira@acme.dev · `you` | <Tag>Payments</Tag>                    | <Tag tone="acc">Admin</Tag> | Everything | now        | Passkey | <Tag tone="ok">Active</Tag>                           |
-| **Jon D.** · jon@acme.dev           | <Tag>Widgets</Tag>                     | Maintainer                  | Widgets    | 2 h ago    | SSO     | <Tag tone="ok">Active</Tag>                           |
-| **Ana P.** · ana@acme.dev           | <Tag>Payments</Tag> <Tag>Widgets</Tag> | Developer                   | Payments   | yesterday  | Passkey | <Tag tone="ok">Active</Tag>                           |
-| **Leo S.** · leo@acme.dev           | <Tag>Payments</Tag>                    | Viewer                      | Payments   | —          | —       | <Tag tone="warn">Invited</Tag> Link expires in 2 days |
-| **Rae T.** · rae@acme.dev           | —                                      | Custom                      | 3 grants   | 5 days ago | Passkey | <Tag tone="ok">Active</Tag>                           |
+| Person                              | Teams                               | Role                        | Applies to | Last seen  | Sign-in | Status                                                |
+| ----------------------------------- | ----------------------------------- | --------------------------- | ---------- | ---------- | ------- | ----------------------------------------------------- |
+| **Mira K.** · mira@acme.dev · `you` | <Tag>Gizmo</Tag>                    | <Tag tone="acc">Admin</Tag> | Everything | now        | Passkey | <Tag tone="ok">Active</Tag>                           |
+| **Jon D.** · jon@acme.dev           | <Tag>Widgets</Tag>                  | Maintainer                  | Widgets    | 2 h ago    | SSO     | <Tag tone="ok">Active</Tag>                           |
+| **Ana P.** · ana@acme.dev           | <Tag>Gizmo</Tag> <Tag>Widgets</Tag> | Developer                   | Gizmo      | yesterday  | Passkey | <Tag tone="ok">Active</Tag>                           |
+| **Leo S.** · leo@acme.dev           | <Tag>Gizmo</Tag>                    | Viewer                      | Gizmo      | —          | —       | <Tag tone="warn">Invited</Tag> Link expires in 2 days |
+| **Rae T.** · rae@acme.dev           | —                                   | Custom                      | 3 grants   | 5 days ago | Passkey | <Tag tone="ok">Active</Tag>                           |
 
   </Scroll>
 </Screen>
@@ -76,7 +76,7 @@ The table lists everyone who can sign in with the panel's own accounts. Search m
 | Column     | Meaning                                                                                       |
 | ---------- | --------------------------------------------------------------------------------------------- |
 | Person     | Avatar, name, email, and `you` on your own row.                                               |
-| Teams      | The person's home groups, else the groups their access names.                                 |
+| Teams      | The person's home teams, else the teams they are a member of or their access names.           |
 | Role       | Viewer, Developer, Maintainer, Admin, Custom or No access.                                    |
 | Applies to | Where the role applies, or how many grants a custom set has.                                  |
 | Last seen  | Their last signed-in request.                                                                 |
@@ -86,7 +86,7 @@ The table lists everyone who can sign in with the panel's own accounts. Search m
 **Access map** draws the filtered people against what they can reach; click a person to open their sheet.
 
 :::note
-**Teams** only decide what _My teams_ shows a person across the panel. They never grant access; roles do.
+The **Teams** column shows home teams, which only decide what _My teams_ shows a person across the panel. Access comes from team membership on [Repos › Teams](/guide/repos/teams/) and from the roles and grants here, which add to it.
 :::
 
 ## Roles
@@ -100,7 +100,7 @@ Every person has one role on one scope, or an exact set of grants. The **Roles**
 | Maintainer | Developer, plus run release steps and edit settings in its scope.                           |
 | Admin      | Everything, everywhere, including people and credentials. Always covers the whole instance. |
 
-A scope is everything, some groups, or some repositories. A group entry can ask for repositories in two groups at once (`frontend + storefront`). Grants that match no preset show as **Custom**. See [Permissions](/reference/permissions/) for every action a grant can hold.
+A scope is everything, some teams, or path patterns: a folder such as `acme/round/**`, a shape such as `acme/*/web`, or one repository. People get their team's repositories from membership already; use roles here for administrators, people outside a team and exceptions. Grants that match no preset show as **Custom**. See [Permissions](/reference/permissions/) for every action a grant can hold.
 
 ## Invite people
 
@@ -124,7 +124,7 @@ A scope is everything, some groups, or some repositories. A group entry can ask 
         value="Viewer"
         hint="Reads health, libraries, releases, knowledge and settings in its scope."
       />
-      <Field label="Applies to" value="Payments" />
+      <Field label="Applies to" value="Team Gizmo" />
     </Fields>
     <Toolbar>
       <Button ghost>Exact grants</Button>
@@ -134,7 +134,7 @@ A scope is everything, some groups, or some repositories. A group entry can ask 
 </Screen>
 
 :::caution
-You can only give access you have: `users:invite` over each scope, and grants within your own. A group admin can invite people to their group, never to everything.
+You can only give access you have: `users:invite` over each scope, and grants within your own. A maintainer of a team can invite people to the team's repositories, never to everything.
 :::
 
 While the person has not signed in, their sheet offers <Ui>Send a new invite</Ui>, which makes a fresh link.
@@ -155,7 +155,7 @@ Click a row, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows status, r
     <Tabs items={['Role and access', 'Sign-in', 'Teams', 'Activity']} />
     <Stack>
       <Segmented items={['Viewer', 'Developer', 'Maintainer', 'Admin']} active={2} />
-      <Field label="Applies to" value="Payments" />
+      <Field label="Applies to" value="Team Gizmo" />
       <Facts
         items={[
           ['Allowed', 'read repositories, run analyzers, start agent tasks, write notes'],
@@ -185,7 +185,7 @@ The other tabs:
 | Tab      | What it shows                                                                                         |
 | -------- | ----------------------------------------------------------------------------------------------------- |
 | Sign-in  | Passkeys (remove one with `users:write`) and linked single sign-on identities.                        |
-| Teams    | The person's home groups.                                                                             |
+| Teams    | The person's home teams.                                                                              |
 | Activity | Last seen, then what they did, as far as the [Audit log](/guide/settings/audit-log/) lets you see it. |
 
 The header's <Ui>Create recovery link</Ui> (needs `users:write`) lets someone who lost their passkey back in. <Ui>Disable</Ui> and <Ui>Enable</Ui> never apply to yourself. The ⋯ menu edits name and email.
@@ -217,11 +217,11 @@ Changing it needs `settings:write` over everything. Findings, audits, jobs, rele
 
 **Read-only repositories** lists freezes: while a repository is frozen, Holtkeeper only analyzes it and never changes it.
 
-1. Add an entry, pick the groups or repositories and give a reason. A new entry starts frozen.
+1. Add an entry, pick the teams or path patterns and give a reason. A new entry starts frozen.
 2. Optionally set an end date; without one the freeze lasts until removed.
-3. To keep one repository of a frozen group writable, add an entry for it with **frozen** switched off. The most specific entry wins.
+3. To keep one repository of a frozen folder writable, add an entry for it with **frozen** switched off. The most specific entry wins.
 
-Anyone with `settings:write` on a group or repository can lift a broader freeze there.
+Anyone with `settings:write` on a folder, team or repository can lift a broader freeze there.
 
 ## Who sees this section
 

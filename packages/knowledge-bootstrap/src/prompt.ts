@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { BootstrapEvidence } from './evidence-code.ts'
 
 /** Bumped whenever the prompt or the output handling changes; stored with every run. */
-export const BOOTSTRAP_VERSION = 1
+export const BOOTSTRAP_VERSION = 2
 
 /** The system prompt of a starter knowledge run. */
 export const BOOTSTRAP_SYSTEM = [
@@ -75,7 +75,10 @@ export interface LibraryLine {
 export interface BootstrapPromptInput {
   /** `forge:path`. */
   repo: string
-  groups: readonly string[]
+  /** Owner teams of the repository. */
+  teams: readonly string[]
+  /** The repository's family id, when it belongs to one. */
+  family?: string
   /** How far back merge requests were read. */
   since: string
   maxEntries: number
@@ -93,6 +96,14 @@ export const EXISTING_CHARS = 9_000
 /** Most dependency subjects listed. */
 export const DEPENDENCIES = 60
 
+const repoContext = (input: BootstrapPromptInput) => {
+  const parts = [
+    ...(input.teams.length ? [`teams: ${input.teams.join(', ')}`] : []),
+    ...(input.family ? [`family: ${input.family}`] : []),
+  ]
+  return parts.length ? ` (${parts.join('; ')})` : ''
+}
+
 /** The user prompt of a starter knowledge run. */
 export function bootstrapPrompt(input: BootstrapPromptInput): string {
   let existingChars = 0
@@ -103,7 +114,7 @@ export function bootstrapPrompt(input: BootstrapPromptInput): string {
     return [line]
   })
   return [
-    `Repository: ${input.repo}${input.groups.length ? ` (groups: ${input.groups.join(', ')})` : ''}`,
+    `Repository: ${input.repo}${repoContext(input)}`,
     `Write 3 to ${input.maxEntries} lessons; fewer when the evidence is thin, none when it shows nothing specific. Merge requests are those merged since ${input.since}.`,
     '# Evidence',
     ...input.evidence.map((item) => `## [${item.id}] ${item.label}\n${item.text}`),

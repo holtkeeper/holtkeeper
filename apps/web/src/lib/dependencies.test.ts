@@ -143,9 +143,9 @@ describe('narrowRow', () => {
   })
 })
 
-const repoEntry = (path: string, groups: string[]): DependencyRepo => ({
+const repoEntry = (path: string, teams: string[]): DependencyRepo => ({
   repo: { forge: 'work', path },
-  groups,
+  teams,
   dependencies: 1,
 })
 
@@ -158,7 +158,7 @@ describe('scopeLibraryRows', () => {
 
   test('my teams narrows shared rows to its repositories and marks the rest as other teams', () => {
     const scoped = scopeLibraryRows(list, repos, 'mine', ['games'])
-    expect(scoped.map((item) => [item.name, item.groups])).toEqual([
+    expect(scoped.map((item) => [item.name, item.teams])).toEqual([
       ['widget-kit', ['games']],
       ['shape-lib', ['infra', 'tools']],
     ])
@@ -169,12 +169,12 @@ describe('scopeLibraryRows', () => {
   test('all keeps rows whole with the groups of a home-group user first', () => {
     const scoped = scopeLibraryRows(list, repos, 'all', ['games'])
     expect(scoped[0]?.usedBy).toHaveLength(2)
-    expect(scoped[0]?.groups).toEqual(['games'])
+    expect(scoped[0]?.teams).toEqual(['games'])
   })
 
   test('a group keeps the libraries its repositories use, narrowed to them', () => {
-    const scoped = scopeLibraryRows(list, repos, 'group:tools', ['games'])
-    expect(scoped.map((item) => [item.name, item.groups])).toEqual([
+    const scoped = scopeLibraryRows(list, repos, 'team:tools', ['games'])
+    expect(scoped.map((item) => [item.name, item.teams])).toEqual([
       ['widget-kit', ['infra', 'tools']],
       ['shape-lib', ['infra', 'tools']],
     ])

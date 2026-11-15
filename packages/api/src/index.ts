@@ -6,15 +6,21 @@ export type * from './settings-ai.ts'
 export type * from './settings-analyzers.ts'
 export type * from './settings-system.ts'
 
-export type { Action, Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
+export type { Action, Grant, Principal, Scope } from '@holtkeeper/access'
 export {
-  GROUP_KEY_PATTERN,
-  groupLineage,
-  isSubgroup,
-  leafGroups,
-  parentGroup,
-  rootGroup,
-} from '@holtkeeper/access/groups'
+  commonFolder,
+  folderPattern,
+  globMatches,
+  hasWildcard,
+  isExactPattern,
+  parentFolder,
+  pathAncestors,
+  patternMatches,
+  patternWithin,
+  sharedShape,
+  splitPattern,
+} from '@holtkeeper/access/paths'
+export { TEAM_KEY_PATTERN, type TeamMember, type TeamRole } from '@holtkeeper/access/teams'
 export { type Role, roleOf } from '@holtkeeper/access/roles'
 export { AUTO_ACCEPT_ACTOR } from '@holtkeeper/store/actors'
 export type { AuthInfo, LoginMethod } from '@holtkeeper/auth'
@@ -81,7 +87,6 @@ export type {
   DatabaseReplica,
   DatabaseSession,
   DatabaseTable,
-  GroupDocumentData,
   Family,
   GuideGenerated,
   GuideLearning,
@@ -93,6 +98,7 @@ export type {
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
+  KnowledgeMatch,
   KnowledgePackage,
   KnowledgeRevision,
   KnowledgeStatus,
@@ -108,7 +114,9 @@ export type {
   ScheduleDocumentData,
   ScheduleWindow,
   ScheduleWindows,
+  TeamDocumentData,
   TriggerDocumentData,
+  TriggerTarget,
   Weekday,
 } from '@holtkeeper/store'
 export type {

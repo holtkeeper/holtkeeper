@@ -15,9 +15,9 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*'] },
   },
 })
 
@@ -42,9 +42,9 @@ const setup = (auth: AuthProvider = noAuth()) => {
 
 const teams = headerAuth({
   roles: {
-    'games-readers': [{ scope: { groups: ['games'] }, actions: ['knowledge:read'] }],
+    'games-readers': [{ scope: { teams: ['games'] }, actions: ['knowledge:read'] }],
     'games-curators': [
-      { scope: { groups: ['games'] }, actions: ['knowledge:read', 'knowledge:write'] },
+      { scope: { teams: ['games'] }, actions: ['knowledge:read', 'knowledge:write'] },
     ],
   },
 })
@@ -67,7 +67,7 @@ const draft = (overrides: Record<string, unknown> = {}) => ({
   title: 'Prefer Vitest',
   body: 'Use **Vitest** for unit tests.',
   kind: 'convention',
-  scope: { groups: ['games'] },
+  scope: { teams: ['games'] },
   topics: ['testing'],
   appliesTo: ['tests', 'review'],
   ...overrides,
@@ -185,7 +185,7 @@ describe('knowledge routes', () => {
       packages: [{ ecosystem: 'npm', name: 'react', from: '>=18 <19', to: '>=19 <20' }],
       status: 'proposed',
     })
-    await create(app, { title: 'Tools use Go', scope: { groups: ['tools'] }, topics: [] })
+    await create(app, { title: 'Tools use Go', scope: { teams: ['tools'] }, topics: [] })
 
     const list = async (query: string) =>
       ((await (await app.request(`/api/knowledge${query}`)).json()) as KnowledgeList).entries.map(
@@ -209,7 +209,7 @@ describe('knowledge routes', () => {
     const root = setup()
     const games = await create(root, { title: 'Games rule' })
     const global = await create(root, { title: 'Global rule', scope: { all: true } })
-    const tools = await create(root, { title: 'Tools rule', scope: { groups: ['tools'] } })
+    const tools = await create(root, { title: 'Tools rule', scope: { teams: ['tools'] } })
     const app = setup(teams)
     const reader = as('games-readers')
     const curator = as('games-curators')
@@ -245,7 +245,7 @@ describe('knowledge routes', () => {
           app,
           'PUT',
           `/api/knowledge/${games.id}`,
-          draft({ scope: { groups: ['games', 'tools'] } }),
+          draft({ scope: { teams: ['games', 'tools'] } }),
           curator,
         )
       ).status,

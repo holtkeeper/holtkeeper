@@ -1,6 +1,5 @@
 import type {
   ConfigEntryView,
-  GroupMatch,
   PutConfigInput,
   ScheduleDocumentData,
   ScheduleRun,
@@ -13,13 +12,12 @@ import type { StatusTone } from '../ui/colors.ts'
 import {
   type ScopeCounts,
   type ScopeView,
-  groupCounts,
-  groupView,
-  inHomeGroups,
-  viewGroup,
+  teamCounts,
+  teamView,
+  inHomeTeams,
+  viewTeam,
 } from './home-scope.ts'
-import { validateGroupId } from './repo.ts'
-import { formatGroupMatch, parseGroupMatch } from './scope.ts'
+import { validateConfigId } from './repo.ts'
 
 /** Days of the week in the order schedules list them. */
 const weekdays: readonly Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
@@ -350,46 +348,46 @@ export const isProblem = (state: ScheduleState): boolean =>
 const EVERY_REPOSITORY = 'all'
 
 /**
- * Whether a rule belongs to the viewer's teams: it covers every repository, or its groups include
- * one of the home groups. A UI default, not a permission.
+ * Whether a rule belongs to the viewer's teams: it covers every repository, or its teams include
+ * one of the home teams. A UI default, not a permission.
  */
-export const inMyTeams = (lanes: readonly string[], homeGroups: readonly GroupMatch[]): boolean =>
-  lanes.includes(EVERY_REPOSITORY) || inHomeGroups(homeGroups, lanes)
+export const inMyTeams = (lanes: readonly string[], homeTeams: readonly string[]): boolean =>
+  lanes.includes(EVERY_REPOSITORY) || inHomeTeams(homeTeams, lanes)
 
 /**
  * Whether a rule with `lanes` belongs to a scope position: rules covering every repository belong
- * to *My teams* and to every group.
+ * to *My teams* and to every team.
  */
 export function laneInView(
   lanes: readonly string[],
   view: ScopeView,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): boolean {
   if (view === 'all') return true
-  const group = viewGroup(view)
-  if (group === undefined) return inMyTeams(lanes, homeGroups)
-  return lanes.includes(EVERY_REPOSITORY) || lanes.includes(group)
+  const team = viewTeam(view)
+  if (team === undefined) return inMyTeams(lanes, homeTeams)
+  return lanes.includes(EVERY_REPOSITORY) || lanes.includes(team)
 }
 
 /** Scope switch counts of rules by their lanes, as `laneInView` places them. */
 export const laneScopeCounts = (
   lanesOf: readonly (readonly string[])[],
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): ScopeCounts => ({
-  mine: lanesOf.filter((lanes) => inMyTeams(lanes, homeGroups)).length,
+  mine: lanesOf.filter((lanes) => inMyTeams(lanes, homeTeams)).length,
   all: lanesOf.length,
-  groups: groupCounts(
-    lanesOf.map((lanes) => lanes.filter((lane) => lane !== EVERY_REPOSITORY)),
-  ).map(({ group }) => ({
-    group,
-    count: lanesOf.filter((lanes) => laneInView(lanes, groupView(group), homeGroups)).length,
-  })),
+  teams: teamCounts(lanesOf.map((lanes) => lanes.filter((lane) => lane !== EVERY_REPOSITORY))).map(
+    ({ team }) => ({
+      team,
+      count: lanesOf.filter((lanes) => laneInView(lanes, teamView(team), homeTeams)).length,
+    }),
+  ),
 })
 
 /** What the schedule list filters by. */
 export interface ScheduleFilter {
   q?: string
-  /** Lane ids, e.g. `all` or a group. */
+  /** Lane ids, e.g. `all` or a team. */
   teams?: readonly string[]
   states?: readonly ScheduleState[]
   problems?: boolean
@@ -509,7 +507,7 @@ export interface ScheduleDraft {
   cron: string
   timezone: string
   analyzers: string[]
-  groups: string[]
+  teams: string[]
   repos: string[]
   allow: WindowDraft[]
   deny: WindowDraft[]
@@ -555,7 +553,7 @@ export function toScheduleDraft(entry?: ConfigEntryView<'schedule'>): ScheduleDr
     cron: data?.cron ?? '',
     timezone: data?.timezone ?? '',
     analyzers: [...(data?.analyzers ?? [])],
-    groups: (data?.groups ?? []).map(formatGroupMatch),
+    teams: data?.teams ?? [],
     repos: [...(data?.repos ?? [])],
     allow: (windows?.allow ?? []).map((w) => ({ days: [...w.days], from: w.from, to: w.to })),
     deny: (windows?.deny ?? []).map((w) => ({ days: [...w.days], from: w.from, to: w.to })),
@@ -585,7 +583,7 @@ export function validateScheduleDraft(
 ): ScheduleDraftErrors {
   const errors: ScheduleDraftErrors = {}
   const id = draft.id.trim()
-  const idError = validateGroupId(id)
+  const idError = validateConfigId(id)
   if (idError) errors.id = idError
   else if (taken.includes(id)) errors.id = 'A schedule with this id exists'
   if (draft.cadence === 'every' && !isEvery(draft.every))
@@ -635,7 +633,7 @@ export function toScheduleInput(draft: ScheduleDraft): PutConfigInput['schedule'
     analyzers: [...draft.analyzers],
     ...(draft.cadence === 'every' ? { every: draft.every.trim() } : { cron: draft.cron.trim() }),
     ...(draft.timezone.trim() ? { timezone: draft.timezone.trim() } : {}),
-    ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+    ...(draft.teams.length ? { teams: draft.teams } : {}),
     ...(draft.repos.length ? { repos: [...draft.repos] } : {}),
     ...(Object.keys(windows).length ? { windows } : {}),
     ...(jitter > 0 ? { jitterMinutes: jitter } : {}),
@@ -701,7 +699,7 @@ export interface TriggerDraft {
   analyzers: string[]
   /** Analyzers a new repository trigger leaves out. */
   exclude: string[]
-  groups: string[]
+  teams: string[]
   /** Branch globs of a push trigger; empty means every branch. */
   branches: string[]
   actions: (typeof mergeRequestActions)[number][]
@@ -726,7 +724,7 @@ export function toTriggerDraft(
     on: data?.on ?? kind,
     analyzers: [],
     exclude: [],
-    groups: [],
+    teams: [],
     branches: [],
     actions: [],
     draft: false,
@@ -741,20 +739,20 @@ export function toTriggerDraft(
       return {
         ...draft,
         analyzers: [...data.analyzers],
-        groups: (data.groups ?? []).map(formatGroupMatch),
+        teams: data.teams ?? [],
       }
     case 'push':
       return {
         ...draft,
         analyzers: [...data.analyzers],
-        groups: (data.groups ?? []).map(formatGroupMatch),
+        teams: data.teams ?? [],
         branches: [...(data.branches ?? [])],
       }
     case 'mergeRequest':
       return {
         ...draft,
         analyzers: [...data.analyzers],
-        groups: (data.groups ?? []).map(formatGroupMatch),
+        teams: data.teams ?? [],
         actions: [...(data.actions ?? [])],
         draft: data.draft ?? false,
       }
@@ -763,7 +761,7 @@ export function toTriggerDraft(
         ...draft,
         analyzers: [...(data.analyzers ?? [])],
         exclude: [...(data.exclude ?? [])],
-        groups: (data.groups ?? []).map(formatGroupMatch),
+        teams: data.teams ?? [],
       }
     case 'label':
       return { ...draft, analyzers: [...data.analyzers], label: data.label }
@@ -801,14 +799,14 @@ export function toTriggerInput(draft: TriggerDraft): TriggerDocumentData {
       return {
         on: 'tag',
         analyzers: [...draft.analyzers],
-        ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+        ...(draft.teams.length ? { teams: draft.teams } : {}),
       }
     case 'push':
       return {
         on: 'push',
         analyzers: [...draft.analyzers],
         ...(draft.branches.length ? { branches: [...draft.branches] } : {}),
-        ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+        ...(draft.teams.length ? { teams: draft.teams } : {}),
       }
     case 'mergeRequest':
       return {
@@ -818,14 +816,14 @@ export function toTriggerInput(draft: TriggerDraft): TriggerDocumentData {
           ? { actions: mergeRequestActions.filter((a) => draft.actions.includes(a)) }
           : {}),
         ...(draft.draft ? { draft: true } : {}),
-        ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+        ...(draft.teams.length ? { teams: draft.teams } : {}),
       }
     case 'newRepo':
       return {
         on: 'newRepo',
         ...(draft.analyzers.length ? { analyzers: [...draft.analyzers] } : {}),
         ...(draft.exclude.length ? { exclude: [...draft.exclude] } : {}),
-        ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+        ...(draft.teams.length ? { teams: draft.teams } : {}),
       }
     case 'label':
       return { on: 'label', label: draft.label.trim(), analyzers: [...draft.analyzers] }

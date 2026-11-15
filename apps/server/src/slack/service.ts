@@ -119,7 +119,7 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 /**
  * The Slack review status over the server's store, settings and the stored Slack credential.
  * A message is followed only for merge requests of connected repositories (configured forge, in
- * a config group) whose reviews are on (`mergeRequests.comments`) and whose `slack.reviews`
+ * in the fleet with an owner team) whose reviews are on (`mergeRequests.comments`) and whose `slack.reviews`
  * channels include the message's channel; everything else is ignored without a trace, and a
  * message whose gate closes later loses its emoji. The message carries one emoji, the worst
  * status of its merge requests. A message following several merge requests also gets one reply
@@ -175,7 +175,7 @@ export function createSlackReviews(
   const channelsOf = async (repo: RepoRef): Promise<string[]> => {
     if (!(repo.forge in config.forges)) return []
     const target = repoTarget(config, repo)
-    if (target.groups.length === 0) return []
+    if (target.teams.length === 0) return []
     if (await commentsOffFor(store, config, repo)) return []
     return resolveSlackReviewChannels(await store.settings.list(slackReviews.key), target)
   }

@@ -60,9 +60,9 @@ const analyzers = [
 const configWith = (jobs: Record<string, unknown>) =>
   parseConfig({
     forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-    groups: {
-      games: { forge: 'work', include: ['games/*'] },
-      shop: { forge: 'work', include: ['shop/*'] },
+    teams: {
+      games: { owns: ['work:games/*'] },
+      shop: { owns: ['work:shop/*'] },
     },
     jobs,
   })
@@ -106,11 +106,11 @@ describe('jobs.onNewRepo', () => {
   test('queues read-only analyzers once for repositories a listing finds first', async () => {
     const p = poller(configWith({ onNewRepo: {} }))
     listed = ['games/a']
-    await p.listGroup('games')
+    await p.listFleet('work')
     expect(await queued()).toEqual(['games/a licenses new-repo', 'games/a quality new-repo'])
 
     listed = ['games/a', 'games/b']
-    await p.listGroup('games')
+    await p.listFleet('work')
     expect(await queued()).toEqual([
       'games/a licenses new-repo',
       'games/a quality new-repo',
@@ -144,7 +144,7 @@ describe('jobs.onNewRepo', () => {
       createKnowledgeBootstrapAnalyzer({ store }),
     ])
     listed = ['games/a', 'games/b']
-    await p.listGroup('games')
+    await p.listFleet('work')
     expect(await queued()).toEqual([
       'games/a knowledge-bootstrap new-repo',
       'games/a quality new-repo',
@@ -158,7 +158,7 @@ describe('jobs.onNewRepo', () => {
       analyzer('starter', { dailyLimit: 2 }),
     ])
     listed = ['games/a', 'games/b', 'games/c']
-    await p.listGroup('games')
+    await p.listFleet('work')
     const jobs = await store.jobs.list({})
     const runAfter = (kind: string) =>
       jobs
@@ -173,32 +173,44 @@ describe('jobs.onNewRepo', () => {
     ])
   })
 
-  test('honors analyzers, exclude and groups', async () => {
+  test('honors analyzers, exclude and teams', async () => {
     const p = poller(
       configWith({
-        onNewRepo: { analyzers: ['quality', 'go-only', 'renovate'], groups: ['shop'] },
+        onNewRepo: { analyzers: ['quality', 'go-only', 'renovate'], teams: ['shop'] },
       }),
     )
     listed = ['games/a', 'shop/b']
-    await p.listGroup('games')
-    await p.listGroup('shop')
+    await p.listFleet('work')
     expect(await queued()).toEqual(['shop/b go-only new-repo', 'shop/b quality new-repo'])
   })
 
-  test('a repository another group already listed is not new', async () => {
+  test('honors path patterns, and the forge fleet includes and excludes', async () => {
     const config = parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-      groups: {
-        games: { forge: 'work', include: ['games/*'] },
-        everything: { forge: 'work', include: ['**'] },
-      },
+      fleet: { work: { include: ['tools/*'], exclude: ['tools/old'] } },
+      teams: { games: { owns: ['work:games/*'] } },
+      jobs: { onNewRepo: { analyzers: ['quality'], repos: ['tools/*', 'work:games/b'] } },
+    })
+    listed = ['games/a', 'games/b', 'tools/cli', 'tools/old', 'other/x']
+    await poller(config).listFleet('work')
+    expect(await queued()).toEqual(['games/b quality new-repo', 'tools/cli quality new-repo'])
+  })
+
+  test('a repository an earlier listing found is not new when the fleet widens', async () => {
+    const narrow = parseConfig({
+      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
+      teams: { games: { owns: ['work:games/*'] } },
       jobs: { onNewRepo: { exclude: ['licenses'] } },
     })
-    const p = poller(config)
-    listed = ['games/a']
-    await p.listGroup('games')
-    await p.listGroup('everything')
+    listed = ['games/a', 'shop/b']
+    await poller(narrow).listFleet('work')
     expect(await queued()).toEqual(['games/a quality new-repo'])
+    await poller(configWith({ onNewRepo: { exclude: ['licenses'] } })).listFleet('work')
+    expect(await queued()).toEqual([
+      'games/a quality new-repo',
+      'shop/b go-only new-repo',
+      'shop/b quality new-repo',
+    ])
   })
 
   test('skips analyzers whose required options are not set up for the repository', async () => {
@@ -213,7 +225,7 @@ describe('jobs.onNewRepo', () => {
     })
     const p = poller(configWith({ onNewRepo: { analyzers: ['quality', 'build'] } }))
     listed = ['games/a', 'games/b']
-    await p.listGroup('games')
+    await p.listFleet('work')
     expect(await queued()).toEqual([
       'games/a quality new-repo',
       'games/b build new-repo',
@@ -267,7 +279,7 @@ describe('jobs.onNewRepo', () => {
       withCoverage,
     )
     listed = ['games/a', 'games/b']
-    await p.listGroup('games')
+    await p.listFleet('work')
     const dispatch = createEventDispatcher(
       deps(configWith({ onPush: { analyzers: ['coverage'] } }), withCoverage),
     )
@@ -291,13 +303,13 @@ describe('jobs.onNewRepo', () => {
   test('queues nothing without the trigger', async () => {
     const p = poller(configWith({}))
     listed = ['games/a']
-    await p.listGroup('games')
+    await p.listFleet('work')
     expect(await queued()).toEqual([])
   })
 })
 
 describe('running the trigger on known repositories', () => {
-  test('queues for every repository of every group, once, and logs the run', async () => {
+  test('queues for every repository of the fleet, once, and logs the run', async () => {
     const background: Promise<unknown>[] = []
     const app = createApp({
       ...deps(configWith({ onNewRepo: { analyzers: ['quality'] } })),
@@ -327,7 +339,7 @@ describe('running the trigger on known repositories', () => {
   })
 })
 
-test('newRepoAnalyzers: never group-scope or exclusive ones', () => {
+test('newRepoAnalyzers: never team-scope or exclusive ones', () => {
   expect(newRepoAnalyzers({}, analyzers)).toEqual(['quality', 'licenses', 'go-only', 'build'])
   expect(newRepoAnalyzers({ exclude: ['quality'] }, analyzers)).toEqual([
     'licenses',

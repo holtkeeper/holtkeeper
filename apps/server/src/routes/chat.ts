@@ -1,4 +1,4 @@
-import { type Principal, can, groupLineage } from '@holtkeeper/access'
+import { type Principal, can } from '@holtkeeper/access'
 import type {
   AgentTranscriptView,
   ChatCommandView,
@@ -38,7 +38,7 @@ import {
   type AppContext,
   type Env,
   type ServerDeps,
-  groupLabeler,
+  teamLabeler,
   parseRepo,
   principalOf,
   readBody,
@@ -62,11 +62,11 @@ const threadSchema = z
   .object({
     title: z.string().trim().max(120).optional(),
     repo: repoKey,
-    group: z.string().min(1).optional(),
+    team: z.string().min(1).optional(),
     autoReply: z.boolean().optional(),
     contextRepos: contextReposSchema,
   })
-  .refine((input) => !(input.repo && input.group), 'give repo or group, not both')
+  .refine((input) => !(input.repo && input.team), 'give repo or team, not both')
 
 const patchSchema = z
   .object({
@@ -90,7 +90,7 @@ const readSchema = z.object({ messageId: z.string().min(1) })
 
 /** The answer to a slash command in a team-wide thread. */
 const TEAM_COMMANDS_REFUSED =
-  'Commands run in a repository or group thread. Open one for the repository or team you mean and run the command there.'
+  'Commands run in a repository or team thread. Open one for the repository or team you mean and run the command there.'
 
 /** How far `serverTime` trails the clock, for updates stamped before a poll but committed after. */
 const CHANGE_MARGIN_MS = 30_000
@@ -231,9 +231,9 @@ function exportMarkdown(
   people: readonly { id: string; label: string; name?: string }[],
   now: Date,
   readable: (repo: string) => boolean,
-  groupLabel: (key: string) => string,
+  teamLabel: (key: string) => string,
 ): string {
-  const scope = thread.repo ?? (thread.group ? `group ${groupLabel(thread.group)}` : 'whole team')
+  const scope = thread.repo ?? (thread.group ? `team ${teamLabel(thread.group)}` : 'everyone')
   const authorOf = (message: ChatMessage) => {
     if (message.authorType === 'agent') return 'Holtkeeper'
     if (message.authorType === 'system') return 'Holtkeeper (system)'
@@ -256,14 +256,14 @@ function exportMarkdown(
 
 /**
  * The team chat. Every endpoint needs a signed-in caller and answers 404 for threads it cannot see
- * (`canSeeThread`): repository and group threads need `repos:read` there, unscoped threads chat
+ * (`canSeeThread`): repository and team threads need `repos:read` there, unscoped threads chat
  * access (`repos:read` anywhere). Context repositories, message refs and task card entries of
  * repositories the caller may not read are left out; costs show only with `ai:read` (or `ai:admin`) on the thread's scope
- * (its repository, its group, everything for team-wide threads).
+ * (its repository, its team, everything for unscoped threads).
  *
  * - `GET /chat/threads?archived=true&q=` — visible threads with unread and message counts, the
  *   archived count, and the commands.
- * - `POST /chat/threads` `{ title?, repo?, group?, autoReply?, contextRepos? }` — a new thread;
+ * - `POST /chat/threads` `{ title?, repo?, team?, autoReply?, contextRepos? }` — a new thread;
  *   without a title (or a blank one) it is named from its first message (`chatTitles`).
  * - `GET /chat/threads/:id` and `PATCH /chat/threads/:id`
  *   `{ title?, archived?, autoReply?, contextRepos?, muted? }`; `muted` is the caller's own.
@@ -272,8 +272,8 @@ function exportMarkdown(
  * - `GET /chat/threads/:id/people` — enabled `users` accounts that can see the thread, to mention.
  * - `GET /chat/threads/:id/messages?before=&after=&changedSince=&limit=` — a page of messages.
  * - `POST /chat/threads/:id/messages` `{ body, repo? }` — a message; `/command` runs a command
- *   about `repo` (400 when it lies outside a repository or group thread's scope, and always in
- *   team-wide threads),
+ *   about `repo` (400 when it lies outside a repository thread's repository or outside the
+ *   repositories a team thread's team owns, and always in unscoped threads),
  *   `@holtkeeper` (or `autoReply`) starts an agent reply in the background.
  * - `POST /chat/threads/:id/read` `{ messageId }` and `GET /chat/unread` (muted threads left out).
  * - `GET /chat/messages/:id/transcript` — the transcript of an agent reply in a visible thread.
@@ -301,7 +301,7 @@ export function chatRoutes(deps: ServerDeps) {
       const target = { kind: 'repo' as const, repo: repoTarget(deps.config, repo) }
       return can(principal, 'ai:read', target) || can(principal, 'ai:admin', target)
     }
-    return canReadAiScope(principal, thread.group ? { groups: [thread.group] } : { all: true })
+    return canReadAiScope(principal, thread.group ? { teams: [thread.group] } : { all: true })
   }
 
   const sightOf = (principal: Principal, thread: ChatThread): MessageSight => ({
@@ -359,13 +359,13 @@ export function chatRoutes(deps: ServerDeps) {
     if (thread.repo) return repoText === thread.repo
     if (!thread.group) return true
     const repo = parseRepo(repoText)
-    return repo !== undefined && repoTarget(deps.config, repo).groups.includes(thread.group)
+    return repo !== undefined && repoTarget(deps.config, repo).teams.includes(thread.group)
   }
 
-  const groupsOf = (thread: ChatThread): string[] => {
+  const teamsOf = (thread: ChatThread): string[] => {
     const repo = parseRepo(thread.repo)
-    if (repo) return repoTarget(deps.config, repo).groups
-    return thread.group ? groupLineage(thread.group) : []
+    if (repo) return repoTarget(deps.config, repo).teams
+    return thread.group ? [thread.group] : []
   }
 
   const threadView = async (
@@ -377,8 +377,8 @@ export function chatRoutes(deps: ServerDeps) {
     title: thread.title,
     ...(thread.titlePending && { titlePending: true }),
     ...(thread.repo && { repo: thread.repo }),
-    ...(thread.group && { group: thread.group }),
-    groups: groupsOf(thread),
+    ...(thread.group && { team: thread.group }),
+    teams: teamsOf(thread),
     createdBy: thread.createdBy,
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
@@ -434,8 +434,8 @@ export function chatRoutes(deps: ServerDeps) {
         ),
       ),
       commands: commands(),
-      groups: Object.keys(deps.config.groups).filter((group) =>
-        canSeeThread(deps.config, principal, { group }),
+      teams: Object.keys(deps.config.teams).filter((team) =>
+        canSeeThread(deps.config, principal, { group: team }),
       ),
       archivedCount: visible.filter((thread) => thread.archived).length,
     })
@@ -447,11 +447,11 @@ export function chatRoutes(deps: ServerDeps) {
     const repo = parseRepo(input.repo)
     if (repo && !deps.config.forges[repo.forge])
       throw new HTTPException(400, { message: `forge ${repo.forge} is not configured` })
-    if (input.group && !deps.config.groups[input.group])
-      throw new HTTPException(400, { message: `group ${input.group} is not configured` })
+    if (input.team && !deps.config.teams[input.team])
+      throw new HTTPException(400, { message: `team ${input.team} is not configured` })
     const scope = {
       ...(input.repo && { repo: input.repo }),
-      ...(input.group && { group: input.group }),
+      ...(input.team && { group: input.team }),
     }
     if (!canSeeThread(deps.config, principal, scope))
       throw new ForbiddenException('repos:read', input.repo)
@@ -558,7 +558,7 @@ export function chatRoutes(deps: ServerDeps) {
       people,
       deps.now(),
       readable(principal),
-      groupLabeler(deps.config),
+      teamLabeler(deps.config),
     )
     c.set('audit', { action: 'chat.thread.export', target: { type: 'chat', id: thread.id } })
     return c.body(markdown, 200, {

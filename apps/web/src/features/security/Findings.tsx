@@ -200,13 +200,13 @@ export function FindingsBody({
   ]
     .toSorted()
     .map((key) => ({ id: key, label: key }))
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const all = findings.data?.groups ?? []
   const sort = search.sort ?? 'severity'
   const groups = sortFindings(filterFindings(all, search), sort)
   const rows = findingRows(groups)
   const ecosystems = findingEcosystems(all)
-  const keys = (repo ? rows : foldScope(rows, view, homeGroups, (row) => row.groups).shown).map(
+  const keys = (repo ? rows : foldScope(rows, view, homeTeams, (row) => row.teams).shown).map(
     (row) => row.key,
   )
   const step = neighbours(keys, search.finding)
@@ -225,7 +225,7 @@ export function FindingsBody({
         rows={rows}
         rowKey={(row) => row.key}
         columns={columns}
-        {...(repo ? {} : { scope: { value: view, onChange: setView, homeGroups } })}
+        {...(repo ? {} : { scope: { value: view, onChange: setView, homeTeams } })}
         strip={(shown) => strip(shown, repo !== undefined)}
         noun={{ one: 'finding', many: 'findings' }}
         caption="· grouped by advisory and package"

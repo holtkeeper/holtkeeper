@@ -1,5 +1,9 @@
-import { type RepoTarget, isSubgroup } from '@holtkeeper/access'
-import { selectForTask } from '@holtkeeper/knowledge'
+import type { RepoTarget } from '@holtkeeper/access'
+import {
+  type KnowledgeNeighbour,
+  selectForTask,
+  selectNeighbourKnowledge,
+} from '@holtkeeper/knowledge'
 import type {
   GuideScopeKey,
   GuideSection,
@@ -12,6 +16,7 @@ import {
   guideScopeKey,
   guideSectionLabels,
   guideSections,
+  parseGuideScope,
   scopesFor,
   sectionsForTask,
 } from './model.ts'
@@ -26,7 +31,7 @@ export interface GuideCaps {
   /** Most the repository's rules files may take; a longer file is cut with a pointer to it. */
   repoFiles: number
   /**
-   * Room of `human` kept for team rules of groups, families and `all`, learned rules and policies
+   * Room of `human` kept for team rules of families, folders, teams and `all`, learned rules and policies
    * before rules files are placed, on top of what the repository's own team rules take, so long
    * rules files never crowd them out.
    */
@@ -35,6 +40,12 @@ export interface GuideCaps {
 
 /** Share of `total` the repository's rules files may take at most (`GuideCaps.repoFiles`). */
 export const GUIDE_REPO_FILES_SHARE = 0.4
+
+/**
+ * Share of `total` the knowledge of similar repositories (`GuideNotes.neighbours`) may take at most
+ * unless `GuideNeighbours.maxChars` says otherwise.
+ */
+export const GUIDE_NEIGHBOURS_SHARE = 0.15
 
 /** Share of `total` kept for team rules, learned rules and policies (`GuideCaps.rules`). */
 export const GUIDE_RULES_SHARE = 1 / 3
@@ -66,6 +77,22 @@ export interface GuidePolicy {
   text: string
 }
 
+/**
+ * Repositories like this one whose knowledge may help (`selectNeighbourKnowledge`), offered as the
+ * lowest-priority block of the Guide.
+ */
+export interface GuideNeighbours {
+  /** The neighbours with their similarity and family id, e.g. from `repoNeighbours`. */
+  repos: readonly KnowledgeNeighbour[]
+  /**
+   * Entries the block may pick from: only those the task may read (the caller decides). Default:
+   * the notes' entries.
+   */
+  entries?: readonly KnowledgeEntry[]
+  /** Most characters of the block. Default: `GUIDE_NEIGHBOURS_SHARE` of the total budget. */
+  maxChars?: number
+}
+
 /** Knowledge notes the resolver picks from with `selectForTask`. */
 export interface GuideNotes {
   entries: readonly KnowledgeEntry[]
@@ -75,6 +102,19 @@ export interface GuideNotes {
   query?: string
   /** Most characters notes may take even when more of the budget is left. */
   maxChars?: number
+  /**
+   * Repository-relative paths the task touches (e.g. a merge request's changed files); entries
+   * whose `match.files` none of them matches are left out. Unknown when absent: such entries apply.
+   */
+  files?: readonly string[]
+  /**
+   * Entry id → cosine between the entry's vector and the task's query vector; ranks the notes
+   * (`SelectForTaskInput.semantic`), never makes one apply. Absent: text relevance only.
+   * Cosines of neighbour entries rank the neighbour block the same way.
+   */
+  semantic?: ReadonlyMap<string, number>
+  /** Knowledge of similar repositories, placed after the notes from what budget they leave. */
+  neighbours?: GuideNeighbours
 }
 
 export interface ResolveGuideInput {
@@ -92,29 +132,36 @@ export interface ResolveGuideInput {
   policies?: readonly GuidePolicy[]
   notes?: GuideNotes
   caps?: Partial<GuideCaps>
-  /** Names a group key in titles, e.g. `Shapes › Round (shapes.round)`. Default: the key. */
-  groupTitle?: (key: string) => string
+  /** Names a team key in titles, e.g. `Widgets (widgets)`. Default: the key. */
+  teamTitle?: (key: string) => string
 }
 
-/** Where a block comes from; `subgroup` is a group of the repository nested in another one. */
+/**
+ * Where a block comes from: `path` is a folder holding the repository (`path:<forge>:<folder>`),
+ * `team` one of its owner teams, `neighbours` knowledge written for similar repositories.
+ */
 export type GuideLayer =
   | 'repo-file'
   | 'repo'
   | 'family'
-  | 'subgroup'
-  | 'group'
+  | 'path'
+  | 'team'
   | 'all'
   | 'learnings'
   | 'policies'
   | 'generated'
   | 'notes'
+  | 'neighbours'
 
 /** One block the resolver considered: what it would take whole and what it got. */
 export interface GuideBlock {
   layer: GuideLayer
   scope?: GuideScopeKey
   title: string
-  /** Where the block comes from in words: `REVIEW.md · AGENTS.md`, `Team games`, `All repositories`, … */
+  /**
+   * Where the block comes from in words: `REVIEW.md · AGENTS.md`, `Folder acme/round`,
+   * `Team widgets`, `All repositories`, …
+   */
   source: string
   /** The block as the prompt has it, cut when `cut` is set; empty when left out. */
   text: string
@@ -136,7 +183,17 @@ export interface ResolvedGuide {
   blocks: GuideBlock[]
   /** Problems a person should see, e.g. repository rules too long to fit. */
   warnings: string[]
-  budget: GuideCaps & { used: number; humanUsed: number; generatedUsed: number; notesUsed: number }
+  /**
+   * `notesUsed` counts the notes and the neighbour block, `neighboursUsed` the neighbour block
+   * alone.
+   */
+  budget: GuideCaps & {
+    used: number
+    humanUsed: number
+    generatedUsed: number
+    notesUsed: number
+    neighboursUsed: number
+  }
 }
 
 const MARKER = '\n[...]'
@@ -187,18 +244,20 @@ const sectionBodies = (
 /**
  * The Guide of a repository for one task, as one deterministic Markdown block (the same inputs
  * give the same text, so it can sit in a cached prompt prefix). Blocks, strongest first: the
- * repository's own rules files, panel team rules of the repository, its family, its subgroups,
- * its parent groups and `all`, accepted learnings, policies as plain facts, generated sections
- * under `GENERATED_HEADER`, then knowledge notes from what budget is left. Group titles go through
- * `groupTitle`.
+ * repository's own rules files, panel team rules of the repository, its family, its folders
+ * (deepest first), its owner teams (in `repo.teams` order) and `all`, accepted learnings, policies
+ * as plain facts, generated sections under `GENERATED_HEADER`, knowledge notes from what
+ * budget is left, then knowledge of similar repositories (`notes.neighbours`) from what the notes
+ * leave, at most `GUIDE_NEIGHBOURS_SHARE` of the total by default, so it is cut first. Team keys
+ * in titles go through `teamTitle`.
  *
  * Budgets (`GUIDE_CAPS`): rules files take at most `repoFiles` and leave of `human` the room of
  * the repository's team rules plus `rules` for the other team rules, learned rules and policies
  * (as much of it as they need); a longer file is cut with `[… truncated, see <file>]`, and every
  * file left out keeps that pointer. Repository rules come next and are never cut to make room, only
  * past `total`. The other human blocks share what is left of `human`: over it `all` is cut first,
- * then parent groups (the last one first), then subgroups, then the family, learnings and
- * policies. Every cut comes with a warning. Generated text gets at most `generated` and what
+ * then owner teams (the last one first), then folders (the shallowest first), then the family,
+ * learnings and policies. Every cut comes with a warning. Generated text gets at most `generated` and what
  * human text leaves of `total`; notes get the rest. Generated text nobody accepted is included
  * only when no human rules apply to the selected sections and the repository has no rules files.
  */
@@ -232,13 +291,16 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
         title: `Team rules for the ${input.family?.name ?? ''} family`,
         source: `Family ${input.family?.name ?? scope.slice('family:'.length)}`,
       }
-    const group = scope.slice('group:'.length)
-    const label = input.groupTitle?.(group) ?? group
-    return {
-      layer: isSubgroup(group) ? 'subgroup' : 'group',
-      title: `Team rules for team ${label}`,
-      source: `Team ${label}`,
-    }
+    const parsed = parseGuideScope(scope)
+    if (parsed?.kind === 'path')
+      return {
+        layer: 'path',
+        title: `Rules for folder ${parsed.folder}`,
+        source: `Folder ${parsed.folder}`,
+      }
+    const team = parsed?.kind === 'team' ? parsed.team : scope
+    const label = input.teamTitle?.(team) ?? team
+    return { layer: 'team', title: `Team rules for team ${label}`, source: `Team ${label}` }
   }
   const ruleBlocks: Candidate[] = scopes.flatMap((scope) => {
     const body = sectionBodies(rows, scope, sections, (row) => row.rules)
@@ -288,8 +350,8 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
         ]
       : []),
     ...ruleBlocks.filter((block) => block.layer === 'family'),
-    ...ruleBlocks.filter((block) => block.layer === 'subgroup'),
-    ...ruleBlocks.filter((block) => block.layer === 'group'),
+    ...ruleBlocks.filter((block) => block.layer === 'path'),
+    ...ruleBlocks.filter((block) => block.layer === 'team'),
     ...ruleBlocks.filter((block) => block.layer === 'all'),
   ]
 
@@ -389,12 +451,41 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
           task: {
             kind: input.notes.kind,
             repo: input.repo,
+            ...(input.family && { family: input.family.id }),
+            ...(input.notes.files && { files: input.notes.files }),
             ...(input.notes.query && { query: input.notes.query }),
           },
           budgetTokens: Math.floor((notesRoom - 2) / 4),
+          ...(input.notes.semantic && { semantic: input.notes.semantic }),
         })
       : undefined
   const notesText = notes?.markdown ? `${notes.markdown.trim()}\n\n` : ''
+
+  const nearby = input.notes?.neighbours
+  const neighboursRoom = Math.max(
+    0,
+    Math.min(
+      caps.total - humanUsed - generatedUsed - notesText.length,
+      nearby?.maxChars ?? Math.floor(caps.total * GUIDE_NEIGHBOURS_SHARE),
+    ),
+  )
+  const neighbours =
+    input.notes && nearby?.repos.length && neighboursRoom >= MIN_PIECE
+      ? selectNeighbourKnowledge({
+          entries: nearby.entries ?? input.notes.entries,
+          task: {
+            kind: input.notes.kind,
+            repo: input.repo,
+            ...(input.family && { family: input.family.id }),
+            ...(input.notes.files && { files: input.notes.files }),
+            ...(input.notes.query && { query: input.notes.query }),
+          },
+          neighbours: nearby.repos,
+          budgetTokens: Math.floor((neighboursRoom - 2) / 4),
+          ...(input.notes.semantic && { semantic: input.notes.semantic }),
+        })
+      : undefined
+  const neighboursText = neighbours?.markdown ? `${neighbours.markdown.trim()}\n\n` : ''
 
   const blocks: GuideBlock[] = []
   const describe = (candidate: Candidate, value: { text: string; full: number }) =>
@@ -427,11 +518,24 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
       fullChars: notesText.length,
       cut: notes.omitted.length > 0,
     })
+  if (neighbours) {
+    const from = [...new Set(neighbours.selected.map((item) => item.neighbour.repo.path))]
+    blocks.push({
+      layer: 'neighbours',
+      title: 'Knowledge from similar repositories',
+      source: from.length ? `Similar repositories: ${from.join(' · ')}` : 'Similar repositories',
+      text: neighboursText,
+      chars: neighboursText.length,
+      fullChars: neighboursText.length,
+      cut: neighbours.omitted.length > 0,
+    })
+  }
 
   const body = [
     ...humanSorted.map((block) => placed.get(block)?.text ?? ''),
     ...generatedBlocks.map((block) => generatedTexts.get(block)?.text ?? ''),
     notesText,
+    neighboursText,
   ].join('')
   const text = body ? `${header}${body}`.trimEnd() : ''
   return {
@@ -444,7 +548,8 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
       used: text.length,
       humanUsed: body ? humanUsed : 0,
       generatedUsed,
-      notesUsed: notesText.length,
+      notesUsed: notesText.length + neighboursText.length,
+      neighboursUsed: neighboursText.length,
     },
   }
 }
@@ -454,8 +559,8 @@ const order: GuideLayer[] = [
   'repo-file',
   'repo',
   'family',
-  'subgroup',
-  'group',
+  'path',
+  'team',
   'all',
   'learnings',
   'policies',

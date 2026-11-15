@@ -20,7 +20,7 @@ import {
   withCiSort,
   worstCiFirst,
 } from './ci.ts'
-import { groupTitleOf } from './group-titles.ts'
+import { teamTitleOf } from './team-titles.ts'
 
 const job = (name: string, stage: string, extra: Partial<CiJobStats> = {}): CiJobStats => ({
   name,
@@ -45,7 +45,7 @@ const card = (path: string, extra: Partial<CiRepoCard> = {}): CiRepoCard => ({
   pipelines: 100,
   weeks: [],
   problems: 0,
-  groups: ['Web'],
+  teams: ['Web'],
   status: 'healthy',
   flakyJobs: 0,
   ...extra,
@@ -162,7 +162,7 @@ test('filters and sort values', () => {
       status: 'flaky',
       lastRunAt: '2026-11-12T01:00:00.000Z',
     }),
-    card('acme/ledger-api', { groups: ['Payments'] }),
+    card('acme/ledger-api', { teams: ['Payments'] }),
   ]
   expect(filterCiCards(cards, { q: 'payments' }).map((c) => c.repo.path)).toEqual([
     'acme/ledger-api',
@@ -172,7 +172,7 @@ test('filters and sort values', () => {
   ])
   expect(filterCiCards(cards, { problems: true })).toHaveLength(1)
   expect(
-    filterCiCards(cards, { q: 'money' }, groupTitleOf({ Payments: 'Money Desk' })).map(
+    filterCiCards(cards, { q: 'money' }, teamTitleOf({ Payments: 'Money Desk' })).map(
       (c) => c.repo.path,
     ),
   ).toEqual(['acme/ledger-api'])

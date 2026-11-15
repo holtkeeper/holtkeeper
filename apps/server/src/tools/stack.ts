@@ -1,5 +1,5 @@
 import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
-import type { StackGroupView, StackUse } from '@holtkeeper/api'
+import type { StackTeamView, StackUse } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
@@ -7,9 +7,9 @@ import { repoKey } from '../context.ts'
 
 /** What the `stack` tools read, limited to what one caller may see. */
 export interface StackToolsContext {
-  /** The newest stack view of every group, already limited to the caller's catalog reach. */
-  views: () => Promise<StackGroupView[]>
-  /** The teams of a repository (innermost config groups), named on every row. */
+  /** The newest stack view of every team, already limited to the caller's catalog reach. */
+  views: () => Promise<StackTeamView[]>
+  /** The owner teams of a repository, named on every row. */
   ownerOf: (repo: RepoRef) => string[]
   /** Direct dependencies of a repository at their resolved versions, for `repo_stack`. */
   dependencies?: (repo: RepoRef) => Promise<{ ecosystem: string; name: string; version: string }[]>
@@ -36,7 +36,7 @@ const supportLabel: Record<StackUse['support'], string> = {
 }
 
 /** Every use of every tool across the views, one per repository, tool and file. */
-export function stackUseRows(views: readonly StackGroupView[]): StackUseRow[] {
+export function stackUseRows(views: readonly StackTeamView[]): StackUseRow[] {
   const rows = new Map<string, StackUseRow>()
   for (const view of views)
     for (const tool of view.tools)
@@ -126,7 +126,7 @@ export function renderStackUsage(
 /** Markdown of one repository's runtimes, images, conventions status and key dependencies. */
 function renderRepoStack(
   repo: string,
-  views: readonly StackGroupView[],
+  views: readonly StackTeamView[],
   owner: readonly string[],
   dependencies: readonly { ecosystem: string; name: string; version: string }[] | undefined,
 ): string | undefined {
@@ -138,7 +138,7 @@ function renderRepoStack(
   )
   if (!mine.length && !dependencies?.length) return undefined
   const rows = stackUseRows(mine).filter((row) => row.use.repo === path)
-  const conventions = new Map<string, StackGroupView['conventions'][number]>()
+  const conventions = new Map<string, StackTeamView['conventions'][number]>()
   for (const view of mine)
     for (const result of view.conventions)
       if (result.repo === path && !conventions.has(result.file))

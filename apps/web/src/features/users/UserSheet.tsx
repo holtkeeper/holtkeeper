@@ -3,7 +3,7 @@ import { Fingerprint, KeyRound, LifeBuoy, Mail, Pencil, Power, Trash2 } from 'lu
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useGroupNames, useGroupTitles, useHistory, useUserMutations } from '../../api/queries.ts'
+import { useTeamTitles, useHistory, useUserMutations } from '../../api/queries.ts'
 import { useResendInvite } from '../../api/settings-people.ts'
 import { actionLabel, outcomeLabel, outcomeTone, targetLabel } from '../../lib/audit-log.ts'
 import { formatDate, formatDateTime, formatRelative, plural, shortId } from '../../lib/format.ts'
@@ -33,7 +33,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
-  GroupName,
+  TeamName,
   KeyValue,
   LoadMore,
   Notice,
@@ -67,10 +67,9 @@ const abilityText: Readonly<Record<AbilityState, { label: string; className: str
 
 function RoleTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
   const match = roleOf(user.grants)
-  const groups = useGroupNames()
   const { update } = useUserMutations()
   const [role, setRole] = useState<RoleId>(match.role)
-  const [scope, setScope] = useState<Scope>('scope' in match ? match.scope : { groups: [] })
+  const [scope, setScope] = useState<Scope>('scope' in match ? match.scope : { teams: [] })
   const [exact, setExact] = useState<Grant[] | null>(null)
   const draft: Grant[] =
     exact ?? (role === 'custom' || role === 'none' ? user.grants : grantsForRole(role, scope))
@@ -81,7 +80,7 @@ function RoleTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
 
   const discard = () => {
     setRole(match.role)
-    setScope('scope' in match ? match.scope : { groups: [] })
+    setScope('scope' in match ? match.scope : { teams: [] })
     setExact(null)
   }
   const save = () =>
@@ -120,7 +119,7 @@ function RoleTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
             current={match.role}
             onChange={(next) => {
               setRole(next)
-              if (role === 'custom' || role === 'none') setScope({ groups: [] })
+              if (role === 'custom' || role === 'none') setScope({ teams: [] })
             }}
             isDisabled={!canEdit}
           />
@@ -130,7 +129,7 @@ function RoleTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
       {exact === null && role !== 'admin' && role !== 'custom' && role !== 'none' ? (
         <section className="flex flex-col gap-2">
           {canEdit ? (
-            <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+            <ScopeEditor value={scope} onChange={setScope} label="Applies to" />
           ) : (
             <>
               <h3 className="text-xs font-medium uppercase tracking-wide text-muted">Applies to</h3>
@@ -188,7 +187,7 @@ function RoleTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
               ) : null}
             </>
           ) : (
-            <GrantsEditor value={exact} onChange={setExact} groups={groups} />
+            <GrantsEditor value={exact} onChange={setExact} />
           )}
         </div>
       </details>
@@ -309,13 +308,13 @@ function SignInTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
 }
 
 function TeamsTab({ user }: { user: UserView }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const teams = user.teams ?? []
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted">
-        Their home groups, else the groups their grants name. Teams decide what “My teams” shows
-        them; access comes only from grants.
+        Their home teams, else the teams they are members of or their grants name. Teams decide what
+        “My teams” shows them; access comes only from grants.
       </p>
       {teams.length ? (
         <ul className="flex flex-wrap gap-1.5" aria-label={`Teams of ${user.name}`}>
@@ -326,7 +325,9 @@ function TeamsTab({ user }: { user: UserView }) {
           ))}
         </ul>
       ) : (
-        <p className="text-[12.5px] text-muted">No team: their grants name no group.</p>
+        <p className="text-[12.5px] text-muted">
+          No team: they are in no team and their grants name none.
+        </p>
       )}
     </div>
   )
@@ -548,7 +549,7 @@ export function UserSheet({
           <Tag>{roleNames[roleOf(user.grants).role]}</Tag>
           {(user.teams ?? []).map((team) => (
             <Tag key={team}>
-              Team <GroupName group={team} />
+              Team <TeamName team={team} />
             </Tag>
           ))}
           <span className="text-xs text-muted">

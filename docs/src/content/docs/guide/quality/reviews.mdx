@@ -319,7 +319,7 @@ Release prep, please review: https://gitlab.acme.dev/acme/admin-ui/-/merge_reque
 
 1. Create and install the Slack app, then paste its credential in **Settings › Integrations › Slack**. [Slack settings](/guide/settings/slack/) walks through it.
 2. Invite the app to each channel it should watch: `/invite @Holtkeeper`.
-3. Bind channels to repositories with the `slack.reviews` setting: channel ids such as `C0123ABCD`, per scope. A group entry with no channels keeps that group quiet.
+3. Bind channels to repositories with the `slack.reviews` setting: channel ids such as `C0123ABCD`, per scope. A team or path entry with no channels keeps those repositories quiet; repositories no team owns never post.
 
 :::tip
 These are Holtkeeper's own status emoji and the default. A workspace that has not uploaded them shows the standard fallback; [Slack app](/guide/settings/slack/#use-the-holtkeeper-emoji) explains how to add them.
@@ -349,7 +349,7 @@ Nothing is posted when the repository has merge request reviews turned off, the 
 | `reviewOwn`       | off                                           | Review Holtkeeper's own merge requests.                                                                                               |
 | `goGuidelines`    | on                                            | Modern Go guidelines for merge requests that change Go code; `{ "enabled": false }` turns them off, `tag` pins a release.             |
 
-```json title="analyzers.review · one group"
+```json title="analyzers.review · one team"
 {
   "minSeverity": "major",
   "maxComments": 8,

@@ -1,8 +1,11 @@
 import type {
   CreateKnowledgeInput,
+  KnowledgeCitationSummary,
+  KnowledgeCitationView,
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
+  KnowledgeMatch,
   KnowledgePackage,
   KnowledgeRevision,
   KnowledgeStatus,
@@ -11,6 +14,7 @@ import type {
   UpdateKnowledgeInput,
 } from '@holtkeeper/api'
 
+import { plural } from './format.ts'
 import type { Space } from './guide.ts'
 import { repoKey } from './repo.ts'
 import { isEmptyScope, normalizeScope } from './scope.ts'
@@ -60,6 +64,8 @@ export interface KnowledgeDraft {
   /** `npm:react`, `tool:node`; blank for none (an entry about one package gets it from there). */
   subject: string
   evidence: KnowledgeLink[]
+  /** Narrows the scope: family ids and file globs; both empty means no narrowing. */
+  match: { families: string[]; files: string[] }
   version?: number
 }
 
@@ -84,6 +90,7 @@ export const emptyDraft = (scope: Scope = { all: true }): KnowledgeDraft => ({
   visibility: 'auto',
   subject: '',
   evidence: [],
+  match: { families: [], files: [] },
 })
 
 export const draftOf = (entry: KnowledgeEntry): KnowledgeDraft => ({
@@ -97,6 +104,7 @@ export const draftOf = (entry: KnowledgeEntry): KnowledgeDraft => ({
   visibility: entry.visibility ?? 'team',
   subject: entry.subject ?? '',
   evidence: entry.evidence,
+  match: { families: entry.match?.families ?? [], files: entry.match?.files ?? [] },
   version: entry.version,
 })
 
@@ -123,9 +131,40 @@ const cleanPackages = (packages: readonly KnowledgePackage[]): KnowledgePackage[
     return [{ ecosystem, name, ...(from ? { from } : {}), ...(to ? { to } : {}) }]
   })
 
+const distinctTrimmed = (items: readonly string[]) => [
+  ...new Set(items.map((item) => item.trim()).filter(Boolean)),
+]
+
+const cleanMatch = (match: KnowledgeDraft['match']): KnowledgeMatch | undefined => {
+  const list = distinctTrimmed
+  const families = list(match.families)
+  const files = list(match.files)
+  if (!families.length && !files.length) return undefined
+  return { ...(families.length ? { families } : {}), ...(files.length ? { files } : {}) }
+}
+
+/**
+ * How an entry's `match` narrows its scope, as short parts for its card: `family Web apps`,
+ * `files src/**\/*.tsx`; empty without a match. `familyName` names a family id.
+ */
+export function matchParts(
+  match: KnowledgeMatch | undefined,
+  familyName: (id: string) => string = (id) => id,
+): string[] {
+  return [
+    ...(match?.families?.length
+      ? [
+          `${match.families.length === 1 ? 'family' : 'families'} ${match.families.map(familyName).join(', ')}`,
+        ]
+      : []),
+    ...(match?.files?.length ? [`files ${match.files.join(', ')}`] : []),
+  ]
+}
+
 /** The request body for a draft: trimmed text, normalized scope, no blank rows. */
 export function inputOf(draft: KnowledgeDraft): CreateKnowledgeInput & { version?: number } {
   const packages = cleanPackages(draft.packages)
+  const match = cleanMatch(draft.match)
   const evidence = draft.evidence
     .map((link) => ({ label: link.label.trim(), url: link.url.trim() }))
     .filter((link) => link.url)
@@ -140,17 +179,14 @@ export function inputOf(draft: KnowledgeDraft): CreateKnowledgeInput & { version
     ...(packages.length ? { packages } : {}),
     ...(draft.visibility === 'auto' ? {} : { visibility: draft.visibility }),
     ...(draft.subject.trim() ? { subject: draft.subject.trim() } : {}),
+    ...(match ? { match } : {}),
     evidence,
     ...(draft.version !== undefined ? { version: draft.version } : {}),
   }
 }
 
-const entriesOfGroup = <T extends KnowledgeEntry>(entries: readonly T[], group: string) =>
-  entries.filter((entry) =>
-    entry.scope.groups?.some((match) =>
-      typeof match === 'string' ? match === group : match.includes(group),
-    ),
-  )
+const entriesOfTeam = <T extends KnowledgeEntry>(entries: readonly T[], team: string) =>
+  entries.filter((entry) => entry.scope.teams?.includes(team))
 
 const namesRepo = (scope: Scope, key: string) => {
   const path = key.slice(key.indexOf(':') + 1)
@@ -158,7 +194,7 @@ const namesRepo = (scope: Scope, key: string) => {
 }
 
 /**
- * Notes a space lists: every entry for *All*, entries naming the group or a family member, and
+ * Notes a space lists: every entry for *All*, entries naming the team, folder or a family member, and
  * for a repository the entries the server found covering it (`entries` is then already filtered).
  */
 export function notesOfSpace<T extends KnowledgeEntry>(
@@ -166,7 +202,7 @@ export function notesOfSpace<T extends KnowledgeEntry>(
   space: Space,
   members: readonly string[] = [],
 ): T[] {
-  if (space.kind === 'group') return entriesOfGroup(entries, space.group)
+  if (space.kind === 'team') return entriesOfTeam(entries, space.team)
   if (space.kind === 'family')
     return entries.filter((entry) => members.some((member) => namesRepo(entry.scope, member)))
   return [...entries]
@@ -363,6 +399,7 @@ const fieldLabels: [keyof NoteContent, string][] = [
   ['body', 'text'],
   ['kind', 'kind'],
   ['scope', 'scope'],
+  ['match', 'narrowing'],
   ['topics', 'topics'],
   ['appliesTo', 'tasks'],
   ['packages', 'packages'],
@@ -421,6 +458,53 @@ export const restoreInput = (
   ...(revision.packages?.length ? { packages: revision.packages } : {}),
   ...(revision.visibility ? { visibility: revision.visibility } : {}),
   ...(revision.subject ? { subject: revision.subject } : {}),
+  ...(revision.match ? { match: revision.match } : {}),
   evidence: revision.evidence,
   version: entry.version,
 })
+
+type CitationOutcome = KnowledgeCitationView['outcome']
+
+/** How a review comment citing a note ended, for its tag. */
+export const citationOutcomes: Record<
+  CitationOutcome,
+  { label: string; tone: 'success' | 'info' | 'warning' | 'default' }
+> = {
+  fixed: { label: 'Fixed', tone: 'success' },
+  resolved: { label: 'Resolved', tone: 'success' },
+  dismissed: { label: 'Dismissed', tone: 'warning' },
+  open: { label: 'Open', tone: 'info' },
+  closed: { label: 'Closed', tone: 'default' },
+  unknown: { label: 'Unknown', tone: 'default' },
+}
+
+/**
+ * `Cited in 4 review comments · 2 resolved · 1 dismissed · 1 open`: the outcomes with at least one
+ * comment, fixed and resolved counted together as resolved; empty without citations.
+ */
+export function citationLine(summary: KnowledgeCitationSummary | undefined): string {
+  if (!summary?.comments) return ''
+  const parts = [`Cited in ${plural(summary.comments, 'review comment')}`]
+  const counts: [number, string][] = [
+    [summary.fixed + summary.resolved, 'resolved'],
+    [summary.dismissed, 'dismissed'],
+    [summary.open, 'open'],
+    [summary.closed, 'closed without merging'],
+    [summary.replied, 'replied to'],
+  ]
+  for (const [count, label] of counts) if (count) parts.push(`${count} ${label}`)
+  return parts.join(' · ')
+}
+
+/**
+ * Share of judged citing comments (fixed, resolved or dismissed) that were acted on — fixed or
+ * resolved — as a whole percentage; undefined while none is judged.
+ */
+export function citationHelpRate(
+  summary: KnowledgeCitationSummary | undefined,
+): number | undefined {
+  if (!summary) return undefined
+  const helped = summary.fixed + summary.resolved
+  const judged = helped + summary.dismissed
+  return judged ? Math.round((helped / judged) * 100) : undefined
+}

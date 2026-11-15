@@ -87,7 +87,7 @@ export interface NavItem {
     | '/'
     | '/inbox'
     | '/repos'
-    | '/repos/groups'
+    | '/repos/teams'
     | '/chat'
     | '/supply/libraries'
     | '/supply/security'
@@ -157,8 +157,8 @@ const navItems: readonly NavItem[] = [
   },
   {
     workspace: 'repos',
-    to: '/repos/groups',
-    label: 'Groups',
+    to: '/repos/teams',
+    label: 'Teams',
     icon: Users,
     requires: 'repos:read',
   },

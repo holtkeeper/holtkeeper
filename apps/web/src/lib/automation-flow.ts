@@ -1,19 +1,16 @@
 import {
   type ConfigEntryView,
-  type GroupMatch,
   type Job,
   type JobAnalyzerView,
   type Scope,
   type SettingView,
   type TriggerDocumentData,
-  isSubgroup,
-  rootGroup,
 } from '@holtkeeper/api'
 
 import { describeCadence, describeWindows, mergeRequestActions } from './automation.ts'
 import type { FlowEdgeSpec, FlowNodeSpec } from './flow.ts'
-import { type GroupTitleOf, byGroupTitle, groupMatchTitle, keyAsTitle } from './group-titles.ts'
 import { type ConditionValue, describeCondition, normalizePolicies } from './policies.ts'
+import { type TeamTitleOf, byTeamTitle, keyAsTitle } from './team-titles.ts'
 
 /** Settings key of merge request policies, edited on the Automation page. */
 export const POLICIES_KEY = 'mergeRequests.policies'
@@ -91,11 +88,11 @@ export type AutomationNode =
   | FlowNodeSpec<'rule', RuleData>
   | FlowNodeSpec<'action', { action: ActionKind; label: string; kind?: string; ai: boolean }>
 
-/** One team's part of the automation: config group lanes, plus one for every repository. */
+/** One team's part of the automation: config team lanes, plus one for every repository. */
 export interface AutomationLane {
-  /** `all`, or the group id. */
+  /** `all`, or the team id. */
   id: string
-  group?: string
+  team?: string
   label: string
   nodes: AutomationNode[]
   edges: FlowEdgeSpec[]
@@ -125,69 +122,50 @@ const freshnessValue = (value: unknown): Pick<LaneFreshness, 'mode' | 'factor'> 
 }
 
 /**
- * The freshness override of a team (`group`) or of every repository: the group's own entry (scoped
- * to exactly that group), else an entry shared with other groups, else the every-repository entry,
+ * The freshness override of a team (`team`) or of every repository: the team's own entry (scoped
+ * to exactly that team), else an entry shared with other teams, else the every-repository entry,
  * else on. Only the own entry is `inherited: false`, so editing a team never rewrites a shared one.
  */
 export function laneFreshness(
   settings: readonly SettingView[],
-  group: string | undefined,
+  team: string | undefined,
 ): LaneFreshness {
   const entries = settings.filter((entry) => entry.key === FRESHNESS_KEY && !entry.secret)
   const own =
-    group === undefined
+    team === undefined
       ? entries.find((entry) => entry.scope.all)
       : entries.find(
           (entry) =>
             !entry.scope.all &&
             !entry.scope.repos?.length &&
-            entry.scope.groups?.length === 1 &&
-            entry.scope.groups[0] === group,
+            entry.scope.teams?.length === 1 &&
+            entry.scope.teams[0] === team,
         )
   if (own) return { ...freshnessValue(own.value), entry: own, inherited: false }
   const shared =
-    group === undefined
+    team === undefined
       ? undefined
       : entries.find(
           (entry) =>
-            !entry.scope.all &&
-            !entry.scope.repos?.length &&
-            entry.scope.groups?.some((match) => match === group),
+            !entry.scope.all && !entry.scope.repos?.length && entry.scope.teams?.includes(team),
         )
   if (shared) return { ...freshnessValue(shared.value), entry: shared, inherited: true }
-  const all = group === undefined ? undefined : entries.find((entry) => entry.scope.all)
+  const all = team === undefined ? undefined : entries.find((entry) => entry.scope.all)
   if (all) return { ...freshnessValue(all.value), entry: all, inherited: true }
-  return { mode: 'on', factor: 3, inherited: group !== undefined }
+  return { mode: 'on', factor: 3, inherited: team !== undefined }
 }
 
-const memberGroups = (matches: readonly GroupMatch[] | undefined): string[] =>
-  matches?.length
-    ? [
-        ...new Set(
-          matches.flatMap((match) => (typeof match === 'string' ? [match] : match)).map(rootGroup),
-        ),
-      ]
-    : [ALL_LANE]
+const teamLanes = (teams: readonly string[] | undefined): string[] =>
+  teams?.length ? [...new Set(teams)] : [ALL_LANE]
 
 const scopeLanes = (scope: Scope): string[] =>
-  scope.all || !scope.groups?.length ? [ALL_LANE] : memberGroups(scope.groups)
+  scope.all || !scope.teams?.length ? [ALL_LANE] : teamLanes(scope.teams)
 
 const joined = (items: readonly string[]) => items.join(', ')
 
-const intersectionChips = (
-  matches: readonly GroupMatch[] | undefined,
-  titleOf: GroupTitleOf,
-): string[] =>
-  (matches ?? []).flatMap((match) =>
-    typeof match !== 'string'
-      ? [`only ${groupMatchTitle(match, titleOf)}`]
-      : subgroupChips([match], titleOf),
-  )
-
-const subgroupChips = (matches: readonly GroupMatch[] | undefined, titleOf: GroupTitleOf) =>
-  (matches ?? []).flatMap((match) =>
-    typeof match === 'string' && isSubgroup(match) ? [`subgroup ${titleOf(match)}`] : [],
-  )
+/** Path patterns a rule is limited to, besides its teams. */
+const pathChips = (repos: readonly string[] | undefined): string[] =>
+  repos?.length ? [`only ${joined(repos)}`] : []
 
 /** The title a trigger has on the canvas. */
 function triggerTitle(trigger: TriggerDocumentData): string {
@@ -259,22 +237,22 @@ interface ActionSpec {
 /** A rule as the canvas and the list see it: its node data, lanes and actions. */
 export interface AutomationRule extends RuleData {
   id: string
-  /** `all`, or the root groups it sits in. */
+  /** `all`, or the teams it sits in. */
   lanes: string[]
   actions: ActionSpec[]
 }
 
 /** Everything the canvas projects. */
 export interface AutomationInput {
-  /** Config group ids. */
-  groups: readonly string[]
+  /** Team keys; one lane each. */
+  teams: readonly string[]
   triggers: readonly ConfigEntryView<'trigger'>[]
   schedules: readonly ConfigEntryView<'schedule'>[]
   /** Settings entries; only `mergeRequests.policies` and `freshness` ones are read. */
   settings: readonly SettingView[]
   analyzers: readonly JobAnalyzerView[]
-  /** Names group lanes; default the group ids. */
-  titleOf?: GroupTitleOf
+  /** Names team lanes; default the team keys. */
+  titleOf?: TeamTitleOf
 }
 
 /** Node id of a rule. */
@@ -298,12 +276,11 @@ const sizes = {
 
 /**
  * The stored rules (triggers, merge request policies and schedules) with the lanes they sit in and
- * the actions they take, in that order. A rule limited to groups sits in the lane of each member
- * group's root group, tagged with the subgroups it names; one without groups, or limited to
- * repositories only, in the every-repository lane.
+ * the actions they take, in that order. A rule limited to teams sits in the lane of each team; one
+ * without teams, or limited to path patterns only, in the every-repository lane, tagged with its
+ * patterns.
  */
 export function automationRules(input: AutomationInput): AutomationRule[] {
-  const titleOf = input.titleOf ?? keyAsTitle
   const byKind = new Map(input.analyzers.map((analyzer) => [analyzer.kind, analyzer]))
   const usesAgent = (kind: string) => byKind.get(kind)?.needs.agent !== undefined
   const analyzerAction = (kind: string): ActionSpec => ({
@@ -320,14 +297,15 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
   for (const entry of input.triggers) {
     const data = entry.data
     const anyRepo = data.on === 'label' || data.on === 'command'
-    const groups = 'groups' in data ? data.groups : undefined
+    const teams = 'teams' in data ? data.teams : undefined
+    const repos = 'repos' in data ? data.repos : undefined
     const base = {
       ref: { type: 'trigger' as const, id: entry.id },
       title: triggerTitle(data),
-      chips: [...triggerChips(data), ...intersectionChips(groups, titleOf)],
+      chips: [...triggerChips(data), ...pathChips(repos)],
       enabled: true,
       events: [data.on],
-      lanes: anyRepo ? [ALL_LANE] : memberGroups(groups),
+      lanes: anyRepo ? [ALL_LANE] : teamLanes(teams),
     }
     if (data.on === 'newRepo' && !data.analyzers?.length) {
       const kinds = input.analyzers
@@ -359,12 +337,7 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
   for (const entry of input.settings) {
     if (entry.key !== POLICIES_KEY || entry.secret) continue
     const lanes = scopeLanes(entry.scope)
-    const repoChip =
-      !entry.scope.all && !entry.scope.groups?.length && entry.scope.repos?.length
-        ? [`only ${joined(entry.scope.repos)}`]
-        : entry.scope.all
-          ? []
-          : subgroupChips(entry.scope.groups, titleOf)
+    const repoChip = entry.scope.all ? [] : pathChips(entry.scope.repos)
     for (const policy of normalizePolicies(entry.value)) {
       const kinds = [
         ...new Set(
@@ -414,16 +387,11 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
     add({
       ref: { type: 'schedule', id: entry.id },
       title: data.name || entry.id,
-      chips: [
-        describeCadence(data),
-        ...describeWindows(data.windows),
-        ...(data.repos?.length ? [`only ${joined(data.repos)}`] : []),
-        ...intersectionChips(data.groups, titleOf),
-      ],
+      chips: [describeCadence(data), ...describeWindows(data.windows), ...pathChips(data.repos)],
       enabled: data.enabled,
       events: ['schedule'],
       analyzers: [...new Set(data.analyzers)],
-      lanes: memberGroups(data.groups),
+      lanes: teamLanes(data.teams),
       actions: [...new Set(data.analyzers)].map(analyzerAction),
     })
   }
@@ -433,7 +401,7 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
 
 /**
  * Lanes of the automation canvas, projected from the stored documents (nothing here is stored):
- * one for every repository, then one per root config group (subgroups share their parent's). Each lane links event nodes to the rules
+ * one for every repository, then one per team. Each lane links event nodes to the rules
  * (triggers, merge request policies, schedules, freshness and the release assistant) that react
  * to them, and rules to the actions they take, placed as `automationRules` says. Freshness has a
  * rule in every lane, with that lane's override. Disabled rules draw dashed.
@@ -441,16 +409,16 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
 export function automationLanes(input: AutomationInput): AutomationLane[] {
   const rules = automationRules(input)
   const fresh = input.analyzers.filter((analyzer) => analyzer.refresh !== undefined)
-  const lanes: { id: string; group?: string; label: string }[] = [
+  const lanes: { id: string; team?: string; label: string }[] = [
     { id: ALL_LANE, label: 'All repositories' },
-    ...[...new Set(input.groups.map(rootGroup))]
-      .toSorted(byGroupTitle(input.titleOf ?? keyAsTitle))
-      .map((group) => ({ id: group, group, label: (input.titleOf ?? keyAsTitle)(group) })),
+    ...[...new Set(input.teams)]
+      .toSorted(byTeamTitle(input.titleOf ?? keyAsTitle))
+      .map((team) => ({ id: team, team, label: (input.titleOf ?? keyAsTitle)(team) })),
   ]
 
   return lanes.map((lane) => {
     const own = rules.filter((rule) => rule.lanes.includes(lane.id))
-    const override = laneFreshness(input.settings, lane.group)
+    const override = laneFreshness(input.settings, lane.team)
     const freshness: AutomationRule = {
       id: ruleNodeId({ type: 'freshness' }),
       ref: { type: 'freshness' },
@@ -560,7 +528,7 @@ export function mergedLane(lanes: readonly AutomationLane[], laneId: string = AL
   const all = [...nodes.values()]
   const merged: AutomationLane = {
     id: own?.id ?? ALL_LANE,
-    ...(own?.group !== undefined && { group: own.group }),
+    ...(own?.team !== undefined && { team: own.team }),
     label: own?.label ?? base?.label ?? 'All repositories',
     nodes: [
       ...eventOrder.flatMap((event) => all.filter((node) => node.id === `event:${event}`)),
@@ -627,11 +595,8 @@ export const laneRuleCounts = (lanes: readonly AutomationLane[]): Record<string,
     lanes.map((lane) => [lane.id, lane.nodes.filter((node) => node.kind === 'rule').length]),
   )
 
-/** Lanes a job's path can show in: every repository, then the root groups of the job's groups. */
-export const jobLanes = (groups: readonly string[]): string[] => [
-  ALL_LANE,
-  ...new Set(groups.map(rootGroup)),
-]
+/** Lanes a job's path can show in: every repository, then the job's teams. */
+export const jobLanes = (teams: readonly string[]): string[] => [ALL_LANE, ...new Set(teams)]
 
 /** A highlighted path: node ids and edge keys (`from->to`). */
 export interface WhyPath {

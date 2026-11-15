@@ -67,7 +67,7 @@ export function bundlesRow(
   const targets = names.flatMap((name) => targetRow(name, line, budgets) ?? [])
   return {
     repo: { forge: target.forge, path: target.path },
-    groups: [...target.groups],
+    teams: [...target.teams],
     analysisId: newest.id,
     createdAt: newest.createdAt,
     ...(newest.ref ? { ref: newest.ref } : {}),

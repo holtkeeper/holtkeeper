@@ -89,7 +89,7 @@ test('a rerun keeps the target, ref and options', () => {
   })
   expect(rerunJobInput({ analyzer: 'audit', repo, group: 'web', options: {} })).toEqual({
     analyzer: 'audit',
-    group: 'web',
+    team: 'web',
   })
 })
 
@@ -108,7 +108,7 @@ test('duration covers the latest attempt', () => {
 test('analyzers are filtered by the fixed target', () => {
   const all = [analyzer('changelog', 'repo'), analyzer('inventory', 'group')]
   expect(analyzersFor(all, {}).map((a) => a.kind)).toEqual(['changelog', 'inventory'])
-  expect(analyzersFor(all, { group: 'web' }).map((a) => a.kind)).toEqual(['inventory'])
+  expect(analyzersFor(all, { team: 'widgets' }).map((a) => a.kind)).toEqual(['inventory'])
   expect(analyzersFor(all, { repo: { forge: 'f', path: 'a/b' } }).map((a) => a.kind)).toEqual([
     'changelog',
   ])
@@ -147,11 +147,11 @@ test('attempts have a duration once finished and a short label', () => {
   expect(attemptLabel({ n: 3, status: 'running' })).toBe('#3 Running')
 })
 
-test('jobScopeRepos splits targets by home groups and leaves All unfiltered', () => {
+test('jobScopeRepos splits targets by home teams and leaves All unfiltered', () => {
   const targets = [
-    { repo: 'work:shapes/circle', groups: ['shapes'] },
-    { repo: 'work:colors/red', groups: ['colors'] },
-    { repo: 'work:shapes', group: 'shapes', groups: ['shapes'] },
+    { repo: 'work:shapes/circle', teams: ['shapes'] },
+    { repo: 'work:colors/red', teams: ['colors'] },
+    { repo: 'work:shapes', team: 'shapes', teams: ['shapes'] },
   ]
   expect(jobScopeRepos('mine', targets, ['shapes'])).toEqual(['work:shapes/circle', 'work:shapes'])
   expect(jobScopeRepos('all', targets, ['shapes'])).toBeUndefined()

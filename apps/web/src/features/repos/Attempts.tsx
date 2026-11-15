@@ -73,7 +73,7 @@ export function UpdateEvents({ events }: { events: readonly UpdateEvent[] }) {
   )
 }
 
-/** Recent listings of a group's repositories, newest first. */
+/** Recent listings of a forge's fleet, newest first. */
 export function ListingAttempts({ attempts }: { attempts: readonly ListingAttemptView[] }) {
   const now = new Date()
   if (attempts.length === 0) return <p className="text-sm text-muted">Not listed yet.</p>

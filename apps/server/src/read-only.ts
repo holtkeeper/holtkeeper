@@ -9,7 +9,7 @@ import { repoTarget } from './context.ts'
 export type ReadOnlyRepos = (repo: RepoRef) => Promise<boolean>
 
 /**
- * Reads `repo.freeze` for a repository with its groups from `config()`. The settings are read on
+ * Reads `repo.freeze` for a repository with its owner teams from `config()`. The settings are read on
  * every call, so a change in the panel applies to the next write, and an entry stops counting once
  * `now()` passes its `until`. The most specific entry in force wins, so a lift keeps its scope
  * writable under a broader freeze.

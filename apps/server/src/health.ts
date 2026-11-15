@@ -21,6 +21,11 @@ export interface ProbeOptions {
   draining: () => boolean
   /** More named checks; a check fails by throwing. */
   checks?: Record<string, () => Promise<unknown>>
+  /**
+   * Named facts reported in the body under `info` that never fail readiness, e.g. the state of
+   * optional features (`embeddings`). One that throws or times out reads `unknown`.
+   */
+  info?: Record<string, () => Promise<string>>
   /** Each check fails after this long. Default 3 seconds. */
   timeoutMs?: number
 }
@@ -80,10 +85,20 @@ export function createProbes(options: ProbeOptions): Probes {
           }
         }),
       )
+      const info: Record<string, string> = {}
+      await Promise.all(
+        Object.entries(options.info ?? {}).map(async ([name, read]) => {
+          info[name] = await withTimeout(read(), timeoutMs).catch(() => 'unknown')
+        }),
+      )
       const draining = options.draining()
       const ok = !draining && Object.values(results).every((result) => result === 'ok')
       return Response.json(
-        { status: ok ? 'ok' : draining ? 'draining' : 'unavailable', checks: results },
+        {
+          status: ok ? 'ok' : draining ? 'draining' : 'unavailable',
+          checks: results,
+          ...(options.info && { info }),
+        },
         { status: ok ? 200 : 503 },
       )
     },

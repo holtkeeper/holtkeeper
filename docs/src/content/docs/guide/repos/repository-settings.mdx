@@ -26,9 +26,9 @@ import {
   Ui,
 } from '@ui'
 
-See every setting as it applies to one repository, where each value comes from, override it for just this repository, and control how the repository gets updates. It is the **Settings** tab of the [repository hub](/guide/repos/repository-hub/); a group's Settings tab works the same way for the group.
+See every setting as it applies to one repository, where each value comes from, override it for just this repository, and control how the repository gets updates. It is the **Settings** tab of the [repository hub](/guide/repos/repository-hub/); a team's Settings tab on [Repos › Teams](/guide/repos/teams/) works the same way for the team.
 
-<Screen title="Repos › acme/checkout-web › Settings" caption="Rows overridden here carry an accent bar; the chip names the layer the winning value comes from.">
+<Screen title="Repos › acme/round/web › Settings" caption="Rows overridden here carry an accent bar; the chip names the layer the winning value comes from.">
   <Toolbar title="Settings">
     <Segmented slot="start" items={['All:142', 'Overridden here:3', 'Not default:17']} />
     <Tag>Filter by label or key</Tag>
@@ -36,7 +36,7 @@ See every setting as it applies to one repository, where each value comes from, 
   </Toolbar>
   <Stack>
 
-<Tag>Default 125</Tag> → <Tag>Org 9</Tag> → <Tag>Group web 5</Tag> →
+<Tag>Default 125</Tag> → <Tag>Org 9</Tag> → <Tag>Team Widgets 5</Tag> →
 <Tag tone="acc">This repo 3</Tag>
 
   </Stack>
@@ -53,9 +53,9 @@ See every setting as it applies to one repository, where each value comes from, 
 
 | Setting                                  | Value                           | Source                          | Replaces     |
 | ---------------------------------------- | ------------------------------- | ------------------------------- | ------------ |
-| **Bundle budgets** `analyzers.bundle`    | `checkout-web`: 180 000         | <Tag tone="acc">This repo</Tag> | Group web    |
-| **Coverage target** `analyzers.coverage` | 75%                             | <Tag>Group web</Tag>            | Org          |
-| **Freeze** `repo.freeze`                 | _Writable here: hotfix ABC-123_ | <Tag tone="acc">This repo</Tag> | Repo pattern |
+| **Bundle budgets** `analyzers.bundle`    | `web`: 180 000                  | <Tag tone="acc">This repo</Tag> | Path pattern |
+| **Coverage target** `analyzers.coverage` | 75%                             | <Tag>Path pattern</Tag>         | Team Widgets |
+| **Freeze** `repo.freeze`                 | _Writable here: hotfix ABC-123_ | <Tag tone="acc">This repo</Tag> | Path pattern |
 | **Review language** `review.language`    | English                         | <Tag>Org</Tag>                  | Default      |
 | **Polling** `polling`                    | every 15 min                    | <Tag>Default</Tag>              |              |
 
@@ -68,15 +68,15 @@ See every setting as it applies to one repository, where each value comes from, 
 
 Each row is one setting with the value that wins for this repository, in words where raw JSON would read poorly, the layer it comes from and what it replaces. Layers resolve in this order, the later one winning:
 
-| Chip         | Layer                                                        |
-| ------------ | ------------------------------------------------------------ |
-| Default      | Holtkeeper's built-in default (drawn dashed).                |
-| Org          | Set for the whole organization.                              |
-| Group …      | Set for one of the repository's groups, such as `Group web`. |
-| Repo pattern | Set for repositories matching a pattern.                     |
-| This repo    | Set for exactly this repository (accented).                  |
+| Chip         | Layer                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| Default      | Holtkeeper's built-in default (drawn dashed).                                                    |
+| Org          | Set for the whole organization.                                                                  |
+| Team …       | Set for one of the repository's owner teams, such as `Team Widgets`.                             |
+| Path pattern | Set for repositories matching a path pattern: a folder such as `acme/round/**`, or `acme/*/web`. |
+| This repo    | Set for exactly this repository (accented).                                                      |
 
-The legend above the table shows how many settings each layer wins, so it reads as the key. On a subgroup the order is Default → Org → Parent group → This group.
+The legend above the table shows how many settings each layer wins, so it reads as the key. Among path patterns the deeper folder wins (`acme/round/**` over `acme/**`). On a team's Settings tab the team's own entries read **This team**.
 
 ## Find a setting
 
@@ -92,13 +92,13 @@ Global settings say they have one value for all repositories and cannot be overr
 2. Edit the value in the row editor. It shows what the new value replaces.
 3. Click <Ui>Save override</Ui>. The row now shows <Tag tone="acc">This repo</Tag> and an accent bar.
 
-<Screen title="Repos › acme/checkout-web › Settings › Override">
+<Screen title="Repos › acme/round/web › Settings › Override">
   <Stack>
     <Fields columns={1}>
       <Field
         label="Coverage target · analyzers.coverage"
         value="80"
-        hint="Replaces 75% from Group web."
+        hint="Replaces 75% from Path pattern."
         mono
       />
     </Fields>
@@ -107,7 +107,7 @@ Global settings say they have one value for all repositories and cannot be overr
   </Stack>
 </Screen>
 
-An override of this repository can be edited inline or removed later. A value that comes from a shared entry, such as a group or pattern, opens the full entry editor instead, since changing it affects other repositories. <Ui>Full editor</Ui> opens that editor for any row.
+An override of this repository can be edited inline or removed later. A value that comes from a shared entry, such as a team or a path pattern, opens the full entry editor instead, since changing it affects other repositories. <Ui>Full editor</Ui> opens that editor for any row.
 
 :::caution
 Overriding needs `settings:write` on the repository. Every change is recorded in the [audit log](/guide/settings/audit-log/).
@@ -120,7 +120,7 @@ categories links Analyzer defaults, Policies and the Audit log, those you may op
 
 The **Updates** category adds three panels. The **Updates** tag in the hub's header opens it too.
 
-<Screen title="Repos › acme/checkout-web › Settings › Updates">
+<Screen title="Repos › acme/round/web › Settings › Updates">
   <Split>
     <Stack>
 
@@ -194,7 +194,7 @@ Reading this tab needs `settings:read` on the repository; the webhook URL, <Ui>P
 ## Related
 
 - [Repository hub](/guide/repos/repository-hub/) — the page this tab belongs to.
-- [Groups](/guide/repos/groups/) — the group Settings tab, with the same view.
+- [Teams](/guide/repos/teams/) — the team Settings tab, with the same view.
 - [Analyzers](/guide/settings/analyzers/) — defaults for every repository.
 - [Policies](/start/concepts/policies/) — rules that limit what settings may say.
 - [Setting keys](/reference/setting-keys/) — every key and its shape.

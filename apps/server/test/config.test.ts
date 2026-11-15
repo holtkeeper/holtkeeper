@@ -160,50 +160,44 @@ describe('config routes', () => {
     ).toBe(400)
     expect((await putForge({ botUsername: 'keeper' })).status).toBe(200)
     expect(source.current().jobs.botUsernames).toEqual({ cloud: 'keeper' })
+    expect((await call('PUT', '/config/teams/apps', { owns: ['**/apps'] })).status).toBe(400)
+    expect((await call('PUT', '/config/teams/Apps', { owns: ['apps/*'] })).status).toBe(400)
+    const team = await call('PUT', '/config/teams/games', { owns: ['cloud:studio/*'] })
+    expect(team.status).toBe(200)
+    expect(await team.json()).toMatchObject({ id: 'games', version: 1 })
     expect(
-      (await call('PUT', '/config/groups/apps', { forge: 'missing', include: ['apps/*'] })).status,
+      (await call('PUT', '/config/teams/games', { title: ' ', owns: ['cloud:a/*'] })).status,
     ).toBe(400)
-    const group = await call('PUT', '/config/groups/games', {
-      forge: 'cloud',
-      include: ['studio/*'],
-    })
-    expect(group.status).toBe(200)
-    expect(await group.json()).toMatchObject({ id: 'games', version: 1 })
-    expect(
-      (await call('PUT', '/config/groups/games', { title: ' ', forge: 'cloud', include: ['a/*'] }))
-        .status,
-    ).toBe(400)
-    await call('PUT', '/config/groups/games', {
+    await call('PUT', '/config/teams/games', {
       title: '  Game studio ',
-      forge: 'cloud',
-      include: ['studio/*', 'web/*'],
+      owns: ['cloud:studio/*', 'cloud:web/*'],
     })
 
-    const groups = (await (await call('GET', '/config/groups')).json()) as ConfigEntryList<'group'>
-    expect(groups.entries.map((e) => [e.id, e.version, e.data.include, e.data.title])).toEqual([
-      ['games', 2, ['studio/*', 'web/*'], 'Game studio'],
+    const teams = (await (await call('GET', '/config/teams')).json()) as ConfigEntryList<'team'>
+    expect(teams.entries.map((e) => [e.id, e.version, e.data.owns, e.data.title])).toEqual([
+      ['games', 2, ['cloud:studio/*', 'cloud:web/*'], 'Game studio'],
     ])
-    expect(source.current().groups.games?.title).toBe('Game studio')
+    expect(source.current().teams.games?.title).toBe('Game studio')
     const forges = (await (await call('GET', '/config/forges')).json()) as ConfigEntryList<'forge'>
     expect(forges.entries.map((e) => [e.id, e.data.botUsername])).toEqual([['cloud', 'keeper']])
     const detail = (await (
-      await call('GET', '/config/groups/games')
-    ).json()) as ConfigEntryDetail<'group'>
-    expect(detail.history.map((h) => h.data.include)).toEqual([['studio/*']])
-    expect(source.current().groups.games?.forge).toBe('cloud')
+      await call('GET', '/config/teams/games')
+    ).json()) as ConfigEntryDetail<'team'>
+    expect(detail.history.map((h) => h.data.owns)).toEqual([['cloud:studio/*']])
+    expect(source.current().teams.games?.owns).toEqual(['cloud:studio/*', 'cloud:web/*'])
 
     expect((await call('DELETE', '/config/forges/cloud')).status).toBe(409)
-    expect((await call('DELETE', '/config/groups/games')).status).toBe(204)
-    expect(source.current().groups.games).toBeUndefined()
-    expect((await call('DELETE', '/config/groups/games')).status).toBe(404)
+    expect((await call('DELETE', '/config/teams/games')).status).toBe(204)
+    expect(source.current().teams.games).toBeUndefined()
+    expect((await call('DELETE', '/config/teams/games')).status).toBe(404)
     expect((await call('GET', '/config/nope')).status).toBe(404)
 
     const actions = (await store.audit.list({ limit: 500 })).events.map(
       (e) => `${e.action} ${e.target.type}:${e.target.id}`,
     )
     expect(actions).toContain('forge.create forge:cloud')
-    expect(actions).toContain('group.update group:games')
-    expect(actions).toContain('group.delete group:games')
+    expect(actions).toContain('team.update team:games')
+    expect(actions).toContain('team.delete team:games')
   })
 
   test('schedules, previews and triggers', async () => {
@@ -262,10 +256,7 @@ describe('config routes', () => {
 
   test('webhook secret: generate, register, receive, rotate', async () => {
     await putForge()
-    await call('PUT', '/config/groups/studio', {
-      forge: 'cloud',
-      include: ['studio/*', 'tools/cli'],
-    })
+    await call('PUT', '/config/teams/studio', { owns: ['cloud:studio/*', 'cloud:tools/cli'] })
     await call('PUT', '/config/triggers/tag', { on: 'tag', analyzers: ['snapshot'] })
     expect((await call('POST', '/forges/work/webhook', {})).status).toBe(404)
 
@@ -323,7 +314,7 @@ describe('config routes', () => {
       rotated.secret,
     )
 
-    await call('DELETE', '/config/groups/studio')
+    await call('DELETE', '/config/teams/studio')
     await call('DELETE', '/config/triggers/tag')
     expect((await call('DELETE', '/config/forges/cloud')).status).toBe(204)
     expect(removed).toHaveLength(3)
@@ -394,14 +385,14 @@ describe('config routes', () => {
     )
   })
 
-  test('adding repositories and editing groups need settings:write over everything', async () => {
+  test('adding repositories and creating teams need settings:write over everything', async () => {
     await putForge()
     const narrow = createApp({
       config: liveConfig(source),
       configSource: source,
       auth: headerAuth({
         roles: {
-          lead: [{ scope: { groups: ['games'] }, actions: ['settings:read', 'settings:write'] }],
+          lead: [{ scope: { teams: ['games'] }, actions: ['settings:read', 'settings:write'] }],
         },
       }),
       store,
@@ -425,10 +416,10 @@ describe('config routes', () => {
       (await lead('POST', '/forges/cloud/repositories/access', { paths: ['studio/game'] })).status,
     ).toBe(403)
     expect((await lead('GET', '/forges/cloud/repositories')).status).toBe(403)
-    expect(
-      (await lead('PUT', '/config/groups/games', { forge: 'cloud', include: ['studio/*'] })).status,
-    ).toBe(403)
-    expect(source.current().groups.games).toBeUndefined()
+    expect((await lead('PUT', '/config/teams/games', { owns: ['cloud:studio/*'] })).status).toBe(
+      403,
+    )
+    expect(source.current().teams.games).toBeUndefined()
   })
 
   test('defaultWebhookTargets', () => {
@@ -436,52 +427,195 @@ describe('config routes', () => {
       forges: {
         work: { kind: 'gitlab', url: 'https://work.test', create: () => ({}) as GitForge },
       },
-      groups: { games: { forge: 'work', include: ['games/*'] } },
+      teams: { games: { owns: ['work:games/*'] } },
     })
     expect(defaultWebhookTargets(config, 'work')).toEqual([{ group: 'games' }])
   })
 
-  test('defaultWebhookTargets skips subgroups', () => {
+  test('defaultWebhookTargets covers the fleet once: forge includes and team patterns', () => {
     const config = parseConfig({
       forges: {
         work: { kind: 'gitlab', url: 'https://work.test', create: () => ({}) as GitForge },
+        other: { kind: 'gitlab', url: 'https://other.test', create: () => ({}) as GitForge },
       },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'] },
-        'shapes.round': { forge: 'work', include: ['shapes/circle', 'shapes/oval-*'] },
+      fleet: { work: { include: ['tools/cli'], exclude: [] } },
+      teams: {
+        shapes: { owns: ['work:shapes/*'] },
+        round: { owns: ['work:shapes/circle', 'shapes/oval-*'], consumes: ['work:paints/*'] },
+        elsewhere: { owns: ['other:widgets/*'] },
       },
     })
-    expect(defaultWebhookTargets(config, 'work')).toEqual([{ group: 'shapes' }])
+    expect(defaultWebhookTargets(config, 'work')).toEqual([
+      { group: 'shapes' },
+      { group: 'paints' },
+      { project: 'tools/cli' },
+    ])
+    expect(defaultWebhookTargets(config, 'other')).toEqual([
+      { group: 'shapes' },
+      { group: 'widgets' },
+    ])
   })
 
-  test('subgroups: key format, parent in the listing, deleting the parent first is refused', async () => {
+  test('team keys: lowercase letters, digits and dashes; teams are not nested', async () => {
     await putForge()
-    const shapes = { forge: 'cloud', include: ['shapes/*'] }
-    expect((await call('PUT', '/config/groups/shapes.round', shapes)).status).toBe(400)
-    expect((await call('PUT', '/config/groups/shapes', shapes)).status).toBe(200)
-    expect((await call('PUT', '/config/groups/shapes.round.small', shapes)).status).toBe(400)
-    expect((await call('PUT', '/config/groups/Shapes.round', shapes)).status).toBe(400)
-    const round = await call('PUT', '/config/groups/shapes.round', {
-      forge: 'cloud',
-      include: ['shapes/circle'],
-    })
-    expect(round.status).toBe(200)
-    expect(await round.json()).toMatchObject({ id: 'shapes.round', data: { parent: 'shapes' } })
-    await call('PUT', '/config/groups/shapes.flat', { forge: 'cloud', include: ['shapes/square'] })
-
-    const groups = (await (await call('GET', '/config/groups')).json()) as ConfigEntryList<'group'>
-    expect(groups.entries.map((e) => [e.id, e.data.parent])).toEqual([
-      ['shapes', undefined],
-      ['shapes.flat', 'shapes'],
-      ['shapes.round', 'shapes'],
+    const shapes = { owns: ['cloud:shapes/*'] }
+    expect((await call('PUT', '/config/teams/shapes.round', shapes)).status).toBe(400)
+    expect((await call('PUT', '/config/teams/Shapes', shapes)).status).toBe(400)
+    expect((await call('PUT', '/config/teams/1shapes', shapes)).status).toBe(400)
+    expect((await call('PUT', '/config/teams/shapes', shapes)).status).toBe(200)
+    expect(
+      (await call('PUT', '/config/teams/round', { owns: ['cloud:shapes/circle'] })).status,
+    ).toBe(200)
+    expect((await call('PUT', '/config/teams/empty', { owns: [] })).status).toBe(400)
+    const teams = (await (await call('GET', '/config/teams')).json()) as ConfigEntryList<'team'>
+    expect(teams.entries.map((e) => [e.id, e.data.owns])).toEqual([
+      ['round', ['cloud:shapes/circle']],
+      ['shapes', ['cloud:shapes/*']],
     ])
+    expect((await call('DELETE', '/config/teams/shapes')).status).toBe(204)
+    expect(source.current().teams.round).toBeDefined()
+  })
+})
 
-    const refused = await call('DELETE', '/config/groups/shapes')
-    expect(refused.status).toBe(409)
-    expect(await refused.text()).toContain('delete subgroups first: shapes.flat, shapes.round')
-    expect(source.current().groups.shapes).toBeDefined()
-    expect((await call('DELETE', '/config/groups/shapes.round')).status).toBe(204)
-    expect((await call('DELETE', '/config/groups/shapes.flat')).status).toBe(204)
-    expect((await call('DELETE', '/config/groups/shapes')).status).toBe(204)
+const as = (user: string, roles = 'none') => ({
+  'content-type': 'application/json',
+  'x-forwarded-user': user,
+  'x-forwarded-groups': roles,
+})
+
+describe('team maintainers', () => {
+  let teamApp: ReturnType<typeof createApp>
+  const teamCall = (
+    method: string,
+    path: string,
+    headers: Record<string, string>,
+    body?: unknown,
+  ) =>
+    teamApp.request(`/api${path}`, {
+      method,
+      headers,
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    })
+  const games = {
+    title: 'Game studio',
+    owns: ['cloud:studio/*'],
+    exclude: ['cloud:studio/old'],
+    consumes: ['cloud:tools/*'],
+    members: [
+      { id: 'header:mia', role: 'maintainer' },
+      { id: 'header:max', role: 'member' },
+    ],
+  }
+
+  beforeEach(async () => {
+    await putForge()
+    expect((await call('PUT', '/config/teams/games', games)).status).toBe(200)
+    expect(
+      (
+        await call('PUT', '/config/teams/puzzles', {
+          owns: ['cloud:puzzles/*'],
+          members: [{ id: 'header:max', role: 'maintainer' }],
+        })
+      ).status,
+    ).toBe(200)
+    teamApp = createApp({
+      config: liveConfig(source),
+      configSource: source,
+      auth: headerAuth({
+        roles: { admin: [{ scope: { all: true }, actions: ['settings:read', 'settings:write'] }] },
+      }),
+      store,
+      vault,
+      credentials: createCredentialService({ credentials: store.credentials, vault }),
+      settings: builtinSettings,
+      analyses: [],
+      now: () => new Date('2026-10-30T12:00:00.000Z'),
+    })
+  })
+
+  test('a maintainer reads only the teams it maintains and no other config', async () => {
+    const list = await teamCall('GET', '/config/teams', as('mia'))
+    expect(list.status).toBe(200)
+    expect(((await list.json()) as ConfigEntryList<'team'>).entries.map((e) => e.id)).toEqual([
+      'games',
+    ])
+    expect((await teamCall('GET', '/config/teams/games', as('mia'))).status).toBe(200)
+    expect((await teamCall('GET', '/config/teams/puzzles', as('mia'))).status).toBe(403)
+    expect((await teamCall('GET', '/config/forges', as('mia'))).status).toBe(403)
+    expect((await teamCall('GET', '/config/teams', as('nobody'))).status).toBe(403)
+  })
+
+  test('a maintainer changes title and members; owns, exclude and consumes stay global', async () => {
+    const renamed = await teamCall('PUT', '/config/teams/games', as('mia'), {
+      ...games,
+      title: 'Arcade',
+      members: [...games.members, { id: 'kim@example.test', role: 'member' }],
+    })
+    expect(renamed.status).toBe(200)
+    expect(source.current().teams.games).toMatchObject({
+      title: 'Arcade',
+      owns: ['cloud:studio/*'],
+    })
+    expect(source.current().teams.games?.members).toHaveLength(3)
+
+    for (const change of [
+      { owns: ['cloud:studio/*', 'cloud:web/*'] },
+      { exclude: [] },
+      { consumes: ['cloud:**'] },
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refused change after another
+      const refused = await teamCall('PUT', '/config/teams/games', as('mia'), {
+        ...games,
+        ...change,
+      })
+      expect(refused.status).toBe(403)
+      // oxlint-disable-next-line no-await-in-loop -- reads the response of this iteration
+      expect(((await refused.json()) as { error: string }).error).toBe(
+        'changing owns, exclude or consumes needs global settings:write; maintainers may change title and members',
+      )
+    }
+    expect(source.current().teams.games?.owns).toEqual(['cloud:studio/*'])
+
+    const created = await teamCall('PUT', '/config/teams/arcade', as('mia'), {
+      owns: ['cloud:studio/arcade'],
+    })
+    expect(created.status).toBe(403)
+    expect(((await created.json()) as { error: string }).error).toBe(
+      'creating a team or changing one you do not maintain needs global settings:write',
+    )
+    expect((await teamCall('DELETE', '/config/teams/games', as('mia'))).status).toBe(403)
+    expect(source.current().teams.games).toBeDefined()
+  })
+
+  test('members, maintainers of other teams and readers may not change a team', async () => {
+    expect(
+      (await teamCall('PUT', '/config/teams/games', as('max'), { ...games, title: 'Mine' })).status,
+    ).toBe(403)
+    expect(
+      (await teamCall('PUT', '/config/teams/puzzles', as('mia'), { owns: ['cloud:puzzles/*'] }))
+        .status,
+    ).toBe(403)
+    expect(
+      (
+        await teamCall('PUT', '/config/teams/puzzles', as('max'), {
+          title: 'Riddles',
+          owns: ['cloud:puzzles/*'],
+          members: [{ id: 'header:max', role: 'maintainer' }],
+        })
+      ).status,
+    ).toBe(200)
+    expect(source.current().teams.games?.title).toBe('Game studio')
+    expect(source.current().teams.puzzles?.title).toBe('Riddles')
+  })
+
+  test('global settings:write changes every field and deletes teams', async () => {
+    const widened = await teamCall('PUT', '/config/teams/games', as('ada', 'admin'), {
+      ...games,
+      owns: ['cloud:studio/*', 'cloud:web/*'],
+    })
+    expect(widened.status).toBe(200)
+    expect(source.current().teams.games?.owns).toEqual(['cloud:studio/*', 'cloud:web/*'])
+    expect((await teamCall('DELETE', '/config/teams/games', as('ada', 'admin'))).status).toBe(204)
+    expect(source.current().teams.games).toBeUndefined()
   })
 })

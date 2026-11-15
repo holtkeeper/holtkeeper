@@ -6,8 +6,8 @@ import { z } from 'zod'
 import { analyzerOff, resolveRepoAnalyzers } from './analyzers.ts'
 import { repoAnalyzersSetting } from './definitions.ts'
 
-const widget = { forge: 'acme', path: 'shapes/widget', groups: ['shapes'] }
-const core = { forge: 'acme', path: 'shapes/widget-core', groups: ['shapes'] }
+const widget = { forge: 'acme', path: 'shapes/widget', teams: ['shapes'] }
+const core = { forge: 'acme', path: 'shapes/widget-core', teams: ['shapes'] }
 
 const entry = (
   id: string,
@@ -30,7 +30,7 @@ describe('repo.analyzers', () => {
   })
 
   test('a group entry turns analyzers off and a repository entry turns them back on', () => {
-    const group = entry('g', { groups: ['shapes'] }, { off: ['audit'], reason: 'Values only' })
+    const group = entry('g', { teams: ['shapes'] }, { off: ['audit'], reason: 'Values only' })
     const own = entry('r', { repos: ['shapes/widget-core'] }, { off: [] })
     expect(resolveRepoAnalyzers([group, own], widget)).toEqual({
       off: ['audit'],

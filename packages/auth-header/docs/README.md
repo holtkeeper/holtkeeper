@@ -8,7 +8,7 @@ headerAuth({
   roles: {
     'keeper-admins': [{ scope: { all: true }, actions: ['*'] }],
     'games-team': [
-      { scope: { groups: ['games'] }, actions: ['audits:read', 'audits:run', 'settings:read'] },
+      { scope: { teams: ['games'] }, actions: ['audits:read', 'audits:run', 'settings:read'] },
     ],
   },
   defaultGrants: [{ scope: { all: true }, actions: ['repos:read'] }],

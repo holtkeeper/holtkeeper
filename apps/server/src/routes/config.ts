@@ -1,4 +1,4 @@
-import { parentGroup } from '@holtkeeper/access'
+import { type Principal, can, grantsWithin } from '@holtkeeper/access'
 import type {
   ConfigEntryDetail,
   ConfigEntryList,
@@ -16,7 +16,7 @@ import type {
   RepoAccessStatus,
   SchedulePreview,
 } from '@holtkeeper/api'
-import { ConfigError, type HoltkeeperConfig, subgroupsOf } from '@holtkeeper/core'
+import { ConfigError, type HoltkeeperConfig, fleetPatterns } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
 import {
@@ -33,8 +33,8 @@ import {
   type EffectiveConfig,
   configIdSchema,
   forgeDataSchema,
-  groupDataSchema,
-  groupIdSchema,
+  teamDataSchema,
+  teamIdSchema,
   repoTraitsDataSchema,
   scheduleDataSchema,
   triggerDataSchema,
@@ -47,6 +47,7 @@ import type {
   ConfigDocumentType,
   ConfigStore,
   RegisteredWebhook,
+  TeamDocumentData,
   TriggerDocumentData,
 } from '@holtkeeper/store'
 import { Hono } from 'hono'
@@ -57,7 +58,9 @@ import {
   type AppContext,
   type Env,
   type ServerDeps,
+  ForbiddenException,
   authorize,
+  principalOf,
   publicUrlOf,
   forgeFor,
   readBody,
@@ -67,7 +70,7 @@ import { issueForgeSshKey, removeForgeSshKey, sshKeyView } from '../ssh-keys.ts'
 /** URL segment of each document type. */
 const configCollections: Record<string, ConfigDocumentType> = {
   forges: 'forge',
-  groups: 'group',
+  teams: 'team',
   'repo-traits': 'repoTraits',
   schedules: 'schedule',
   triggers: 'trigger',
@@ -121,21 +124,43 @@ const triggersOf = (config: HoltkeeperConfig): [string, TriggerDocumentData][] =
 }
 
 /**
- * Hook targets on the forge for a forge's root groups: group paths for globs, projects for exact
- * paths. Subgroups add none: their members are the parent's, which the parent's hooks already reach.
+ * Hook targets on the forge for its fleet (`fleetPatterns`: the forge's includes plus what teams
+ * own or consume there): the namespace (forge group) before the first wildcard of a glob, the
+ * project of an exact path. A target inside another target's namespace is left out, since the
+ * outer hook already reaches it.
  */
 export function defaultWebhookTargets(config: HoltkeeperConfig, forgeId: string): WebhookTarget[] {
-  const targets = new Map<string, WebhookTarget>()
-  for (const [key, group] of Object.entries(config.groups)) {
-    if (group.forge !== forgeId || parentGroup(key) !== undefined) continue
-    for (const pattern of group.include) {
-      const prefix = staticPrefix(pattern)
-      if (!prefix) continue
-      if (prefix === pattern) targets.set(`project:${prefix}`, { project: prefix })
-      else targets.set(`group:${prefix}`, { group: prefix })
-    }
+  const namespaces = new Set<string>()
+  const projects = new Set<string>()
+  for (const pattern of fleetPatterns(config, forgeId).include) {
+    const prefix = staticPrefix(pattern)
+    if (!prefix) continue
+    if (prefix === pattern) projects.add(prefix)
+    else namespaces.add(prefix)
   }
-  return [...targets.values()]
+  const inside = (path: string, self?: string) =>
+    [...namespaces].some((namespace) => namespace !== self && path.startsWith(`${namespace}/`))
+  return [
+    ...[...namespaces]
+      .filter((namespace) => !inside(namespace, namespace))
+      .map((group): WebhookTarget => ({ group })),
+    ...[...projects]
+      .filter((project) => !inside(project))
+      .map((project): WebhookTarget => ({ project })),
+  ]
+}
+
+/**
+ * Whether the principal maintains team `key`: it holds every action on `{ teams: [key] }`, as
+ * team maintainers do through `teamGrants`.
+ */
+const maintainsTeam = (principal: Principal, key: string): boolean =>
+  grantsWithin([{ scope: { teams: [key] }, actions: ['*'] }], principal.grants, principal.teamDefs)
+
+const samePatterns = (a: readonly string[], b: readonly string[]) => {
+  const left = new Set(a)
+  const right = new Set(b)
+  return left.size === right.size && [...left].every((pattern) => right.has(pattern))
 }
 
 /** Paths one `POST /forges/:id/repositories/access` may check. */
@@ -227,11 +252,47 @@ const audit = (
   details: Record<string, unknown> = {},
 ) => c.set('audit', { action, target: { type, id }, details })
 
+/** Global `settings:write`; for an existing team its maintainers too (`teamChange` checks what). */
+const writer = (c: AppContext, type: ConfigDocumentType, id: string) => {
+  const principal = principalOf(c)
+  if (can(principal, 'settings:write', GLOBAL)) return { principal, global: true }
+  if (type !== 'team') throw new ForbiddenException('settings:write')
+  if (!maintainsTeam(principal, id))
+    throw new ForbiddenException(
+      'settings:write',
+      undefined,
+      'creating a team or changing one you do not maintain needs global settings:write',
+    )
+  return { principal, global: false }
+}
+
+/** A maintainer's change may touch only `title` and `members` of a team that exists. */
+const teamChange = (stored: TeamDocumentData | undefined, data: TeamDocumentData) => {
+  if (!stored)
+    throw new ForbiddenException(
+      'settings:write',
+      undefined,
+      'creating a team needs global settings:write',
+    )
+  if (
+    !samePatterns(stored.owns, data.owns) ||
+    !samePatterns(stored.exclude, data.exclude) ||
+    !samePatterns(stored.consumes, data.consumes)
+  )
+    throw new ForbiddenException(
+      'settings:write',
+      undefined,
+      'changing owns, exclude or consumes needs global settings:write; maintainers may change title and members',
+    )
+}
+
 /**
- * Panel-managed configuration: CRUD for forges, groups, repo traits, schedules and triggers
+ * Panel-managed configuration: CRUD for forges, teams, repo traits, schedules and triggers
  * (`/config/<collection>[/:id]`), forge webhooks and schedule previews. Reading needs global
  * `settings:read`, changing global `settings:write`; every change is audited with the document as
- * target. Checking repository access before adding (a batch of up to 50 paths) also needs global
+ * target. A team's maintainers (every action on `{ teams: [key] }`, see `maintainsTeam`) may also
+ * read their team and change its `title` and `members`; creating or deleting a team and changing
+ * its `owns`, `exclude` or `consumes` widens access, so it needs global `settings:write`. Checking repository access before adding (a batch of up to 50 paths) also needs global
  * `settings:write` and changes nothing. `GET /forges/:id/account` reads the token's account;
  * `PUT /forges/:id/account/avatar?filename=` replaces its avatar with the raw body (400 for files
  * `checkAccountAvatar` rejects, 409 when the forge cannot), audited as `forge.avatar_set`.
@@ -287,6 +348,8 @@ export function configRoutes(deps: ServerDeps) {
               packages: doc.data.packages !== false,
               cachePackages: doc.data.packages !== false && doc.data.cachePackages === true,
               ...(doc.data.botUsername !== undefined && { botUsername: doc.data.botUsername }),
+              ...(doc.data.include !== undefined && { include: doc.data.include }),
+              ...(doc.data.exclude !== undefined && { exclude: doc.data.exclude }),
             }),
             ...(webhook && {
               webhook: {
@@ -298,11 +361,16 @@ export function configRoutes(deps: ServerDeps) {
             ...(sshKey && { sshKey }),
           })
         })
-      case 'group':
-        return Object.entries(config.groups).map(([id, group]) => {
-          const parent = parentGroup(id)
-          return entry(id, { ...group, ...(parent !== undefined && { parent }) })
-        })
+      case 'team':
+        return Object.entries(config.teams).map(([id, team]) =>
+          entry(id, {
+            ...(team.title !== undefined && { title: team.title }),
+            owns: team.owns,
+            exclude: team.exclude,
+            consumes: team.consumes,
+            members: team.members,
+          }),
+        )
       case 'repoTraits':
         return Object.entries(config.repos).map(([pattern, repo]) => {
           const doc = docs.find((d) => d.type === 'repoTraits' && d.data.pattern === pattern)
@@ -356,33 +424,50 @@ export function configRoutes(deps: ServerDeps) {
     return stored
   }
 
+  /**
+   * Which documents of `type` the caller may read: every one with global `settings:read`, for
+   * teams the ones it maintains; a 403 when that is none.
+   */
+  const readable = (c: AppContext, type: ConfigDocumentType): ((id: string) => boolean) => {
+    const principal = principalOf(c)
+    if (can(principal, 'settings:read', GLOBAL)) return () => true
+    if (type !== 'team') throw new ForbiddenException('settings:read')
+    const maintained = Object.keys(deps.config.teams).filter((key) => maintainsTeam(principal, key))
+    if (!maintained.length) throw new ForbiddenException('settings:read')
+    return (id) => maintained.includes(id)
+  }
+
   app.get('/config/:collection', async (c) => {
-    authorize(c, 'settings:read', GLOBAL)
     const type = typeOf(c.req.param('collection'))
+    const visible = readable(c, type)
     const { source, store } = managed()
-    return c.json<ConfigEntryList>({
-      entries: view(c, source.effective(), await store.list(), type, await credentialViews(type)),
-    })
+    const entries = view(
+      c,
+      source.effective(),
+      await store.list(),
+      type,
+      await credentialViews(type),
+    )
+    return c.json<ConfigEntryList>({ entries: entries.filter((entry) => visible(entry.id)) })
   })
 
   app.get('/config/:collection/:id', async (c) => {
-    authorize(c, 'settings:read', GLOBAL)
     const type = typeOf(c.req.param('collection'))
     const id = c.req.param('id')
+    if (!readable(c, type)(id)) throw new ForbiddenException('settings:read')
     const entry = await findEntry(c, type, id)
     const history = await managed().store.history(type, id)
     return c.json<ConfigEntryDetail>({ entry, history })
   })
 
   app.put('/config/:collection/:id', async (c) => {
-    const principal = authorize(c, 'settings:write', GLOBAL)
     const type = typeOf(c.req.param('collection'))
     const id = c.req.param('id')
-    if (type === 'group') {
-      if (!groupIdSchema.safeParse(id).success)
+    const { principal, global } = writer(c, type, id)
+    if (type === 'team') {
+      if (!teamIdSchema.safeParse(id).success)
         throw new HTTPException(400, {
-          message:
-            'id: use lowercase letters, digits and dashes, with one optional dot for a subgroup (team.sub)',
+          message: 'id: use lowercase letters, digits and dashes, starting with a letter',
         })
     } else if (type !== 'repoTraits' && type !== 'trigger' && !configIdSchema.safeParse(id).success)
       throw new HTTPException(400, { message: 'id: use lowercase letters, digits and dashes' })
@@ -408,9 +493,12 @@ export function configRoutes(deps: ServerDeps) {
         }
         break
       }
-      case 'group':
-        input = { ...meta, type, data: await readBody(c, groupDataSchema) }
+      case 'team': {
+        const data = await readBody(c, teamDataSchema)
+        if (!global) teamChange((await store.get('team', id))?.data, data)
+        input = { ...meta, type, data }
         break
+      }
       case 'repoTraits':
         input = { ...meta, type, data: await readBody(c, repoTraitsDataSchema) }
         break
@@ -442,11 +530,6 @@ export function configRoutes(deps: ServerDeps) {
     const { source, store } = managed()
     const doc = await store.get(type, id)
     if (!doc) throw new HTTPException(404, { message: `no panel ${type} ${id}` })
-    const subgroups = type === 'group' ? subgroupsOf(source.effective().config, id) : []
-    if (subgroups.length)
-      throw new HTTPException(409, {
-        message: `group ${id} has subgroups; delete subgroups first: ${subgroups.join(', ')}`,
-      })
     try {
       await source.preview({ remove: { type, id } })
     } catch (error) {

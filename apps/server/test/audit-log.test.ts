@@ -18,7 +18,7 @@ import { appendAudit } from '../src/audit.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: { widgets: { forge: 'work', include: ['widgets/*'] } },
+  teams: { widgets: { owns: ['work:widgets/*'] } },
 })
 
 const now = new Date('2026-11-12T12:00:00.000Z')
@@ -42,7 +42,7 @@ const setup = (auth: AuthProvider = noAuth()) => {
   })
 }
 
-const narrow = (actions: Action[], scope: Scope = { groups: ['widgets'] }) =>
+const narrow = (actions: Action[], scope: Scope = { teams: ['widgets'] }) =>
   setup(headerAuth({ roles: { widgets: [{ scope, actions }] } }))
 const asWidgets = { 'x-forwarded-user': 'ann', 'x-forwarded-groups': 'widgets' }
 

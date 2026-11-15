@@ -7,7 +7,7 @@ import { repoTestsFor, testsExpectedFor } from '../src/repo-tests.ts'
 
 const config = parseConfig({
   forges: { acme: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: { shapes: { forge: 'acme', include: ['shapes/*'] } },
+  teams: { shapes: { owns: ['acme:shapes/*'] } },
 })
 
 test('reads repo.tests anew on every call, with the groups of the config', async () => {
@@ -26,7 +26,7 @@ test('reads repo.tests anew on every call, with the groups of the config', async
       secret: false,
       updatedAt: '2026-11-01T00:00:00.000Z',
     })
-  await put('group', { groups: ['shapes'] }, { expected: false, reason: 'Config only' })
+  await put('group', { teams: ['shapes'] }, { expected: false, reason: 'Config only' })
   await put('core', { repos: ['acme:shapes/widget-core'] }, { expected: true })
   expect(await expected(widget)).toBe(false)
   expect(await expected(core)).toBe(true)

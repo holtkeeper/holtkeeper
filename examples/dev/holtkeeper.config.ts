@@ -5,7 +5,7 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
 
 /**
  * Local development: no sign-in, a SQLite file next to this config, a fixed dev vault key.
- * `bun run dev:seed` adds a placeholder forge and groups as panel documents.
+ * `bun run dev:seed` adds a placeholder forge and teams as panel documents.
  */
 export default defineConfig({
   server: {

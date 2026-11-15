@@ -113,9 +113,9 @@ function groupByParam(value: string | undefined): AiUsageDimension[] {
   return [...new Set(items.filter(isDimension))]
 }
 
-/** `groups=a,b` as a list; `undefined` when absent or empty. */
-function groupsParam(value: string | undefined): string[] | undefined {
-  const groups = [
+/** `teams=a,b` as a list; `undefined` when absent or empty. */
+function teamsParam(value: string | undefined): string[] | undefined {
+  const teams = [
     ...new Set(
       (value ?? '')
         .split(',')
@@ -123,7 +123,7 @@ function groupsParam(value: string | undefined): string[] | undefined {
         .filter(Boolean),
     ),
   ]
-  return groups.length ? groups : undefined
+  return teams.length ? teams : undefined
 }
 
 function periodParam(value: string | undefined): PeriodKind {
@@ -145,7 +145,7 @@ function weekParam(value: string | undefined, now: Date): PeriodRange {
   return week
 }
 
-/** What the caller may read, narrowed to `groups=` when given; never wider than its scopes. */
+/** What the caller may read, narrowed to `teams=` when given; never wider than its scopes. */
 const readsPeople = (principal: Principal) =>
   principal.grants.some(
     (grant) => grant.actions.includes('*') || grant.actions.includes('users:read'),
@@ -153,8 +153,8 @@ const readsPeople = (principal: Principal) =>
 
 function accessOf(c: AppContext): AiUsageFilter {
   const scopes = readableScopes(principalOf(c))
-  const groups = groupsParam(c.req.query('groups'))
-  return { ...(scopes && { scopes }), ...(groups && { groups }) }
+  const teams = teamsParam(c.req.query('teams'))
+  return { ...(scopes && { scopes }), ...(teams && { teams }) }
 }
 
 /** The page filters every AI usage endpoint takes: `feature`, `origin`, `model` and `taskKind`. */
@@ -255,7 +255,7 @@ function agentToolRegistry(): AgentToolView[] {
 
 /**
  * AI usage history and budgets. Everything needs `ai:read`; rows are limited to repositories
- * (with the groups recorded on each run) the caller's `ai:read` grants cover, and asking for one
+ * (with the owner teams recorded on each run) the caller's `ai:read` grants cover, and asking for one
  * repository needs `ai:read` on it.
  */
 export function aiRoutes({ store, config, now }: ServerDeps) {
@@ -276,13 +276,13 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
     if (outcome !== undefined && !outcomes.some((o) => o === outcome))
       throw new HTTPException(400, { message: `unknown outcome ${outcome}` })
     const narrow = narrowOf(c)
-    const groups = groupsParam(c.req.query('groups'))
+    const teams = teamsParam(c.req.query('teams'))
     const from = timeParam(c, 'from')
     const to = timeParam(c, 'to')
     const fields = {
       from,
       to,
-      group: text('group'),
+      team: text('team'),
       provider: text('provider'),
       analyzer: text('analyzer'),
       actor: text('actor'),
@@ -291,7 +291,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
     return {
       ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)),
       ...narrow,
-      ...(groups && { groups }),
+      ...(teams && { teams }),
       ...(repo ? { repo } : scopes && { scopes }),
     }
   }

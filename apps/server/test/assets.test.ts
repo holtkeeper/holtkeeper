@@ -23,16 +23,16 @@ import { assetsToolset, pathFacts, storedAssetTools } from '../src/tools/assets.
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/circle'] },
-    tools: { forge: 'work', include: ['tools/lint'] },
+  teams: {
+    shapes: { owns: ['work:shapes/circle'] },
+    tools: { owns: ['work:tools/lint'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    tools: [{ scope: { groups: ['tools'] }, actions: ['analyses:read'] }],
+    tools: [{ scope: { teams: ['tools'] }, actions: ['analyses:read'] }],
     catalog: [{ scope: { all: true }, actions: ['catalog:read', 'settings:read'] }],
   },
 })
@@ -220,7 +220,7 @@ describe('assets routes', () => {
   test('the repo view has the effective policy, a summary of the newest record and a trend', async () => {
     await add('shapes/circle', record(1_100_000, false), '2026-10-20T03:00:00.000Z')
     await add('shapes/circle', record(1_200_000), '2026-10-29T03:00:00.000Z')
-    await putPolicy({ groups: ['shapes'] }, { maxDimension: 4096 })
+    await putPolicy({ teams: ['shapes'] }, { maxDimension: 4096 })
 
     const response = await setup().request('/api/assets/repo?repo=work:shapes/circle', {
       headers: asAdmin,
@@ -229,8 +229,8 @@ describe('assets routes', () => {
     const view = (await response.json()) as RepoAssetsView
     expect(view.policy.maxDimension).toBe(4096)
     expect(view.policySource).toMatchObject({
-      level: 'group',
-      entry: { id: 'p1', scope: { groups: ['shapes'] } },
+      level: 'team',
+      entry: { id: 'p1', scope: { teams: ['shapes'] } },
     })
     expect(view.checkedPolicy).toBe(true)
     expect(view.summary).toMatchObject({ files: 2, errors: 1, warnings: 0 })
@@ -261,13 +261,13 @@ describe('assets routes', () => {
   })
 
   test('the policy entry is named only to readers of its settings scope', async () => {
-    await putPolicy({ groups: ['tools', 'shapes'] }, { maxDimension: 4096 })
+    await putPolicy({ teams: ['tools', 'shapes'] }, { maxDimension: 4096 })
     const response = await setup().request('/api/assets/repo?repo=work:tools/lint', {
       headers: asTools,
     })
     const view = (await response.json()) as RepoAssetsView
     expect(view.policy.maxDimension).toBe(4096)
-    expect(view.policySource).toEqual({ level: 'group' })
+    expect(view.policySource).toEqual({ level: 'team' })
   })
 })
 
@@ -280,12 +280,10 @@ describe('fleet assets', () => {
 
   test('summarizes every readable repository from metrics and lists their files', async () => {
     const view = await overview('')
-    expect(view.repos.map((repo) => [repo.repo.path, repo.groups, repo.files, repo.delta])).toEqual(
-      [
-        ['shapes/circle', ['shapes'], 2, 100_000],
-        ['tools/lint', ['tools'], 3, undefined],
-      ],
-    )
+    expect(view.repos.map((repo) => [repo.repo.path, repo.teams, repo.files, repo.delta])).toEqual([
+      ['shapes/circle', ['shapes'], 2, 100_000],
+      ['tools/lint', ['tools'], 3, undefined],
+    ])
     expect(view.repos[0]).toMatchObject({ errors: 1, kinds: { image: 1_201_000 } })
     expect(view.items.map((item) => [item.repo.path, item.path, item.severity])).toEqual([
       ['shapes/circle', 'public/hero.png', 'error'],
@@ -311,7 +309,7 @@ describe('fleet assets', () => {
     expect(paths(view)).toEqual(['public/hero.png'])
   })
 
-  test('filters by status, kind, format, problem, group and repository and sorts', async () => {
+  test('filters by status, kind, format, problem, team and repository and sorts', async () => {
     expect(paths(await overview('?status=policy'))).toEqual(['public/hero.png'])
     expect(paths(await overview('?status=saving'))).toEqual(['public/hero.png', 'static/f.ttf'])
     expect(paths(await overview('?kind=font'))).toEqual(['static/f.ttf'])
@@ -322,10 +320,7 @@ describe('fleet assets', () => {
       'static/f.ttf',
       'static/b.jpg',
     ])
-    expect(paths(await overview('?sort=size&group=tools'))).toEqual([
-      'static/f.ttf',
-      'static/b.jpg',
-    ])
+    expect(paths(await overview('?sort=size&team=tools'))).toEqual(['static/f.ttf', 'static/b.jpg'])
     const one = await overview('?repo=work:tools/lint&status=policy&kind=')
     expect(one.repos.map((repo) => repo.repo.path)).toEqual(['tools/lint'])
     expect(one.items).toEqual([])
@@ -378,7 +373,7 @@ describe('fleet assets', () => {
       createdAt: '2026-10-30T03:00:00.000Z',
       data: record(1_200_000),
     })
-    const view = await overview('?group=tools')
+    const view = await overview('?team=tools')
     expect(view.repos.map((repo) => [repo.repo.path, repo.bytes, repo.moreRows])).toEqual([
       ['tools/lint', 1_201_000, 0],
     ])
@@ -417,7 +412,7 @@ describe('fleet assets', () => {
 const toolsFor = (readable: string[]) =>
   assetsToolset(
     storedAssetTools(store, {
-      targetOf: (repo) => ({ ...repo, groups: [] }),
+      targetOf: (repo) => ({ ...repo, teams: [] }),
       canRead: (target) => readable.includes(`${target.forge}:${target.path}`),
       canReadScope: () => true,
     }),
@@ -425,7 +420,7 @@ const toolsFor = (readable: string[]) =>
 
 const grouped = (settings: boolean) =>
   storedAssetTools(store, {
-    targetOf: (repo) => ({ ...repo, groups: ['shapes'] }),
+    targetOf: (repo) => ({ ...repo, teams: ['shapes'] }),
     canRead: () => true,
     canReadScope: () => settings,
   }).policy('work:shapes/square')
@@ -446,8 +441,8 @@ describe('assets tools', () => {
     expect(text).toContain("from the repository's own entry")
     expect(text).toContain('ship with a AVIF and WEBP version')
     expect(text).toContain('- From 8 kB it needs AVIF and WEBP next to it')
-    await putPolicy({ groups: ['shapes', 'circles'] }, {}, 'p2')
-    expect(await grouped(false)).toMatchObject({ source: { level: 'group' } })
+    await putPolicy({ teams: ['shapes', 'circles'] }, {}, 'p2')
+    expect(await grouped(false)).toMatchObject({ source: { level: 'team' } })
     expect((await grouped(false))?.source.entry).toBeUndefined()
     expect(await grouped(true)).toMatchObject({ source: { entry: { id: 'p2' } } })
     expect(pathFacts('vendor/x.png', defaultAssetsPolicy)).toEqual([
@@ -471,7 +466,7 @@ describe('assets tools', () => {
 
   test('assetsPolicyFor falls back to the default without an entry', async () => {
     expect(
-      await assetsPolicyFor(store, { forge: 'work', path: 'tools/lint', groups: ['tools'] }),
+      await assetsPolicyFor(store, { forge: 'work', path: 'tools/lint', teams: ['tools'] }),
     ).toEqual({ policy: defaultAssetsPolicy })
   })
 })

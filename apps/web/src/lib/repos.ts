@@ -1,25 +1,25 @@
 import {
   type Action,
-  type GroupDocumentData,
   type HealthTone,
   type RepoHealthCellKey,
   type RepoHealthStatus,
   type RepoRef,
   type RepoSummary,
-  groupLineage,
-  parentGroup,
+  type TeamConfigView,
+  type TeamMember,
+  patternMatches,
 } from '@holtkeeper/api'
 
 import type { DotTone } from '../ui/Legend.tsx'
 import type { StripCell } from '../ui/Strip.tsx'
 import { plural } from './format.ts'
-import { groupMatchesQuery, keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { healthLabels, healthOrder, repoHealth } from './home.ts'
 import { type PageTab, hubSearch, pickTab, visibleTabs } from './repo-page.ts'
 import type { RepoHubSearch, RepoHubTab } from './repo.ts'
-import { repoKey, repoSplat, withRepos } from './repo.ts'
+import { repoKey, repoSplat } from './repo.ts'
 import { sheetCommand } from './sheet.ts'
 import type { SortState, SortValue } from './table-sort.ts'
+import { type TeamTitleOf, byTeamTitle, keyAsTitle, teamMatchesQuery } from './team-titles.ts'
 
 /** Columns of the repository list a person can sort by. */
 export type FleetSortKey = 'repo' | 'health' | RepoHealthCellKey | 'analysed'
@@ -52,10 +52,12 @@ export const fleetCells: readonly { key: RepoHealthCellKey; label: string; mono?
 
 /**
  * The repository list's search parameters: a text filter, chosen health states and forges, and
- * the sorted column. No sort means worst first; groups come from the scope switch.
+ * the sorted column, and the folder the tree on the left selects (`forge:folder`, or `forge:` for a
+ * whole forge). No sort means worst first; teams come from the scope switch.
  */
 export interface ReposSearch {
   q?: string
+  folder?: string
   health?: RepoHealthStatus[]
   forge?: string[]
   sort?: FleetSortKey
@@ -81,8 +83,11 @@ export function parseReposSearch(search: Record<string, unknown>): ReposSearch {
   const health = strings(search.health).filter(isHealth)
   const forge = strings(search.forge)
   const sort = isSortKey(search.sort) ? search.sort : undefined
+  const folder =
+    typeof search.folder === 'string' && search.folder.includes(':') ? search.folder : ''
   return {
     ...(q ? { q } : {}),
+    ...(folder ? { folder } : {}),
     ...(health.length ? { health } : {}),
     ...(forge.length ? { forge } : {}),
     ...(sort ? { sort, dir: search.dir === 'desc' ? ('desc' as const) : ('asc' as const) } : {}),
@@ -99,31 +104,35 @@ export function withReposSort(search: ReposSearch, sort: SortState<FleetSortKey>
   return sort ? { ...rest, sort: sort.key, dir: sort.direction } : rest
 }
 
-/** Whether `summary` matches the text filter: its `forge:path` or one of its groups (key or title). */
+/** Whether `summary` matches the text filter: its `forge:path` or one of its teams (key or title). */
 const matchesRepoQuery = (
   summary: RepoSummary,
   query: string | undefined,
-  titleOf: GroupTitleOf,
+  titleOf: TeamTitleOf,
 ): boolean => {
   const needle = query?.trim().toLowerCase()
   return (
     !needle ||
     repoKey(summary.repo).toLowerCase().includes(needle) ||
-    summary.groups.some((group) => groupMatchesQuery(group, titleOf, needle))
+    summary.teams.some((team) => teamMatchesQuery(team, titleOf, needle))
   )
 }
 
-/** The repositories `search` keeps: text (groups by key or `titleOf`), health states and forges. */
+/**
+ * The repositories `search` keeps: text (teams by key or `titleOf`), health states, forges and the
+ * selected folder.
+ */
 export const filterRepos = (
   repos: readonly RepoSummary[],
   search: ReposSearch,
-  titleOf: GroupTitleOf = keyAsTitle,
+  titleOf: TeamTitleOf = keyAsTitle,
 ): RepoSummary[] =>
   repos.filter(
     (summary) =>
       matchesRepoQuery(summary, search.q, titleOf) &&
       (!search.health?.length || search.health.includes(summary.health)) &&
-      (!search.forge?.length || search.forge.includes(summary.repo.forge)),
+      (!search.forge?.length || search.forge.includes(summary.repo.forge)) &&
+      (search.folder === undefined || inFolderKey(summary.repo, search.folder)),
   )
 
 const toneRank: Record<HealthTone, number> = { bad: 0, warn: 1, info: 2, ok: 3, none: 4 }
@@ -321,366 +330,272 @@ export function fleetKeyCommand(
   return command === 'next' || command === 'previous' ? command : undefined
 }
 
-/** One row of the group list: a group with its patterns (when readable) and its visible members. */
-export interface GroupRow {
-  id: string
-  /** The parent group of a subgroup row. */
-  parent?: string
-  /** Subgroup rows of a root group, sorted by id; empty for a subgroup. */
-  subgroups: GroupRow[]
-  forge?: string
-  include?: string[]
-  exclude?: string[]
-  members: RepoSummary[]
-  counts: Record<RepoHealthStatus, number>
-  /** The group and its parent, so the group list splits by home groups like any fleet list. */
-  groups: string[]
-}
-
-/**
- * Every group the viewer can see as a tree: those in the panel config (when it may read it) and
- * those its visible repositories are in, each with its members and their states. Root groups come
- * sorted by id, each holding its subgroups; a subgroup whose parent is unknown stands as a root.
- */
-export function groupRows(
-  repos: readonly RepoSummary[],
-  config: readonly { id: string; data: GroupDocumentData }[] = [],
-): GroupRow[] {
-  const ids = [...new Set([...config.map((entry) => entry.id), ...repos.flatMap((r) => r.groups)])]
-  const rows = new Map(
-    ids.toSorted().map((id): [string, GroupRow] => {
-      const entry = config.find((candidate) => candidate.id === id)
-      const members = repos.filter((repo) => repo.groups.includes(id))
-      const parent = parentGroup(id)
-      return [
-        id,
-        {
-          id,
-          ...(parent !== undefined && { parent }),
-          subgroups: [],
-          ...(entry
-            ? { forge: entry.data.forge, include: entry.data.include, exclude: entry.data.exclude }
-            : members[0]
-              ? { forge: members[0].repo.forge }
-              : {}),
-          members,
-          counts: countHealth(members),
-          groups: groupLineage(id),
-        },
-      ]
-    }),
-  )
-  const roots: GroupRow[] = []
-  for (const row of rows.values()) {
-    const parent = row.parent === undefined ? undefined : rows.get(row.parent)
-    if (parent) parent.subgroups.push(row)
-    else roots.push(row)
-  }
-  return roots
-}
-
-/**
- * The group tree as list rows: each root, then its subgroups when it is in `open`. With `matches`
- * (a filter people typed), a root stays when it or a subgroup matches, and its matching subgroups
- * show whether it is open or not. `order` sorts the roots and each root's subgroups.
- */
-export function groupTreeRows(
-  tree: readonly GroupRow[],
-  open: ReadonlySet<string>,
-  matches?: (row: GroupRow) => boolean,
-  order: (rows: readonly GroupRow[]) => GroupRow[] = (rows) => [...rows],
-): GroupRow[] {
-  const rows: GroupRow[] = []
-  for (const root of order(tree)) {
-    const subgroups = matches
-      ? root.subgroups.filter(matches)
-      : open.has(root.id)
-        ? root.subgroups
-        : []
-    if (matches && !matches(root) && !subgroups.length) continue
-    rows.push(root)
-    rows.push(...order(subgroups))
-  }
-  return rows
-}
-
-/**
- * Members of `parent` that sit in more than one of its subgroups, by `forge:path`, with those
- * subgroups sorted. Sibling subgroups may overlap; the group page warns about these.
- */
-export function siblingOverlaps(
-  members: readonly RepoSummary[],
-  parent: string,
-): Map<string, string[]> {
-  const overlaps = new Map<string, string[]>()
-  for (const member of members) {
-    const siblings = member.groups.filter((group) => parentGroup(group) === parent).toSorted()
-    if (siblings.length > 1) overlaps.set(repoKey(member.repo), siblings)
-  }
-  return overlaps
-}
-
-/** What a group list row says about its members' states, worst first, zero states left out. */
-export const groupHealthText = (counts: Record<RepoHealthStatus, number>): string[] =>
+/** What a health count line says, worst first, zero states left out: `["2 failing", "5 healthy"]`. */
+export const healthCountsText = (counts: Record<RepoHealthStatus, number>): string[] =>
   healthOrder
     .filter((status) => counts[status] > 0)
-    .map((status) => {
-      const label = healthLabels[status].toLowerCase()
-      return `${counts[status]} ${label}`
-    })
+    .map((status) => `${counts[status]} ${healthLabels[status].toLowerCase()}`)
 
-/** The group page's tabs in display order; also its `tab` search parameter. */
-const groupPageTabs = [
-  { id: 'repos', label: 'Repositories' },
-  { id: 'subgroups', label: 'Subgroups', root: true },
-  { id: 'stack', label: 'Stack & conventions', requires: ['analyses:read'] },
-  { id: 'knowledge', label: 'Knowledge', requires: ['knowledge:read'] },
-  { id: 'settings', label: 'Settings', requires: ['settings:read'] },
-  { id: 'membership', label: 'Membership', requires: ['settings:read'], global: true },
-] as const satisfies readonly (PageTab<string> & { global?: true; root?: true })[]
+/** Whether a team's `owns` patterns match the repository and none of its `exclude` patterns do. */
+export const teamOwns = (team: Pick<TeamConfigView, 'owns' | 'exclude'>, repo: RepoRef): boolean =>
+  team.owns.some((pattern) => patternMatches(pattern, repo.forge, repo.path)) &&
+  !team.exclude.some((pattern) => patternMatches(pattern, repo.forge, repo.path))
 
-/** Id of a group page tab. */
-type GroupPageTab = (typeof groupPageTabs)[number]['id']
+/** Whether one of a team's `consumes` patterns matches the repository. */
+export const teamConsumes = (team: Pick<TeamConfigView, 'consumes'>, repo: RepoRef): boolean =>
+  team.consumes.some((pattern) => patternMatches(pattern, repo.forge, repo.path))
 
-/**
- * The group tabs the viewer may see, and the requested one when visible, else the first. A tab
- * marked `global` (Membership, which reads the group patterns) needs its action on every
- * repository (`canGlobal`), the others anywhere (`can`). Subgroups is a root group's tab only.
- */
-export function pickGroupTab(
-  can: (action: Action) => boolean,
-  requested: string | undefined,
-  canGlobal: (action: Action) => boolean = can,
-  group?: string,
-): { tabs: (typeof groupPageTabs)[number][]; tab: GroupPageTab } {
-  const subgroup = group !== undefined && parentGroup(group) !== undefined
-  const tabs = visibleTabs<(typeof groupPageTabs)[number]>(groupPageTabs, can).filter(
-    (tab) => (!('global' in tab) || tab.requires.some(canGlobal)) && !('root' in tab && subgroup),
-  )
-  return { tabs, tab: pickTab(tabs, requested) ?? 'repos' }
-}
-
-const globSpecial = /[*?[\]{}]/
-
-/** Whether `pattern` names one path exactly, without glob syntax. */
-export const isExactPattern = (pattern: string): boolean => !globSpecial.test(pattern)
-
-const escapeRegExp = (text: string) => text.replace(/[.+^$()|\\/]/g, '\\$&')
-
-/**
- * A matcher for a group pattern as the server reads it: `*` and `?` stay inside one path segment,
- * `**` crosses segments, `[abc]` is a class and `{a,b}` alternatives.
- */
-export function globMatcher(pattern: string): (path: string) => boolean {
-  let source = ''
-  let braces = 0
-  for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index] ?? ''
-    if (char === '*') {
-      if (pattern[index + 1] === '*') {
-        index++
-        if (pattern[index + 1] === '/') {
-          index++
-          source += '(?:.*/)?'
-        } else source += '.*'
-      } else source += '[^/]*'
-    } else if (char === '?') source += '[^/]'
-    else if (char === '[') {
-      const end = pattern.indexOf(']', index + 1)
-      if (end < 0) source += '\\['
-      else {
-        const body = pattern.slice(index + 1, end).replace(/^!/, '^')
-        source += `[${body.replaceAll('\\', '\\\\')}]`
-        index = end
-      }
-    } else if (char === '{') {
-      braces++
-      source += '(?:'
-    } else if (char === '}' && braces > 0) {
-      braces--
-      source += ')'
-    } else if (char === ',' && braces > 0) source += '|'
-    else source += escapeRegExp(char)
-  }
-  const regex = new RegExp(`^${source}${')'.repeat(braces)}$`)
-  return (path) => regex.test(path)
+/** One row of the Teams list: a team, its definition when readable, and its fleet repositories. */
+export interface TeamRow {
+  id: string
+  /** The team document; absent when the viewer may not read the config (only owner teams known). */
+  definition?: TeamConfigView
+  /** Fleet repositories the team owns that the viewer can see. */
+  repos: RepoSummary[]
+  /** Fleet repositories it consumes (and does not own); 0 without the definition. */
+  consumed: number
+  counts: Record<RepoHealthStatus, number>
+  /** The team itself, so the list splits by home teams like any fleet list. */
+  teams: string[]
 }
 
 /**
- * The paths of `paths` that an exclude pattern of `group` still keeps out once `withRepos` adds
- * them, each with the pattern: `withRepos` lifts only exact-path excludes, never globs.
+ * Every team the viewer can see: those in the config (when it may read it) and the owner teams of
+ * its visible repositories. With a definition, what it owns and consumes is computed from its
+ * patterns over `repos` (the fleet listing the server sent); without one, from `RepoSummary.teams`.
+ * Sorted by title.
  */
-export function excludedByPattern(
-  group: GroupDocumentData | undefined,
-  forge: string,
-  paths: readonly string[],
-): { path: string; pattern: string }[] {
-  const { exclude } = withRepos(group, forge, paths)
-  return paths.flatMap((path) => {
-    const pattern = exclude.find((candidate) => globMatcher(candidate)(path))
-    return pattern === undefined ? [] : [{ path, pattern }]
+export function teamRows(
+  repos: readonly RepoSummary[],
+  config: readonly { id: string; data: TeamConfigView }[] = [],
+  titleOf: TeamTitleOf = keyAsTitle,
+): TeamRow[] {
+  const ids = [...new Set([...config.map((entry) => entry.id), ...repos.flatMap((r) => r.teams)])]
+  return ids.toSorted(byTeamTitle(titleOf)).map((id) => {
+    const definition = config.find((entry) => entry.id === id)?.data
+    const owned = definition
+      ? repos.filter((r) => teamOwns(definition, r.repo))
+      : repos.filter((r) => r.teams.includes(id))
+    const consumed = definition
+      ? repos.filter((r) => teamConsumes(definition, r.repo) && !owned.includes(r)).length
+      : 0
+    return {
+      id,
+      ...(definition ? { definition } : {}),
+      repos: owned,
+      consumed,
+      counts: countHealth(owned),
+      teams: [id],
+    }
   })
 }
 
-const matchesAny = (patterns: readonly string[], path: string) =>
-  patterns.some((pattern) => globMatcher(pattern)(path))
+/** How the signed-in principal may edit a team: everything, title and members only, or nothing. */
+export type TeamEditLevel = 'full' | 'members' | 'none'
 
-/** Where a repository stands with a group's patterns. */
-export type MembershipState = 'member' | 'excluded' | 'joins' | 'leaves'
+const writesSettings = (actions: readonly string[]) =>
+  actions.includes('*') || actions.includes('settings:write')
 
-/** One repository on the Membership tab. */
-interface MembershipRow {
-  repo: RepoRef
-  state: MembershipState
-  /** The include pattern that matched (for `excluded`, the exclude pattern that keeps it out). */
-  pattern?: string
-  /** `exact` when an exact include path lists it, `listed` when the forge listing found it. */
-  source: 'exact' | 'listed'
-}
-
-/** Counts per pattern, for the pattern lists. */
-interface PatternCounts {
-  /** Members each include pattern matches and how many of those an exclude pattern keeps out. */
-  include: Record<string, { members: number; excluded: number }>
-  /** Repositories each exclude pattern keeps out. */
-  exclude: Record<string, number>
-}
-
-/** The Membership tab's rows and figures for `draft` patterns against the `saved` ones. */
-export interface Membership {
-  rows: MembershipRow[]
-  counts: PatternCounts
-  members: number
-  excluded: number
-  /** Repositories the draft adds or removes compared with the saved patterns. */
-  joins: number
-  leaves: number
-}
-
-const stateOrder: Record<MembershipState, number> = { joins: 0, leaves: 1, member: 2, excluded: 3 }
+const distinctTrimmed = (items: readonly string[]) => [
+  ...new Set(items.map((item) => item.trim()).filter(Boolean)),
+]
 
 /**
- * Membership of `forge`'s repositories under `draft` patterns, judged on `matched` (what include
- * patterns matched in the last listing, before excludes) plus exact include paths, which list a
- * repository before any listing. Compared with `saved`, a member only under the draft `joins` and
- * one only under the saved patterns `leaves`. Unsaved patterns are previewed on the last listing,
- * so repositories the forge never listed cannot appear. Without `exactPaths` (a subgroup, whose
- * `matched` are its parent's members) only `matched` counts, so an exact path outside the parent
- * matches nothing.
+ * Global `settings:write` edits everything (patterns widen access, so only it may); a maintainer,
+ * holding `*` on a grant naming the team, edits its title and members. The server checks again.
  */
-export function groupMembership(
-  forge: string,
-  matched: readonly RepoRef[],
-  saved: Pick<GroupDocumentData, 'include' | 'exclude'>,
-  draft: Pick<GroupDocumentData, 'include' | 'exclude'> = saved,
-  exactPaths = true,
-): Membership {
-  const paths = new Map<string, RepoRef>()
-  for (const repo of matched) if (repo.forge === forge) paths.set(repo.path, repo)
-  if (exactPaths)
-    for (const pattern of [...saved.include, ...draft.include])
-      if (isExactPattern(pattern) && !paths.has(pattern))
-        paths.set(pattern, { forge, path: pattern })
-  const counts: PatternCounts = {
-    include: Object.fromEntries(draft.include.map((p) => [p, { members: 0, excluded: 0 }])),
-    exclude: Object.fromEntries(draft.exclude.map((p) => [p, 0])),
-  }
-  const rows: MembershipRow[] = []
-  for (const repo of paths.values()) {
-    const including = draft.include.filter((pattern) => globMatcher(pattern)(repo.path))
-    const excluding = draft.exclude.find((pattern) => globMatcher(pattern)(repo.path))
-    const now = including.length > 0 && !excluding
-    const before = matchesAny(saved.include, repo.path) && !matchesAny(saved.exclude, repo.path)
-    for (const pattern of including) {
-      const entry = counts.include[pattern]
-      if (entry) entry[excluding ? 'excluded' : 'members'] += 1
-    }
-    if (including.length && excluding)
-      counts.exclude[excluding] = (counts.exclude[excluding] ?? 0) + 1
-    const pattern = including.find(isExactPattern) ?? including[0]
-    const source = pattern !== undefined && isExactPattern(pattern) ? 'exact' : 'listed'
-    if (now)
-      rows.push({
-        repo,
-        state: before ? 'member' : 'joins',
-        ...(pattern ? { pattern } : {}),
-        source,
-      })
-    else if (before) {
-      const kept = saved.include.find((p) => globMatcher(p)(repo.path))
-      rows.push({
-        repo,
-        state: 'leaves',
-        ...(kept ? { pattern: kept } : {}),
-        source: kept !== undefined && isExactPattern(kept) ? 'exact' : 'listed',
-      })
-    } else if (including.length && excluding)
-      rows.push({ repo, state: 'excluded', pattern: excluding, source })
-  }
-  rows.sort(
-    (a, b) => stateOrder[a.state] - stateOrder[b.state] || a.repo.path.localeCompare(b.repo.path),
+export function teamEditLevel(
+  grants: readonly {
+    actions: readonly string[]
+    scope: { all?: boolean; teams?: readonly string[] }
+  }[],
+  team: string | undefined,
+): TeamEditLevel {
+  if (grants.some((grant) => grant.scope.all && writesSettings(grant.actions))) return 'full'
+  if (
+    team !== undefined &&
+    grants.some((grant) => grant.scope.teams?.includes(team) && grant.actions.includes('*'))
   )
+    return 'members'
+  return 'none'
+}
+
+/** What the team dialog edits; patterns and members as lists. */
+export interface TeamDraft {
+  id: string
+  title: string
+  owns: string[]
+  exclude: string[]
+  consumes: string[]
+  members: TeamMember[]
+}
+
+/** A draft from a stored team, or an empty one. */
+export const toTeamDraft = (id = '', data?: TeamConfigView): TeamDraft => ({
+  id,
+  title: data?.title ?? '',
+  owns: [...(data?.owns ?? [])],
+  exclude: [...(data?.exclude ?? [])],
+  consumes: [...(data?.consumes ?? [])],
+  members: (data?.members ?? []).map((member) => ({ ...member })),
+})
+
+/** The `PUT /api/config/teams/:id` body of a draft: trimmed, duplicates and blank members dropped. */
+export function toTeamInput(draft: TeamDraft): {
+  title?: string
+  owns: string[]
+  exclude: string[]
+  consumes: string[]
+  members: TeamMember[]
+} {
+  const list = distinctTrimmed
+  const seen = new Set<string>()
+  const members = draft.members.flatMap((member) => {
+    const id = member.id.trim()
+    if (!id || seen.has(id)) return []
+    seen.add(id)
+    return [{ id, role: member.role }]
+  })
+  const title = draft.title.trim()
   return {
-    rows,
-    counts,
-    members: rows.filter((row) => row.state === 'member' || row.state === 'joins').length,
-    excluded: rows.filter((row) => row.state === 'excluded').length,
-    joins: rows.filter((row) => row.state === 'joins').length,
-    leaves: rows.filter((row) => row.state === 'leaves').length,
+    ...(title ? { title } : {}),
+    owns: list(draft.owns),
+    exclude: list(draft.exclude),
+    consumes: list(draft.consumes),
+    members,
   }
 }
 
-/** Words and tag tone for a membership state. */
-export const membershipLabels: Record<MembershipState, { label: string; tone: DotTone }> = {
-  member: { label: 'Member', tone: 'success' },
-  excluded: { label: 'Excluded', tone: 'none' },
-  joins: { label: 'Joins on save', tone: 'info' },
-  leaves: { label: 'Leaves on save', tone: 'warning' },
-}
+/** The team page's tabs in display order; also its `tab` search parameter. */
+const teamPageTabs = [
+  { id: 'repos', label: 'Repositories' },
+  { id: 'stack', label: 'Stack & conventions', requires: ['analyses:read'] },
+  { id: 'knowledge', label: 'Knowledge', requires: ['knowledge:read'] },
+  { id: 'settings', label: 'Settings', requires: ['settings:read'] },
+] as const satisfies readonly PageTab<string>[]
 
-/** "acme/payout-* adds 1 repository, removes 2" for the unsaved-changes bar. */
-export function membershipChangeText(membership: Pick<Membership, 'joins' | 'leaves'>): string {
-  const parts = [
-    ...(membership.joins ? [`adds ${plural(membership.joins, 'repository', 'repositories')}`] : []),
-    ...(membership.leaves
-      ? [`removes ${plural(membership.leaves, 'repository', 'repositories')}`]
-      : []),
-  ]
-  return parts.length ? parts.join(', ') : 'changes no membership in the last listing'
-}
+/** Id of a team page tab. */
+type TeamPageTab = (typeof teamPageTabs)[number]['id']
 
-const diff = (a: readonly string[], b: readonly string[]) =>
-  a.filter((item) => !b.includes(item)).length + b.filter((item) => !a.includes(item)).length
-
-/** How many patterns differ between `saved` and `draft`, counted per added or removed pattern. */
-export function patternChanges(
-  saved: Pick<GroupDocumentData, 'include' | 'exclude'>,
-  draft: Pick<GroupDocumentData, 'include' | 'exclude'>,
-): number {
-  return diff(saved.include, draft.include) + diff(saved.exclude, draft.exclude)
+/** The team tabs the viewer may see, and the requested one when visible, else the first. */
+export function pickTeamTab(
+  can: (action: Action) => boolean,
+  requested: string | undefined,
+): { tabs: (typeof teamPageTabs)[number][]; tab: TeamPageTab } {
+  const tabs = visibleTabs<(typeof teamPageTabs)[number]>(teamPageTabs, can)
+  return { tabs, tab: pickTab(tabs, requested) ?? 'repos' }
 }
 
 /**
- * The group whose include patterns match most of `paths`, for the add wizard's suggestion; none
- * when no group matches any.
+ * The repositories of `repos` a draft owns under its patterns, compared with the saved team:
+ * `joins` are owned only under the draft, `leaves` only under the saved patterns.
  */
-export function suggestGroup(
-  paths: readonly string[],
-  groups: readonly { id: string; data: GroupDocumentData }[],
-): string | undefined {
-  let best: { id: string; hits: number } | undefined
-  for (const group of groups) {
-    const hits = paths.filter(
-      (path) =>
-        group.data.include.some((p) => !isExactPattern(p) && globMatcher(p)(path)) ||
-        group.data.include.some((p) => isExactPattern(p) && sameNamespace(p, path)),
-    ).length
-    if (hits && (!best || hits > best.hits)) best = { id: group.id, hits }
+export function ownershipChange(
+  repos: readonly RepoSummary[],
+  saved: Pick<TeamConfigView, 'owns' | 'exclude'> | undefined,
+  draft: Pick<TeamConfigView, 'owns' | 'exclude'>,
+): { owned: RepoSummary[]; joins: RepoSummary[]; leaves: RepoSummary[] } {
+  const owned = repos.filter((r) => teamOwns(draft, r.repo))
+  const before = saved ? repos.filter((r) => teamOwns(saved, r.repo)) : []
+  return {
+    owned,
+    joins: owned.filter((r) => !before.includes(r)),
+    leaves: before.filter((r) => !owned.includes(r)),
   }
-  return best?.id
 }
 
-const namespaceOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf('/'), 0))
+/** "adds 1 repository, removes 2" for the unsaved-changes line; empty when nothing changes. */
+export function ownershipChangeText(change: {
+  joins: readonly unknown[]
+  leaves: readonly unknown[]
+}) {
+  return [
+    ...(change.joins.length
+      ? [`adds ${plural(change.joins.length, 'repository', 'repositories')}`]
+      : []),
+    ...(change.leaves.length
+      ? [`removes ${plural(change.leaves.length, 'repository', 'repositories')}`]
+      : []),
+  ].join(', ')
+}
 
-const sameNamespace = (a: string, b: string) =>
-  namespaceOf(a) !== '' && namespaceOf(a) === namespaceOf(b)
+/** One folder of the repository tree: a forge root (`folder` empty) or a path prefix. */
+export interface FolderNode {
+  forge: string
+  /** The folder path, `acme/round`; empty for the forge root. */
+  folder: string
+  /** The last segment, or the forge id for the root. */
+  name: string
+  /** Repositories anywhere below it. */
+  total: number
+  children: FolderNode[]
+}
+
+/** `forge:folder`, the folder's key in the tree and in `ReposSearch.folder`; `forge:` for a root. */
+export const folderKey = (node: Pick<FolderNode, 'forge' | 'folder'>): string =>
+  `${node.forge}:${node.folder}`
+
+/** Whether `repo` sits below the folder of `key` (`forge:folder`, `forge:` for every repository there). */
+export function inFolderKey(repo: RepoRef, key: string): boolean {
+  const separator = key.indexOf(':')
+  const forge = key.slice(0, separator)
+  const folder = key.slice(separator + 1)
+  return repo.forge === forge && (folder === '' || repo.path.startsWith(`${folder}/`))
+}
+
+/**
+ * The folder tree of `repos`: every prefix of a repository path is a folder, sorted by name, each
+ * with how many repositories it holds. One root per forge; with a single forge its root is left
+ * out and its top folders are the roots.
+ */
+export function folderTree(repos: readonly RepoRef[]): FolderNode[] {
+  const roots = new Map<string, FolderNode>()
+  for (const repo of repos) {
+    let node = roots.get(repo.forge)
+    if (!node) {
+      node = { forge: repo.forge, folder: '', name: repo.forge, total: 0, children: [] }
+      roots.set(repo.forge, node)
+    }
+    node.total += 1
+    const segments = repo.path.split('/').filter(Boolean)
+    for (let end = 1; end < segments.length; end++) {
+      const folder = segments.slice(0, end).join('/')
+      let child: FolderNode | undefined = node.children.find((c) => c.folder === folder)
+      if (!child) {
+        child = { forge: repo.forge, folder, name: segments[end - 1] ?? '', total: 0, children: [] }
+        node.children.push(child)
+      }
+      child.total += 1
+      node = child
+    }
+  }
+  const sort = (nodes: FolderNode[]): FolderNode[] =>
+    nodes
+      .map((node) => ({ ...node, children: sort(node.children) }))
+      .toSorted((a, b) => a.name.localeCompare(b.name))
+  const tree = sort([...roots.values()])
+  return tree.length === 1 ? (tree[0]?.children ?? []) : tree
+}
+
+/** The keys of the folders holding `key`, outermost first, the forge root included. */
+export function folderAncestors(key: string): string[] {
+  const separator = key.indexOf(':')
+  const forge = key.slice(0, separator)
+  const segments = key
+    .slice(separator + 1)
+    .split('/')
+    .filter(Boolean)
+  return [
+    `${forge}:`,
+    ...segments
+      .slice(0, -1)
+      .map((_, index) => `${forge}:${segments.slice(0, index + 1).join('/')}`),
+  ]
+}
+
+/** A folder key in words: `acme/round`, or `forge work` for a forge root. */
+export const folderLabel = (key: string): string => {
+  const separator = key.indexOf(':')
+  const folder = key.slice(separator + 1)
+  return folder || `forge ${key.slice(0, separator)}`
+}

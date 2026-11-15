@@ -13,7 +13,7 @@ describe('forbidden', () => {
   test('related actions are the ones held on the same kind of object', () => {
     const grants = [
       {
-        scope: { groups: ['widgets'] },
+        scope: { teams: ['widgets'] },
         actions: ['releases:read' as const, 'repos:read' as const],
       },
       { scope: { repos: ['acme/gadgets'] }, actions: ['releases:run' as const] },

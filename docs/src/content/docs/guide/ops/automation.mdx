@@ -68,13 +68,13 @@ Four kinds of rules queue analyzer runs:
   />
   <Scroll>
 
-| Schedule                                  | When                                           | Teams    | Analyzers                      | Last 14 runs                        | Health                                     | Next        | On                      |                          |
-| ----------------------------------------- | ---------------------------------------------- | -------- | ------------------------------ | ----------------------------------- | ------------------------------------------ | ----------- | ----------------------- | ------------------------ |
-| **Nightly audit** · `nightly`             | `0 2 * * *` Every day at 02:00 · Europe/Berlin | Payments | audit, licenses                | <Ticks healthy={11} failing={3} />  | <Tag tone="bad">Failing · 3 in a row</Tag> | today 02:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
-| **Weekly guide refresh** · `weekly-guide` | `0 6 * * 1` Mon at 06:00                       | Widgets  | guide <Tag tone="acc">AI</Tag> | <Ticks healthy={12} warnings={2} /> | <Tag tone="warn">Partly failed</Tag>       | Mon 06:00   | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
-| **Office hours CI** · `office`            | `1h` Every hour · weekdays 09:00–18:00         | Payments | ci-jobs                        | <Ticks healthy={14} />              | <Tag tone="ok">Healthy</Tag>               | today 11:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
-| **Bundle backfill** · `bundles`           | `0 3 * * 6` Sat at 03:00                       | Widgets  | bundle                         | <Ticks healthy={0} none={14} />     | <Tag>Paused</Tag>                          | —           | <Tag>Off</Tag>          | <Button>Run now</Button> |
-| _Other teams · 2 schedules_               |                                                |          |                                |                                     |                                            |             |                         |                          |
+| Schedule                                  | When                                           | Teams   | Analyzers                      | Last 14 runs                        | Health                                     | Next        | On                      |                          |
+| ----------------------------------------- | ---------------------------------------------- | ------- | ------------------------------ | ----------------------------------- | ------------------------------------------ | ----------- | ----------------------- | ------------------------ |
+| **Nightly audit** · `nightly`             | `0 2 * * *` Every day at 02:00 · Europe/Berlin | Gizmo   | audit, licenses                | <Ticks healthy={11} failing={3} />  | <Tag tone="bad">Failing · 3 in a row</Tag> | today 02:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Weekly guide refresh** · `weekly-guide` | `0 6 * * 1` Mon at 06:00                       | Widgets | guide <Tag tone="acc">AI</Tag> | <Ticks healthy={12} warnings={2} /> | <Tag tone="warn">Partly failed</Tag>       | Mon 06:00   | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Office hours CI** · `office`            | `1h` Every hour · weekdays 09:00–18:00         | Gizmo   | ci-jobs                        | <Ticks healthy={14} />              | <Tag tone="ok">Healthy</Tag>               | today 11:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Bundle backfill** · `bundles`           | `0 3 * * 6` Sat at 03:00                       | Widgets | bundle                         | <Ticks healthy={0} none={14} />     | <Tag>Paused</Tag>                          | —           | <Tag>Off</Tag>          | <Button>Run now</Button> |
+| _Other teams · 2 schedules_               |                                                |         |                                |                                     |                                            |             |                         |                          |
 
   </Scroll>
 </Screen>
@@ -83,7 +83,7 @@ Four kinds of rules queue analyzer runs:
 
 The list is the default view. The toolbar narrows it:
 
-- **Scope switch.** _My teams_ keeps rules that cover every repository or sit in one of your home groups; a picked group keeps rules that cover every repository or sit in that group.
+- **Scope switch.** _My teams_ keeps rules that cover every repository or sit in one of your home teams; a picked team keeps rules that cover every repository or sit in that team's lane. Rules limited to path patterns only sit with the rules for every repository.
 - **Text filter.** Matches a rule's name, id or analyzer.
 - **Rule kind.** **Triggers**, **Schedules** (the default), **MR policies** and **Freshness** (with its count of stale analyses), each with its count.
 - **Filters.** **Team** everywhere; on Schedules also **Status** and **Problems only**.
@@ -125,7 +125,7 @@ Click a schedule, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows the 
           ['First error', 'osv-scanner: lockfile not found'],
           ['Cadence', 'Every day at 02:00 · Europe/Berlin · jitter 10 min'],
           ['Next runs', 'Thu 02:04 · Fri 02:01 · Sat 02:07 · Sun 02:03 · Mon 02:09'],
-          ['Groups', 'Payments'],
+          ['Teams', 'Gizmo'],
           ['Analyzers', 'audit, licenses'],
           ['Spread', 'On — repository jobs spread over the run window'],
         ]}
@@ -150,7 +150,7 @@ Click a schedule, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows the 
 
 1. Click <Ui>New rule</Ui> and pick the **Schedule** tab.
 2. Name it and give it a cadence: a cron expression (`0 3 * * 1-5`) or an interval (`1h`, `2d`), and its time zone.
-3. Pick the analyzers, and the groups and repositories it covers. Without groups it covers every top-level group.
+3. Pick the analyzers, and the teams and path patterns it covers. A repository matching either is covered; with neither the schedule covers every repository in the fleet.
 4. Optionally limit when it may run, add jitter or spread its jobs.
 5. Save. The sheet shows the next five runs, so check them before you leave.
 
@@ -166,12 +166,12 @@ Click a schedule, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows the 
       <Field label="Cadence" value="1h" mono hint="Every hour" />
       <Field label="Time zone" value="Europe/Berlin" />
       <Field label="Analyzers" value="ci-jobs" />
-      <Field label="Groups" value="Payments" />
+      <Field label="Teams" value="Gizmo" hint="None selected: every repository." />
       <Field
-        label="Repositories"
-        placeholder="acme/checkout-*"
+        label="Only these repositories"
+        placeholder="acme/square/*"
         mono
-        hint="Optional path globs inside the groups"
+        hint="forge:path globs; none means every repository of the teams."
       />
       <Field label="Allowed windows" value="Mon–Fri 09:00–18:00" />
       <Field label="Skip weekends" toggle={true} />
@@ -206,15 +206,15 @@ ran it. It needs `analyses:run`. :::
 
 <Ui>New rule</Ui> › **Event trigger** queues analyzers when the forge reports something:
 
-| Event          | Queues its analyzers when…                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------- |
-| Push           | a branch matching one of the rule's globs gets new commits. A burst of pushes runs once, for the newest commit. |
-| Tag            | a tag is pushed, on the tagged commit.                                                                          |
-| Merge request  | a merge request is opened, reopened, gets new commits or leaves draft. Title or description edits do not count. |
-| Label          | a given label is added to a merge request, drafts included.                                                     |
-| New repository | a repository appears in a group for the first time. A built-in rule runs every read-only analyzer once on it.   |
+| Event          | Queues its analyzers when…                                                                                       |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Push           | a branch matching one of the rule's globs gets new commits. A burst of pushes runs once, for the newest commit.  |
+| Tag            | a tag is pushed, on the tagged commit.                                                                           |
+| Merge request  | a merge request is opened, reopened, gets new commits or leaves draft. Title or description edits do not count.  |
+| Label          | a given label is added to a merge request, drafts included.                                                      |
+| New repository | a fleet listing finds a repository for the first time. A built-in rule runs every read-only analyzer once on it. |
 
-Each trigger can be limited to some groups. Pushes by Holtkeeper's own bot user, deleted branches and deleted tags never fire.
+Each trigger can be limited to some teams or path patterns. Pushes by Holtkeeper's own bot user, deleted branches and deleted tags never fire.
 
 ## Add a merge request policy
 
@@ -256,7 +256,7 @@ A policy is an **If / Then** rule on merge request events. Conditions are all op
 - Policies from narrower scopes run first; a policy marked **stop** ends evaluation.
 - Approve, merge and comment happen once per head commit, so a redelivered event never approves twice. An approve waits while the pipeline runs and is skipped when it is not green.
 - Holtkeeper never approves its own merge requests unless the policy explicitly allows it.
-- A repository can switch off or replace a group policy by giving its own entry the same id.
+- A repository can switch off or replace a team or folder policy by giving its own entry the same id.
 
 :::note
 When [merge request reviews are off](/guide/settings/policies/#merge-request-reviews) for a repository, policy comments and labels are skipped and approvals go out without their summary. Everything else runs as usual.
@@ -279,7 +279,7 @@ Freshness keeps analyses current without schedules: every analyzer says when its
     <Row title="Every repository" sub="On · last sweep: 2 queued, 4 waiting">
       <Segmented items={['On', 'Slower', 'Off']} />
     </Row>
-    <Row title="Payments" sub="Slower × 3 · own setting">
+    <Row title="Gizmo" sub="Slower × 3 · own setting">
       <Segmented items={['On', 'Slower', 'Off']} active={1} />
       <Button ghost>Use the every-repository setting</Button>
     </Row>

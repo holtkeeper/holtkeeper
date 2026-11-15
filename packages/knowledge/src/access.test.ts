@@ -16,11 +16,11 @@ beforeEach(async () => {
     entry({ id: 'global', title: 'Snapshot tests are banned', body: 'Use assertions.' }),
     entry({
       id: 'games',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       title: 'Snapshot fixtures',
       body: 'Small.',
     }),
-    entry({ id: 'tools', scope: { groups: ['tools'] }, title: 'Snapshot tools', body: 'x' }),
+    entry({ id: 'tools', scope: { teams: ['tools'] }, title: 'Snapshot tools', body: 'x' }),
     entry({ id: 'tests-only', appliesTo: ['tests'], title: 'Snapshot naming', body: 'x' }),
     entry({ id: 'draft', status: 'proposed', title: 'Snapshot draft', body: 'x' }),
     entry({ id: 'other', title: 'Translations', body: 'ICU.' }),
@@ -53,17 +53,108 @@ describe('knowledgeAccess', () => {
     expect(results.map((r) => r.id).toSorted()).toEqual(['games', 'global', 'other'])
   })
 
-  test('a blank query lists a subgroup entry before its parent group', async () => {
+  test('a blank query lists a folder entry before a team entry', async () => {
     await store.knowledge.put(
-      entry({ id: 'arcade', scope: { groups: ['games.arcade'] }, title: 'Arcade', body: 'x' }),
+      entry({ id: 'arcade', scope: { repos: ['work:games/**'] }, title: 'Arcade', body: 'x' }),
     )
     const kb = knowledgeAccess({ store, now })
-    const nested = repo('games/app', ['games.arcade', 'games'])
-    const results = await kb.search('', { repo: nested, taskKind: 'review', limit: 10 })
+    const results = await kb.search('', { repo: app, taskKind: 'review', limit: 10 })
     expect(results.map((r) => r.id).slice(0, 2)).toEqual(['arcade', 'games'])
     expect(
-      (await kb.search('', { repo: app, taskKind: 'review', limit: 10 })).map((r) => r.id),
+      (
+        await kb.search('', { repo: repo('tools/app', ['tools']), taskKind: 'review', limit: 10 })
+      ).map((r) => r.id),
     ).not.toContain('arcade')
+  })
+
+  test('entries narrowed to families need the repository family', async () => {
+    await store.knowledge.put(
+      entry({
+        id: 'family',
+        scope: { teams: ['games'] },
+        match: { families: ['f-web'] },
+        title: 'Snapshot family rule',
+        body: 'x',
+      }),
+    )
+    await store.knowledge.put(
+      entry({
+        id: 'files',
+        scope: { teams: ['games'] },
+        match: { files: ['src/**'] },
+        title: 'Snapshot files rule',
+        body: 'x',
+      }),
+    )
+    const kb = knowledgeAccess({ store, now })
+    const ids = async (target: typeof app & { family?: string }) =>
+      (await kb.search('snapshot', { repo: target, taskKind: 'review', limit: 10 })).map(
+        (r) => r.id,
+      )
+    expect(await ids({ ...app, family: 'f-web' })).toContain('family')
+    expect(await ids({ ...app, family: 'f-api' })).not.toContain('family')
+    expect(await ids(app)).not.toContain('family')
+    expect(await ids(app)).toContain('files')
+  })
+
+  test('semantic finds entries close in meaning and fuses the rankings', async () => {
+    const asked: string[] = []
+    const kb = knowledgeAccess({
+      store,
+      now,
+      semantic: async (query) => {
+        asked.push(query)
+        return new Map([
+          ['global', 0.8],
+          ['other', 0.1],
+          ['tools', 0.9],
+        ])
+      },
+    })
+    // No shared word: the full-text search finds nothing, the vectors find `global` (the
+    // `tools` entry is another team's, `other` is not close enough).
+    const found = await kb.search('border radius', { repo: app, taskKind: 'review' })
+    expect(found.map((r) => [r.id, r.score])).toEqual([['global', 1 / 61]])
+    // `games` and `global` both match the words; only `global` has a vector, so it comes first.
+    expect(
+      (await kb.search('snapshot', { repo: app, taskKind: 'review' })).map((r) => r.id),
+    ).toEqual(['global', 'games'])
+    expect(await kb.search('', { repo: app, taskKind: 'review', limit: 1 })).toHaveLength(1)
+    expect(asked).toEqual(['border radius', 'snapshot'])
+  })
+
+  test('without vectors, or when they fail, search stays full text', async () => {
+    const off = knowledgeAccess({ store, now, semantic: async () => undefined })
+    const failing = knowledgeAccess({
+      store,
+      now,
+      semantic: () => Promise.reject(new Error('gateway down')),
+    })
+    const results = await Promise.all(
+      [off, failing].map((kb) => kb.search('snapshot', { repo: app, taskKind: 'review' })),
+    )
+    expect(results.map((found) => found.map((r) => r.id))).toEqual([
+      ['games', 'global'],
+      ['games', 'global'],
+    ])
+  })
+
+  test('propose dedupes by meaning with proposalSimilarity', async () => {
+    const proposals: string[] = []
+    const kb = knowledgeAccess({
+      store,
+      now,
+      proposalSimilarity: async (proposal) => {
+        proposals.push(proposal.title)
+        return (candidate) => (candidate.id === 'global' ? 0.95 : 0.2)
+      },
+    })
+    const result = await kb.propose(
+      { title: 'Assert, do not snapshot', body: 'Prefer explicit expectations.' },
+      { actor: 'agent:review', repo: app, taskKind: 'review' },
+    )
+    expect(result).toEqual({ id: 'global', status: 'accepted', duplicateOf: 'global' })
+    expect(proposals).toEqual(['Assert, do not snapshot'])
   })
 
   test('propose creates, dedupes and auto-accepts', async () => {
@@ -106,7 +197,7 @@ describe('knowledgeAccess', () => {
       now,
       autoAccept: (target) => {
         seen.push(target.path)
-        return target.groups.includes('games') ? ['howto'] : []
+        return target.teams.includes('games') ? ['howto'] : []
       },
     })
     const proposal = {
@@ -117,7 +208,7 @@ describe('knowledgeAccess', () => {
     const inGames = await kb.propose(proposal, { ...ctx, repo: app })
     const elsewhere = await kb.propose(
       { title: 'Regenerate the client', body: 'How to: run codegen after schema edits.' },
-      { ...ctx, repo: { forge: 'work', path: 'tools/cli', groups: [] } },
+      { ...ctx, repo: { forge: 'work', path: 'tools/cli', teams: [] } },
     )
     expect(inGames.status).toBe('accepted')
     expect(elsewhere.status).toBe('proposed')

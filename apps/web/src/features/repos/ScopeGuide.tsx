@@ -9,18 +9,18 @@ import { EffectivePromptPanel } from '../knowledge/EffectivePrompt.tsx'
 import { GuideTab } from '../knowledge/GuideTab.tsx'
 
 /**
- * A repository's or group's Guide inside its hub: the sections table with the layers of the
+ * A repository's or team's Guide inside its hub: the sections table with the layers of the
  * picked section in agent reading order, and for a repository the effective prompt its tasks get.
  * Notes and Learnings stay on Knowledge.
  */
-export function ScopeGuide({ space }: { space: Extract<Space, { kind: 'repo' | 'group' }> }) {
+export function ScopeGuide({ space }: { space: Extract<Space, { kind: 'repo' | 'team' }> }) {
   const [section, setSection] = useState<GuideSectionName | undefined>()
   const [prompt, setPrompt] = useState(space.kind === 'repo')
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold">
-          {space.kind === 'repo' ? 'Guide of this repository' : 'Guide of this group'}
+          {space.kind === 'repo' ? 'Guide of this repository' : 'Guide of this team'}
         </h2>
         <LinkButton
           to="/knowledge/notes"

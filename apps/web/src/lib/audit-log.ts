@@ -1,4 +1,4 @@
-import type { AuditEvent, GroupMatch, HistoryScope } from '@holtkeeper/api'
+import type { AuditEvent, HistoryScope } from '@holtkeeper/api'
 
 import type { HistoryQuery } from '../api/endpoints.ts'
 import type { StatusTone } from '../ui/colors.ts'
@@ -53,16 +53,16 @@ const rangeMs: Record<Exclude<HistoryRange, 'all'>, number> = {
 
 /**
  * The repositories a scope switch position narrows the audit log to, or `undefined` for no narrowing.
- * *My teams* keeps the visible repositories in the home groups, a group position those in the group.
+ * *My teams* keeps the visible repositories of the home teams, a team position those of the team.
  */
 export function scopeRepos(
   view: ScopeView,
   scope: HistoryScope | undefined,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): string[] | undefined {
   if (view === 'all' || !scope) return undefined
   return scope.repos
-    .filter((entry) => inView(view, homeGroups, entry.groups))
+    .filter((entry) => inView(view, homeTeams, entry.teams))
     .map((entry) => entry.repo)
 }
 

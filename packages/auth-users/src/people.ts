@@ -1,4 +1,4 @@
-import { type GroupMatch, groupMatchSchema, roleOf } from '@holtkeeper/access'
+import { type TeamDefinition, roleOf, teamKeySchema, teamsOfPrincipal } from '@holtkeeper/access'
 import type { KvStore, Timestamp, User, UserStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
@@ -8,6 +8,8 @@ import type { PeopleSummary, PersonView, UserInviteView } from './views.ts'
 export interface PeopleDeps {
   store: UserStore
   kv?: Pick<KvStore, 'get' | 'set'>
+  /** The configured teams, read on every call; their members count as teams of the user. */
+  teams?: () => Readonly<Record<string, TeamDefinition>>
   now: () => Date
 }
 
@@ -56,20 +58,21 @@ export async function inviteOf(
   }
 }
 
-const formatGroupMatch = (entry: GroupMatch) =>
-  typeof entry === 'string' ? entry : entry.join(' + ')
-
-const homeGroupsSchema = z.object({ homeGroups: z.array(groupMatchSchema).optional() })
+const homeTeamsSchema = z.object({ homeTeams: z.array(teamKeySchema).optional() })
 
 /**
- * The user's teams: the home groups they picked (the server keeps them under `prefs:<id>` in the
- * kv store), else every group their grants name, in grant order without duplicates.
+ * The user's teams: the home teams they picked (the server keeps them under `prefs:<id>` in the
+ * kv store), else the teams they are a member of (`deps.teams`) followed by every team their
+ * grants name, without duplicates.
  */
 export async function teamsOf(deps: PeopleDeps, user: User): Promise<string[]> {
-  const stored = deps.kv ? homeGroupsSchema.safeParse(await deps.kv.get(`prefs:${user.id}`)) : null
-  const picked = stored?.success ? stored.data.homeGroups : undefined
-  const groups = picked ?? user.grants.flatMap((grant) => grant.scope.groups ?? [])
-  return [...new Set(groups.map(formatGroupMatch))]
+  const stored = deps.kv ? homeTeamsSchema.safeParse(await deps.kv.get(`prefs:${user.id}`)) : null
+  const picked = stored?.success ? stored.data.homeTeams : undefined
+  const teams = picked ?? [
+    ...(deps.teams ? teamsOfPrincipal(deps.teams(), user) : []),
+    ...user.grants.flatMap((grant) => grant.scope.teams ?? []),
+  ]
+  return [...new Set(teams)]
 }
 
 /** Counts of the users the caller may see by state, and the sign-in methods on offer. */

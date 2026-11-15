@@ -110,7 +110,7 @@ export function ciRoutes(deps: ServerDeps) {
       ...(metrics.change === undefined ? {} : { change: metrics.change }),
       weeks: metrics.weeks ?? [],
       problems: metrics.problems ?? 0,
-      groups: [...targetOf(head.repo).groups],
+      teams: [...targetOf(head.repo).teams],
       status: metrics.status,
       flakyJobs: metrics.flaky,
       ...(metrics.queue === undefined ? {} : { queueMedian: metrics.queue }),

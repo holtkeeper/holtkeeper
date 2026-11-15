@@ -2,7 +2,7 @@ import type { GuideSectionName, KnowledgeKind } from '@holtkeeper/store'
 import { allowlistSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
-/** A setting that can be set per scope (everything, groups, repository patterns). */
+/** A setting that can be set per scope (everything, teams, repository path patterns). */
 export interface SettingDefinition<Schema extends z.ZodType = z.ZodType> {
   key: string
   label: string
@@ -137,12 +137,49 @@ export const knowledgeAutoAccept = defineSetting({
 
 - \`quirk\` and \`howto\` are low risk: facts about the code agents found the hard way.
 - Keep \`decision\` and \`convention\` under review: they change how agents judge code.
-- The scope is the repository the agent worked on, so an entry for a group lets agents learn freely in that group only.
+- The scope is the repository the agent worked on, so an entry for a folder lets agents learn freely in that folder only.
 - Starter knowledge for new repositories (\`knowledge-bootstrap\`) is always proposed, whatever this says; its options are \`analyzers.knowledge-bootstrap\` under Settings › Analyzers.`,
   default: [],
   schema: z.array(
     z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),
   ),
+})
+
+/** Model `knowledge.embeddings` uses until someone picks another. */
+export const DEFAULT_EMBEDDING_MODEL = 'openai/text-embedding-3-small'
+
+/** Value of `knowledge.embeddings`: whether knowledge gets vectors and from which credential and model. */
+export const knowledgeEmbeddingsSchema = z.object({
+  /** Off (default): retrieval and duplicate checks stay full text. */
+  enabled: z.boolean().default(false),
+  /** Id or name of an `ai-sdk` credential; unset: the credential `llm.provider` names. */
+  credential: z.string().trim().min(1).optional().meta({ 'x-credential': 'ai-sdk' }),
+  /** Embedding model id as the credential's endpoint names it. */
+  model: z.string().trim().min(1).default(DEFAULT_EMBEDDING_MODEL),
+  /** Vector length to ask for; unset: the model's own. */
+  dimensions: z.number().int().min(1).max(8192).optional(),
+})
+
+/** A parsed `knowledge.embeddings` value; `enabled` and `model` are always set. */
+export type KnowledgeEmbeddings = z.output<typeof knowledgeEmbeddingsSchema>
+
+export const knowledgeEmbeddings = defineSetting({
+  key: 'knowledge.embeddings',
+  label: 'Semantic search',
+  description:
+    'Vectors for knowledge notes, so agents find notes by meaning and duplicates worded differently are caught. Off by default.',
+  section: 'Knowledge',
+  global: true,
+  help: `Gives every knowledge note a vector from an embedding model, so notes rank by meaning next to their words, also across languages, and a proposal that repeats a note in other words is caught as a duplicate.
+
+- **enabled** (default off): the switch. Off, or whenever the model cannot be reached, search and the Guide stay full text and nothing else changes.
+- **credential**: an \`ai-sdk\` credential whose endpoint speaks the OpenAI Embeddings format (OpenAI, Waibee Router and most gateways). Unset, the credential of **AI provider** (\`llm.provider\`) is used.
+- **model** (default \`${DEFAULT_EMBEDDING_MODEL}\`): a multilingual embedding model, named as the endpoint names it. Changing it re-embeds every note in the background.
+- **dimensions**: the vector length to ask for, for models that can shorten their vectors. Unset, the model's own length.
+
+Vectors never decide where a note applies; they only rank notes and flag duplicates. Embedding spend counts against the weekly **AI budget** as task kind \`embedding\`; once the budget is used up, new and changed notes wait and search stays full text.`,
+  default: knowledgeEmbeddingsSchema.parse({}),
+  schema: knowledgeEmbeddingsSchema,
 })
 
 /** Where `learnings.autoAccept` comes from: rules MCP clients propose, rules learned from review replies. */
@@ -172,7 +209,7 @@ export const learningsAutoAccept = defineSetting({
   help: `Learned rules reach every agent prompt of the scope they are accepted into. By default each candidate waits for a person in Knowledge › Learnings.
 
 - **sources**: \`mcp\` accepts rules MCP clients propose with \`propose_rule_change\`, but only from people who may edit the repository's knowledge (\`knowledge:write\`); proposals of mere readers stay for review. \`review-reply\` accepts rules extracted from replies to review comments, from anyone who replies on the repository's merge requests. Empty (default) accepts nothing.
-- **scope**: \`suggested\` (default) accepts into the scope the proposer named, else the nearest group, family or the repository as suggested, but never wider than this entry's own scope: an entry on a repository or subgroup accepts a rule meant for a parent group or family into the repository. \`repo\` always accepts into the candidate's repository only.
+- **scope**: \`suggested\` (default) accepts into the scope the proposer named, else the folder, team, family or repository as suggested, but never wider than this entry's own scope: an entry on a repository or folder accepts a rule meant for a parent folder, team or family into the repository. \`repo\` always accepts into the candidate's repository only.
 - The entry that applies to the candidate's repository decides. Auto-accepted rules show as accepted by *Auto-accept* and in History; reject one in Knowledge › Learnings to take it out of the Guide.`,
   default: { sources: [], scope: 'suggested' },
   schema: learningsAutoAcceptSchema,
@@ -208,7 +245,7 @@ export const auditFix = defineSetting({
   section: 'Audit',
   help: `When on, audits change dependency versions and open merge requests with the fixes. When off, they only report.
 
-Turn it on for a pilot group first and watch the merge requests it opens before enabling it everywhere.`,
+Turn it on for a pilot folder first and watch the merge requests it opens before enabling it everywhere.`,
   default: false,
   schema: z.boolean(),
 })
@@ -298,13 +335,13 @@ export const repoFreeze = defineSetting({
 
 - **frozen** (default on): off makes the entry a lift, so its scope stays writable under a broader freeze.
 - **reason** says why, so others know whom to ask before changing it. A freeze needs one; on a lift it is recommended and shown as "Writable here: <reason>".
-- Anyone who may change settings of a group or repository can lift a broader freeze there, including one set for everything: a lift is an ordinary entry, and the most specific entry wins.
+- Anyone who may change settings of a folder or repository can lift a broader freeze there, including one set for everything: a lift is an ordinary entry, and the most specific entry wins.
 - **until** ends the entry at that moment; leave it empty for one that lasts until the entry is removed. An entry past its end no longer counts, and the next broader entry applies again.
 - Analyses, schedules, tag-triggered jobs and links between repositories keep working.
 - Every change through the forge is refused before it is sent: comments, reviews, thread replies, labels, merges, branches, commits, tags, pipeline jobs, deploy keys and project webhooks. Jobs that try one fail with a read-only error.
 - Merge request, comment and pipeline events of the repository are ignored, so no policies, reviews or commands run for it.
 
-Set it for everything to make Holtkeeper a pure analytics tool, or for a group or repository pattern only. The most specific entry wins, so a repository entry with frozen off keeps one repository of a frozen group writable.`,
+Set it for everything to make Holtkeeper a pure analytics tool, or for a folder or repository pattern only. The most specific entry wins, so a repository entry with frozen off keeps one repository of a frozen folder writable.`,
   default: null,
   schema: repoFreezeSchema,
   form: z
@@ -318,7 +355,7 @@ Set it for everything to make Holtkeeper a pure analytics tool, or for a group o
 
 /**
  * Value of `repo.tests`: whether the repository is meant to have tests and, when it is not, why.
- * The most specific entry wins, so a repository entry can turn tests back on under a group.
+ * The most specific entry wins, so a repository entry can turn tests back on under a folder.
  */
 export const repoTestsSchema = z.object({
   expected: z.boolean().default(true),
@@ -340,7 +377,7 @@ export const repoTests = defineSetting({
 - **expected** (default on): off marks the covered repositories as having no tests by design.
 - **reason** says why; the panel shows it wherever it says "No tests by design".
 
-Set it for everything, a group or a repository pattern. The most specific entry wins, so a repository entry with tests on lifts a group entry with tests off.
+Set it for everything, a folder or a repository pattern. The most specific entry wins, so a repository entry with tests on lifts a folder entry with tests off.
 
 When tests are off:
 - Coverage is never queued automatically (events, new repositories, freshness, schedules), counts as skipped in Ops › Automation and leaves repository freshness; a manual run still goes ahead. Quality › Coverage, repository health and the repository overview show "No tests by design" instead of a coverage figure.
@@ -394,7 +431,7 @@ export function repoAnalyzersSetting(analyzers: readonly SwitchableAnalyzer[]) {
 - **off**: the analyzer kinds to leave out. Leave it empty in a narrower entry to turn every analyzer back on there.
 - **reason** says why; the panel shows it wherever it says "Off".
 
-Set it for everything, a group or a repository pattern. The most specific entry wins as a whole, so repeat kinds a narrower entry should keep off.
+Set it for everything, a folder or a repository pattern. The most specific entry wins as a whole, so repeat kinds a narrower entry should keep off.
 
 For an analyzer that is off:
 - It is never queued automatically (events, triggers, schedules, freshness, new repositories) and counts as skipped in Ops › Automation; a manual run still goes ahead.
@@ -431,7 +468,7 @@ export const mergeRequestComments = defineSetting({
 - **enabled** (default on): off stops reviews and merge request comments in the covered repositories.
 - **reason** says why, for whoever wonders where the reviews went.
 
-Set it for everything, a group or a repository pattern. The most specific entry wins, so a repository entry that is on lifts a group entry that is off.
+Set it for everything, a folder or a repository pattern. The most specific entry wins, so a repository entry that is on lifts a folder entry that is off.
 
 When it is off:
 - The AI review is never queued: not on merge request events, labels, policies, \`/holtkeeper\` commands, replies to review threads or task review requests.
@@ -469,7 +506,7 @@ export const slackReviews = defineSetting({
 
 - **channels**: Slack channel ids, e.g. \`C0123ABCD\`. Copy one from the channel's details (click the channel name, the id is at the bottom of **About**). Invite the app to the channel too (\`/invite @<app name>\`).
 
-Set it for everything, a group or a repository pattern. The most specific entry wins as a whole, so different groups can watch different channels, and an entry with no channels keeps a group quiet. A message about a repository is handled only in channels bound to that repository.
+Set it for everything, a folder or a repository pattern. The most specific entry wins as a whole, so different folders can watch different channels, and an entry with no channels keeps a folder quiet. A message about a repository is handled only in channels bound to that repository.
 
 Nothing is shown where **Merge request reviews** (\`mergeRequests.comments\`) is off; turning it off, or unbinding a channel, removes the emoji at the merge request's next review change.`,
   default: { channels: [] },
@@ -548,6 +585,7 @@ export const builtinSettings: SettingDefinition[] = [
   llmBudget,
   agentTools,
   knowledgeAutoAccept,
+  knowledgeEmbeddings,
   learningsAutoAccept,
   guideAutoAccept,
   auditFix,

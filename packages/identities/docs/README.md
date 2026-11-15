@@ -35,7 +35,7 @@ Because unverified links prove nothing, they also do not block: when someone els
   - `list(principal)`, `link(principal, input)`, `unlink(principal, id)`, `issueChallenge(principal, id)` — self-service; throw `IdentityError` with `code` `invalid | forbidden | not-found | conflict`.
   - `completeChallenge(answer)` — see above.
   - `resolveExternalActor({ provider, externalId }) → Principal | undefined` — only verified links; the principal is the stored user with its **current** grants (disabled or deleted users → `undefined`).
-  - `authorizeExternal({ provider, externalId, action, repo }) → { allowed, principal?, reason }` with `reason` `allowed | not-linked | unverified | no-principal | forbidden`. `repo` is a `RepoTarget` (include the config groups, e.g. via the server's `repoTarget`). For MR commands.
+  - `authorizeExternal({ provider, externalId, action, repo }) → { allowed, principal?, reason }` with `reason` `allowed | not-linked | unverified | no-principal | forbidden`. `repo` is a `RepoTarget` (include its owner teams, e.g. via the server's `repoTarget`). For MR commands.
 - `linkInputSchema`, `parseVerifyCommand`, `verifyCommand`, `generateChallengeCode`, `normalizeChallengeCode`, `forgeProvider`, `isVerified`.
 
 The server builds the service with `identitiesFor(deps)` from `apps/server/src/routes/accounts.ts`.

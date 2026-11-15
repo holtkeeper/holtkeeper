@@ -70,7 +70,7 @@ See what models cost this week against the weekly budget, who and what spent it,
 The page shows what agent runs cost: reviews, chat, agent tasks, the Guide and release notes. Everything is limited to the repositories you may read.
 
 - **Period.** _This week_ is the budget week, from Monday 00:00 in the instance's time zone. _This month_ and _Last 30 days_ widen the strip, the breakdowns and the runs. The budget card and the daily chart always show the budget week.
-- **Scope switch.** _My teams_ counts your home groups, a picked group just that group.
+- **Scope switch.** _My teams_ counts your home teams, a picked team just that team.
 - **Feature**, **Model** and **Started by** (_People_ or _Automatic_) narrow every figure on the page but the budget card, which always shows the real budget.
 
 The strip under the toolbar shows spend in the period (with the weekly limit on _This week_), the week's forecast, the automatic and people parts, runs, tokens, the cache hit ratio, the change against the same elapsed span before, errors with the error rate, runs blocked by the budget and runs whose cost is unknown.
@@ -103,14 +103,14 @@ When spend reaches the warning share, everyone who may change that budget gets o
 
 ### Narrower budgets and caps
 
-Under the card, **Narrower budgets and caps** lists the group and repository budgets you may read with their scope, mode, status and a small bar. A narrower budget adds a limit for its repositories; it never lifts them out of the broader one. Two fixed caps follow, which are not settings:
+Under the card, **Narrower budgets and caps** lists the team and path budgets you may read with their scope, mode, status and a small bar. A narrower budget adds a limit for its repositories; it never lifts them out of the broader one. Two fixed caps follow, which are not settings:
 
 <Screen title="Ops › AI spend · Narrower budgets and caps">
   <Rows>
-    <Row title="Payments" sub={'Group · Block · $31.10 of $60'}>
+    <Row title="Gizmo" sub={'Team · Block · $31.10 of $60'}>
       <Meter value={52} />
     </Row>
-    <Row title="acme/widget-kit" sub={'Repository · Warn · $9.80 of $10'}>
+    <Row title="acme/kit/ui-kit" sub={'Paths · Warn · $9.80 of $10'}>
       <Meter value={98} />
     </Row>
     <Row title="Write tasks" sub={'Default cap per task $1.50 · most a task may ask for $5'} />
@@ -143,7 +143,7 @@ With `settings:write` over everything, the global budget has an inline editor un
 4. Pick **When reached**: _Block runs_ or _Warn_. There is no mode that pauses everything.
 5. Click <Ui>Save budget</Ui>. Every figure on the page refreshes.
 
-Group and repository budgets are entries of the same setting, added in [Settings › AI](/guide/settings/ai/#budgets).
+Team and path budgets are entries of the same setting, added in [Settings › AI](/guide/settings/ai/#budgets).
 
 ## See where it went
 
@@ -210,11 +210,11 @@ Last on the page, and never narrowed by the filters, a table shows how people us
   </Toolbar>
   <Scroll>
 
-| Person  | Teams               | Tokens | Calls | Top tools                           | Errors | Last call |
-| ------- | ------------------- | ------ | ----- | ----------------------------------- | ------ | --------- |
-| Mira K. | <Tag>Payments</Tag> | 2      | 1,284 | `search_symbols`, `get_package_api` | 0.4%   | 2 min ago |
-| Jon D.  | <Tag>Widgets</Tag>  | 1      | 412   | `repo_rules`, `commit_conventions`  | 1.2%   | 1 h ago   |
-| Ana P.  | —                   | 1      | 37    | `fleet_health`, `why_job`           | 0%     | yesterday |
+| Person  | Teams              | Tokens | Calls | Top tools                           | Errors | Last call |
+| ------- | ------------------ | ------ | ----- | ----------------------------------- | ------ | --------- |
+| Mira K. | <Tag>Gizmo</Tag>   | 2      | 1,284 | `search_symbols`, `get_package_api` | 0.4%   | 2 min ago |
+| Jon D.  | <Tag>Widgets</Tag> | 1      | 412   | `repo_rules`, `commit_conventions`  | 1.2%   | 1 h ago   |
+| Ana P.  | —                  | 1      | 37    | `fleet_health`, `why_job`           | 0%     | yesterday |
 
   </Scroll>
 </Screen>
@@ -227,7 +227,7 @@ The page needs `ai:read` or `ai:admin`; others see a no-access card. <Ui>Configu
 
 ## Related
 
-- [Settings › AI](/guide/settings/ai/) — providers, model tiers, group and repository budgets.
+- [Settings › AI](/guide/settings/ai/) — providers, model tiers, team and path budgets.
 - [Tasks](/guide/ops/tasks/) — agent tasks and their own write caps.
 - [Runs](/guide/ops/runs/) — the jobs behind automatic spend, with each run's cost.
 - [Connect agents](/guide/account/connect-agents/) — MCP tokens for your coding agent.

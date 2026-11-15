@@ -26,9 +26,9 @@ import {
   withAllowlistEntry,
 } from './security.ts'
 
-const repo = (key: string, status: FindingRepo['status'] = 'open', groups = ['web']) => ({
+const repo = (key: string, status: FindingRepo['status'] = 'open', teams = ['web']) => ({
   repo: key,
-  groups,
+  teams,
   versions: ['3.2.1'],
   sources: ['pnpm-lock.yaml'],
   status,
@@ -174,10 +174,10 @@ describe('findings', () => {
     })
   })
 
-  test('rows carry a key and the groups of their repositories', () => {
+  test('rows carry a key and the teams of their repositories', () => {
     const rows = findingRows(groups)
     expect(rows[0]?.key).toBe('GHSA-aaaa-bbbb-cccc:fooUtil')
-    expect(rows[1]?.groups).toEqual(['payments'])
+    expect(rows[1]?.teams).toEqual(['payments'])
     expect(findingKey(groups[2]!)).toBe('GHSA-zzzz-yyyy-xxxx:zod')
     expect(findingEcosystems(groups)).toEqual(['Go', 'npm'])
   })
@@ -233,11 +233,11 @@ describe('allowlist', () => {
     expect(allowlistState('2026-11-26', '2026-11-12')).toBe('active')
   })
 
-  test('scopes cover repositories by all, groups and patterns', () => {
-    const target = { repo: 'gitlab:acme/checkout-web', groups: ['web', 'payments'] }
+  test('scopes cover repositories by all, teams and patterns', () => {
+    const target = { repo: 'gitlab:acme/checkout-web', teams: ['web', 'payments'] }
     expect(scopeCovers({ all: true }, target)).toBe(true)
-    expect(scopeCovers({ groups: ['web'] }, target)).toBe(true)
-    expect(scopeCovers({ groups: [['web', 'platform']] }, target)).toBe(false)
+    expect(scopeCovers({ teams: ['web'] }, target)).toBe(true)
+    expect(scopeCovers({ teams: ['platform'] }, target)).toBe(false)
     expect(scopeCovers({ repos: ['gitlab:acme/*'] }, target)).toBe(true)
     expect(scopeCovers({ repos: ['github:acme/*'] }, target)).toBe(false)
     expect(scopeCovers({ repos: ['acme/checkout-web'] }, target)).toBe(true)
@@ -261,7 +261,7 @@ describe('allowlist', () => {
           { id: 'GHSA-old', reason: 'Old', expires: '2026-11-01' },
           { bogus: true },
         ]),
-        setting('s2', { groups: ['web'] }, [
+        setting('s2', { teams: ['web'] }, [
           { id: 'GHSA-aaaa-bbbb-cccc', package: 'other-lib', reason: 'Other package' },
         ]),
         { ...setting('s3', { all: true }, []), key: 'audit.fix' },
@@ -278,7 +278,7 @@ describe('allowlist', () => {
 
   test('targets are the applying entries, plus a new one only for uncovered repositories', () => {
     const org = setting('org', { all: true }, [{ id: 'X', reason: 'r' }])
-    const web = setting('web', { groups: ['web'] }, [])
+    const web = setting('web', { teams: ['web'] }, [])
     const repos = ['gitlab:acme/checkout-web', 'gitlab:acme/storefront', 'gitlab:acme/ledger-api']
     const winners = new Map<string, SettingView | null>([
       ['gitlab:acme/checkout-web', web],
@@ -296,7 +296,7 @@ describe('allowlist', () => {
       targets: [
         {
           settingId: 'web',
-          scope: { groups: ['web'] },
+          scope: { teams: ['web'] },
           entries: [],
           reaches: ['gitlab:acme/checkout-web', 'gitlab:acme/storefront'],
         },

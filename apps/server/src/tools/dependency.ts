@@ -45,7 +45,7 @@ export interface DependencyContext {
   bundleOff?: () => Promise<RepoFilter>
   knowledge: KnowledgeToolsContext
   libraries?: Pick<LibraryStore, 'getLibrary' | 'listVersions'>
-  /** The teams of a repository (innermost config groups), named on every user. */
+  /** The owner teams of a repository, named on every user. */
   ownerOf?: (repo: RepoRef) => string[]
   /** Latest registry versions, the source of "behind". */
   latest?: Pick<LatestVersions, 'all'>

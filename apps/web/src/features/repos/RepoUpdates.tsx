@@ -205,7 +205,7 @@ function PollingPanel({ view }: { view: RepoUpdatesView }) {
         {!polling.enabled ? (
           <p className="text-sm text-muted">
             Turn it on with the <strong>Polling</strong> setting (section Updates) for this
-            repository, its group or everything. Requests are drawn from token{' '}
+            repository, its folder or everything. Requests are drawn from token{' '}
             <code className="font-mono text-xs">{polling.key}</code> and share its budget with every
             repository on it.
           </p>

@@ -49,7 +49,7 @@ test('the rail holds the eight workspaces in order, with Settings at the bottom'
   ])
   expect(groups.map((g) => [g.workspace.id, g.items.map(navKey)])).toEqual([
     ['home', ['/', '/inbox']],
-    ['repos', ['/repos', '/repos/groups']],
+    ['repos', ['/repos', '/repos/teams']],
     ['chat', ['/chat']],
     [
       'supply',
@@ -126,7 +126,7 @@ test('hides entries the principal cannot use', () => {
 })
 
 test('entries the server checks globally need a grant over everything', () => {
-  const scoped = withGrant({ groups: ['games'] }, 'settings:read')
+  const scoped = withGrant({ teams: ['games'] }, 'settings:read')
   const labels = visibleNav(scoped, 'snippets').map((i) => i.label)
   expect(labels).toEqual(expect.arrayContaining(['AI', 'Integrations']))
   for (const label of ['Automation', 'System']) expect(labels).not.toContain(label)
@@ -139,7 +139,7 @@ const sections = (p: Principal) => workspaceOf(p, 'settings', 'off')?.items.map(
 
 test('Settings sections follow what the server lets the principal read', () => {
   expect(sections(principal)).toEqual(['people'])
-  expect(sections(withGrant({ groups: ['shapes'] }, 'ai:admin'))).toBeUndefined()
+  expect(sections(withGrant({ teams: ['shapes'] }, 'ai:admin'))).toBeUndefined()
   expect(sections(withGrant({ repos: ['w:x/*'] }, 'credentials:read'))).toEqual([
     'ai',
     'integrations',
@@ -156,7 +156,7 @@ test('Settings sections follow what the server lets the principal read', () => {
 })
 
 test('Analyzers and Policies open for settings:read on any scope, each with its own icon', () => {
-  const scoped = workspaceOf(withGrant({ groups: ['shapes'] }, 'settings:read'), 'settings', 'off')
+  const scoped = workspaceOf(withGrant({ teams: ['shapes'] }, 'settings:read'), 'settings', 'off')
   const entries = scoped?.items.filter(
     (item) => item.section === 'analyzers' || item.section === 'policies',
   )
@@ -171,21 +171,21 @@ test('Analyzers and Policies open for settings:read on any scope, each with its 
 
 test('AI spend sits under Ops for ai:read or ai:admin', () => {
   for (const action of ['ai:read', 'ai:admin'] as const)
-    expect(
-      workspaceOf(withGrant({ groups: ['shapes'] }, action), 'ops')?.items.map(navKey),
-    ).toEqual(['/ops/spend'])
+    expect(workspaceOf(withGrant({ teams: ['shapes'] }, action), 'ops')?.items.map(navKey)).toEqual(
+      ['/ops/spend'],
+    )
   expect(visibleNav(withGrant({ all: true }, 'settings:read'), 'off').map(navKey)).not.toContain(
     '/ops/spend',
   )
 })
 
 test('repository readers see Repos, Chat, Tasks under Ops and Settings with only the Audit log', () => {
-  const reader = withGrant({ groups: ['shop'] }, 'repos:read')
+  const reader = withGrant({ teams: ['shop'] }, 'repos:read')
   expect(visibleNav(reader, 'off').map(navKey)).toEqual([
     '/',
     '/inbox',
     '/repos',
-    '/repos/groups',
+    '/repos/teams',
     '/chat',
     '/ops/tasks',
     '/settings/audit',
@@ -207,14 +207,14 @@ test('the Inbox and Tasks tabs carry badges, nothing else does', () => {
 
 test('catalog pages follow catalog reach and the cross-team level', () => {
   const catalogPages = ['Libraries', 'Stack', 'Public API']
-  const reader = withGrant({ groups: ['games'] }, 'repos:read')
+  const reader = withGrant({ teams: ['games'] }, 'repos:read')
   expect(visibleNav(reader, 'metadata').map((i) => i.label)).toEqual(
     expect.arrayContaining(catalogPages),
   )
   const closed = visibleNav(reader, 'off').map((i) => i.label)
   for (const label of catalogPages) expect(closed).not.toContain(label)
   expect(
-    visibleNav(withGrant({ groups: ['games'] }, 'catalog:read'), 'off').map((i) => i.label),
+    visibleNav(withGrant({ teams: ['games'] }, 'catalog:read'), 'off').map((i) => i.label),
   ).toEqual(expect.arrayContaining(catalogPages))
 })
 
@@ -224,9 +224,9 @@ test('the active entry is the longest path prefix', () => {
   expect(activeNav('/inbox')?.workspace).toBe('home')
   expect(activeNav('/inboxes')).toBeUndefined()
   expect(activeNav('/repos/work/acme/widget-kit')?.label).toBe('Repositories')
-  expect(activeNav('/repos/groups')?.label).toBe('Groups')
-  expect(activeNav('/repos/groups/g1')?.label).toBe('Groups')
-  expect(activeNav('/repos/groups/g1')?.workspace).toBe('repos')
+  expect(activeNav('/repos/teams')?.label).toBe('Teams')
+  expect(activeNav('/repos/teams/widgets')?.label).toBe('Teams')
+  expect(activeNav('/repos/teams/g1')?.workspace).toBe('repos')
   expect(activeNav('/chat')?.label).toBe('Chat')
   expect(activeNav('/supply/libraries/npm/@scope/widget')?.label).toBe('Libraries')
   expect(activeNav('/supply/security/runs/r1')?.label).toBe('Security')

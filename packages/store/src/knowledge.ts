@@ -27,7 +27,7 @@ export function matchesKnowledgeFilter(entry: KnowledgeEntry, filter: KnowledgeF
   }
   if (filter.scope !== undefined) {
     const text = filter.scope.toLowerCase()
-    const patterns = [...(entry.scope.groups ?? []).flat(), ...(entry.scope.repos ?? [])]
+    const patterns = [...(entry.scope.teams ?? []), ...(entry.scope.repos ?? [])]
     const hit =
       (text === 'all' && entry.scope.all === true) ||
       patterns.some((pattern) => pattern.toLowerCase().includes(text))
@@ -70,6 +70,7 @@ const content = (entry: KnowledgeEntry): KnowledgeContent => ({
   body: entry.body,
   kind: entry.kind,
   scope: entry.scope,
+  ...(entry.match !== undefined && { match: entry.match }),
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   ...(entry.packages !== undefined && { packages: entry.packages }),

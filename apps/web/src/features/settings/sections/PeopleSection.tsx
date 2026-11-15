@@ -19,7 +19,7 @@ function Roles() {
   return (
     <SettingsSection
       title={<span id="roles">Roles</span>}
-      description="Four presets. Each person gets one, limited to the groups and repositories it applies to; grants matching none show as Custom and stay as they are."
+      description="Four presets. Each person gets one, limited to the teams and paths it applies to; grants matching none show as Custom and stay as they are."
     >
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {rolePresetIds.map((id) => (

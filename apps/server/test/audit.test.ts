@@ -28,7 +28,7 @@ import { identitiesFor } from '../src/routes/accounts.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
 })
 
 let store: Store
@@ -70,7 +70,7 @@ const setup = (auth: AuthProvider = noAuth()) => {
 
 const games = headerAuth({
   roles: {
-    games: [{ scope: { groups: ['games'] }, actions: ['credentials:read', 'credentials:write'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['credentials:read', 'credentials:write'] }],
   },
 })
 const asGames = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'games' }
@@ -101,13 +101,13 @@ describe('audit helpers', () => {
   test('diffChanges compares nested fields and redacts secrets', () => {
     expect(
       diffChanges(
-        { name: 'a', scope: { groups: ['x'] }, options: { headers: { authorization: 'k1' } } },
-        { name: 'b', scope: { groups: ['x', 'y'] }, options: { headers: { authorization: 'k2' } } },
+        { name: 'a', scope: { teams: ['x'] }, options: { headers: { authorization: 'k1' } } },
+        { name: 'b', scope: { teams: ['x', 'y'] }, options: { headers: { authorization: 'k2' } } },
       ),
     ).toEqual([
       { field: 'name', before: 'a', after: 'b' },
       { field: 'options.headers.authorization', before: REDACTED, after: REDACTED },
-      { field: 'scope.groups', before: ['x'], after: ['x', 'y'] },
+      { field: 'scope.teams', before: ['x'], after: ['x', 'y'] },
     ])
     expect(diffChanges(undefined, { apiToken: 'x', n: 1 })).toEqual([
       { field: 'apiToken', after: REDACTED },
@@ -195,7 +195,7 @@ describe('audit middleware', () => {
         name: 'Bot',
         kind: 'other',
         url: 'https://gitlab.test',
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         secret: 'glpat-123',
       })
     ).json()) as CredentialView
@@ -371,16 +371,16 @@ describe('history and audit routes', () => {
   test('?repo= names the event repository only after a permission check allowed it', async () => {
     const config2 = parseConfig({
       forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-      groups: {
-        games: { forge: 'work', include: ['games/*'] },
-        shop: { forge: 'work', include: ['shop/*'] },
+      teams: {
+        games: { owns: ['work:games/*'] },
+        shop: { owns: ['work:shop/*'] },
       },
     })
     const vault = aesVault('v'.repeat(32))
     const app = createApp({
       config: config2,
       auth: headerAuth({
-        roles: { games: [{ scope: { groups: ['games'] }, actions: ['settings:write'] }] },
+        roles: { games: [{ scope: { teams: ['games'] }, actions: ['settings:write'] }] },
       }),
       store,
       vault,
@@ -439,7 +439,7 @@ describe('history and audit routes', () => {
 
     const reader = setup(
       headerAuth({
-        roles: { games: [{ scope: { groups: ['games'] }, actions: ['repos:read'] }] },
+        roles: { games: [{ scope: { teams: ['games'] }, actions: ['repos:read'] }] },
       }),
     )
     const seen = await history(reader, '', asGames)
@@ -457,8 +457,8 @@ describe('history and audit routes', () => {
     ).json()) as HistoryScope
     expect(scope).toEqual({
       repos: [
-        { repo: 'work:games/a', groups: ['games'] },
-        { repo: 'work:games/c', groups: ['games'] },
+        { repo: 'work:games/a', teams: ['games'] },
+        { repo: 'work:games/c', teams: ['games'] },
       ],
       instance: false,
     })
@@ -577,7 +577,7 @@ describe('external accounts', () => {
         provider: 'gitlab:work',
         externalId: '42',
         action: 'analyses:run',
-        repo: { forge: 'work', path: 'games/a', groups: ['games'] },
+        repo: { forge: 'work', path: 'games/a', teams: ['games'] },
       }),
     ).toMatchObject({ allowed: true, principal: { id: 'root', provider: 'none' } })
 

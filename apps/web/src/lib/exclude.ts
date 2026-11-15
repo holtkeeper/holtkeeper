@@ -57,7 +57,7 @@ function editListOption(
   const own = (effective?.scope.repos ?? []).some(
     (entry) => entry === repoKey(repo) || entry === repo.path,
   )
-  return own && effective && !effective.scope.groups?.length && !effective.scope.all
+  return own && effective && !effective.scope.teams?.length && !effective.scope.all
     ? { id: effective.id, key, scope: effective.scope, value: next }
     : { key, scope: { repos: [repoKey(repo)] }, value: next }
 }

@@ -39,7 +39,7 @@ export type StackForge = Pick<
 >
 
 export interface AnalyzeStackOptions {
-  /** Group name, stored as the record's subject. */
+  /** Team key, stored as the record's subject. */
   group: string
   repos: RepoRef[]
   forge: StackForge

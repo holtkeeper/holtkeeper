@@ -25,7 +25,7 @@ import {
   Button,
   EmptyState,
   ErrorState,
-  GroupName,
+  TeamName,
   KeyValue,
   Placeholder,
   SideSheet,
@@ -451,7 +451,7 @@ function Reliability({ data }: { data: CiJobsData }) {
   )
 }
 
-/** The line under a CI header: state, groups, branch, pipeline count and the newest run. */
+/** The line under a CI header: state, teams, branch, pipeline count and the newest run. */
 export function CiSummary({ view, card }: { view: CiRepoView; card: CiRepoCard | undefined }) {
   const data = view.data
   return (
@@ -461,9 +461,9 @@ export function CiSummary({ view, card }: { view: CiRepoView; card: CiRepoCard |
           {ciStatusLabel[card.status]}
         </Tag>
       ) : null}
-      {card?.groups.map((group) => (
-        <Tag key={group}>
-          <GroupName group={group} />
+      {card?.teams.map((team) => (
+        <Tag key={team}>
+          <TeamName team={team} />
         </Tag>
       ))}
       {data?.pipelines.ref ? <span className="mono">{data.pipelines.ref}</span> : null}

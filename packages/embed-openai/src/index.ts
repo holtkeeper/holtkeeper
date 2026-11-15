@@ -1,0 +1,5 @@
+export { createOpenAiEmbedder } from './embedder.ts'
+export type { OpenAiEmbedderOptions } from './embedder.ts'
+export { EmbeddingError } from './http.ts'
+export { listEmbeddingModels } from './models.ts'
+export type { EmbeddingModel } from './models.ts'

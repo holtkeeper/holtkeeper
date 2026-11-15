@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { GroupListingView, RepoUpdatesView } from '@holtkeeper/api'
+import type { FleetListingView, RepoUpdatesView } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
@@ -50,7 +50,7 @@ const fakeForge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-  groups: { games: { forge: 'work', include: ['games/a'] } },
+  teams: { games: { owns: ['work:games/a'] } },
   jobs: { onMergeRequest: { analyzers: ['review'] } },
 })
 
@@ -241,32 +241,36 @@ describe('polling', () => {
     ])
   })
 
-  test('a group can be listed again by hand, and its attempts are kept', async () => {
+  test('a fleet can be listed again by hand, and its attempts are kept', async () => {
     visible = false
     const app = createApp(deps())
     const failed = (await (
-      await app.request('/api/repos/updates/groups/games/list', { method: 'POST' })
-    ).json()) as GroupListingView
+      await app.request('/api/repos/updates/fleet/work/list', { method: 'POST' })
+    ).json()) as FleetListingView
     expect(failed.repos).toEqual([])
     expect(failed.attempts[0]).toMatchObject({ trigger: 'manual', error: '404 Project Not Found' })
 
     visible = true
     now = new Date(now.getTime() + 1000)
     const listed = (await (
-      await app.request('/api/repos/updates/groups/games/list', { method: 'POST' })
-    ).json()) as GroupListingView
+      await app.request('/api/repos/updates/fleet/work/list', { method: 'POST' })
+    ).json()) as FleetListingView
+    expect(listed).toMatchObject({ forge: 'work', patterns: ['games/a'] })
     expect(listed.repos).toEqual([{ forge: 'work', path: 'games/a' }])
     expect(listed.attempts.map((a) => a.repos ?? a.error)).toEqual([1, '404 Project Not Found'])
 
     const shown = (await (
-      await app.request('/api/repos/updates/groups/games')
-    ).json()) as GroupListingView
+      await app.request('/api/repos/updates/fleet/work')
+    ).json()) as FleetListingView
     expect(shown.listedAt).toBe(now.toISOString())
     expect(shown.nextAt).toBe(new Date(now.getTime() + 30 * 60_000).toISOString())
-    expect((await app.request('/api/repos/updates/groups/nope')).status).toBe(404)
+    expect((await app.request('/api/repos/updates/fleet/nope')).status).toBe(404)
+    expect(
+      (await app.request('/api/repos/updates/fleet/nope/list', { method: 'POST' })).status,
+    ).toBe(404)
   })
 
-  test('a listing keeps what include patterns matched before excludes', async () => {
+  test('a listing keeps what fleet patterns matched before the forge excludes', async () => {
     const listed = [
       { path: 'games/a', archived: false },
       { path: 'games/old', archived: false },
@@ -278,21 +282,21 @@ describe('polling', () => {
         yield* listed
       },
     } as unknown as GitForge
-    const groupsConfig = parseConfig({
+    const fleetConfig = parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge } },
-      groups: { games: { forge: 'work', include: ['games/*'], exclude: ['games/old'] } },
+      fleet: { work: { exclude: ['games/old'] } },
+      teams: { games: { owns: ['work:games/*'] } },
     })
-    const app = createApp({ ...deps(), config: groupsConfig })
-    expect((await app.request('/api/repos/updates/groups/games')).status).toBe(200)
+    const app = createApp({ ...deps(), config: fleetConfig })
     const before = (await (
-      await app.request('/api/repos/updates/groups/games')
-    ).json()) as GroupListingView
+      await app.request('/api/repos/updates/fleet/work')
+    ).json()) as FleetListingView
     expect(before).toMatchObject({ repos: [], matched: [], attempts: [] })
     expect(before.nextAt).toBeUndefined()
 
     const view = (await (
-      await app.request('/api/repos/updates/groups/games/list', { method: 'POST' })
-    ).json()) as GroupListingView
+      await app.request('/api/repos/updates/fleet/work/list', { method: 'POST' })
+    ).json()) as FleetListingView
     expect(view.repos).toEqual([{ forge: 'work', path: 'games/a' }])
     expect(view.matched).toEqual([
       { forge: 'work', path: 'games/a' },
@@ -300,51 +304,50 @@ describe('polling', () => {
     ])
   })
 
-  test('a subgroup shows its parent listing narrowed and never lists the forge itself', async () => {
+  test('a fleet lists every namespace of the forge once: its includes and every team pattern', async () => {
     const listings: string[] = []
     const listingForge = {
       ...fakeForge,
       listRepositories: async function* (namespace: string) {
         listings.push(namespace)
         yield* [
-          { path: 'shapes/circle', archived: false },
-          { path: 'shapes/oval', archived: false },
-          { path: 'shapes/square', archived: false },
+          { path: `${namespace}/circle`, archived: false },
+          { path: `${namespace}/oval`, archived: false },
+          { path: `${namespace}/stale`, archived: true },
         ]
       },
     } as unknown as GitForge
-    const nested = parseConfig({
-      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge } },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'], exclude: ['shapes/oval'] },
-        'shapes.round': { forge: 'work', include: ['shapes/circle', 'shapes/oval'] },
+    const overlapping = parseConfig({
+      forges: {
+        work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge },
+        other: { kind: 'gitlab', url: 'https://other.test', create: () => listingForge },
+      },
+      fleet: { work: { include: ['tools/*'] } },
+      teams: {
+        shapes: { owns: ['work:shapes/*'], exclude: ['work:shapes/oval'] },
+        round: { owns: ['work:shapes/circle'], consumes: ['work:paints/*'] },
       },
     })
-    const app = createApp({ ...deps(), config: nested })
-    const empty = (await (
-      await app.request('/api/repos/updates/groups/shapes.round')
-    ).json()) as GroupListingView
-    expect(empty).toMatchObject({ parent: 'shapes', repos: [], attempts: [] })
-
-    const listed = (await (
-      await app.request('/api/repos/updates/groups/shapes.round/list', { method: 'POST' })
-    ).json()) as GroupListingView
-    expect(listings).toEqual(['shapes'])
-    expect(listed.parent).toBe('shapes')
-    expect(listed.repos).toEqual([{ forge: 'work', path: 'shapes/circle' }])
-    expect(listed.matched).toEqual([
-      { forge: 'work', path: 'shapes/circle' },
-      { forge: 'work', path: 'shapes/square' },
+    const serverDeps = { ...deps(), config: overlapping }
+    const poller = serverPoller(serverDeps, createEventDispatcher(serverDeps))
+    const listing = await poller?.listFleet('work')
+    expect(listings.toSorted()).toEqual(['paints', 'shapes', 'tools'])
+    // A team exclude only narrows ownership: the repository stays in the fleet.
+    expect(listing?.repos.map((repo) => repo.path)).toEqual([
+      'paints/circle',
+      'paints/oval',
+      'shapes/circle',
+      'shapes/oval',
+      'tools/circle',
+      'tools/oval',
     ])
-    expect(listed.attempts).toHaveLength(1)
 
-    const poller = serverPoller({ ...deps(), config: nested }, createEventDispatcher(deps()))
-    const direct = await poller?.listGroup('shapes.round')
-    expect(direct?.repos).toEqual([{ forge: 'work', path: 'shapes/circle' }])
-    expect(listings).toEqual(['shapes'])
+    const other = await poller?.listFleet('other')
+    expect(other?.repos).toEqual([])
+    expect(listings).toHaveLength(3)
   })
 
-  test('a subgroup-only writer cannot list the parent and sees no parent attempts', async () => {
+  test('only global settings rights reach a fleet listing; team rights do not', async () => {
     const listings: string[] = []
     const listingForge = {
       ...fakeForge,
@@ -353,38 +356,38 @@ describe('polling', () => {
         yield* [{ path: 'shapes/circle', archived: false }]
       },
     } as unknown as GitForge
-    const nested = parseConfig({
+    const shapes = parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge } },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'] },
-        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      teams: {
+        shapes: { owns: ['work:shapes/*'], members: [{ id: 'header:mia', role: 'maintainer' }] },
       },
     })
     const auth = headerAuth({
       roles: {
-        round: [
-          { scope: { groups: ['shapes.round'] }, actions: ['settings:read', 'settings:write'] },
-        ],
-        lead: [{ scope: { groups: ['shapes'] }, actions: ['settings:read', 'settings:write'] }],
+        lead: [{ scope: { teams: ['shapes'] }, actions: ['settings:read', 'settings:write'] }],
+        reader: [{ scope: { all: true }, actions: ['settings:read'] }],
+        admin: [{ scope: { all: true }, actions: ['settings:read', 'settings:write'] }],
       },
     })
-    const app = createApp({ ...deps(), auth, config: nested })
-    const refused = await app.request('/api/repos/updates/groups/shapes.round/list', {
-      method: 'POST',
-      headers: as('round'),
-    })
-    expect(refused.status).toBe(403)
+    const app = createApp({ ...deps(), auth, config: shapes })
+    const list = (headers: Record<string, string>) =>
+      app.request('/api/repos/updates/fleet/work/list', { method: 'POST', headers })
+    const read = (headers: Record<string, string>) =>
+      app.request('/api/repos/updates/fleet/work', { headers })
+
+    for (const headers of [as('lead'), { 'x-forwarded-user': 'mia' }, as('reader')]) {
+      // oxlint-disable-next-line no-await-in-loop -- one caller after another
+      expect((await list(headers)).status).toBe(403)
+    }
     expect(listings).toEqual([])
-    const allowed = await app.request('/api/repos/updates/groups/shapes.round/list', {
-      method: 'POST',
-      headers: as('lead'),
-    })
-    expect(allowed.status).toBe(200)
+    expect((await read(as('lead'))).status).toBe(403)
+    expect((await read({ 'x-forwarded-user': 'mia' })).status).toBe(403)
+
+    expect((await list(as('admin'))).status).toBe(200)
     expect(listings).toEqual(['shapes'])
-    const view = (await (
-      await app.request('/api/repos/updates/groups/shapes.round', { headers: as('round') })
-    ).json()) as GroupListingView
+    const view = (await (await read(as('reader'))).json()) as FleetListingView
     expect(view.repos).toEqual([{ forge: 'work', path: 'shapes/circle' }])
-    expect(view.attempts).toEqual([])
+    expect(view.matched).toBeUndefined()
+    expect(view.attempts).toHaveLength(1)
   })
 })

@@ -1,6 +1,6 @@
 ---
 title: Analyzers
-description: See every analyzer with where and when it runs, how its last week went and which groups override it, and change its options or run it by hand.
+description: See every analyzer with where and when it runs, how its last week went and which teams or paths override it, and change its options or run it by hand.
 panel: Settings › Analyzers
 route: /settings/analyzers
 permission: settings:read
@@ -25,7 +25,7 @@ import {
   Ui,
 } from '@ui'
 
-See every analyzer with where and when it runs, how its last week went and which groups override it, and change its options or run it by hand.
+See every analyzer with where and when it runs, how its last week went and which teams or paths override it, and change its options or run it by hand.
 
 <Screen title="Settings › Analyzers" caption="Grouped by the workspace an analyzer's records feed, sorted by name inside a group.">
   <Toolbar title="Analyzers" crumbs={['Settings']}>
@@ -69,24 +69,24 @@ An analyzer has no switch of its own. Its state is read from [Automation](/guide
 | State             | Means                                                                                                           |
 | ----------------- | --------------------------------------------------------------------------------------------------------------- |
 | On                | Freshness refreshes it, or an enabled trigger, schedule or merge request policy queues it for every repository. |
-| Some repositories | Enabled rules queue it for some groups only.                                                                    |
+| Some repositories | Enabled rules queue it for some teams or paths only.                                                            |
 | Off               | It runs only when someone starts it.                                                                            |
 
 Rules that only react to newly found repositories do not count. To turn an analyzer on or off, change the rules or the freshness setting in Automation; to keep it away from particular repositories, use **Analyzers off** in [Policies](/guide/settings/policies/#turn-analyzers-off).
 
 :::note
-Without `settings:read` over everything, Holtkeeper cannot show you the triggers, schedules and groups, so every state comes from freshness alone.
+Without `settings:read` over everything, Holtkeeper cannot show you the triggers, schedules and teams, so every state comes from freshness alone.
 :::
 
 ## Read the table
 
-| Column            | Meaning                                                                                                         |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| Analyzer          | Name, kind, and an **AI** tag when it calls a model.                                                            |
-| State             | On, Some repositories or Off.                                                                                   |
-| Scope · runs when | _Every repository_, the groups, or _Only when started_, over the freshness cadence and the rules that queue it. |
-| Last 7 days       | _No runs_, _4 runs, all fine_, _1 of 4 failed_ (red when at least half failed) or _2 stopped by budget_.        |
-| Overrides         | Options entries narrower than the organization's.                                                               |
+| Column            | Meaning                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Analyzer          | Name, kind, and an **AI** tag when it calls a model.                                                                     |
+| State             | On, Some repositories or Off.                                                                                            |
+| Scope · runs when | _Every repository_, the teams and paths, or _Only when started_, over the freshness cadence and the rules that queue it. |
+| Last 7 days       | _No runs_, _4 runs, all fine_, _1 of 4 failed_ (red when at least half failed) or _2 stopped by budget_.                 |
+| Overrides         | Options entries narrower than the organization's.                                                                        |
 
 The state tabs, the search over name and kind, **Area** and **Uses AI** narrow it. The strip counts analyzers, overrides, AI analyzers, how many need a look (failed or budget-stopped runs) and the last run. Health counts only runs you may read (`analyses:read`).
 
@@ -119,10 +119,10 @@ Click a row, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows the state
 | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Runs      | The newest 20 runs you may read, each linking to the run, plus a link to [Ops › Runs](/guide/ops/runs/) filtered to it.      |
 | Options   | Every entry of the analyzer's options per scope, with the same editor the analyzer's own page opens from <Ui>Configure</Ui>. |
-| Overrides | Only the entries narrower than the organization's. A new one must name groups or repositories.                               |
+| Overrides | Only the entries narrower than the organization's. A new one must name teams or path patterns.                               |
 
 1. Open **Options**.
-2. Edit the organization's entry, or add one for some groups or repositories. Settings with presets offer a **Preset** picker above the value.
+2. Edit the organization's entry, or add one for some teams, folders or repositories. Settings with presets offer a **Preset** picker above the value.
 3. Save. The next run uses it.
 
 Run-only analyzers such as the Guide have no options and say so. <Ui>Show runs</Ui> in the ⋯ menu opens Ops › Runs filtered to the analyzer.

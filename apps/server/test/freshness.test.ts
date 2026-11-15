@@ -49,9 +49,9 @@ const analyzers: JobAnalyzerInfo[] = [
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-  groups: {
-    games: { forge: 'work', include: ['games/a'] },
-    tools: { forge: 'work', include: ['tools/b'] },
+  teams: {
+    games: { owns: ['work:games/a'] },
+    tools: { owns: ['work:tools/b'] },
   },
   jobs: {},
 })
@@ -186,8 +186,8 @@ describe('freshness sweeper', () => {
   })
 
   test('a team turns freshness off or slower', async () => {
-    await putSetting('freshness', { mode: 'off' }, { groups: ['games'] })
-    await putSetting('freshness', { mode: 'slower', factor: 4 }, { groups: ['tools'] })
+    await putSetting('freshness', { mode: 'off' }, { teams: ['games'] })
+    await putSetting('freshness', { mode: 'slower', factor: 4 }, { teams: ['tools'] })
     await record('tools/b', 'weekly', '2026-11-01T00:00:00.000Z')
     expect((await sweep([analyzers[1] as JobAnalyzerInfo])).queued).toEqual([])
     const [games] = await freshnessStatus(deps([analyzers[1] as JobAnalyzerInfo]), {
@@ -216,7 +216,7 @@ describe('freshness sweeper', () => {
         { appliesTo: async ({ repo, forge }) => !!(await forge.readFile(repo.path, 'go.mod')) },
       ),
     ]
-    await putSetting('analyzers.setup', { command: 'make' }, { groups: ['tools'] })
+    await putSetting('analyzers.setup', { command: 'make' }, { teams: ['tools'] })
     await sweep(list)
     expect(await queued()).toEqual(['go-only games/a', 'setup tools/b'])
     const verdicts = await lastSweepVerdicts({ store })
@@ -234,11 +234,7 @@ describe('freshness sweeper', () => {
       analyzer('coverage', { on: 'time', cadence: '1d' }),
       analyzer('testids', { on: 'time', cadence: '1d' }),
     ]
-    await putSetting(
-      'repo.tests',
-      { expected: false, reason: 'Config only' },
-      { groups: ['games'] },
-    )
+    await putSetting('repo.tests', { expected: false, reason: 'Config only' }, { teams: ['games'] })
     await sweep(list)
     expect(await queued()).toEqual(['coverage tools/b', 'testids games/a', 'testids tools/b'])
     const status = await freshnessStatus(deps(list), { repo: { forge: 'work', path: 'games/a' } })
@@ -271,7 +267,7 @@ describe('freshness sweeper', () => {
       analyzer('reporter', { on: 'time', cadence: '1d' }, { exclusive: true, options }),
       analyzer('testids', { on: 'time', cadence: '1d' }),
     ]
-    await putSetting('repo.freeze', { reason: 'Shared library' }, { groups: ['games'] })
+    await putSetting('repo.freeze', { reason: 'Shared library' }, { teams: ['games'] })
     await putSetting('analyzers.reporter', { dryRun: true }, { all: true })
     await sweep(list)
     expect(await queued()).toEqual([
@@ -349,7 +345,7 @@ describe('freshness sweeper', () => {
     await store.aiUsage.append({
       at: clock.toISOString(),
       repo: { forge: 'work', path: 'tools/b' },
-      groups: ['tools'],
+      teams: ['tools'],
       taskKind: 'review',
       actor: 'system',
       provider: 'anthropic',
@@ -389,19 +385,19 @@ describe('freshness sweeper', () => {
     expect((await sweep(deps2)).queued.map((job) => job.repo.path)).toEqual(['games/a'])
   })
 
-  test('group analyzers run per group on their cadence', async () => {
+  test('team analyzers run per team on their cadence', async () => {
     const fleet = [analyzer('fleet', { on: 'time', cadence: '1d' }, { scope: 'group' })]
     await record('games', 'fleet', '2026-11-11T00:00:00.000Z')
     const result = await sweep(fleet)
     expect(result.queued.map((job) => [job.repo.path, job.group])).toEqual([['tools', 'tools']])
   })
 
-  test('subgroups get group analyses of their own', async () => {
+  test('overlapping teams get team analyses of their own', async () => {
     const nested = parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-      groups: {
-        shapes: { forge: 'work', include: ['shapes/*'] },
-        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      teams: {
+        shapes: { owns: ['work:shapes/*'] },
+        round: { owns: ['work:shapes/circle'] },
       },
       jobs: {},
     })
@@ -411,8 +407,8 @@ describe('freshness sweeper', () => {
       { timezone: 'UTC' },
     )
     expect(result.queued.map((job) => `${job.repo.path} ${job.group}`).toSorted()).toEqual([
+      'round round',
       'shapes shapes',
-      'shapes.round shapes.round',
     ])
   })
 
@@ -427,12 +423,12 @@ describe('freshness sweeper', () => {
     expect(summary.teams).toEqual([
       { analyzers: [{ analyzer: 'weekly', stale: 1, waiting: 0, fresh: 0, skipped: 0 }] },
       {
-        group: 'games',
+        team: 'games',
         analyzers: [{ analyzer: 'weekly', stale: 1, waiting: 0, fresh: 0, skipped: 0 }],
       },
     ])
     const all = await freshnessSummary(deps(), () => true)
-    expect(all.teams.find((team) => team.group === 'tools')?.analyzers).toEqual([
+    expect(all.teams.find((team) => team.team === 'tools')?.analyzers).toEqual([
       { analyzer: 'weekly', stale: 0, waiting: 0, fresh: 1, skipped: 0 },
     ])
   })

@@ -219,7 +219,7 @@ export function BundlesBody({
   update: (patch: Partial<BundlesSearch>) => void
 }) {
   const overview = useBundlesOverview()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   if (overview.isPending) return <Placeholder className="h-72" />
   if (overview.isError) return <ErrorState error={overview.error} />
 
@@ -234,7 +234,7 @@ export function BundlesBody({
     bundleSortValue,
   )
   const scoped = !narrowed && !key
-  const keys = (scoped ? foldScope(rows, view, homeGroups, (row) => row.groups).shown : rows).map(
+  const keys = (scoped ? foldScope(rows, view, homeTeams, (row) => row.teams).shown : rows).map(
     (row) => row.key,
   )
   const openKey =
@@ -281,7 +281,7 @@ export function BundlesBody({
             next ? { sort: next.key, dir: next.direction } : { sort: undefined, dir: undefined },
           )
         }
-        {...(narrowed || key ? {} : { scope: { value: view, onChange: setView, homeGroups } })}
+        {...(narrowed || key ? {} : { scope: { value: view, onChange: setView, homeTeams } })}
         strip={(shown) => kpiCells(bundleKpis(shown))}
         noun={{ one: 'build target', many: 'build targets' }}
         othersSummary={(others) => {

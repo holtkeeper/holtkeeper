@@ -27,7 +27,7 @@ describe('syncWebhooks', () => {
     }
     const config = parseConfig({
       forges: { work: forge },
-      groups: { libs: { forge: 'work', include: ['games/libs'] } },
+      teams: { libs: { owns: ['work:games/libs'] } },
     })
     if (!store.kv || !store.config) throw new Error('memory store has kv and config')
     const hooks = repoHooks(store.kv, vault)

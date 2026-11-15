@@ -105,8 +105,9 @@ export interface StackNote {
   message: string
 }
 
-/** Everything the `stack` analysis stores for one group. */
+/** Everything the `stack` analysis stores for one team. */
 export interface StackData {
+  /** The team key. */
   group: string
   /** When versions and lifecycles were looked up (ISO 8601); end of life is judged at this time. */
   checkedAt: string
@@ -114,7 +115,7 @@ export interface StackData {
   soonDays: number
   repos: StackRepo[]
   components: StackComponent[]
-  /** Every readable repository checked against every convention of the group. */
+  /** Every readable repository checked against every convention of the team. */
   conventions: ConventionResult[]
   notes: StackNote[]
 }

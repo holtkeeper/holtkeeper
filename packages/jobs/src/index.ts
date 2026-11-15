@@ -44,7 +44,15 @@ export {
   matchesAnyPath,
   refreshIntervalMs,
 } from './freshness.ts'
-export { type ResolveRepos, groupRepositories, matchesRepoGlob, staticPrefix } from './repos.ts'
+export {
+  type RepoSelection,
+  type ResolveRepos,
+  fleetRepositories,
+  matchesRepoGlob,
+  selectionCovers,
+  staticPrefix,
+  teamForges,
+} from './repos.ts'
 export {
   type CheckedSchedule,
   type ForgeReaderFor,

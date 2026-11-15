@@ -23,16 +23,16 @@ import { REVIEWS_SCAN, guideScopesOf } from '../src/reviews.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -92,7 +92,7 @@ const review = (iid: number, overrides: Partial<ReviewData> = {}): ReviewData =>
   approved: false,
   checks: [],
   usage: { turns: 4, costUsd: 0.25, inputTokens: 9000, outputTokens: 800, model: 'model-a' },
-  guideScopes: ['all', 'group:shapes'],
+  guideScopes: ['all', 'team:shapes'],
   durationMs: 64_000,
   ...overrides,
 })
@@ -183,7 +183,7 @@ describe('GET /api/reviews', () => {
       resolved: 1,
       model: 'model-a',
       durationMs: 64_000,
-      guideScopes: ['all', 'group:shapes'],
+      guideScopes: ['all', 'team:shapes'],
       costUsd: 0.25,
     })
     expect(result.totals).toEqual({ reviews: 2, findings: 1, resolved: 2, costUsd: 0.3 })
@@ -203,7 +203,7 @@ describe('GET /api/reviews', () => {
     expect(older.reviews).toHaveLength(3)
   })
 
-  test('filters by repository, group and verdict', async () => {
+  test('filters by repository, team and verdict', async () => {
     await add('shapes/circle', daysAgo(1), review(4))
     await add('shapes/square', daysAgo(2), review(6, { verdict: 'looks-good' }))
     await add('colors/red', daysAgo(3), review(5, { verdict: 'looks-good' }))
@@ -211,7 +211,7 @@ describe('GET /api/reviews', () => {
     expect((await list('?repo=work:shapes/square')).reviews.map((r) => r.repo.path)).toEqual([
       'shapes/square',
     ])
-    expect((await list('?group=colors')).reviews.map((r) => r.repo.path)).toEqual(['colors/red'])
+    expect((await list('?team=colors')).reviews.map((r) => r.repo.path)).toEqual(['colors/red'])
     expect((await list('?verdict=looks-good')).reviews.map((r) => r.repo.path)).toEqual([
       'shapes/square',
       'colors/red',
@@ -352,14 +352,14 @@ test('guide scopes are the filled ones, broad to narrow, each once', () => {
       blocks: [
         block('repo:work:shapes/circle', 10),
         block('family:f1', 5),
-        block('group:shapes', 3),
+        block('team:shapes', 3),
         block('all', 7),
-        block('group:shapes', 2),
-        block('group:empty', 0),
+        block('team:shapes', 2),
+        block('team:empty', 0),
         block(undefined, 40),
       ],
     }),
-  ).toEqual(['all', 'group:shapes', 'family:f1', 'repo:work:shapes/circle'])
+  ).toEqual(['all', 'team:shapes', 'family:f1', 'repo:work:shapes/circle'])
 })
 
 const ingest = (data: ReviewData) =>
@@ -435,7 +435,7 @@ describe('GET /api/reviews/quality', () => {
     expect(result.total.comments).toBe(4)
   })
 
-  test('groups by prompt version or model, and narrows to a repository or group', async () => {
+  test('groups by prompt version or model, and narrows to a repository or team', async () => {
     expect((await quality('?by=promptVersion')).rows.map((row) => [row.key, row.comments])).toEqual(
       [
         ['p-1', 3],
@@ -444,7 +444,7 @@ describe('GET /api/reviews/quality', () => {
     )
     expect((await quality('?by=model')).rows).toHaveLength(1)
     expect((await quality('?repo=work:colors/red')).total.comments).toBe(1)
-    expect((await quality('?group=colors')).total.comments).toBe(1)
+    expect((await quality('?team=colors')).total.comments).toBe(1)
     expect((await quality(`?since=${encodeURIComponent(daysAgo(300))}`)).total.comments).toBe(5)
   })
 

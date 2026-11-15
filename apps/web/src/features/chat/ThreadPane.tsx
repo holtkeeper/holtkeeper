@@ -21,7 +21,7 @@ import {
   useChatMutations,
   useChatPeople,
   useChatThread,
-  useGroupTitles,
+  useTeamTitles,
   useRepos,
 } from '../../api/queries.ts'
 import {
@@ -41,7 +41,7 @@ import {
   Avatar,
   Button,
   ErrorState,
-  GroupName,
+  TeamName,
   MoreMenu,
   type MoreMenuItem,
   notify,
@@ -208,7 +208,7 @@ function ContextRepos({ thread, hidden }: { thread: ChatThreadView; hidden: numb
 }
 
 function Context({ thread, refs }: { thread: ChatThreadView; refs: readonly ChatMessageRef[] }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { update } = useChatMutations()
   const context = useChatContext(thread.id)
   const data = context.data
@@ -231,11 +231,11 @@ function Context({ thread, refs }: { thread: ChatThreadView; refs: readonly Chat
           {threadKind(thread)} · {plural(data?.messageCount ?? thread.messageCount, 'message')}
           {thread.muted ? ' · muted' : ''}
         </p>
-        {thread.groups.length ? (
+        {thread.teams.length ? (
           <div className="flex flex-wrap gap-1">
-            {thread.groups.map((group) => (
-              <Tag key={group}>
-                <GroupName group={group} />
+            {thread.teams.map((team) => (
+              <Tag key={team}>
+                <TeamName team={team} />
               </Tag>
             ))}
           </div>
@@ -344,7 +344,7 @@ export function ThreadPane({
   commands: readonly ChatCommandView[]
 }) {
   const { principal } = useSession()
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const { messages, loadOlder } = useChatThread(threadId)
   const people = useChatPeople(threadId)
   const { post, update, read } = useChatMutations()
@@ -493,7 +493,7 @@ export function ThreadPane({
                 people={people.data?.people ?? []}
                 commands={commands}
                 autoReply={thread.autoReply}
-                scope={thread.repo || thread.group ? threadScope(thread, titleOf) : undefined}
+                scope={thread.repo || thread.team ? threadScope(thread, titleOf) : undefined}
                 busy={post.isPending}
                 onSend={send}
               />

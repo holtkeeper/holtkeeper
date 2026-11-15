@@ -125,7 +125,7 @@ describe('schedule form', () => {
       name: 'Office hours',
       enabled: false,
       analyzers: ['quality'],
-      groups: ['games', ['frontend', 'storefront']],
+      teams: ['games', 'storefront'],
       repos: ['work:games/*'],
       options: { quality: { depth: 2 } },
       every: '1h',
@@ -139,7 +139,7 @@ describe('schedule form', () => {
       spread: true,
     }
     const draft = toScheduleDraft({ type: 'schedule', id: 'office', data })
-    expect(draft.groups).toEqual(['games', 'frontend + storefront'])
+    expect(draft.teams).toEqual(['games', 'storefront'])
     expect(validateScheduleDraft(draft)).toEqual({})
     expect(toScheduleInput(draft)).toEqual({
       ...data,
@@ -216,16 +216,16 @@ describe('triggers', () => {
 
   test('round-trips every kind', () => {
     const triggers: TriggerDocumentData[] = [
-      { on: 'tag', analyzers: ['changelog'], groups: ['games'] },
+      { on: 'tag', analyzers: ['changelog'], teams: ['games'] },
       {
         on: 'mergeRequest',
         analyzers: ['review'],
         actions: ['open', 'reopen'],
         draft: true,
-        groups: [['frontend', 'admin-panel']],
+        teams: ['admin-panel'],
       },
       { on: 'newRepo' },
-      { on: 'newRepo', exclude: ['quality'], groups: ['games'] },
+      { on: 'newRepo', exclude: ['quality'], teams: ['games'] },
       { on: 'newRepo', analyzers: ['audit', 'licenses'] },
       { on: 'label', label: 'needs-port', analyzers: ['port'] },
       { on: 'command', command: 'port', analyzer: 'port', args: ['targets'] },
@@ -435,25 +435,23 @@ describe('schedule list', () => {
     expect(filterSchedules(rows, { problems: true }).map((r) => r.id)).toEqual(['b'])
   })
 
-  test('my teams: every-repository rules and those of a home group', () => {
+  test('my teams: every-repository rules and those of a home team', () => {
     expect(inMyTeams(['all'], [])).toBe(true)
     expect(inMyTeams(['toys'], ['toys'])).toBe(true)
     expect(inMyTeams(['toys'], ['games'])).toBe(false)
-    expect(inMyTeams(['toys', 'games'], [['toys', 'games']])).toBe(true)
-    expect(inMyTeams(['toys'], [['toys', 'games']])).toBe(false)
   })
 
-  test('a group position keeps its rules and every-repository ones', () => {
-    expect(laneInView(['toys'], 'group:toys', [])).toBe(true)
-    expect(laneInView(['all'], 'group:toys', [])).toBe(true)
-    expect(laneInView(['games'], 'group:toys', ['games'])).toBe(false)
+  test('a team position keeps its rules and every-repository ones', () => {
+    expect(laneInView(['toys'], 'team:toys', [])).toBe(true)
+    expect(laneInView(['all'], 'team:toys', [])).toBe(true)
+    expect(laneInView(['games'], 'team:toys', ['games'])).toBe(false)
     expect(laneInView(['games'], 'all', [])).toBe(true)
     expect(laneScopeCounts([['all'], ['toys'], ['games', 'toys']], ['games'])).toEqual({
       mine: 2,
       all: 3,
-      groups: [
-        { group: 'games', count: 2 },
-        { group: 'toys', count: 3 },
+      teams: [
+        { team: 'games', count: 2 },
+        { team: 'toys', count: 3 },
       ],
     })
   })

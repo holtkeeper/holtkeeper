@@ -9,7 +9,7 @@ import type { ConventionMode, ConventionStatus } from './types.ts'
 import { yamlSplices } from './yaml-edit.ts'
 
 /**
- * One golden file every repository of a group should match:
+ * One golden file every repository of a team should match:
  * - `exact`: the whole file, ignoring line endings and trailing blank lines;
  * - `json-subset` / `yaml-subset`: every key and array item the golden content defines;
  * - `lines-present`: every non-blank line of the golden content, in any order.

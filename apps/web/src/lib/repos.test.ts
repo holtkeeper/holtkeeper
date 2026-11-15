@@ -3,26 +3,26 @@ import { describe, expect, test } from 'bun:test'
 import type { RepoSummary } from '@holtkeeper/api'
 
 import {
-  filterRepos,
   cellTarget,
-  excludedByPattern,
+  filterRepos,
   fleetKeyCommand,
   fleetSortValue,
   fleetStrip,
-  globMatcher,
-  groupMembership,
-  type GroupRow,
-  groupRows,
-  groupTreeRows,
+  folderAncestors,
+  folderLabel,
+  folderTree,
   healthSummaryText,
-  membershipChangeText,
+  inFolderKey,
+  ownershipChange,
+  ownershipChangeText,
   parseReposSearch,
-  patternChanges,
-  pickGroupTab,
+  pickTeamTab,
   reposSort,
-  siblingOverlaps,
   stepKey,
-  suggestGroup,
+  teamEditLevel,
+  teamRows,
+  toTeamDraft,
+  toTeamInput,
   updatesText,
   withReposSort,
   worstFirst,
@@ -31,7 +31,7 @@ import { sortRows } from './table-sort.ts'
 
 const repo = (path: string, extra: Partial<RepoSummary> = {}): RepoSummary => ({
   repo: { forge: 'gitlab.acme.dev', path },
-  groups: ['web'],
+  teams: ['web'],
   health: 'healthy',
   cells: {},
   ...extra,
@@ -44,7 +44,7 @@ describe('search parameters', () => {
     expect(
       parseReposSearch({
         q: 'widget',
-        group: ['web', '', 'web', 'payments'],
+        team: ['web', '', 'web', 'payments'],
         health: 'failing,bogus',
         forge: 'github.com',
         sort: 'coverage',
@@ -57,7 +57,7 @@ describe('search parameters', () => {
       sort: 'coverage',
       dir: 'desc',
     })
-    expect(parseReposSearch({ sort: 'size', q: '', group: 3 })).toEqual({})
+    expect(parseReposSearch({ sort: 'size', q: '', team: 3 })).toEqual({})
     expect(parseReposSearch({ sort: 'repo' })).toEqual({ sort: 'repo', dir: 'asc' })
   })
 
@@ -72,8 +72,8 @@ describe('search parameters', () => {
 
 const fleet = [
   repo('acme/widget-kit', { repo: { forge: 'github.com', path: 'acme/widget-kit' } }),
-  repo('acme/ledger-api', { groups: ['payments'], health: 'failing' }),
-  repo('acme/checkout-web', { groups: ['web', 'payments'], health: 'warnings' }),
+  repo('acme/ledger-api', { teams: ['payments'], health: 'failing' }),
+  repo('acme/checkout-web', { teams: ['web', 'payments'], health: 'warnings' }),
 ]
 
 const paths = (search: Parameters<typeof filterRepos>[1]) =>
@@ -82,10 +82,8 @@ const paths = (search: Parameters<typeof filterRepos>[1]) =>
 const audit = (critical: number, high: number, active: number) =>
   ({ severities: { critical, high, medium: 0, low: 0, unknown: 0 }, active }) as never
 
-const only = (actions: string[]) => (action: string) => actions.includes(action)
-
 describe('filtering and sorting', () => {
-  test('filters by text over path and groups, health and forge', () => {
+  test('filters by text over path and teams, health and forge', () => {
     expect(paths({ q: 'PAY' })).toEqual(['acme/ledger-api', 'acme/checkout-web'])
     expect(paths({ q: 'github.com:acme' })).toEqual(['acme/widget-kit'])
     expect(paths({ q: 'payments', health: ['warnings'] })).toEqual(['acme/checkout-web'])
@@ -193,196 +191,138 @@ test('J, K and Enter drive the table except while typing or in a dialog', () => 
   expect(fleetKeyCommand({ key: 'k', metaKey: true })).toBeUndefined()
 })
 
-test('group rows merge configured groups with the groups of visible repositories', () => {
-  const rows = groupRows(
-    [repo('acme/a', { health: 'failing' }), repo('acme/b', { groups: ['web', 'platform'] })],
-    [{ id: 'payments', data: { forge: 'gitlab.acme.dev', include: ['acme/pay-*'], exclude: [] } }],
-  )
-  expect(rows.map((row) => [row.id, row.forge, row.members.length, row.counts.failing])).toEqual([
-    ['payments', 'gitlab.acme.dev', 0, 0],
-    ['platform', 'gitlab.acme.dev', 1, 0],
-    ['web', 'gitlab.acme.dev', 2, 1],
-  ])
-  expect(rows[0]?.groups).toEqual(['payments'])
-})
-
-const ids = (rows: readonly GroupRow[]) => rows.map((row) => row.id)
-
-describe('group tree', () => {
-  const shapes = { forge: 'gitlab.acme.dev', include: ['acme/*'], exclude: [] }
-  const tree = groupRows(
-    [
-      repo('acme/disc', { groups: ['shapes.round', 'shapes'], health: 'failing' }),
-      repo('acme/ring', { groups: ['shapes.round', 'shapes.flat', 'shapes'] }),
-      repo('acme/tile', { groups: ['shapes.flat', 'shapes'] }),
-      repo('acme/beep', { groups: ['sounds'] }),
-    ],
-    [
-      { id: 'shapes', data: shapes },
-      { id: 'shapes.round', data: { ...shapes, include: ['acme/disc', 'acme/ring'] } },
-      { id: 'shapes.flat', data: { ...shapes, include: ['acme/t*', 'acme/ring'] } },
-    ],
-  )
-
-  test('nests subgroups under their parent', () => {
-    expect(tree.map((row) => row.id)).toEqual(['shapes', 'sounds'])
-    const [root] = tree
-    expect(root?.subgroups.map((row) => [row.id, row.parent, row.members.length])).toEqual([
-      ['shapes.flat', 'shapes', 2],
-      ['shapes.round', 'shapes', 2],
-    ])
-    expect(root?.subgroups[1]?.groups).toEqual(['shapes.round', 'shapes'])
-    expect(root?.subgroups[1]?.counts.failing).toBe(1)
-    expect(root?.members).toHaveLength(3)
-  })
-
-  test('a subgroup whose parent is unknown stands as a root', () => {
-    expect(groupRows([repo('acme/x', { groups: ['lone.part'] })]).map((row) => row.id)).toEqual([
-      'lone.part',
-    ])
-  })
-
-  test('lists subgroups of open roots, or the ones a filter matches', () => {
-    expect(ids(groupTreeRows(tree, new Set()))).toEqual(['shapes', 'sounds'])
-    expect(ids(groupTreeRows(tree, new Set(['shapes'])))).toEqual([
-      'shapes',
-      'shapes.flat',
-      'shapes.round',
-      'sounds',
-    ])
-    expect(ids(groupTreeRows(tree, new Set(), (row) => row.id.includes('round')))).toEqual([
-      'shapes',
-      'shapes.round',
-    ])
-    expect(ids(groupTreeRows(tree, new Set(['shapes']), (row) => row.id === 'sounds'))).toEqual([
-      'sounds',
-    ])
-    expect(
-      ids(groupTreeRows(tree, new Set(['shapes']), undefined, (rows) => rows.toReversed())),
-    ).toEqual(['sounds', 'shapes', 'shapes.round', 'shapes.flat'])
-  })
-
-  test('finds members in two sibling subgroups', () => {
-    const members = tree[0]?.members ?? []
-    expect([...siblingOverlaps(members, 'shapes')]).toEqual([
-      ['gitlab.acme.dev:acme/ring', ['shapes.flat', 'shapes.round']],
-    ])
-    expect(siblingOverlaps(members, 'sounds').size).toBe(0)
-  })
-})
-
-test('group tabs follow permissions', () => {
-  expect(pickGroupTab(only([]), 'membership')).toMatchObject({ tab: 'repos' })
-  expect(pickGroupTab(only([]), undefined).tabs.map((t) => t.id)).toEqual(['repos', 'subgroups'])
-  const reader = pickGroupTab(only(['settings:read', 'analyses:read']), 'membership')
-  expect(reader.tab).toBe('membership')
-  expect(reader.tabs.map((t) => t.id)).toEqual([
-    'repos',
-    'subgroups',
-    'stack',
-    'settings',
-    'membership',
-  ])
-  const partial = pickGroupTab(only(['settings:read']), 'membership', only([]))
-  expect(partial.tab).toBe('repos')
-  expect(partial.tabs.map((t) => t.id)).toEqual(['repos', 'subgroups', 'settings'])
-})
-
-test('a subgroup has no Subgroups tab', () => {
-  const sub = pickGroupTab(only(['settings:read']), 'subgroups', only([]), 'shapes.round')
-  expect(sub.tab).toBe('repos')
-  expect(sub.tabs.map((t) => t.id)).toEqual(['repos', 'settings'])
-  expect(pickGroupTab(only([]), 'subgroups', only([]), 'shapes').tab).toBe('subgroups')
-})
-
-describe('group patterns', () => {
-  test('globs match like the server: * in one segment, ** across, classes and braces', () => {
-    expect(globMatcher('acme/*')('acme/widget-kit')).toBe(true)
-    expect(globMatcher('acme/*')('acme/web/widget-kit')).toBe(false)
-    expect(globMatcher('acme/**')('acme/web/widget-kit')).toBe(true)
-    expect(globMatcher('acme/**/kit')('acme/kit')).toBe(true)
-    expect(globMatcher('acme/{ledger,billing}-*')('acme/billing-worker')).toBe(true)
-    expect(globMatcher('acme/{ledger,billing}-*')('acme/notify-svc')).toBe(false)
-    expect(globMatcher('acme/v[0-9]')('acme/v2')).toBe(true)
-    expect(globMatcher('acme/a.b')('acme/aXb')).toBe(false)
-    expect(globMatcher('acme/app?')('acme/app1')).toBe(true)
-  })
-
-  test('a path a glob exclude keeps out stays excluded after it is added', () => {
-    const group = { forge: 'work', include: ['team/*'], exclude: ['team/legacy-*', 'team/old'] }
-    expect(excludedByPattern(group, 'work', ['team/legacy-a', 'team/old', 'team/new'])).toEqual([
-      { path: 'team/legacy-a', pattern: 'team/legacy-*' },
-    ])
-    expect(excludedByPattern(undefined, 'work', ['team/legacy-a'])).toEqual([])
-  })
-
-  const forge = 'gitlab.acme.dev'
-  const listed = ['acme/ledger-api', 'acme/ledger-legacy', 'acme/payout-svc', 'acme/billing-worker']
-  const matched = listed.map((path) => ({ forge, path }))
-  const saved = {
-    include: ['acme/ledger-*', 'acme/billing-*', 'acme/fx-rates'],
-    exclude: ['acme/*-legacy'],
+describe('teams', () => {
+  const widgets = {
+    title: 'Widgets',
+    owns: ['acme/round/**'],
+    exclude: ['acme/round/legacy-*'],
+    consumes: ['acme/shared/**'],
+    members: [{ id: 'ann@acme.test', role: 'maintainer' as const }],
   }
+  const listing = [
+    repo('acme/round/web', { health: 'failing' }),
+    repo('acme/round/legacy-api'),
+    repo('acme/shared/kit'),
+    repo('acme/square/web', { teams: ['gizmo'] }),
+  ]
 
-  test('members, excluded paths and exact paths before any listing', () => {
-    const membership = groupMembership(
-      forge,
-      [...matched, { forge: 'github.com', path: 'acme/x' }],
-      saved,
+  test('rows count what each team owns and consumes by its patterns, or by owner teams', () => {
+    const rows = teamRows(listing, [{ id: 'widgets', data: widgets }], (id) =>
+      id === 'widgets' ? 'Widgets' : id,
+    )
+    expect(rows.map((row) => [row.id, row.repos.length, row.consumed, row.counts.failing])).toEqual(
+      [
+        ['gizmo', 1, 0, 0],
+        ['web', 3, 0, 1],
+        ['widgets', 1, 1, 1],
+      ],
+    )
+    expect(rows[2]?.teams).toEqual(['widgets'])
+    expect(rows[2]?.definition?.title).toBe('Widgets')
+  })
+
+  test('global settings:write edits everything, a maintainer only title and members', () => {
+    expect(teamEditLevel([{ scope: { all: true }, actions: ['settings:write'] }], 'widgets')).toBe(
+      'full',
+    )
+    expect(teamEditLevel([{ scope: { teams: ['widgets'] }, actions: ['*'] }], 'widgets')).toBe(
+      'members',
     )
     expect(
-      membership.rows.map((row) => [row.repo.path, row.state, row.pattern, row.source]),
-    ).toEqual([
-      ['acme/billing-worker', 'member', 'acme/billing-*', 'listed'],
-      ['acme/fx-rates', 'member', 'acme/fx-rates', 'exact'],
-      ['acme/ledger-api', 'member', 'acme/ledger-*', 'listed'],
-      ['acme/ledger-legacy', 'excluded', 'acme/*-legacy', 'listed'],
-    ])
-    expect(membership.counts).toEqual({
-      include: {
-        'acme/ledger-*': { members: 1, excluded: 1 },
-        'acme/billing-*': { members: 1, excluded: 0 },
-        'acme/fx-rates': { members: 1, excluded: 0 },
-      },
-      exclude: { 'acme/*-legacy': 1 },
-    })
-    expect([membership.members, membership.excluded, membership.joins, membership.leaves]).toEqual([
-      3, 1, 0, 0,
-    ])
-  })
-
-  test('a subgroup counts only what the parent listed, so outside exact paths match nothing', () => {
-    const membership = groupMembership(forge, matched, saved, saved, false)
-    expect(membership.rows.map((row) => row.repo.path)).not.toContain('acme/fx-rates')
-    expect(membership.members).toBe(2)
-  })
-
-  test('unsaved patterns preview who joins and who leaves on the last listing', () => {
-    const draft = {
-      include: ['acme/ledger-*', 'acme/payout-*', 'acme/fx-rates'],
-      exclude: ['acme/*-legacy'],
-    }
-    const membership = groupMembership(forge, matched, saved, draft)
-    expect(membership.rows.slice(0, 2).map((row) => [row.repo.path, row.state])).toEqual([
-      ['acme/payout-svc', 'joins'],
-      ['acme/billing-worker', 'leaves'],
-    ])
-    expect(membershipChangeText(membership)).toBe('adds 1 repository, removes 1 repository')
-    expect(membershipChangeText({ joins: 0, leaves: 0 })).toBe(
-      'changes no membership in the last listing',
+      teamEditLevel([{ scope: { teams: ['widgets'] }, actions: ['settings:write'] }], 'widgets'),
+    ).toBe('none')
+    expect(teamEditLevel([{ scope: { teams: ['gizmo'] }, actions: ['*'] }], 'widgets')).toBe('none')
+    expect(teamEditLevel([{ scope: { teams: ['widgets'] }, actions: ['*'] }], undefined)).toBe(
+      'none',
     )
-    expect(patternChanges(saved, draft)).toBe(2)
-    expect(patternChanges(saved, saved)).toBe(0)
   })
 
-  test('suggests the group whose patterns cover the most pasted paths', () => {
-    const groups = [
-      { id: 'payments', data: { forge, include: ['acme/ledger-*', 'acme/fx-rates'], exclude: [] } },
-      { id: 'web', data: { forge, include: ['web/*'], exclude: [] } },
-    ]
-    expect(suggestGroup(['acme/ledger-core', 'acme/tax-rules'], groups)).toBe('payments')
-    expect(suggestGroup(['web/storefront'], groups)).toBe('web')
-    expect(suggestGroup(['tools/cli'], groups)).toBeUndefined()
+  test('the draft round-trips; blanks and duplicates are dropped on save', () => {
+    const draft = toTeamDraft('widgets', widgets)
+    expect(toTeamInput(draft)).toEqual(widgets)
+    expect(
+      toTeamInput({
+        ...draft,
+        title: ' ',
+        owns: [' acme/round/** ', 'acme/round/**', ''],
+        members: [
+          { id: ' bob@acme.test ', role: 'member' },
+          { id: 'bob@acme.test', role: 'maintainer' },
+          { id: '', role: 'member' },
+        ],
+      }),
+    ).toEqual({
+      owns: ['acme/round/**'],
+      exclude: ['acme/round/legacy-*'],
+      consumes: ['acme/shared/**'],
+      members: [{ id: 'bob@acme.test', role: 'member' }],
+    })
+    expect(toTeamDraft()).toMatchObject({ id: '', owns: [], members: [] })
+  })
+
+  test('unsaved patterns preview who joins and who leaves', () => {
+    const change = ownershipChange(listing, widgets, { owns: ['acme/**/web'], exclude: [] })
+    expect(change.owned.map((r) => r.repo.path)).toEqual(['acme/round/web', 'acme/square/web'])
+    expect(change.joins.map((r) => r.repo.path)).toEqual(['acme/square/web'])
+    expect(change.leaves).toEqual([])
+    expect(ownershipChangeText(change)).toBe('adds 1 repository')
+    expect(ownershipChangeText({ joins: [], leaves: [1, 2] })).toBe('removes 2 repositories')
+    expect(ownershipChangeText({ joins: [], leaves: [] })).toBe('')
+  })
+
+  test('team tabs follow permissions', () => {
+    expect(pickTeamTab(() => true, 'stack').tab).toBe('stack')
+    const limited = pickTeamTab((action) => action === 'repos:read', 'settings')
+    expect(limited.tabs.map((tab) => tab.id)).toEqual(['repos'])
+    expect(limited.tab).toBe('repos')
+  })
+})
+
+describe('folder tree', () => {
+  const refs = [
+    { forge: 'work', path: 'acme/round/web' },
+    { forge: 'work', path: 'acme/round/api' },
+    { forge: 'work', path: 'acme/square/web' },
+    { forge: 'work', path: 'solo' },
+  ]
+
+  test('every path prefix is a folder; a single forge hides its root', () => {
+    const tree = folderTree(refs)
+    expect(tree.map((node) => [node.folder, node.total])).toEqual([['acme', 3]])
+    expect(tree[0]?.children.map((node) => [node.folder, node.name, node.total])).toEqual([
+      ['acme/round', 'round', 2],
+      ['acme/square', 'square', 1],
+    ])
+    const two = folderTree([...refs, { forge: 'home', path: 'acme/kit' }])
+    expect(two.map((node) => [node.forge, node.folder, node.total])).toEqual([
+      ['home', '', 1],
+      ['work', '', 4],
+    ])
+  })
+
+  test('folder keys select repositories below them and name their ancestors', () => {
+    expect(inFolderKey(refs[0]!, 'work:acme/round')).toBe(true)
+    expect(inFolderKey(refs[2]!, 'work:acme/round')).toBe(false)
+    expect(inFolderKey(refs[3]!, 'work:')).toBe(true)
+    expect(inFolderKey(refs[0]!, 'home:acme')).toBe(false)
+    expect(folderAncestors('work:acme/round/web')).toEqual([
+      'work:',
+      'work:acme',
+      'work:acme/round',
+    ])
+    expect(folderLabel('work:acme/round')).toBe('acme/round')
+    expect(folderLabel('work:')).toBe('forge work')
+  })
+
+  test('the selected folder is a search parameter and filters the list', () => {
+    expect(parseReposSearch({ folder: 'work:acme/round' })).toEqual({ folder: 'work:acme/round' })
+    expect(parseReposSearch({ folder: 'acme' })).toEqual({})
+    expect(
+      filterRepos(
+        refs.map((ref) => repo(ref.path, { repo: ref })),
+        { folder: 'work:acme/round' },
+      ).map((r) => r.repo.path),
+    ).toEqual(['acme/round/web', 'acme/round/api'])
   })
 })
 

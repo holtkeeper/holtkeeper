@@ -27,6 +27,7 @@ import {
   guideSectionLabels,
   guideSections,
   guideTasks,
+  learningScopeKinds,
   testIdsSettingKey,
 } from '@holtkeeper/guide'
 import type {
@@ -207,14 +208,14 @@ const renderChainLayers = (layers: readonly GuideChainLayer[]): string =>
   ].join('\n')
 
 const noRepo = (repo: string) =>
-  new ToolError(`No readable repository ${repo}; pass forge:path, e.g. gitlab:group/app.`)
+  new ToolError(`No readable repository ${repo}; pass forge:path, e.g. gitlab:acme/app.`)
 
 function guideTools(access: GuideRulesAccess): RegistryTool[] {
   return [
     defineTool({
       name: 'repo_rules',
       description:
-        "The team's rules for a repository (its Guide): team rules from the repository, its family, its groups and the whole organization, learned rules, policies such as commit conventions, generated text marked lower priority, then relevant knowledge notes. Human rules always win over generated text. Call it before changing code in a repository; the repository's own rules files (AGENTS.md, CLAUDE.md, ...) are not included, read them from the checkout.",
+        "The team's rules for a repository (its Guide): team rules from the repository, its family, its folders, its owner teams and the whole organization, learned rules, policies such as commit conventions, generated text marked lower priority, then relevant knowledge notes. Human rules always win over generated text. Call it before changing code in a repository; the repository's own rules files (AGENTS.md, CLAUDE.md, ...) are not included, read them from the checkout.",
       input: z.object({
         repo: repoArg,
         task: z
@@ -258,7 +259,7 @@ function guideTools(access: GuideRulesAccess): RegistryTool[] {
 }
 
 const isScopeKind = (value: string): value is LearningScopeKind =>
-  value === 'repo' || value === 'family' || value === 'group'
+  learningScopeKinds.some((kind) => kind === value)
 
 function proposalTools(access: RuleProposalAccess): RegistryTool[] {
   return [
@@ -285,12 +286,12 @@ function proposalTools(access: RuleProposalAccess): RegistryTool[] {
           .describe('Why the rule is needed, with the evidence you saw'),
         scope: z
           .union([
-            z.enum(['repo', 'family', 'group']),
-            z.templateLiteral([z.enum(['group', 'family', 'repo']), ':', z.string().min(1)]),
+            z.enum(learningScopeKinds),
+            z.templateLiteral([z.enum(learningScopeKinds), ':', z.string().min(1)]),
           ])
           .optional()
           .describe(
-            'Where it should apply once accepted (default repo): repo, family, group (the nearest group, a subgroup when there is one), or an exact scope of the repository such as group:<key> for a parent group, family:<id> or repo:<forge:path>',
+            'Where it should apply once accepted (default repo): repo, family, path (the folder directly holding the repository), team (its first owner team), or an exact scope of the repository such as path:<forge>:<folder> for a wider folder, team:<key> for another owner team, family:<id> or repo:<forge:path>',
           ),
       }),
       readOnly: false,

@@ -72,25 +72,25 @@ One row per repository you can read, from its newest coverage record. Repositori
 | Untested files | Source files no test loaded, of all source files.                                                                                                                                    |
 | Freshness      | Whether the record is current, behind the default branch's HEAD, or more than a week or a month old, with its age and short commit.                                                  |
 
-The toolbar narrows the table: the scope switch (_My teams_ folds other teams' rows into one row with their median and how many are below target; its group picker filters by group), the **Freshness** filter (it also offers **No tests by design**) and **Below 60% only**, which names the organization-wide target. The search in the header matches a path or group. Every column but the sparkline sorts, and filters live in the URL, so a link shows the same view.
+The toolbar narrows the table: the scope switch (_My teams_ folds other teams' rows into one row with their median and how many are below target; its team picker filters by team), the **Freshness** filter (it also offers **No tests by design**) and **Below 60% only**, which names the organization-wide target. The search in the header matches a path or team. Every column but the sparkline sorts, and filters live in the URL, so a link shows the same view.
 
 The strip counts the rows in scope: median line and branch coverage of measured repositories, how many are below their target, untested files, and repositories per freshness state. Repositories with no tests by design are left out of every figure and counted in their own cell.
 
 ## Set the target
 
-Every repository should reach a line coverage target, 60% unless a setting says otherwise. Groups and repositories may set their own; the table footer names the organization-wide one.
+Every repository should reach a line coverage target, 60% unless a setting says otherwise. Teams, folders and repositories may set their own; the table footer names the organization-wide one.
 
 1. Open <Ui>Configure</Ui> on the page, or **Settings › Analyzers › coverage**.
-2. Add or edit an entry for everything, a group or a repository, and set **target** to a percentage from 0 to 100.
+2. Add or edit an entry for everything, a team, a path pattern or a repository, and set **target** to a percentage from 0 to 100.
 3. Save. The table and repository health judge coverage by the new target at once; the target changes nothing in how tests run.
 
 <Screen
   title="Settings › Analyzers › coverage"
-  caption="An entry for one group; the most specific entry wins."
+  caption="An entry for one folder; the most specific entry wins."
 >
   <Stack>
     <Fields>
-      <Field label="Scope" value="Group · payments" />
+      <Field label="Scope" value="Path · acme/round/**" />
       <Field label="target" value="75" mono hint="Line coverage in percent, 0–100." />
       <Field
         label="exclude"
@@ -125,7 +125,7 @@ Every repository should reach a line coverage target, 60% unless a setting says 
 ```
 
 :::note
-Component files (`.tsx`, `.jsx`) are left out by default, so components need no tests. Turn **components** on for a repository or group that tests them.
+Component files (`.tsx`, `.jsx`) are left out by default, so components need no tests. Turn **components** on for a repository, folder or team that tests them.
 :::
 
 ## Inspect a repository
@@ -176,7 +176,7 @@ Generated code, fixtures or vendored files drag coverage down without telling yo
 2. Click <Ui>Exclude</Ui> on a file. A dialog offers globs for it: the file itself, its extension in that folder, each parent folder, or the name anywhere. Pick one or type your own.
 3. Confirm. The glob is added to the repository's own `analyzers.coverage` entry.
 
-To add a glob without starting from a file, use <Ui>Add pattern</Ui> on the **Exclusions** tab. Each glob there has a remove button. Removing a glob that a broader scope set copies that list into a repository entry without it, so the group keeps its own.
+To add a glob without starting from a file, use <Ui>Add pattern</Ui> on the **Exclusions** tab. Each glob there has a remove button. Removing a glob that a broader scope set copies that list into a repository entry without it, so the broader scope keeps its own.
 
 <Screen title="Quality › Coverage › Exclude">
   <Stack>
@@ -209,7 +209,7 @@ Some repositories have nothing to test: a brand asset bundle, a config repositor
 
 The row then reads **No tests by design** (the reason shows as a tooltip), never counts as below target and sorts last. The sheet shows a notice with the reason and the scope that set it instead of <Ui>Run coverage</Ui>. Agents get the same signal: reviews stop asking for tests there, and the Guide's Testing section is skipped.
 
-To undo it, click <Ui>Expect tests again</Ui> in the notice. When a group marked the repository, the button names the broader scope it overrides.
+To undo it, click <Ui>Expect tests again</Ui> in the notice. When a team or folder entry marked the repository, the button names the broader scope it overrides.
 
 ## How coverage is measured
 

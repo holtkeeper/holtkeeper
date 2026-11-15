@@ -5,7 +5,7 @@ import type { GitForge } from '@holtkeeper/forge'
 import type { AnyConfigDocument, ConfigDocumentInput } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
-import { groupIdSchema } from './documents.ts'
+import { teamIdSchema } from './documents.ts'
 import { effectiveConfig, type ForgeFactory } from './effective.ts'
 import { generateWebhookSecret } from './secret.ts'
 import { createConfigSource, liveConfig } from './source.ts'
@@ -39,13 +39,23 @@ const documents: AnyConfigDocument[] = [
   doc({
     type: 'forge',
     id: 'work',
-    data: { kind: 'gitlab', url: 'https://work.test', credentialId: 'c3' },
+    data: { kind: 'gitlab', url: 'https://work.test', credentialId: 'c3', include: ['misc/*'] },
   }),
-  doc({ type: 'group', id: 'games', data: { forge: 'cloud', include: ['studio/*'], exclude: [] } }),
   doc({
-    type: 'group',
+    type: 'team',
+    id: 'games',
+    data: { owns: ['cloud:studio/*'], exclude: [], consumes: [], members: [] },
+  }),
+  doc({
+    type: 'team',
     id: 'tools',
-    data: { title: 'Tooling crew', forge: 'work', include: ['tools/*'], exclude: ['tools/old'] },
+    data: {
+      title: 'Tooling crew',
+      owns: ['work:tools/*'],
+      exclude: ['tools/old'],
+      consumes: ['studio/**'],
+      members: [{ id: 'ada', role: 'maintainer' }],
+    },
   }),
   doc({ type: 'repoTraits', id: 'r1', data: { pattern: 'tools/*', traits: { lang: 'go' } } }),
   doc({
@@ -63,7 +73,7 @@ const documents: AnyConfigDocument[] = [
       timezone: 'Europe/Berlin',
       windows: { allow: [{ days: ['mon', 'fri'], from: '09:00', to: '18:00' }] },
       analyzers: ['quality'],
-      groups: ['tools'],
+      teams: ['tools'],
     },
   }),
   doc({
@@ -75,7 +85,7 @@ const documents: AnyConfigDocument[] = [
 ]
 
 describe('effectiveConfig', () => {
-  test('panel documents become forges, groups, traits, schedules and triggers', () => {
+  test('panel documents become forges, teams, traits, schedules and triggers', () => {
     const effective = effectiveConfig(file, documents, {
       forgeFactories: { gitlab: factory },
       tokens: { c1: 'secret-token', c3: 'work-token' },
@@ -87,8 +97,15 @@ describe('effectiveConfig', () => {
     expect(config.forges.cloud?.url).toBe('https://gitlab.com')
     expect(config.jobs.botUsernames).toEqual({ cloud: 'keeper' })
     expect(config.jobs.concurrency).toBe(3)
-    expect(config.groups.games).toEqual({ forge: 'cloud', include: ['studio/*'], exclude: [] })
-    expect(config.groups.tools?.title).toBe('Tooling crew')
+    expect(config.teams.games).toEqual({
+      owns: ['cloud:studio/*'],
+      exclude: [],
+      consumes: [],
+      members: [],
+    })
+    expect(config.teams.tools?.title).toBe('Tooling crew')
+    expect(config.fleet).toEqual({ work: { include: ['misc/*'], exclude: [] } })
+    expect(config.teams.tools?.members).toEqual([{ id: 'ada', role: 'maintainer' }])
     expect(config.repos['tools/*']).toEqual({ traits: { lang: 'go' } })
     expect(config.jobs?.schedules.map((s) => [s.name, s.enabled, s.title])).toEqual([
       ['nightly', false, 'Nightly'],
@@ -113,7 +130,7 @@ describe('effectiveConfig', () => {
         doc({
           type: 'trigger',
           id: 'new-repo',
-          data: { on: 'newRepo', exclude: ['quality'], groups: ['games'] },
+          data: { on: 'newRepo', exclude: ['quality'], teams: ['games'], repos: ['tools/*'] },
         }),
       ],
       {
@@ -121,13 +138,21 @@ describe('effectiveConfig', () => {
         tokens: {},
       },
     )
-    expect(config.jobs?.onNewRepo).toEqual({ exclude: ['quality'], groups: ['games'] })
+    expect(config.jobs?.onNewRepo).toEqual({
+      exclude: ['quality'],
+      teams: ['games'],
+      repos: ['tools/*'],
+    })
   })
 
   test('rejects documents that reference each other wrongly', () => {
     const broken = [
       ...documents,
-      doc({ type: 'group', id: 'apps', data: { forge: 'nowhere', include: ['a/*'], exclude: [] } }),
+      doc({
+        type: 'team',
+        id: 'apps',
+        data: { owns: ['nowhere:a/*'], exclude: [], consumes: [], members: [] },
+      }),
     ]
     expect(() => effectiveConfig(file, broken, { forgeFactories: { gitlab: factory } })).toThrow(
       ConfigError,
@@ -137,31 +162,16 @@ describe('effectiveConfig', () => {
     )
   })
 
-  test('group ids allow one subgroup level and need the parent', () => {
-    expect(groupIdSchema.safeParse('shapes').success).toBe(true)
-    expect(groupIdSchema.safeParse('shapes.round').success).toBe(true)
-    expect(groupIdSchema.safeParse('shapes.round.small').success).toBe(false)
+  test('team ids are flat keys and unknown teams are refused', () => {
+    expect(teamIdSchema.safeParse('shapes').success).toBe(true)
+    expect(teamIdSchema.safeParse('shapes.round').success).toBe(false)
     const orphan = [
       ...documents,
-      doc({
-        type: 'group',
-        id: 'shapes.round',
-        data: { forge: 'cloud', include: ['studio/*'], exclude: [] },
-      }),
+      doc({ type: 'trigger', id: 'push', data: { on: 'push', analyzers: ['x'], teams: ['gone'] } }),
     ]
     expect(() => effectiveConfig(file, orphan, { forgeFactories: { gitlab: factory } })).toThrow(
-      'parent group "shapes" is not configured',
+      'unknown team "gone"',
     )
-    const nested = [
-      ...documents,
-      doc({
-        type: 'group',
-        id: 'games.round',
-        data: { forge: 'cloud', include: ['studio/round-*'], exclude: [] },
-      }),
-    ]
-    const { config } = effectiveConfig(file, nested, { forgeFactories: { gitlab: factory } })
-    expect(Object.keys(config.groups)).toContain('games.round')
   })
 
   test('forges without token or adapter fail only when used', () => {
@@ -213,7 +223,7 @@ describe('createConfigSource', () => {
     const live = liveConfig(source)
     const forges = live.forges
     const seen: string[] = []
-    source.subscribe((effective) => seen.push(Object.keys(effective.config.groups).join(',')))
+    source.subscribe((effective) => seen.push(Object.keys(effective.config.teams).join(',')))
 
     const client = live.forges.cloud?.create()
     expect(live.forges.cloud?.create()).toBe(client)
@@ -222,15 +232,15 @@ describe('createConfigSource', () => {
     expect(builds).toHaveLength(1)
 
     await put({
-      type: 'group',
+      type: 'team',
       id: 'tools',
-      data: { forge: 'cloud', include: ['t/*'], exclude: [] },
+      data: { owns: ['cloud:t/*'], exclude: [], consumes: [], members: [] },
       updatedAt: at,
     })
     await source.refresh()
     expect(seen).toEqual(['tools'])
-    expect(live.groups.tools?.forge).toBe('cloud')
-    expect('tools' in live.groups).toBeTrue()
+    expect(live.teams.tools?.owns).toEqual(['cloud:t/*'])
+    expect('tools' in live.teams).toBeTrue()
     expect(forges).not.toBe(live.forges)
     expect(live.forges.cloud?.create()).toBe(client)
     expect(builds).toHaveLength(1)
@@ -241,28 +251,28 @@ describe('createConfigSource', () => {
     expect(live.forges.cloud?.create()).not.toBe(client)
 
     await put({
-      type: 'group',
+      type: 'team',
       id: 'bad',
-      data: { forge: 'nope', include: ['x'], exclude: [] },
+      data: { owns: ['nope:x'], exclude: [], consumes: [], members: [] },
       updatedAt: at,
     })
     await source.refresh()
     expect(source.lastError()).toContain('unknown forge "nope"')
-    expect('bad' in live.groups).toBeFalse()
-    await config.remove('group', 'bad')
+    expect('bad' in live.teams).toBeFalse()
+    await config.remove('team', 'bad')
 
     expect(
       source.preview({
         put: {
-          type: 'group',
+          type: 'team',
           id: 'x',
-          data: { forge: 'nope', include: ['x'], exclude: [] },
+          data: { owns: ['nope:x'], exclude: [], consumes: [], members: [] },
           updatedAt: at,
         },
       }),
     ).rejects.toThrow('unknown forge')
-    const preview = await source.preview({ remove: { type: 'group', id: 'tools' } })
-    expect(preview.config.groups.tools).toBeUndefined()
+    const preview = await source.preview({ remove: { type: 'team', id: 'tools' } })
+    expect(preview.config.teams.tools).toBeUndefined()
 
     const current = await config.get('forge', 'cloud')
     if (!current) throw new Error('missing forge')
@@ -277,7 +287,7 @@ describe('createConfigSource', () => {
 
   test('without a store it serves the file config alone', async () => {
     const source = await createConfigSource({ file, forgeFactories: {} })
-    expect(source.current()).toMatchObject({ ...file, forges: {}, groups: {} })
+    expect(source.current()).toMatchObject({ ...file, forges: {}, teams: {} })
     expect((await source.refresh()).config).toBe(source.current())
   })
 })

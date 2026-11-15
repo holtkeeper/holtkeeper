@@ -4,7 +4,7 @@ Configuration and repository resolution. Everything else in Holtkeeper builds on
 
 ## Configuration
 
-A configuration is a TypeScript module whose default export is passed through `defineConfig`. It holds infrastructure only; forges, groups, repository traits, schedules, triggers and every other setting are panel documents and settings in the store ([@holtkeeper/managed-config](../../managed-config/docs/README.md)).
+A configuration is a TypeScript module whose default export is passed through `defineConfig`. It holds infrastructure only; forges, teams, repository traits, schedules, triggers and every other setting are panel documents and settings in the store ([@holtkeeper/managed-config](../../managed-config/docs/README.md)).
 
 ```ts
 import { passwordAuth } from '@holtkeeper/auth-password'
@@ -36,43 +36,24 @@ export default defineConfig({
 
 ### Effective config
 
-`HoltkeeperConfig` is what the server runs on: the file config plus `forges`, `groups`, `repos` (traits by path glob) and the `jobs` entries panel documents produce (`schedules`, `onTag`, `onPush`, `onMergeRequest`, `onNewRepo`, `onLabel`, `commands`, `botUsernames` by forge id, `webhooks` by forge id). `@holtkeeper/managed-config` builds it; `parseConfig` validates one. Globs follow `Bun.Glob`: `*` stays within one path segment, `**` crosses segments. `games/*` matches `games/app-x` but not `games/web/app-x`.
+`HoltkeeperConfig` is what the server runs on: the file config plus `forges`, `teams`, `repos` (traits by path glob) and the `jobs` entries panel documents produce (`schedules`, `onTag`, `onPush`, `onMergeRequest`, `onNewRepo`, `onLabel`, `commands`, `botUsernames` by forge id, `webhooks` by forge id). `@holtkeeper/managed-config` builds it; `parseConfig` validates one. Globs follow `Bun.Glob`: `*` stays within one path segment, `**` crosses segments. `games/*` matches `games/app-x` but not `games/web/app-x`.
 
-### Group lists
+### Teams and path patterns
 
-A repository can belong to any number of groups, so groups double as tags: one set by layer (`frontend`, `backend`), another by product (`storefront`, `admin-panel`, `catalog`). Every list of groups in the effective config (schedule `groups`, `jobs.onTag.groups`, `jobs.onPush.groups`, `jobs.onMergeRequest.groups`, `jobs.onNewRepo.groups`) and every access, settings and knowledge `Scope` takes `GroupMatch` entries from [@holtkeeper/access](../../access/docs/README.md): a group name, or a list of groups a repository must all belong to. Entries combine with OR, groups inside an entry with AND:
-
-```text
-// groups (panel documents)
-frontend: { forge: 'work', include: ['shop/web', 'admin/*-ui'] }
-storefront: { forge: 'work', include: ['shop/**'] }
-'admin-panel': { forge: 'work', include: ['admin/**'] }
-catalog: { forge: 'work', include: ['admin/catalog-*', 'shop/catalog-*'] }
-
-// schedule groups
-['frontend'] // every frontend
-[['frontend', 'storefront'], ['frontend', 'admin-panel', 'catalog']] // storefront frontends, plus admin panel frontends of the catalog
-```
-
-A group may have a `title` (trimmed, 1–60 characters) that people see instead of its key. The key stays the identity: grants, settings scopes, home groups, guides, schedules and triggers name groups by key only. `groupTitle(groups, key)` returns the title, or the key when there is none; `groupLabel(groups, key)` returns `Title (key)` for text a reader may act on (chat, agent and MCP output), so the key is always at hand.
-
-Group-scope analyzers of a schedule or `onTag` run only for single-group entries: an intersection has no group of its own to report on.
-
-### Subgroups
-
-A group key is a root group (`shapes`) or a subgroup one level below it (`shapes.round`): lowercase letters, digits and dashes with at most one dot (`groupKeySchema`, `GROUP_KEY_PATTERN` of `@holtkeeper/access`). The parent comes from the key; there is no stored parent field, so a key's meaning never changes and cycles cannot exist. Moving a subgroup to another parent means creating a new key.
-
-- A subgroup's parent must be configured (`parent group "shapes" is not configured`, reported at `groups.<key>`) and its `forge` must equal the parent's (`forge must match parent "shapes"`).
-- A repository is in `shapes.round` when the subgroup's own include/exclude match it **and** it is a member of `shapes`. A subgroup is never wider than its parent, so every `groups: ['shapes']` grant, setting, note and trigger keeps covering its members.
-- Sibling subgroups may overlap.
-- `rootGroups(config)` lists the keys that are not subgroups and `subgroupsOf(config, key)` the subgroups of one group, both in config order. `groupPathLabel(groups, key)` shows a group with its ancestors' titles: `Shapes › Round (shapes.round)`; `groupLabel` uses it for subgroups.
+Repositories are organised by the forge's own folders and by teams; see [docs/teams-and-paths.md](../../../docs/teams-and-paths.md) for the model. `teams` of the effective config holds one entry per team key (flat, `teamKeySchema` of [@holtkeeper/access](../../access/docs/README.md)): `{ title?, owns, exclude, consumes, members }`. `owns`, `exclude` and `consumes` are path patterns, optionally forge-qualified (`work:acme/**`); a bare pattern matches every forge. A repository may be owned by several teams (a shared library) or by none.
 
 ```text
-shapes: { title: 'Shapes', forge: 'work', include: ['shapes/*'], exclude: ['shapes/legacy-*'] }
-'shapes.round': { title: 'Round', forge: 'work', include: ['shapes/circle-*'] }
-// shapes/circle-a     → ['shapes.round', 'shapes']
-// shapes/legacy-circle → [] (not in the parent, so not in the subgroup)
+// teams (panel documents)
+gizmo: { title: 'Gizmo crew', owns: ['acme/round/**', 'acme/square/**'], consumes: ['acme/shared/**'],
+         members: [{ id: 'ada', role: 'maintainer' }] }
+kit:   { owns: ['work:acme/shared/**'], exclude: ['acme/shared/legacy-*'] }
 ```
+
+Schedules and the `onTag`, `onPush`, `onMergeRequest` and `onNewRepo` triggers take `teams` (keys) and `repos` (path patterns, e.g. `acme/*/game-frontend`); a repository matching either is covered, and every repository when both are absent. Group-scope analyzers of a schedule or `onTag` run once per listed team.
+
+**Fleet.** The repositories Holtkeeper works on are those matching `fleetPatterns(config, forge)`: the forge document's `include` globs (`fleet.<forge>`) plus every team's `owns` and `consumes` pattern that applies to the forge, minus the forge's `exclude`. A repository nobody owns is in the fleet only through a forge include. Fleet includes and team `owns`/`consumes` patterns must start with a literal namespace (`acme/**`, not `**/web`), because listing walks forge namespaces; excludes may be anything.
+
+The key stays the identity: grants, settings scopes, home teams, guides, schedules and triggers name teams by key only. `teamTitle(teams, key)` returns the title, or the key when there is none; `teamLabel(teams, key)` returns `Title (key)` for text a reader may act on (chat, agent and MCP output), so the key is always at hand.
 
 ### Secrets
 
@@ -82,13 +63,14 @@ shapes: { title: 'Shapes', forge: 'work', include: ['shapes/*'], exclude: ['shap
 
 `loadConfig(file, { warn? })` imports the module and validates it with `parseConfigFile(value, { warn? })`; both throw `ConfigError` with every problem listed by path (for example the same AI provider package added twice). `parseConfig(value)` validates an effective config and also reports:
 
-- unknown forge or group references, including groups inside intersections;
-- subgroup keys deeper than one level, subgroups without their parent and subgroups on another forge than the parent;
+- unknown team references and unknown forges in forge-qualified patterns (teams, schedules, triggers);
+- team keys that are not flat keys and teams without `owns`;
 - schedules defined twice and invalid cron, intervals, time zones or windows.
 
 ## Resolution
 
 `resolveRepo(config, { forge, path })` answers "what applies to this repository":
 
-- `groups` — groups whose forge and globs match (for a subgroup, also its parent's), each subgroup listed directly before its parent, so the list always holds every group's full lineage;
+- `teams` — every team whose `owns` matches and whose `exclude` does not, in config order;
+- `consumers` — teams whose `consumes` matches and that do not own it;
 - `traits` — merged traits from matching `repos` entries.

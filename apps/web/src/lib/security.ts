@@ -10,10 +10,10 @@ import type {
   Severity,
   SeverityCounts,
 } from '@holtkeeper/api'
+import { patternMatches } from '@holtkeeper/api'
 
 import { isoDay } from './format.ts'
-import { inHomeGroups } from './home-scope.ts'
-import { globMatcher } from './repos.ts'
+import { inHomeTeams } from './home-scope.ts'
 import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
 import { severities, severityRank } from './severity.ts'
 
@@ -93,11 +93,11 @@ export const findingStatusTone = (status: FindingStatus): 'danger' | 'info' | 'd
 /** The sheet key of a group: `<advisory>:<package>`. */
 export const findingKey = (group: FindingGroup): string => `${group.advisory}:${group.package}`
 
-/** A finding group as fleet tables take it: `groups` joins the groups of its repositories. */
+/** A finding group as fleet tables take it: `teams` joins the owner teams of its repositories. */
 export interface FindingGroupRow {
   key: string
   group: FindingGroup
-  groups: string[]
+  teams: string[]
 }
 
 /** Wraps groups as rows; a group belongs to every team one of its repositories belongs to. */
@@ -105,7 +105,7 @@ export const findingRows = (groups: readonly FindingGroup[]): FindingGroupRow[] 
   groups.map((group) => ({
     key: findingKey(group),
     group,
-    groups: [...new Set(group.repos.flatMap((repo) => repo.groups))].toSorted(),
+    teams: [...new Set(group.repos.flatMap((repo) => repo.teams))].toSorted(),
   }))
 
 const matchesText = (group: FindingGroup, q: string): boolean => {
@@ -365,19 +365,14 @@ export function allowlistRows(
     )
 }
 
-/** Whether a setting scope reaches a repository (`forge:path` with its groups). */
-export function scopeCovers(scope: Scope, repo: Pick<FindingRepo, 'repo' | 'groups'>): boolean {
+/** Whether a setting scope reaches a repository (`forge:path` with its owner teams). */
+export function scopeCovers(scope: Scope, repo: Pick<FindingRepo, 'repo' | 'teams'>): boolean {
   if (scope.all) return true
-  if (scope.groups?.length && inHomeGroups(scope.groups, repo.groups)) return true
+  if (scope.teams?.length && inHomeTeams(scope.teams, repo.teams)) return true
   const separator = repo.repo.indexOf(':')
   const forge = repo.repo.slice(0, separator)
   const path = repo.repo.slice(separator + 1)
-  return (scope.repos ?? []).some((pattern) => {
-    const split = pattern.indexOf(':')
-    if (split > 0)
-      return pattern.slice(0, split) === forge && globMatcher(pattern.slice(split + 1))(path)
-    return globMatcher(pattern)(path)
-  })
+  return (scope.repos ?? []).some((pattern) => patternMatches(pattern, forge, path))
 }
 
 /** A place a new allowlist entry can go: an existing setting entry, or a new one. */

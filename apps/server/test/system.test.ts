@@ -27,7 +27,7 @@ import {
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: { widgets: { forge: 'work', include: ['widgets/*'] } },
+  teams: { widgets: { owns: ['work:widgets/*'] } },
 })
 
 const now = new Date('2026-11-12T12:00:00.000Z')
@@ -296,7 +296,7 @@ describe('GET /api/system/health', () => {
   test('needs a global settings:read', async () => {
     const app = setup(memoryStore(), {
       auth: headerAuth({
-        roles: { widgets: [{ scope: { groups: ['widgets'] }, actions: ['settings:read'] }] },
+        roles: { widgets: [{ scope: { teams: ['widgets'] }, actions: ['settings:read'] }] },
       }),
     })
     const response = await app.request('/api/system/health', {

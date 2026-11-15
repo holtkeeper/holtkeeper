@@ -1,26 +1,22 @@
-import { groupMatchSchema } from '@holtkeeper/access'
+import { pathPatternSchema, teamKeySchema, teamMemberSchema } from '@holtkeeper/access'
 import {
   everyPattern,
-  groupKeySchema,
-  groupTitleSchema,
   isTimeZone,
   looksLikeCron,
+  teamTitleSchema,
   weekdays,
 } from '@holtkeeper/core'
 import type { ConfigDocumentType, TriggerDocumentData } from '@holtkeeper/store'
 import { Cron } from 'croner'
 import { z } from 'zod'
 
-/** Ids of forges and schedules: lowercase letters, digits and dashes. Groups use `groupIdSchema`. */
+/** Ids of forges, schedules and teams: lowercase letters, digits and dashes. */
 export const configIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
 
-/**
- * Ids of groups: a root group (`shapes`) or a subgroup of one (`shapes.round`). A subgroup's parent
- * must exist and share its forge; the effective config checks that.
- */
-export const groupIdSchema = groupKeySchema
+/** Ids of teams: flat keys (`TEAM_KEY_PATTERN` of `@holtkeeper/access`). */
+export const teamIdSchema = teamKeySchema
 
 const parsesAsCron = (expression: string) => {
   try {
@@ -49,14 +45,25 @@ export const forgeDataSchema = z.object({
   cachePackages: z.boolean().optional(),
   /** Username Holtkeeper posts as on this forge; its own events and merge requests are ignored. */
   botUsername: z.string().trim().min(1).optional(),
+  /** Folders of this forge Holtkeeper works on besides what teams own or consume. */
+  include: z.array(pathPatternSchema).optional(),
+  /** Folders left out of the fleet. */
+  exclude: z.array(pathPatternSchema).optional(),
 })
 
-export const groupDataSchema = z.object({
-  title: groupTitleSchema.optional(),
-  forge: configIdSchema,
-  include: z.array(z.string().min(1)).min(1),
-  exclude: z.array(z.string().min(1)).default([]),
+/** A team document: owned and consumed path patterns and members. */
+export const teamDataSchema = z.object({
+  title: teamTitleSchema.optional(),
+  owns: z.array(pathPatternSchema).min(1),
+  exclude: z.array(pathPatternSchema).default([]),
+  consumes: z.array(pathPatternSchema).default([]),
+  members: z.array(teamMemberSchema).default([]),
 })
+
+const targetShape = {
+  teams: z.array(teamKeySchema).optional(),
+  repos: z.array(pathPatternSchema).optional(),
+}
 
 export const repoTraitsDataSchema = z.object({
   pattern: z.string().min(1),
@@ -69,8 +76,7 @@ export const scheduleDataSchema = z
     name: z.string().min(1),
     enabled: z.boolean().default(true),
     analyzers: z.array(z.string().min(1)).min(1),
-    groups: z.array(groupMatchSchema).optional(),
-    repos: z.array(z.string().regex(/^[^:]+:.+$/, 'expected forge:path')).optional(),
+    ...targetShape,
     options: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
     cron: z
       .string()
@@ -102,26 +108,26 @@ export const triggerDataSchema = z.discriminatedUnion('on', [
   z.object({
     on: z.literal('tag'),
     analyzers: analyzerList,
-    groups: z.array(groupMatchSchema).optional(),
+    ...targetShape,
   }),
   z.object({
     on: z.literal('push'),
     analyzers: analyzerList,
     branches: z.array(z.string().min(1)).min(1).optional(),
-    groups: z.array(groupMatchSchema).optional(),
+    ...targetShape,
   }),
   z.object({
     on: z.literal('mergeRequest'),
     analyzers: analyzerList,
     actions: z.array(z.enum(['open', 'update', 'reopen'])).optional(),
     draft: z.boolean().optional(),
-    groups: z.array(groupMatchSchema).optional(),
+    ...targetShape,
   }),
   z.object({
     on: z.literal('newRepo'),
     analyzers: analyzerList.optional(),
     exclude: z.array(z.string().min(1)).optional(),
-    groups: z.array(groupMatchSchema).optional(),
+    ...targetShape,
   }),
   z.object({ on: z.literal('label'), label: z.string().min(1), analyzers: analyzerList }),
   z.object({
@@ -135,7 +141,7 @@ export const triggerDataSchema = z.discriminatedUnion('on', [
 /** Body schemas of the panel's CRUD endpoints, by document type. */
 export const documentDataSchemas = {
   forge: forgeDataSchema,
-  group: groupDataSchema,
+  team: teamDataSchema,
   repoTraits: repoTraitsDataSchema,
   schedule: scheduleDataSchema,
   trigger: triggerDataSchema,

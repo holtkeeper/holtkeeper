@@ -74,11 +74,11 @@ Holtkeeper calls `https://slack.com/api` from the web and worker pods (a review 
 
 `slack.reviews` (**Settings › Integrations**, scoped like other settings) is `{ channels: string[] }`: Slack channel ids such as `C0123ABCD` (private channels may start with `G`). Copy an id from the channel's details: click the channel name, the id is at the bottom of **About**. Names (`#widgets`) are not accepted.
 
-The most specific entry wins as a whole: an entry for everything binds the default channels, a group or repository entry replaces them for its repositories, and an entry with `channels: []` keeps a group quiet. A message about a merge request of repository R in channel X is handled only when X is among the channels resolved for R, so different groups can share or separate channels.
+The most specific entry wins as a whole: an entry for everything binds the default channels, a team, path or repository entry replaces them for its repositories, and an entry with `channels: []` keeps a team quiet. A message about a merge request of repository R in channel X is handled only when X is among the channels resolved for R, so different teams can share or separate channels.
 
 Nothing happens (no emoji, no reply, nothing stored) when:
 
-- the link's host is not a configured forge, or the repository is in no config group;
+- the link's host is not a configured forge, or the repository has no owner team;
 - **Merge request reviews** (`mergeRequests.comments`) is off for the repository;
 - the channel is not bound to the repository;
 - no Slack credential is stored.

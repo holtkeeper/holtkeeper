@@ -31,7 +31,7 @@ test('parseLicensesSearch keeps known values', () => {
       repo: 'gitlab:acme/ledger-api',
       verdict: 'denied,unlisted,allowed,bogus',
       ecosystem: 'Go',
-      group: 'Payments,Web',
+      team: 'Payments,Web',
       sort: 'repos',
       q: 'gpl',
       package: 'npm:some-lib',
@@ -61,7 +61,7 @@ const violation = (overrides: Partial<LicenseViolation> = {}): LicenseViolation 
   verdict: 'unlisted',
   culprits: ['MPL-2.0'],
   dev: false,
-  repos: [{ repo: 'gitlab:acme/checkout-web', groups: ['Web'] }],
+  repos: [{ repo: 'gitlab:acme/checkout-web', teams: ['Web'] }],
   ...overrides,
 })
 
@@ -82,8 +82,8 @@ const violations = [
     verdict: 'unknown',
     culprits: [],
     repos: [
-      { repo: 'gitlab:acme/ledger-api', groups: ['Payments'] },
-      { repo: 'gitlab:acme/checkout-web', groups: ['Web'] },
+      { repo: 'gitlab:acme/ledger-api', teams: ['Payments'] },
+      { repo: 'gitlab:acme/checkout-web', teams: ['Web'] },
     ],
   }),
 ]
@@ -93,7 +93,7 @@ const order = (sort: Parameters<typeof sortViolations>[1]) =>
 
 const repoRow = (repo: string, overrides: Partial<LicensesRepoRow> = {}): LicensesRepoRow => ({
   repo,
-  groups: ['Web'],
+  teams: ['Web'],
   analysisId: `a-${repo}`,
   createdAt: '2026-11-10T00:00:00Z',
   packages: 100,
@@ -130,10 +130,10 @@ describe('violations', () => {
     expect(order('repos')).toEqual(['mystery', 'copyleft-kit', 'tiny-yaml'])
   })
 
-  test('rows carry keys and groups; licenses fall back to UNKNOWN', () => {
+  test('rows carry keys and teams; licenses fall back to UNKNOWN', () => {
     const rows = violationRows(violations)
     expect(rows[2]?.key).toBe('Go:mystery')
-    expect(rows[2]?.groups).toEqual(['Payments', 'Web'])
+    expect(rows[2]?.teams).toEqual(['Payments', 'Web'])
     expect(violationKey(violations[1]!)).toBe('npm:tiny-yaml')
     expect(violationLicense(violations[2]!)).toBe('UNKNOWN')
   })
@@ -143,7 +143,7 @@ test('filterLicenseRepos filters and puts the worst first', () => {
   const rows = [
     repoRow('gitlab:acme/a'),
     repoRow('gitlab:acme/b', {
-      groups: ['Payments'],
+      teams: ['Payments'],
       verdicts: {
         allowed: 1,
         unknown: 0,
@@ -294,7 +294,7 @@ test('policyFacts and exceptedCount read the review, dev and exception parts', (
 const licenseEntry = (id: string, value: unknown): SettingView => ({
   id,
   key: 'analyzers.licenses',
-  scope: { groups: ['web'] },
+  scope: { teams: ['web'] },
   value,
   secret: false,
   updatedAt: '2026-11-01T00:00:00.000Z',

@@ -49,7 +49,7 @@ interface StoredRow {
 
 interface StoredRepo {
   repo: string
-  groups: string[]
+  teams: string[]
   rows: StoredRow[]
 }
 
@@ -82,7 +82,7 @@ const groupStored = (
       let group = groups.get(key)
       if (!group) groups.set(key, (group = { key, first: metric, repos: [] }))
       let entry = group.repos.find((candidate) => candidate.repo === repo)
-      if (!entry) group.repos.push((entry = { repo, groups: [...target.groups], rows: [] }))
+      if (!entry) group.repos.push((entry = { repo, teams: [...target.teams], rows: [] }))
       entry.rows.push({ metric, firstSeenAt: metrics.firstSeen?.[key] ?? head.createdAt })
     }
   }
@@ -110,7 +110,7 @@ const settle = (stored: StoredGroup, tasks: readonly AgentTask[], today: string)
     const status: FindingStatus = allowlisted ? 'allowlisted' : task ? 'fixing' : 'open'
     return {
       repo: entry.repo,
-      groups: entry.groups,
+      teams: entry.teams,
       versions: union(entry.rows.map(({ metric }) => [metric.version])),
       sources: union(entry.rows.map(({ metric }) => [metric.source])),
       status,

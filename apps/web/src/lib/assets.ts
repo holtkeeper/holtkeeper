@@ -12,9 +12,9 @@ import {
 } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
-import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchText } from './search-params.ts'
+import { keyAsTitle, type TeamTitleOf } from './team-titles.ts'
 
 type Policy = RepoAssetsView['policy']
 type AssetKind = NonNullable<AssetsQuery['kind']>
@@ -89,16 +89,16 @@ export const savingPercent = (row: Pick<AssetsOverviewRow, 'bytes' | 'suggestion
 /** Where the effective policy comes from, as shown next to it. */
 export function policySource(
   source: AssetsPolicySource,
-  titleOf: GroupTitleOf = keyAsTitle,
+  titleOf: TeamTitleOf = keyAsTitle,
 ): string {
   if (source.level === 'default')
-    return 'Default policy: nothing set for this repository or its groups'
+    return 'Default policy: nothing set for this repository or its teams'
   if (source.level === 'all') return 'Inherited from the entry for every repository'
   if (source.level === 'repo') return 'Set for this repository'
-  const groups = source.entry?.scope.groups?.flat()
-  return groups?.length
-    ? `Inherited from group ${groups.map(titleOf).join(', ')}`
-    : 'Inherited from a group'
+  const teams = source.entry?.scope.teams
+  return teams?.length
+    ? `Inherited from team ${teams.map(titleOf).join(', ')}`
+    : 'Inherited from a team'
 }
 
 const formatsLabel = (formats: readonly string[]) =>
@@ -193,7 +193,7 @@ export function withPolicyDefaults(value: unknown, defaults: Policy): Policy {
 export interface FleetPolicy {
   policy: Policy
   source: string
-  /** `assets.policy` entries scoped to groups or repositories, which replace it there. */
+  /** `assets.policy` entries scoped to teams or paths, which replace it there. */
   overrides: number
 }
 
@@ -214,11 +214,11 @@ export function fleetPolicy(list: SettingList): FleetPolicy | undefined {
   }
 }
 
-/** "2 groups or repositories override it", or nothing without overrides. */
+/** "2 teams or paths override it", or nothing without overrides. */
 export const overridesText = (count: number): string =>
   count === 0
     ? ''
-    : `${count} ${count === 1 ? 'group or repository overrides' : 'groups or repositories override'} it`
+    : `${count} ${count === 1 ? 'team or path overrides' : 'teams or paths override'} it`
 
 const optimizable = new Set(['png', 'apng', 'jpg', 'jpeg', 'gif', 'webp', 'svg'])
 
@@ -226,21 +226,20 @@ const optimizable = new Set(['png', 'apng', 'jpg', 'jpeg', 'gif', 'webp', 'svg']
 export const canOptimize = (row: Pick<AssetsOverviewRow, 'kind' | 'format'>): boolean =>
   row.kind === 'image' && optimizable.has(row.format.toLowerCase())
 
-/** A file row of the Assets table with its repository's groups, for the scope switch. */
+/** A file row of the Assets table with its repository's owner teams, for the scope switch. */
 export interface AssetTableRow extends AssetsOverviewRow {
   key: string
-  groups: readonly string[]
+  teams: readonly string[]
 }
 
 /** Unique key of a file row: `forge:path` and the file path. */
 export const assetRowKey = (row: Pick<AssetsOverviewRow, 'repo' | 'path'>): string =>
   `${repoKey(row.repo)}|${row.path}`
 
-/** Loaded pages as table rows, each with its repository's groups; repeated rows are dropped. */
+/** Loaded pages as table rows, each with its repository's owner teams; repeated rows are dropped. */
 export function assetTableRows(pages: readonly AssetsOverview[]): AssetTableRow[] {
-  const groups = new Map<string, readonly string[]>()
-  for (const page of pages)
-    for (const repo of page.repos) groups.set(repoKey(repo.repo), repo.groups)
+  const teams = new Map<string, readonly string[]>()
+  for (const page of pages) for (const repo of page.repos) teams.set(repoKey(repo.repo), repo.teams)
   const seen = new Set<string>()
   const rows: AssetTableRow[] = []
   for (const page of pages)
@@ -248,7 +247,7 @@ export function assetTableRows(pages: readonly AssetsOverview[]): AssetTableRow[
       const key = assetRowKey(item)
       if (seen.has(key)) continue
       seen.add(key)
-      rows.push({ ...item, key, groups: groups.get(repoKey(item.repo)) ?? [] })
+      rows.push({ ...item, key, teams: teams.get(repoKey(item.repo)) ?? [] })
     }
   return rows
 }

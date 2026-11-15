@@ -61,9 +61,9 @@ beforeEach(async () => {
   deps = {
     config: parseConfig({
       forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fake.forge } },
-      groups: {
-        games: { forge: 'work', include: ['g/app'] },
-        toys: { forge: 'work', include: ['t/kite'] },
+      teams: {
+        games: { owns: ['work:g/app'] },
+        toys: { owns: ['work:t/kite'] },
       },
     }),
     auth: headerAuth({ roles: {} }),
@@ -91,7 +91,7 @@ beforeEach(async () => {
 async function connect(principal: Principal, steps = false) {
   const access = releaseToolsAccess(deps, {
     principal,
-    canRead: (repo) => repo.groups.includes('games'),
+    canRead: (repo) => repo.teams.includes('games'),
     steps,
     channel: 'mcp',
   })
@@ -133,7 +133,7 @@ describe('releases toolset over MCP', () => {
 
   test('release_rules explains the flow with the Guide releases section', async () => {
     await store.guides.put({
-      scope: 'group:games',
+      scope: 'team:games',
       section: 'releases',
       rules: 'Release notes name the shapes that changed.',
       steering: '',
@@ -355,7 +355,7 @@ describe('release_step', () => {
 
 describe('internal agents', () => {
   test('read releases of their repository and its group, without steps', async () => {
-    const access = agentReleaseAccess(deps, { forge: 'work', path: 'g/app', groups: ['games'] })
+    const access = agentReleaseAccess(deps, { forge: 'work', path: 'g/app', teams: ['games'] })
     expect(access.steps).toBeUndefined()
     expect(access.repoOf('work:g/app')).toEqual({ forge: 'work', path: 'g/app' })
     expect(access.repoOf('work:t/kite')).toBeUndefined()
@@ -373,7 +373,7 @@ describe('internal agents', () => {
     }
     const narrowed = agentReleaseAccess(
       deps,
-      { forge: 'work', path: 'g/app', groups: ['games'] },
+      { forge: 'work', path: 'g/app', teams: ['games'] },
       asker,
     )
     expect(narrowed.repoOf('work:g/app')).toBeUndefined()

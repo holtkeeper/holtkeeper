@@ -133,9 +133,14 @@ export interface ReviewRun {
   checks?: Partial<Record<ReviewCheckName, QualityCheck>>
   /**
    * Resolves the repository's Guide for the review from its rules files and the text notes are
-   * ranked by (title and files in scope); replaces the plain guidelines block in the context.
+   * ranked by (title and files in scope) and the changed files in scope, which narrow notes bound
+   * to files (`match.files`); replaces the plain guidelines block in the context.
    */
-  guide?: (docs: readonly Guideline[], query: string) => Promise<ReviewGuide | undefined>
+  guide?: (
+    docs: readonly Guideline[],
+    query: string,
+    files: readonly string[],
+  ) => Promise<ReviewGuide | undefined>
   /** Passed to the agent as `toolsets`, e.g. code navigation and knowledge tools. */
   toolsets?: readonly Toolset[]
   /**
@@ -381,6 +386,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
             .slice(0, 30)
             .map((f) => f.path)
             .join('\n')}`,
+          planned.scope.files.map((f) => f.path),
         )
         .catch((error: unknown) => {
           run.log?.(

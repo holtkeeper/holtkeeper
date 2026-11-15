@@ -20,7 +20,7 @@ const entry = (id: string, key: string, value: unknown): SettingEntry => ({
   updatedAt: '2026-10-01',
 })
 
-const repo = { forge: 'work', path: 'shapes/widget', groups: ['shapes'] }
+const repo = { forge: 'work', path: 'shapes/widget', teams: ['shapes'] }
 
 test('the resolver ignores entries of retired keys, even with values no schema accepts', () => {
   const entries = [

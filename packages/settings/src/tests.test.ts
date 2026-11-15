@@ -5,8 +5,8 @@ import type { SettingEntry } from '@holtkeeper/store'
 import { repoTests } from './definitions.ts'
 import { resolveRepoTests, testsExpected } from './tests.ts'
 
-const widget = { forge: 'acme', path: 'shapes/widget', groups: ['shapes'] }
-const core = { forge: 'acme', path: 'shapes/widget-core', groups: ['shapes'] }
+const widget = { forge: 'acme', path: 'shapes/widget', teams: ['shapes'] }
+const core = { forge: 'acme', path: 'shapes/widget-core', teams: ['shapes'] }
 
 const entry = (
   id: string,
@@ -30,7 +30,7 @@ describe('repo.tests', () => {
   })
 
   test('a group entry turns tests off and a repository entry lifts it', () => {
-    const group = entry('g', { groups: ['shapes'] }, { expected: false, reason: 'Config only' })
+    const group = entry('g', { teams: ['shapes'] }, { expected: false, reason: 'Config only' })
     const own = entry('r', { repos: ['shapes/widget-core'] }, { expected: true })
     expect(resolveRepoTests([group, own], widget)).toEqual({
       expected: false,

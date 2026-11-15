@@ -1,16 +1,16 @@
 # @holtkeeper/managed-config
 
-Forges, groups, repository traits, schedules and triggers edited in the panel. They are typed documents in `store.config` (`ConfigStore` from `@holtkeeper/store`); `holtkeeper.config.ts` holds only infrastructure. This package turns the file config plus those documents into the config the server runs on and keeps it current.
+Forges, teams, repository traits, schedules and triggers edited in the panel. They are typed documents in `store.config` (`ConfigStore` from `@holtkeeper/store`); `holtkeeper.config.ts` holds only infrastructure. This package turns the file config plus those documents into the config the server runs on and keeps it current.
 
 ## Documents
 
-| Type         | Id                                                                              | Data                                                                                                                             |
-| ------------ | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `forge`      | forge id (`work`)                                                               | `{ kind: 'gitlab' \| 'github', url, credentialId, packages?, cachePackages?, botUsername?, webhook?, sshKey? }`                  |
-| `group`      | group id (`groupIdSchema`: `shapes`, or `shapes.round` for a subgroup)          | `{ title? (display, 1–60 chars), forge, include[], exclude[] }`                                                                  |
-| `repoTraits` | free; merged by `pattern`                                                       | `{ pattern, forge?, traits }`                                                                                                    |
-| `schedule`   | the schedule's config `name`                                                    | `{ name (display), enabled, analyzers, groups?, repos?, options?, cron \| every, timezone?, windows?, jitterMinutes?, spread? }` |
-| `trigger`    | `tag`, `push`, `merge-request`, `label:<label>`, `command:<name>` (`triggerId`) | `{ on: 'tag' \| 'push' \| 'mergeRequest' \| 'label' \| 'command', ... }` as the matching `jobs` entry                            |
+| Type         | Id                                                                              | Data                                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `forge`      | forge id (`work`)                                                               | `{ kind: 'gitlab' \| 'github', url, credentialId, packages?, cachePackages?, botUsername?, include?, exclude?, webhook?, sshKey? }` |
+| `team`       | team key (`teamIdSchema`: flat, `gizmo`)                                        | `{ title? (display, 1–60 chars), owns[], exclude[], consumes[], members[{ id, role }] }`                                            |
+| `repoTraits` | free; merged by `pattern`                                                       | `{ pattern, forge?, traits }`                                                                                                       |
+| `schedule`   | the schedule's config `name`                                                    | `{ name (display), enabled, analyzers, teams?, repos?, options?, cron \| every, timezone?, windows?, jitterMinutes?, spread? }`     |
+| `trigger`    | `tag`, `push`, `merge-request`, `label:<label>`, `command:<name>` (`triggerId`) | `{ on: 'tag' \| 'push' \| 'mergeRequest' \| 'label' \| 'command', ... }` as the matching `jobs` entry (targets: `teams?`, `repos?`) |
 
 Every document has `version` (1, 2, …), `updatedAt`, `updatedBy`; earlier versions stay in `history(type, id)` until the document is removed. Body schemas for the panel's endpoints are in `documentDataSchemas` (ids, cron checked with croner, `every` like `15m`/`1h`/`1d`, IANA zones, `HH:MM` windows). A forge's token is never in a document: `credentialId` points at a stored credential.
 
@@ -18,11 +18,12 @@ Every document has `version` (1, 2, …), `updatedAt`, `updatedBy`; earlier vers
 
 `effectiveConfig(file, documents, { forgeFactories, tokens?, webhookSecrets?, reuse? })`:
 
-- Forges, groups, repository traits (by `pattern`), schedules and triggers come only from documents: triggers become `onTag`, `onPush`, `onMergeRequest`, `onNewRepo`, `onLabel[label]` and `commands[name]` of `jobs`. The file config contributes its infrastructure (`server`, `jobs` worker settings, `limits`, `ai`, `dryRun`).
+- Forges, teams, repository traits (by `pattern`), schedules and triggers come only from documents: triggers become `onTag`, `onPush`, `onMergeRequest`, `onNewRepo`, `onLabel[label]` and `commands[name]` of `jobs`. The file config contributes its infrastructure (`server`, `jobs` worker settings, `limits`, `ai`, `dryRun`).
 - Forges are built by `forgeFactories[kind](doc, token)` with the credential's plaintext token from `tokens`. A missing token or adapter gives a forge whose `create()` throws, so only tasks using it fail.
 - A forge's `botUsername` becomes `jobs.botUsernames.<id>`: the server ignores that account's own events on the forge and review skips its merge requests.
+- A forge's `include` and `exclude` become `fleet.<id>`: folders worked on besides what teams own or consume (`fleetPatterns` of `@holtkeeper/core`).
 - A forge with a webhook secret (opened, in `webhookSecrets`) becomes `jobs.webhooks.<id>.secret`.
-- The result always has a `jobs` section and is validated with `parseConfig`; an unknown forge or group reference or a duplicate schedule throws `ConfigError`.
+- The result always has a `jobs` section and is validated with `parseConfig`; an unknown forge or team reference or a duplicate schedule throws `ConfigError`.
 
 `gitlabForgeFactory({ fetchFor? })` is the GitLab factory (`gitlab({ url, token, fetch })`).
 
@@ -35,7 +36,7 @@ Every document has `version` (1, 2, …), `updatedAt`, `updatedBy`; earlier vers
 ```ts
 const source = await createConfigSource({
   file, // parseConfigFile result
-  store: store.config, // optional: without it there are no forges, groups or triggers
+  store: store.config, // optional: without it there are no forges, teams or triggers
   forgeFactories: { gitlab: gitlabForgeFactory() },
   revealToken: (credentialId) => credentials.reveal(credentialId),
   openSecret: (sealed) => vault.open(sealed),

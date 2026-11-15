@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
-  moveToSubgroup,
   parsePastedPaths,
   parseRepoHubSearch,
   parseRepoKey,
@@ -12,11 +11,10 @@ import {
   repoName,
   repoSplat,
   splitRepoPath,
-  subgroupDraft,
   suggestRepos,
-  validateGroupId,
+  validateConfigId,
   validateRepoPath,
-  withRepos,
+  withPaths,
 } from './repo.ts'
 
 test('repo keys round-trip', () => {
@@ -53,88 +51,25 @@ test('hub search keeps known tabs and non-empty strings only', () => {
   })
 })
 
-test('repository paths and group ids are checked before saving', () => {
+test('repository paths and config ids are checked before saving', () => {
   expect(validateRepoPath('games/app')).toBeUndefined()
   expect(validateRepoPath('')).toBe('Enter the repository path')
   expect(validateRepoPath('/games/app')).toBe('No leading or trailing "/"')
-  expect(validateRepoPath('games/*')).toBe('Use an exact path; edit the group for patterns')
+  expect(validateRepoPath('games/*')).toBe('Use an exact path; edit the team or forge for patterns')
   expect(validateRepoPath('app')).toBe('Include the namespace: team/app')
-  expect(validateGroupId('games-2')).toBeUndefined()
-  expect(validateGroupId('Games')).toBe('Lowercase letters, digits and dashes')
+  expect(validateConfigId('games-2')).toBeUndefined()
+  expect(validateConfigId('Games')).toBe('Lowercase letters, digits and dashes')
 })
 
-test('withRepos adds paths once and lifts their exclusion', () => {
-  expect(withRepos(undefined, 'work', ['games/app', 'games/app', 'games/tool'])).toEqual({
-    forge: 'work',
-    include: ['games/app', 'games/tool'],
+test('withPaths adds paths once and lifts their exact exclusion', () => {
+  const patterns = { include: ['acme/round/*'], exclude: ['acme/round/web', 'acme/round/*-old'] }
+  expect(withPaths(patterns, ['acme/round/web', 'acme/round/web', 'acme/square/api'])).toEqual({
+    include: ['acme/round/*', 'acme/round/web', 'acme/square/api'],
+    exclude: ['acme/round/*-old'],
+  })
+  expect(withPaths({ include: [], exclude: [] }, ['acme/round/web'])).toEqual({
+    include: ['acme/round/web'],
     exclude: [],
-  })
-  const group = { forge: 'work', include: ['games/*'], exclude: ['games/app', 'games/old'] }
-  expect(withRepos(group, 'other', ['games/app'])).toEqual({
-    forge: 'work',
-    include: ['games/*', 'games/app'],
-    exclude: ['games/old'],
-  })
-  expect(withRepos(withRepos(group, 'work', ['games/app']), 'work', ['games/app']).include).toEqual(
-    ['games/*', 'games/app'],
-  )
-  expect(withRepos({ ...group, title: 'Game studio' }, 'work', ['games/app']).title).toBe(
-    'Game studio',
-  )
-})
-
-describe('subgroups', () => {
-  const forge = 'gitlab.acme.dev'
-  const groups = [
-    { id: 'shapes', data: { forge, include: ['acme/*'], exclude: [] } },
-    {
-      id: 'shapes.round',
-      data: { title: 'Round', forge, include: ['acme/disc', 'acme/ring'], exclude: [] },
-    },
-    { id: 'shapes.flat', data: { forge, include: ['acme/t*'], exclude: ['acme/ring'] } },
-    { id: 'shapes.solo', data: { forge, include: ['acme/cube'], exclude: [] } },
-  ]
-
-  test('moving into a subgroup includes the path and lifts its exclusion', () => {
-    expect(moveToSubgroup(groups, 'acme/ring', undefined, 'shapes.flat')).toEqual([
-      { id: 'shapes.flat', data: { forge, include: ['acme/t*', 'acme/ring'], exclude: [] } },
-    ])
-  })
-
-  test('the source drops an exact path or excludes a path its globs match', () => {
-    expect(moveToSubgroup(groups, 'acme/ring', 'shapes.round', 'shapes.flat')[1]).toEqual({
-      id: 'shapes.round',
-      data: { title: 'Round', forge, include: ['acme/disc'], exclude: [] },
-    })
-    expect(moveToSubgroup(groups, 'acme/tile', ['shapes.flat'], 'shapes.round')[1]).toEqual({
-      id: 'shapes.flat',
-      data: { forge, include: ['acme/t*'], exclude: ['acme/ring', 'acme/tile'] },
-    })
-  })
-
-  test('a source left without include patterns excludes the path instead', () => {
-    expect(moveToSubgroup(groups, 'acme/cube', 'shapes.solo', 'shapes.round')[1]).toEqual({
-      id: 'shapes.solo',
-      data: { forge, include: ['acme/cube'], exclude: ['acme/cube'] },
-    })
-  })
-
-  test('unknown groups and the target itself are skipped', () => {
-    expect(
-      moveToSubgroup(groups, 'acme/disc', ['shapes.round', 'shapes.gone'], 'shapes.round'),
-    ).toHaveLength(1)
-    expect(moveToSubgroup(groups, 'acme/disc', undefined, 'shapes.gone')).toEqual([])
-  })
-
-  test('a new subgroup takes the parent forge and its key under the parent', () => {
-    const parent = groups[0] ?? { id: '', data: { forge, include: [], exclude: [] } }
-    expect(
-      subgroupDraft(parent, ' edge ', '  Edges ', ['acme/disc', ' acme/e* ', 'acme/disc']),
-    ).toEqual({
-      id: 'shapes.edge',
-      data: { title: 'Edges', forge, include: ['acme/disc', 'acme/e*'], exclude: [] },
-    })
-    expect(subgroupDraft(parent, 'edge', ' ', []).data).toEqual({ forge, include: [], exclude: [] })
   })
 })
 
@@ -170,7 +105,7 @@ describe('parsePastedPaths', () => {
       fromUrl: [],
       invalid: [
         { line: 'widget', error: 'Include the namespace: team/app' },
-        { line: 'acme/*', error: 'Use an exact path; edit the group for patterns' },
+        { line: 'acme/*', error: 'Use an exact path; edit the team or forge for patterns' },
         { line: 'https://gitlab.acme.dev/', error: 'Enter the repository path' },
       ],
     })

@@ -14,7 +14,7 @@ import { useState } from 'react'
 
 import {
   useFamilies,
-  useGroupTitles,
+  useTeamTitles,
   useGuideSection,
   useKnowledgeEntry,
   useLearnings,
@@ -158,7 +158,7 @@ function NoteBody({ item, tab }: { item: InboxNoteItem; tab: string }) {
 }
 
 function LearningBody({ item, decide }: { item: InboxLearningItem; decide: Decide }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const repo = parseRepoKey(item.repos[0]?.repo)
   const learnings = useLearnings({ ...(repo && { repo }), status: ['proposed'] })
   const families = useFamilies()

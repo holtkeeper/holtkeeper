@@ -98,7 +98,7 @@ export function mrEvent(
   const { mr, ...rest } = overrides
   return {
     repo: { forge: 'work', path: 'games/app' },
-    groups: ['games'],
+    teams: ['games'],
     action: 'open',
     actor: 'alice',
     isBot: false,

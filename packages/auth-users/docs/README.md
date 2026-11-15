@@ -23,7 +23,7 @@ const auth = usersAuth({
       clientSecret: { env: 'OIDC_SECRET' },
       allowSignup: true,
       emailDomains: ['corp.example'],
-      defaultGrants: [{ scope: { groups: ['public'] }, actions: ['repos:read', 'audits:read'] }],
+      defaultGrants: [{ scope: { teams: ['widgets'] }, actions: ['repos:read', 'audits:read'] }],
     },
   ],
 })
@@ -67,7 +67,7 @@ stores the passkey (users may hold several), marks the link used and signs the h
 recovery link also bumps the user's `sessionVersion`, which ends every other session.
 
 `LinkInfo` is what the holder sees before signing in, so it is served only for a live, unused link
-and carries no scopes, group names or the issuer's name: `purpose`, `userName`, `expiresAt` and
+and carries no scopes, team names or the issuer's name: `purpose`, `userName`, `expiresAt` and
 `grants: { count, role }`. Who gave the access shows only after sign-in (`UserView.creator`). `role` (`LinkRole`) is `roleOf` from
 [@holtkeeper/access](../../access/docs/README.md#roles), the same role the web app shows in Account
 and on the Forbidden card: `admin` for `*` on every repository, `viewer` when every action only
@@ -129,9 +129,11 @@ carries:
   (`cli`, `bootstrap`) or that user is gone. The Account page shows it as "Given by".
 - `lastSeenAt`: the last signed-in request. `authenticate` writes it through
   `UserStore.touchUser` at most once a minute per user; a failed write never fails the request.
-- `teams`: the home groups the user picked (read from `prefs:<id>` in `kv`, where the server keeps
-  preferences), else every group their grants name, in grant order; group combinations read
-  `a + b`. Without `kv`, always the grants' groups.
+- `teams`: the home teams the user picked (`homeTeams`, read from `prefs:<id>` in `kv`, where the
+  server keeps preferences), else the teams the user is a member of (`UsersAuthOptions.teams`, the
+  configured teams read on every call) followed by every team their grants name, without
+  duplicates. Membership grants (`teamGrants` of `@holtkeeper/access`) are not added to the user's
+  principal here; whoever builds principals for every provider adds them.
 - `invite`: the newest enrollment link (`createdAt`, `expiresAt`, `expired`, `createdBy`) while the
   user never signed in (no passkey, no identity, no `lastSeenAt`). Inviting and
   `POST /admin/users/:id/invite` remember it in `kv` under `users:invite:<id>`; without `kv` there is

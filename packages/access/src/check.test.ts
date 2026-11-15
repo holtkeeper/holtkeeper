@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   can,
   canDelegate,
-  groupNames,
   grantsWithin,
   scopeCoversRepo,
   scopeSpecificity,
@@ -11,111 +10,102 @@ import {
 } from './check.ts'
 import { type Grant, type Principal, rootPrincipal } from './model.ts'
 
-const repo = (path: string, groups: string[] = [], forge = 'work') => ({ forge, path, groups })
-const principal = (grants: Grant[]): Principal => ({ id: 'u', name: 'u', provider: 'test', grants })
+const repo = (path: string, teams: string[] = [], forge = 'work') => ({ forge, path, teams })
+const principal = (grants: Grant[], teamDefs?: Principal['teamDefs']): Principal => ({
+  id: 'u',
+  name: 'u',
+  provider: 'test',
+  grants,
+  ...(teamDefs ? { teamDefs } : {}),
+})
 
 describe('scopeCoversRepo', () => {
-  test('matches groups, globs and forge prefixes', () => {
-    expect(scopeCoversRepo({ groups: ['games'] }, repo('x/y', ['games']))).toBe(true)
+  test('matches teams, globs and forge prefixes', () => {
+    expect(scopeCoversRepo({ teams: ['gizmo'] }, repo('x/y', ['gizmo']))).toBe(true)
+    expect(scopeCoversRepo({ teams: ['gizmo'] }, repo('x/y', ['other']))).toBe(false)
     expect(scopeCoversRepo({ repos: ['games/**'] }, repo('games/app/a'))).toBe(true)
     expect(scopeCoversRepo({ repos: ['work:games/*'] }, repo('games/a'))).toBe(true)
     expect(scopeCoversRepo({ repos: ['other:games/*'] }, repo('games/a'))).toBe(false)
+    expect(scopeCoversRepo({ repos: ['acme/*/web'] }, repo('acme/round/web'))).toBe(true)
+    expect(scopeCoversRepo({ repos: ['acme/*/web'] }, repo('acme/round/api'))).toBe(false)
     expect(scopeCoversRepo({}, repo('games/a'))).toBe(false)
   })
 
-  test('requires every group of an intersection', () => {
-    const storefrontUi = { groups: [['frontend', 'storefront']] }
-    expect(scopeCoversRepo(storefrontUi, repo('shop/web', ['frontend', 'storefront']))).toBe(true)
-    expect(scopeCoversRepo(storefrontUi, repo('shop/api', ['backend', 'storefront']))).toBe(false)
-    expect(scopeCoversRepo(storefrontUi, repo('admin/web', ['frontend', 'admin-panel']))).toBe(
-      false,
-    )
-  })
-
   test('combines entries with OR', () => {
-    const scope = { groups: ['tools', ['frontend', 'admin-panel', 'catalog']] }
+    const scope = { teams: ['tools'], repos: ['acme/round/**'] }
     expect(scopeCoversRepo(scope, repo('cli', ['tools']))).toBe(true)
-    expect(
-      scopeCoversRepo(scope, repo('admin/catalog', ['frontend', 'admin-panel', 'catalog'])),
-    ).toBe(true)
-    expect(scopeCoversRepo(scope, repo('admin/orders', ['frontend', 'admin-panel']))).toBe(false)
-  })
-})
-
-describe('groupNames', () => {
-  test('lists every group once', () => {
-    expect(groupNames(['tools', ['frontend', 'tools']])).toEqual(['tools', 'frontend'])
+    expect(scopeCoversRepo(scope, repo('acme/round/web'))).toBe(true)
+    expect(scopeCoversRepo(scope, repo('acme/square/web'))).toBe(false)
   })
 })
 
 describe('scopeSpecificity', () => {
-  test('ranks intersections between groups and path globs', () => {
+  test('ranks everything < team < glob < deeper glob < exact path', () => {
     const ranks = [
       { all: true },
-      { groups: ['frontend'] },
-      { groups: [['frontend', 'storefront']] },
-      { groups: [['frontend', 'admin-panel', 'catalog']] },
-      { repos: ['shop/*'] },
-      { repos: ['work:shop/web'] },
+      { teams: ['gizmo'] },
+      { repos: ['*/web'] },
+      { repos: ['acme/**'] },
+      { repos: ['acme/round/**'] },
+      { repos: ['work:acme/round/web'] },
     ].map(scopeSpecificity)
     expect(ranks).toEqual(ranks.toSorted((a, b) => a - b))
     expect(new Set(ranks).size).toBe(ranks.length)
-    expect(scopeSpecificity({ groups: [['frontend', 'frontend']] })).toBe(1)
   })
 
-  test('ranks a subgroup like an intersection with its parent', () => {
-    expect(scopeSpecificity({ groups: ['shapes'] })).toBe(1)
-    expect(scopeSpecificity({ groups: ['shapes.round'] })).toBe(1.5)
-    expect(scopeSpecificity({ groups: [['shapes', 'shapes.round']] })).toBe(1.5)
-    expect(scopeSpecificity({ groups: [['shapes.round', 'tools']] })).toBe(2 - 1 / 3)
-    expect(scopeSpecificity({ groups: ['shapes', 'shapes.round'] })).toBe(1)
+  test('ranks a scope by its broadest entry', () => {
+    expect(scopeSpecificity({ teams: ['gizmo'], repos: ['work:acme/a'] })).toBe(1)
+    expect(scopeSpecificity({ repos: ['acme/**', 'work:acme/a'] })).toBe(2.1)
+    expect(scopeSpecificity({})).toBe(0)
   })
 })
 
 describe('scopeWithin', () => {
-  test('accepts narrower scopes', () => {
+  test('accepts narrower path patterns', () => {
     expect(scopeWithin({ repos: ['games/app/**'] }, { repos: ['games/**'] })).toBe(true)
     expect(scopeWithin({ repos: ['games/app-x'] }, { repos: ['games/*'] })).toBe(true)
-    expect(scopeWithin({ groups: ['games'] }, { groups: ['games', 'tools'] })).toBe(true)
+    expect(scopeWithin({ repos: ['acme/*/web'] }, { repos: ['acme/**'] })).toBe(true)
+    expect(scopeWithin({ repos: ['acme/round/web'] }, { repos: ['acme/*/web'] })).toBe(true)
+    expect(scopeWithin({ repos: ['work:acme/round/web'] }, { repos: ['acme/**'] })).toBe(true)
+    expect(scopeWithin({ teams: ['gizmo'] }, { teams: ['gizmo', 'tools'] })).toBe(true)
     expect(scopeWithin({ all: true }, { all: true })).toBe(true)
-    expect(scopeWithin({ groups: [['frontend', 'storefront']] }, { groups: ['frontend'] })).toBe(
-      true,
-    )
-    expect(
-      scopeWithin(
-        { groups: [['frontend', 'admin-panel', 'catalog']] },
-        { groups: [['admin-panel', 'frontend']] },
-      ),
-    ).toBe(true)
-    expect(scopeWithin({ groups: ['frontend'] }, { groups: [['frontend']] })).toBe(true)
-  })
-
-  test('puts a subgroup within its parent, not the reverse', () => {
-    expect(scopeWithin({ groups: ['shapes.round'] }, { groups: ['shapes'] })).toBe(true)
-    expect(scopeWithin({ groups: [['shapes.round', 'tools']] }, { groups: ['shapes'] })).toBe(true)
-    expect(scopeWithin({ groups: ['shapes'] }, { groups: ['shapes.round'] })).toBe(false)
-    expect(scopeWithin({ groups: ['shapes.flat'] }, { groups: ['shapes.round'] })).toBe(false)
   })
 
   test('rejects wider or unprovable scopes', () => {
     expect(scopeWithin({ repos: ['games/**'] }, { repos: ['games/app/**'] })).toBe(false)
-    expect(scopeWithin({ all: true }, { groups: ['games'] })).toBe(false)
-    expect(scopeWithin({ groups: ['tools'] }, { groups: ['games'] })).toBe(false)
-    expect(scopeWithin({ groups: ['frontend'] }, { groups: [['frontend', 'storefront']] })).toBe(
+    expect(scopeWithin({ repos: ['acme/**'] }, { repos: ['acme/*/web'] })).toBe(false)
+    expect(scopeWithin({ repos: ['acme/*/web'] }, { repos: ['acme/round/*'] })).toBe(false)
+    expect(scopeWithin({ all: true }, { teams: ['gizmo'] })).toBe(false)
+    expect(scopeWithin({ teams: ['tools'] }, { teams: ['gizmo'] })).toBe(false)
+    expect(scopeWithin({ repos: ['games/*-x'] }, { repos: ['games/*'] })).toBe(true)
+    expect(scopeWithin({ repos: ['games/*'] }, { repos: ['games/*-x'] })).toBe(false)
+    expect(scopeWithin({ repos: ['games/a'] }, { repos: ['other:games/**'] })).toBe(false)
+    expect(scopeWithin({ repos: ['games/a/**'] }, { repos: ['games/*'] })).toBe(false)
+  })
+
+  test('expands teams it knows', () => {
+    const teams = {
+      gizmo: { owns: ['acme/round/**', 'acme/square/**'] },
+      kit: { owns: ['acme/shared/**'], exclude: ['acme/shared/legacy-*'] },
+    }
+    expect(scopeWithin({ repos: ['work:acme/round/web'] }, { teams: ['gizmo'] }, teams)).toBe(true)
+    expect(scopeWithin({ repos: ['acme/round/**'] }, { teams: ['gizmo'] }, teams)).toBe(true)
+    expect(scopeWithin({ repos: ['acme/*/web'] }, { teams: ['gizmo'] }, teams)).toBe(false)
+    expect(scopeWithin({ repos: ['work:acme/round/web'] }, { teams: ['gizmo'] })).toBe(false)
+    expect(scopeWithin({ teams: ['gizmo'] }, { repos: ['acme/**'] }, teams)).toBe(true)
+    expect(scopeWithin({ teams: ['gizmo'] }, { repos: ['acme/round/**'] }, teams)).toBe(false)
+    expect(scopeWithin({ repos: ['work:acme/shared/ui'] }, { teams: ['kit'] }, teams)).toBe(true)
+    expect(scopeWithin({ repos: ['work:acme/shared/legacy-ui'] }, { teams: ['kit'] }, teams)).toBe(
       false,
     )
-    expect(
-      scopeWithin({ groups: [['frontend', 'catalog']] }, { groups: [['frontend', 'storefront']] }),
-    ).toBe(false)
-    expect(scopeWithin({ repos: ['games/*-x'] }, { repos: ['games/*'] })).toBe(false)
-    expect(scopeWithin({ repos: ['games/a'] }, { repos: ['other:games/**'] })).toBe(false)
+    expect(scopeWithin({ repos: ['acme/shared/x/**'] }, { teams: ['kit'] }, teams)).toBe(false)
   })
 })
 
 describe('can', () => {
   const gamesAdmin = principal([
     { scope: { repos: ['games/**'] }, actions: ['*'] },
-    { scope: { groups: ['tools'] }, actions: ['audits:read'] },
+    { scope: { teams: ['tools'] }, actions: ['audits:read'] },
   ])
 
   test('checks repository targets', () => {
@@ -138,6 +128,17 @@ describe('can', () => {
     expect(can(gamesAdmin, 'users:write', { kind: 'global' })).toBe(false)
     expect(can(rootPrincipal('none'), 'users:write', { kind: 'global' })).toBe(true)
   })
+
+  test('a team grant covers path-scoped objects inside the team', () => {
+    const maintainer = principal([{ scope: { teams: ['gizmo'] }, actions: ['*'] }], {
+      gizmo: { owns: ['acme/round/**'] },
+    })
+    const scope = { repos: ['work:acme/round/web'] }
+    expect(can(maintainer, 'settings:write', { kind: 'scope', scope })).toBe(true)
+    expect(
+      can(maintainer, 'settings:write', { kind: 'scope', scope: { repos: ['acme/**'] } }),
+    ).toBe(false)
+  })
 })
 
 describe('catalog:read', () => {
@@ -145,7 +146,7 @@ describe('catalog:read', () => {
   const tools = repo('tools/a', ['tools'])
 
   test('analyses:read implies catalog:read on the same scope only', () => {
-    const reader = principal([{ scope: { groups: ['games'] }, actions: ['analyses:read'] }])
+    const reader = principal([{ scope: { teams: ['games'] }, actions: ['analyses:read'] }])
     expect(can(reader, 'catalog:read', { kind: 'repo', repo: games })).toBe(true)
     expect(can(reader, 'catalog:read', { kind: 'repo', repo: tools })).toBe(false)
   })
@@ -175,15 +176,13 @@ describe('catalog:read', () => {
   })
 
   test('delegating catalog:read is covered by analyses:read', () => {
-    const parent: Grant[] = [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }]
-    expect(
-      grantsWithin([{ scope: { groups: ['games'] }, actions: ['catalog:read'] }], parent),
-    ).toBe(true)
+    const parent: Grant[] = [{ scope: { teams: ['games'] }, actions: ['analyses:read'] }]
+    expect(grantsWithin([{ scope: { teams: ['games'] }, actions: ['catalog:read'] }], parent)).toBe(
+      true,
+    )
     expect(grantsWithin([{ scope: { all: true }, actions: ['catalog:read'] }], parent)).toBe(false)
   })
 })
-
-const adminOf = (group: string): Grant[] => [{ scope: { groups: [group] }, actions: ['*'] }]
 
 describe('delegation', () => {
   const gamesAdmin = principal([{ scope: { repos: ['games/**'] }, actions: ['*'] }])
@@ -193,6 +192,9 @@ describe('delegation', () => {
     const grants: Grant[] = [{ scope: { repos: ['games/app/**'] }, actions: ['*'] }]
     expect(grantsWithin(grants, gamesAdmin.grants)).toBe(true)
     expect(canDelegate(gamesAdmin, grants)).toBe(true)
+    expect(canDelegate(gamesAdmin, [{ scope: { repos: ['games/*/web'] }, actions: ['*'] }])).toBe(
+      true,
+    )
   })
 
   test('rejects wider scopes, extra actions and missing invite rights', () => {
@@ -205,12 +207,14 @@ describe('delegation', () => {
     expect(grantsWithin([{ scope: { all: true }, actions: ['*'] }], reader.grants)).toBe(false)
   })
 
-  test('lets a group admin delegate its subgroups only', () => {
-    const shapesAdmin = principal([{ scope: { groups: ['shapes'] }, actions: ['*'] }])
-    const roundAdmin = principal([{ scope: { groups: ['shapes.round'] }, actions: ['*'] }])
-    expect(canDelegate(shapesAdmin, adminOf('shapes.round'))).toBe(true)
-    expect(canDelegate(roundAdmin, adminOf('shapes.round'))).toBe(true)
-    expect(canDelegate(roundAdmin, adminOf('shapes'))).toBe(false)
-    expect(canDelegate(roundAdmin, adminOf('shapes.flat'))).toBe(false)
+  test('lets a team maintainer delegate folders of the team only', () => {
+    const maintainer = principal([{ scope: { teams: ['gizmo'] }, actions: ['*'] }], {
+      gizmo: { owns: ['acme/round/**'] },
+    })
+    const folder: Grant[] = [{ scope: { repos: ['acme/round/web/**'] }, actions: ['*'] }]
+    expect(canDelegate(maintainer, folder)).toBe(true)
+    expect(canDelegate(maintainer, [{ scope: { teams: ['gizmo'] }, actions: ['*'] }])).toBe(true)
+    expect(canDelegate(maintainer, [{ scope: { teams: ['other'] }, actions: ['*'] }])).toBe(false)
+    expect(canDelegate(maintainer, [{ scope: { repos: ['acme/**'] }, actions: ['*'] }])).toBe(false)
   })
 })

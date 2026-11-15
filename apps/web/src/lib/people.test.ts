@@ -25,7 +25,7 @@ const user = (patch: Partial<UserView> = {}): UserView => ({
   id: 'u1',
   name: 'Widget Dev',
   email: 'widget.dev@acme.test',
-  grants: grantsForRole('developer', { groups: ['widgets'] }),
+  grants: grantsForRole('developer', { teams: ['widgets'] }),
   disabled: false,
   createdAt: '2026-10-01T00:00:00.000Z',
   passkeys: [],
@@ -86,10 +86,10 @@ describe('people table', () => {
 
   test('scope labels', () => {
     expect(scopeLabel({ all: true })).toBe('All repositories')
-    expect(scopeLabel({ groups: ['widgets'] })).toBe('Group widgets')
+    expect(scopeLabel({ teams: ['widgets'] })).toBe('Team widgets')
     expect(scopeLabel({ repos: ['acme/widget-kit'] })).toBe('acme/widget-kit')
-    expect(scopeLabel({ groups: ['widgets', ['gadgets', 'shapes']], repos: ['acme/*'] })).toBe(
-      'widgets, gadgets + shapes +1',
+    expect(scopeLabel({ teams: ['widgets', 'gadgets'], repos: ['acme/*'] })).toBe(
+      'widgets, gadgets +1',
     )
     expect(scopeLabel({})).toBe('Nothing')
   })
@@ -98,7 +98,7 @@ describe('people table', () => {
     const viewer = user({
       id: 'u2',
       name: 'Gadget Viewer',
-      grants: grantsForRole('viewer', { groups: ['gadgets'] }),
+      grants: grantsForRole('viewer', { teams: ['gadgets'] }),
       teams: ['gadgets'],
       passkeys: [passkey],
     })

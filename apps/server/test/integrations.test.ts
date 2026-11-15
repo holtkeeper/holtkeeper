@@ -21,9 +21,9 @@ const config = parseConfig({
       create: () => ({ kind: 'gitlab' }) as unknown as GitForge,
     },
   },
-  groups: {
-    web: { forge: 'work', include: ['acme/widget-kit', 'acme/storefront'] },
-    pay: { forge: 'work', include: ['acme/ledger-api'] },
+  teams: {
+    web: { owns: ['work:acme/widget-kit', 'work:acme/storefront'] },
+    pay: { owns: ['work:acme/ledger-api'] },
   },
   jobs: { webhooks: { work: { secret: 'widget-hook' } } },
 })
@@ -33,7 +33,7 @@ const auth = headerAuth({
     admin: [{ scope: { all: true }, actions: ['*'] }],
     narrow: [
       {
-        scope: { groups: ['web'] },
+        scope: { teams: ['web'] },
         actions: ['settings:read', 'credentials:read', 'credentials:write'],
       },
     ],
@@ -131,7 +131,7 @@ describe('GET /api/credentials', () => {
 
   test('a narrow reader sees only credentials of its scope', async () => {
     await created('everything', 'gitlab')
-    await created('web-only', 'gitlab', { groups: ['web'] })
+    await created('web-only', 'gitlab', { teams: ['web'] })
     const list = (await (await call('GET', '/credentials', as('narrow'))).json()) as CredentialList
     expect(list.credentials.map((c) => c.name)).toEqual(['web-only'])
   })

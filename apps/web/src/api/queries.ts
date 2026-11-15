@@ -40,7 +40,6 @@ import type {
   CreateCredentialInput,
   CreateKnowledgeInput,
   ForgeSshKeyInput,
-  GroupDocumentData,
   InviteUserInput,
   KnowledgeStatus,
   PutConfigInput,
@@ -66,11 +65,11 @@ import {
 import { useCallback, useMemo } from 'react'
 
 import { hasLiveCards, mergeMessages, withNewer, withOlder } from '../lib/chat.ts'
-import { type GroupTitleOf, groupTitleOf } from '../lib/group-titles.ts'
 import { runBulk } from '../lib/inbox.ts'
 import { browserStorage, clearRecent } from '../lib/palette.ts'
 import { repoKey } from '../lib/repo.ts'
 import { type ScopeFocus, describeScope } from '../lib/scope.ts'
+import { type TeamTitleOf, teamTitleOf } from '../lib/team-titles.ts'
 import {
   type AiOverviewQuery,
   type AiUsageQuery,
@@ -91,7 +90,7 @@ export const keys = {
   inboxCount: ['inbox', 'count'] as const,
   repos: ['repos'] as const,
   repoUpdates: (repo: RepoRef) => ['repos', 'updates', repoKey(repo)] as const,
-  groupListing: (group: string) => ['repos', 'updates', 'group', group] as const,
+  fleetListing: (forge: string) => ['repos', 'updates', 'fleet', forge] as const,
   auditRuns: (repo?: RepoRef, limit?: number) =>
     ['audit-runs', 'list', repo ? repoKey(repo) : '*', limit ?? 0] as const,
   auditRun: (runId: string) => ['audit-runs', 'detail', runId] as const,
@@ -107,7 +106,7 @@ export const keys = {
     [
       'settings',
       'resolve',
-      focus.kind === 'repo' ? repoKey(focus.repo) : `group:${focus.group}`,
+      focus.kind === 'repo' ? repoKey(focus.repo) : `team:${focus.team}`,
     ] as const,
   knowledge: ['knowledge'] as const,
   knowledgeCounts: ['knowledge', 'counts'] as const,
@@ -154,15 +153,15 @@ export const keys = {
 export const useMe = () =>
   useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 60_000 })
 
-/** What people see for each group key (its display title, else the key), from `useMe`. */
-export function useGroupTitles(): GroupTitleOf {
-  const titles = useMe().data?.groupTitles
-  return useMemo(() => groupTitleOf(titles), [titles])
+/** What people see for each team key (its display title, else the key), from `useMe`. */
+export function useTeamTitles(): TeamTitleOf {
+  const titles = useMe().data?.teamTitles
+  return useMemo(() => teamTitleOf(titles), [titles])
 }
 
-/** `describeScope` with groups shown by their display titles. */
+/** `describeScope` with teams shown by their display titles. */
 export function useDescribeScope(): (scope: Scope) => string {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   return useCallback((scope: Scope) => describeScope(scope, titleOf), [titleOf])
 }
 
@@ -333,10 +332,20 @@ export function useRetryAttention() {
 export const useRepos = (enabled = true) =>
   useQuery({ queryKey: keys.repos, queryFn: api.repos, enabled })
 
-/** Groups of the repositories the viewer can see, sorted, for scope suggestions. */
-export function useGroupNames(enabled = true): string[] {
+/** Owner teams of the repositories the viewer can see, sorted, for scope suggestions. */
+export function useTeamNames(enabled = true): string[] {
   const repos = useRepos(enabled)
-  return [...new Set((repos.data?.repos ?? []).flatMap((repo) => repo.groups))].toSorted()
+  return [...new Set((repos.data?.repos ?? []).flatMap((repo) => repo.teams))].toSorted()
+}
+
+/**
+ * Every team the caller can name: the configured teams `/api/me` titles plus the owner teams of
+ * the visible repositories, sorted by key.
+ */
+export function useKnownTeams(): string[] {
+  const me = useMe()
+  const owners = useTeamNames()
+  return [...new Set([...Object.keys(me.data?.teamTitles ?? {}), ...owners])].toSorted()
 }
 
 /** Audit run summaries, newest first; all repositories when `repo` is omitted. */
@@ -482,7 +491,7 @@ export const useDependencySearch = (q: string) =>
     staleTime: 30_000,
   })
 
-/** The newest stack record of every readable group: runtimes, end of life and conventions. */
+/** The newest stack record of every readable team: runtimes, end of life and conventions. */
 export const useStack = () =>
   useQuery({ queryKey: ['stack'], queryFn: api.stack, staleTime: 60_000 })
 
@@ -672,28 +681,28 @@ export function useRepoUpdateMutations(repo: RepoRef) {
   }
 }
 
-/** The repositories polling knows for a group and its recent listings on the forge. */
-export const useGroupListing = (group: string, enabled = true) =>
+/** The repositories polling knows for one forge's fleet and its recent listings on the forge. */
+export const useFleetListing = (forge: string | undefined, enabled = true) =>
   useQuery({
-    queryKey: keys.groupListing(group),
-    queryFn: () => api.groupListing(group),
-    enabled,
+    queryKey: keys.fleetListing(forge ?? ''),
+    queryFn: () => api.fleetListing(forge ?? ''),
+    enabled: enabled && forge !== undefined,
     refetchInterval: 30_000,
   })
 
-/** Lists a group's repositories on its forge now. */
-export function useListGroup(group: string) {
+/** Lists a forge's fleet on the forge now. */
+export function useListFleet(forge: string) {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: () => api.listGroup(group),
-    onSuccess: (listing) => client.setQueryData(keys.groupListing(group), listing),
+    mutationFn: () => api.listFleet(forge),
+    onSuccess: (listing) => client.setQueryData(keys.fleetListing(forge), listing),
   })
 }
 
 export const useSettings = (enabled = true) =>
   useQuery({ queryKey: keys.settings, queryFn: api.settings, enabled })
 
-/** Every setting as it applies to a repository or a group, with winner and source; off without a focus. */
+/** Every setting as it applies to a repository or a team, with winner and source; off without a focus. */
 export const useResolvedScope = (focus: ScopeFocus | undefined) =>
   useQuery({
     queryKey: focus ? keys.resolved(focus) : ['settings', 'resolve', 'none'],
@@ -753,6 +762,17 @@ export const useKnowledgeEntry = (entryId: string | undefined) =>
   useQuery({
     queryKey: [...keys.knowledge, 'entry', entryId ?? ''],
     queryFn: () => api.knowledgeEntry(entryId!),
+    enabled: entryId !== undefined,
+  })
+
+/**
+ * Posted review comments that cited one knowledge entry and how they ended; off while `entryId`
+ * is unknown.
+ */
+export const useKnowledgeCitations = (entryId: string | undefined) =>
+  useQuery({
+    queryKey: [...keys.knowledge, 'citations', entryId ?? ''],
+    queryFn: () => api.knowledgeCitations(entryId!),
     enabled: entryId !== undefined,
   })
 
@@ -1069,15 +1089,21 @@ export const useCheckRepoAccess = () =>
       api.checkRepoAccess(forgeId, { paths: [...paths] }),
   })
 
-/** Repository groups of the effective config; needs global `settings:read`. */
-export const useGroups = (enabled = true) =>
-  useQuery({ queryKey: [...keys.config, 'groups'], queryFn: api.groups, enabled })
+/** Teams of the effective config; needs global `settings:read`. */
+export const useTeams = (enabled = true) =>
+  useQuery({ queryKey: [...keys.config, 'teams'], queryFn: api.teams, enabled })
 
-/** Creates or replaces a group in the panel config; refreshes groups and repositories. */
-export function usePutGroup() {
+/**
+ * Creates or replaces a team, or deletes it (`data: null`); refreshes the config, the
+ * repositories (their owner teams) and `/api/me` (titles, team grants).
+ */
+export function usePutTeam() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: GroupDocumentData }) => api.putGroup(id, data),
+    mutationFn: async ({ id, data }: { id: string; data: PutConfigInput['team'] | null }) => {
+      if (data === null) await api.deleteConfigEntry('teams', id)
+      else await api.putTeam(id, data)
+    },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: keys.me })
       await client.invalidateQueries({ queryKey: keys.config })
@@ -1263,7 +1289,7 @@ export const useJobCount = (filter: JobQuery & { since?: string }, enabled = tru
     enabled,
   })
 
-/** Repositories and groups with jobs the viewer may read, with their groups, for the scope switch. */
+/** Repositories and teams with jobs the viewer may read, with their owner teams, for the scope switch. */
 export const useJobTargets = () =>
   useQuery({ queryKey: [...keys.jobs, 'targets'], queryFn: api.jobTargets, staleTime: 60_000 })
 
@@ -1839,11 +1865,11 @@ export function useSetAvatar() {
   })
 }
 
-/** The signed-in principal's own UI preferences, such as its home groups. */
+/** The signed-in principal's own UI preferences, such as its home teams. */
 export const usePreferences = () =>
   useQuery({ queryKey: keys.preferences, queryFn: api.preferences, staleTime: 5 * 60_000 })
 
-/** Saves the signed-in principal's preferences; `homeGroups: null` goes back to its grants. */
+/** Saves the signed-in principal's preferences; `homeTeams: null` goes back to its membership and grants. */
 export function useSetPreferences() {
   const client = useQueryClient()
   return useMutation({

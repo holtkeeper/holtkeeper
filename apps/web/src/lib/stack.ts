@@ -1,10 +1,9 @@
 import type {
-  GroupMatch,
   StackComponentKind,
   StackConventionResult,
   StackConventionStatus,
   StackCycle,
-  StackGroupView,
+  StackTeamView,
   StackLag,
   StackSupport,
   StackUse,
@@ -64,76 +63,76 @@ export const parseStackSearch = (search: Record<string, unknown>): StackSearch =
 
 const keyOf = (forge: string, path: string) => `${forge}:${path}`
 
-/** The groups as a scope position shows them: each limited to the repositories it keeps. */
+/** The teams as a scope position shows them: each limited to the repositories it keeps. */
 export interface ScopedStack {
-  groups: StackGroupView[]
+  teams: StackTeamView[]
   counts: ScopeCounts
 }
 
-function narrowGroup(
-  group: StackGroupView,
+function narrowTeam(
+  team: StackTeamView,
   keep: (repo: string) => boolean,
   keepTool: (kind: StackComponentKind) => boolean = () => true,
-): StackGroupView {
+): StackTeamView {
   return {
-    ...group,
-    repos: group.repos.filter((repo) => keep(repo.path)),
-    tools: group.tools
+    ...team,
+    repos: team.repos.filter((repo) => keep(repo.path)),
+    tools: team.tools
       .filter((tool) => keepTool(tool.kind))
       .map((tool) => ({ ...tool, uses: tool.uses.filter((use) => keep(use.repo)) }))
       .filter((tool) => tool.uses.length > 0),
-    conventions: group.conventions.filter((result) => keep(result.repo)),
+    conventions: team.conventions.filter((result) => keep(result.repo)),
   }
 }
 
 /**
- * Splits the groups' repositories by the viewer's home groups (a UI default, not a permission);
- * `only` limits everything to one config group first, as the group page does.
+ * Splits the teams' repositories by the viewer's home teams (a UI default, not a permission);
+ * `only` limits everything to one team first, as the team page does.
  */
 export function scopeStack(
-  groups: readonly StackGroupView[],
+  teams: readonly StackTeamView[],
   view: ScopeView,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
   only?: string,
 ): ScopedStack {
-  const picked = only ? groups.filter((group) => group.group === only) : groups
-  const repos = picked.flatMap((group) =>
-    group.repos.map((repo) => ({ key: keyOf(group.forge, repo.path), groups: repo.groups })),
+  const picked = only ? teams.filter((team) => team.team === only) : teams
+  const repos = picked.flatMap((team) =>
+    team.repos.map((repo) => ({ key: keyOf(team.forge, repo.path), teams: repo.teams })),
   )
   const unique = [...new Map(repos.map((repo) => [repo.key, repo])).values()]
-  const scoped = scopeList(unique, only ? 'all' : view, homeGroups)
+  const scoped = scopeList(unique, only ? 'all' : view, homeTeams)
   const shown = new Set(scoped.shown.map((repo) => repo.key))
   return {
-    groups: picked
-      .map((group) => narrowGroup(group, (path) => shown.has(keyOf(group.forge, path))))
-      .filter((group) => group.repos.length > 0),
+    teams: picked
+      .map((team) => narrowTeam(team, (path) => shown.has(keyOf(team.forge, path))))
+      .filter((team) => team.repos.length > 0),
     counts: scoped.counts,
   }
 }
 
 /**
- * The groups limited to tools of `filter.kind`, or to one repository (`forge:path`); an empty
+ * The teams limited to tools of `filter.kind`, or to one repository (`forge:path`); an empty
  * filter keeps everything.
  */
 export function narrowStack(
-  groups: readonly StackGroupView[],
+  teams: readonly StackTeamView[],
   filter: { kind?: readonly StackComponentKind[]; repo?: string },
-): StackGroupView[] {
+): StackTeamView[] {
   const kinds = filter.kind?.length ? new Set(filter.kind) : undefined
-  return groups
-    .map((group) => {
-      const inGroups = new Set(
-        group.repos
-          .filter((repo) => !filter.repo || keyOf(group.forge, repo.path) === filter.repo)
+  return teams
+    .map((team) => {
+      const inTeams = new Set(
+        team.repos
+          .filter((repo) => !filter.repo || keyOf(team.forge, repo.path) === filter.repo)
           .map((repo) => repo.path),
       )
-      return narrowGroup(
-        group,
-        (path) => inGroups.has(path),
+      return narrowTeam(
+        team,
+        (path) => inTeams.has(path),
         (kind) => !kinds || kinds.has(kind),
       )
     })
-    .filter((group) => group.repos.length > 0)
+    .filter((team) => team.repos.length > 0)
 }
 
 const supportRank: Record<StackSupport, number> = {
@@ -219,7 +218,7 @@ export const supportLegend: readonly { tone: StatusTone; label: string }[] = [
 interface PlacedUse extends StackUse {
   /** `forge:path`. */
   key: string
-  group: string
+  team: string
 }
 
 /** Repositories on one version line of a tool. */
@@ -234,7 +233,7 @@ export interface VersionCell {
   uses: PlacedUse[]
 }
 
-/** One tool across the shown groups, with each version line in use. */
+/** One tool across the shown teams, with each version line in use. */
 export interface ToolRow {
   id: string
   name: string
@@ -279,11 +278,11 @@ const compareLines = (a: string, b: string) => {
   return a.localeCompare(b)
 }
 
-/** Tools of the groups merged by id, runtimes first, then by how many repositories use them. */
-export function versionLines(groups: readonly StackGroupView[]): ToolRow[] {
+/** Tools of the teams merged by id, runtimes first, then by how many repositories use them. */
+export function versionLines(teams: readonly StackTeamView[]): ToolRow[] {
   const rows = new Map<string, ToolRow & { cells: Map<string, VersionCell> }>()
-  for (const group of groups)
-    for (const tool of group.tools) {
+  for (const team of teams)
+    for (const tool of team.tools) {
       const row = rows.get(tool.id) ?? {
         id: tool.id,
         name: tool.name,
@@ -303,11 +302,11 @@ export function versionLines(groups: readonly StackGroupView[]): ToolRow[] {
           repos: [],
           uses: [],
         }
-        const key = keyOf(group.forge, use.repo)
+        const key = keyOf(team.forge, use.repo)
         cell.support = worseSupport(cell.support, use.support)
         if (!cell.eolDate && use.eolDate) cell.eolDate = use.eolDate
         if (!cell.repos.includes(key)) cell.repos.push(key)
-        cell.uses.push({ ...use, key, group: group.group })
+        cell.uses.push({ ...use, key, team: team.team })
         row.cells.set(line, cell)
       }
       rows.set(tool.id, row)
@@ -347,8 +346,8 @@ export interface MatrixRow {
   key: string
   forge: string
   repo: string
-  /** Config groups of the repository, for folding other teams. */
-  groups: string[]
+  /** Config teams of the repository, for folding other teams. */
+  teams: string[]
   webUrl?: string
   error?: string
   /** By tool id; a tool the repository does not use has no cell. */
@@ -375,32 +374,32 @@ export interface RepoMatrix {
 const useRank = (use: StackUse) => supportRank[use.support] * 10 + lagRank[use.lag]
 
 /**
- * The repository × tool matrix of the groups: tool columns in `versionLines` order, repositories
+ * The repository × tool matrix of the teams: tool columns in `versionLines` order, repositories
  * worst support first. With `segment` only cells in it count, and repositories and tools without
  * such a cell are left out.
  */
-export function repoMatrix(groups: readonly StackGroupView[], segment?: StackSegment): RepoMatrix {
+export function repoMatrix(teams: readonly StackTeamView[], segment?: StackSegment): RepoMatrix {
   const rows = new Map<string, MatrixRow>()
-  for (const group of groups)
-    for (const repo of group.repos) {
-      const key = keyOf(group.forge, repo.path)
+  for (const team of teams)
+    for (const repo of team.repos) {
+      const key = keyOf(team.forge, repo.path)
       const row = rows.get(key) ?? {
         key,
-        forge: group.forge,
+        forge: team.forge,
         repo: repo.path,
-        groups: [],
+        teams: [],
         cells: {},
         ...(repo.webUrl ? { webUrl: repo.webUrl } : {}),
         ...(repo.error ? { error: repo.error } : {}),
       }
-      for (const name of repo.groups) if (!row.groups.includes(name)) row.groups.push(name)
+      for (const name of repo.teams) if (!row.teams.includes(name)) row.teams.push(name)
       rows.set(key, row)
     }
   const uses = new Map<string, StackUse[]>()
-  for (const group of groups)
-    for (const tool of group.tools)
+  for (const team of teams)
+    for (const tool of team.tools)
       for (const use of tool.uses) {
-        const id = `${keyOf(group.forge, use.repo)}\0${tool.id}`
+        const id = `${keyOf(team.forge, use.repo)}\0${tool.id}`
         uses.set(id, [...(uses.get(id) ?? []), use])
       }
   for (const [id, list] of uses) {
@@ -422,7 +421,7 @@ export function repoMatrix(groups: readonly StackGroupView[], segment?: StackSeg
     row.worst = row.worst ? worseSupport(row.worst, shown.support) : shown.support
   }
   const used = new Set([...rows.values()].flatMap((row) => Object.keys(row.cells)))
-  const tools = versionLines(groups)
+  const tools = versionLines(teams)
     .filter((tool) => used.has(tool.id))
     .map(({ id, name, kind, latest, latestLts }) => ({
       id,
@@ -556,7 +555,7 @@ export function suggestedSteps(
 export interface PlacedConvention extends StackConventionResult {
   /** `forge:path`. */
   key: string
-  group: string
+  team: string
   analysisId: string
 }
 
@@ -565,7 +564,7 @@ export interface PlacedConvention extends StackConventionResult {
  * missing ones first: the convention a version line's file is checked against.
  */
 export function matchingConvention(
-  groups: readonly StackGroupView[],
+  teams: readonly StackTeamView[],
   key: string,
   files: readonly string[],
 ): PlacedConvention | undefined {
@@ -575,11 +574,11 @@ export function matchingConvention(
     error: 2,
     matches: 3,
   }
-  return groups
-    .flatMap((group) =>
-      group.conventions
-        .filter((result) => keyOf(group.forge, result.repo) === key && files.includes(result.file))
-        .map((result) => ({ ...result, key, group: group.group, analysisId: group.analysisId })),
+  return teams
+    .flatMap((team) =>
+      team.conventions
+        .filter((result) => keyOf(team.forge, result.repo) === key && files.includes(result.file))
+        .map((result) => ({ ...result, key, team: team.team, analysisId: team.analysisId })),
     )
     .toSorted((a, b) => order[a.status] - order[b.status])[0]
 }
@@ -589,8 +588,8 @@ export interface ConventionRow {
   /** `forge:path`. */
   key: string
   repo: string
-  /** Config groups of the repository, for folding other teams. */
-  groups: string[]
+  /** Config teams of the repository, for folding other teams. */
+  teams: string[]
   cells: Record<string, PlacedConvention | undefined>
 }
 
@@ -602,7 +601,7 @@ export interface ConventionGrid {
 }
 
 /** Repositories × convention files, drifting and missing repositories first. */
-export function conventionGrid(groups: readonly StackGroupView[]): ConventionGrid {
+export function conventionGrid(teams: readonly StackTeamView[]): ConventionGrid {
   const files = new Set<string>()
   const rows = new Map<string, ConventionRow>()
   const counts: Record<StackConventionStatus, number> = {
@@ -611,18 +610,18 @@ export function conventionGrid(groups: readonly StackGroupView[]): ConventionGri
     missing: 0,
     error: 0,
   }
-  for (const group of groups)
-    for (const result of group.conventions) {
-      const key = keyOf(group.forge, result.repo)
+  for (const team of teams)
+    for (const result of team.conventions) {
+      const key = keyOf(team.forge, result.repo)
       files.add(result.file)
       counts[result.status] += 1
       const row = rows.get(key) ?? {
         key,
         repo: result.repo,
-        groups: group.repos.find((repo) => repo.path === result.repo)?.groups ?? [group.group],
+        teams: team.repos.find((repo) => repo.path === result.repo)?.teams ?? [team.team],
         cells: {},
       }
-      row.cells[result.file] = { ...result, key, group: group.group, analysisId: group.analysisId }
+      row.cells[result.file] = { ...result, key, team: team.team, analysisId: team.analysisId }
       rows.set(key, row)
     }
   const failing = (row: ConventionRow) =>
@@ -707,11 +706,11 @@ export function sheetItems(
   )
 }
 
-/** Since-last-week changes summed over the groups; `undefined` when no group has an earlier record. */
-export function weeklyChanges(groups: readonly StackGroupView[]) {
-  const withChanges = groups.flatMap((group) => (group.changes ? [group.changes] : []))
+/** Since-last-week changes summed over the teams; `undefined` when no team has an earlier record. */
+export function weeklyChanges(teams: readonly StackTeamView[]) {
+  const withChanges = teams.flatMap((team) => (team.changes ? [team.changes] : []))
   if (!withChanges.length) return undefined
-  const sum = (pick: (changes: NonNullable<StackGroupView['changes']>) => number) =>
+  const sum = (pick: (changes: NonNullable<StackTeamView['changes']>) => number) =>
     withChanges.reduce((total, changes) => total + pick(changes), 0)
   return {
     since: withChanges.map((changes) => changes.since).toSorted()[0] ?? '',

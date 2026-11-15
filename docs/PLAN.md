@@ -2,13 +2,13 @@
 
 Holtkeeper is an automation engine for a fleet of Git repositories (GitLab and GitHub): code review, dependency updates, vulnerability audits, releases. People drive it through the web panel; AI agents through its MCP endpoint.
 
-This repository holds the public engine and its analyzers. The infrastructure (storage, secrets, sign-in, workers) lives in `holtkeeper.config.ts`, often in a separate private repository that depends on the `@holtkeeper/*` packages; forges, repository groups, schedules, triggers, rules and analyzer options are managed in the panel.
+This repository holds the public engine and its analyzers. The infrastructure (storage, secrets, sign-in, workers) lives in `holtkeeper.config.ts`, often in a separate private repository that depends on the `@holtkeeper/*` packages; forges with their fleet, teams, schedules, triggers, rules and analyzer options are managed in the panel.
 
 ## Principles
 
 - **Everything behind interfaces.** Git hosting, LLM, chat, storage and command execution are adapters behind abstractions. A new provider is a new adapter package; the core does not change.
 - **Analyzers, not features.** Every automation is an analyzer with one contract (options schema, scope, what it needs, run); webhooks, schedules, comment commands and the panel all queue the same analyzers.
-- **Config as code for infrastructure.** `defineConfig()` with full typing holds what a deployment needs (server, job execution, limits, AI providers); groups, repository traits, forges and automation live in the panel.
+- **Config as code for infrastructure.** `defineConfig()` with full typing holds what a deployment needs (server, job execution, limits, AI providers); teams, repository traits, forges and automation live in the panel.
 - **Panel first.** Work runs on the server — on webhooks, schedules or a button in the panel. Agents get the same data and actions over MCP.
 - **Safe by default.** `dryRun` mode, every change goes through an MR rather than a direct push, dangerous actions (release, deploy) require human confirmation.
 - **No build step.** Libraries export TypeScript source and Bun runs it directly; see [development.md](development.md#no-build-step).
@@ -66,7 +66,7 @@ Terminology differences (MR/PR, group/org, pipeline/workflow) are hidden inside 
 
 ### Analyzer
 
-The contract lives in [@holtkeeper/analyzer](../packages/analyzer/docs/README.md): a `kind`, an options schema, a `scope` (one repository or a whole group), what the run `needs` (checkout, forge, agent, history) and `run`. Triggers: schedule, webhook event, MR comment command (`/holtkeeper review`), chat command, a button in the panel. The outcome of every run (created MRs, comments, errors) is stored and visible in the UI.
+The contract lives in [@holtkeeper/analyzer](../packages/analyzer/docs/README.md): a `kind`, an options schema, a `scope` (one repository or a whole team), what the run `needs` (checkout, forge, agent, history) and `run`. Triggers: schedule, webhook event, MR comment command (`/holtkeeper review`), chat command, a button in the panel. The outcome of every run (created MRs, comments, errors) is stored and visible in the UI.
 
 ### Config
 
@@ -84,7 +84,7 @@ export default defineConfig({
 })
 ```
 
-Forges, groups, repository traits, schedules, triggers, policies, analyzer options and budgets live in the database and are edited in the panel, which seeds sensible defaults on first start. Keys the file no longer takes are warned about and ignored.
+Forges, teams, repository traits, schedules, triggers, policies, analyzer options and budgets live in the database and are edited in the panel, which seeds sensible defaults on first start. Keys the file no longer takes are warned about and ignored.
 
 ### Workspace
 
@@ -109,7 +109,7 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 
 Status: done as the `browserslist` analyzer ([packages/browserslist](../packages/browserslist/docs/README.md)) refreshed weekly by freshness; it runs only in repositories whose lockfile resolves `caniuse-lite` (analyzer `appliesTo`). Auto-merge waits for the forge contract.
 
-- On a schedule per repository group: `update-browserslist-db` through the repository's package manager.
+- On a schedule per team or folder: `update-browserslist-db` through the repository's package manager.
 - If the lockfile changed — branch, commit, MR (or update the already open MR), optional auto-merge after a green pipeline.
 - Report: whether the resolved browser list changed (`browserslist` before/after) — the main thing a reviewer looks at.
 - First automation to implement: exercises the whole clone → command → commit → MR path without AI.
@@ -163,7 +163,7 @@ Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run o
 - **CLI** — only the server's entrypoint: `holtkeeper serve` (the Helm chart's command) and `holtkeeper users` for operator account tasks such as an agent's login link ([agent-access.md](agent-access.md)).
 - **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and history; audit ingestion; credential rotation._
 - **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters. _Started: [@holtkeeper/chat](../packages/chat/docs/README.md) with commands, cards, forms and the merge request surface; `release`, `verify` and `jobs.commands` run through it; the Slack integration was removed for now and will come back differently: its stored app credential and the Block Kit rendering in [@holtkeeper/chat-slack](../packages/chat-slack/docs/README.md) remain, and the Slack app marks merge request links in bound channels with a review status emoji ([Slack review status](../apps/server/docs/slack.md))._
-- **Digests** — scheduled summaries of what analyses found (license problems, images to optimize, stale merge requests…) per group of repositories, to Slack channels and panel chats. _A first version was removed together with the Slack integration; not started again yet._
+- **Digests** — scheduled summaries of what analyses found (license problems, images to optimize, stale merge requests…) per team, to Slack channels and panel chats. _A first version was removed together with the Slack integration; not started again yet._
 
 ### Access
 
@@ -174,7 +174,7 @@ Sign-in is a replaceable `AuthProvider`; permissions are the same everywhere:
 3. `passwordAuth()` — root behind a password.
 4. `usersAuth()` — real users with passkeys only (setup and recovery through one-time links) or OIDC, with scoped grants: e.g. admins of `games/**` who can invite people only within that scope.
 
-Credentials (forge accounts, API keys) and settings (models, keys, review rules, audit policy) are scoped to everything, groups, subgroups or repository patterns; the most specific setting wins. The scope chain, broad to narrow: everything → team (group, `shapes`) → subteam (subgroup, `shapes.round`, one level, its members always within the team) → path glob → repository. A team's grants, settings and knowledge keep covering its subgroups; a subgroup's own entries win over the team's. GitLab tokens rotate automatically before they expire.
+Repositories keep the forge's own folder tree (`acme/round/web`); teams own (`owns` minus `exclude`) and consume path patterns, and membership grants access (maintainers everything on the team's repositories, members day-to-day work, consumer teams read). Credentials (forge accounts, API keys), grants, knowledge and settings (models, keys, review rules, audit policy) are scoped to everything, teams or path patterns (optionally forge-qualified, `work:acme/**`); the most specific entry wins. The scope chain, broad to narrow: everything → team → path pattern (the deeper folder first) → repository. See [teams-and-paths.md](teams-and-paths.md). GitLab tokens rotate automatically before they expire.
 
 ## Milestones
 

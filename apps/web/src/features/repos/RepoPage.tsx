@@ -1,4 +1,4 @@
-import { type RepoRef, leafGroups } from '@holtkeeper/api'
+import type { RepoRef } from '@holtkeeper/api'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { Copy, FolderGit2 } from 'lucide-react'
 
@@ -13,7 +13,7 @@ import {
   repoSplat,
   splitRepoPath,
 } from '../../lib/repo.ts'
-import { Dot, EmptyState, GroupName, notify, Page, SegmentedTabs, Tag } from '../../ui/index.ts'
+import { Dot, EmptyState, TeamName, notify, Page, SegmentedTabs, Tag } from '../../ui/index.ts'
 import { useRunJob } from '../jobs/RunJobDialog.tsx'
 import { RepoActivityTab } from '../repo/tabs/RepoActivityTab.tsx'
 import { RepoKnowledgeTab } from '../repo/tabs/RepoKnowledgeTab.tsx'
@@ -49,12 +49,12 @@ function UpdatesTag({ repo }: { repo: RepoRef }) {
 
 function Heading({
   repo,
-  groups,
+  teams,
   defaultBranch,
   writable,
 }: {
   repo: RepoRef
-  groups: readonly string[]
+  teams: readonly string[]
   defaultBranch: string | undefined
   writable: boolean
 }) {
@@ -75,19 +75,19 @@ function Heading({
               <span className="mono text-muted">{defaultBranch}</span>
             </>
           ) : null}
-          {groups.length ? (
+          {teams.length ? (
             <>
               <span className="text-dim">·</span>
-              <span className="text-muted">Groups</span>
-              {leafGroups(groups).map((group) => (
+              <span className="text-muted">{teams.length === 1 ? 'Team' : 'Teams'}</span>
+              {teams.map((team) => (
                 <Link
-                  key={group}
-                  to="/repos/groups/$groupId"
-                  params={{ groupId: group }}
+                  key={team}
+                  to="/repos/teams/$teamId"
+                  params={{ teamId: team }}
                   className="no-underline"
                 >
                   <Tag>
-                    <GroupName group={group} path />
+                    <TeamName team={team} />
                   </Tag>
                 </Link>
               ))}
@@ -101,13 +101,11 @@ function Heading({
 
 function Hub({
   repo,
-  groups,
-  allGroups,
+  teams,
   search,
 }: {
   repo: RepoRef
-  groups: readonly string[]
-  allGroups: readonly string[]
+  teams: readonly string[]
   search: RepoHubSearch
 }) {
   const { can } = useSession()
@@ -120,7 +118,7 @@ function Hub({
   const tab = pickTab(tabs, search.tab)
   const go = (next: RepoHubTab, section?: string) =>
     void navigate({ search: hubSearch(next, section), replace: true })
-  const known = groups.length ? groups : (overview?.data?.groups ?? [])
+  const known = teams.length ? teams : (overview?.data?.teams ?? [])
 
   return (
     <Page
@@ -135,7 +133,7 @@ function Hub({
       title={
         <Heading
           repo={repo}
-          groups={known}
+          teams={known}
           defaultBranch={overview?.data?.defaultBranch}
           writable={can('settings:write')}
         />
@@ -194,11 +192,7 @@ function Hub({
       {tab === 'activity' ? <RepoActivityTab repo={repo} /> : null}
       {tab === 'knowledge' ? <RepoKnowledgeTab repo={repo} /> : null}
       {tab === 'settings' ? (
-        <RepoSettingsTab
-          repo={repo}
-          allGroups={allGroups}
-          {...(search.section ? { section: search.section } : {})}
-        />
+        <RepoSettingsTab repo={repo} {...(search.section ? { section: search.section } : {})} />
       ) : null}
       {run.dialog}
     </Page>
@@ -206,7 +200,7 @@ function Hub({
 }
 
 /**
- * The repository hub: header with avatar, path, forge, default branch, groups and the Updates tag,
+ * The repository hub: header with avatar, path, forge, default branch, owner teams and the Updates tag,
  * the health strip, then the tabs Overview, Supply chain, Quality, Releases, Activity, Knowledge and
  * Settings as the `tab`, `section`, `file` and `ref` search parameters choose. The overview behind
  * the strip and the first three tabs is read only with `analyses:read`.
@@ -228,8 +222,7 @@ export function RepoPage() {
   if (repos.isSuccess && !summary) return <RepoNotFound repo={repoKey(repo)} />
   const props = {
     repo,
-    groups: summary?.groups ?? [],
-    allGroups: [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted(),
+    teams: summary?.teams ?? [],
     search,
   }
   return <Hub key={repoKey(repo)} {...props} />

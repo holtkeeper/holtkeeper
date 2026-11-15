@@ -14,7 +14,7 @@ import {
   useDependency,
   useDependencyApi,
   useDependencyDocs,
-  useGroupTitles,
+  useTeamTitles,
   usePublicApiPackage,
   useWriteTasks,
 } from '../../api/queries.ts'
@@ -344,7 +344,7 @@ function SheetFacts({ detail }: { detail: DependencyDetail }) {
 }
 
 function DecisionList({ decisions }: { decisions: readonly DependencyDecision[] }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   if (!decisions.length) return null
   return (
     <ul className="flex flex-col gap-1.5">
@@ -373,8 +373,8 @@ function DecisionList({ decisions }: { decisions: readonly DependencyDecision[] 
 
 function OverviewTab({ detail, inSheet }: { detail: DependencyDetail; inSheet: boolean }) {
   const users = useFoldedUsers(detail.usedBy)
-  const { homeGroups } = useScope()
-  const decisions = foldOtherTeams(detail.decisions, homeGroups, (decision) =>
+  const { homeTeams } = useScope()
+  const decisions = foldOtherTeams(detail.decisions, homeTeams, (decision) =>
     decision.shared ? decision.owner : [],
   )
   const sorted = users.shown.toSorted((a, b) => b.majorsBehind - a.majorsBehind)

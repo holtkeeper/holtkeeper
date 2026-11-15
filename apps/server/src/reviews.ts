@@ -23,8 +23,14 @@ export const REVIEWS_LIMIT = { default: 50, max: 200 }
 /** Review heads one `GET /api/reviews` request reads at most, however many it filters out. */
 export const REVIEWS_SCAN = 1000
 
-const scopeRank = (scope: string) =>
-  scope === 'all' ? 0 : scope.startsWith('group:') ? 1 : scope.startsWith('family:') ? 2 : 3
+const kindRank = ['all', 'team', 'path', 'family', 'repo']
+
+// Broad to narrow: everything, owner teams, folders (shallow first), the family, the repository.
+const scopeRank = (scope: string) => {
+  const kind = kindRank.indexOf(scope.split(':')[0] ?? '')
+  const depth = scope.startsWith('path:') ? scope.split('/').length / 1000 : 0
+  return (kind < 0 ? kindRank.length : kind) + depth
+}
 
 /** Guide scopes whose text reached a resolved Guide, broad to narrow, each once. */
 export function guideScopesOf(guide: Pick<ResolvedGuide, 'blocks'>): string[] {
@@ -64,7 +70,8 @@ function reviewRowOf(head: Pick<AnalysisHead, 'id' | 'repo' | 'createdAt' | 'met
 /** What `listReviews` filters by; `since` and `limit` are already defaulted and capped. */
 export interface ReviewFilter {
   repo?: RepoRef
-  group?: string
+  /** Team key: only repositories it owns. */
+  team?: string
   verdict?: ReviewRow['verdict']
   since: string
   before?: string
@@ -104,7 +111,7 @@ export async function listReviews(
     for (const head of heads) {
       const target = source.targetOf(head.repo)
       if (!canRead(target)) continue
-      if (filter.group && !target.groups.includes(filter.group)) continue
+      if (filter.team && !target.teams.includes(filter.team)) continue
       const row = reviewRowOf(head)
       if (!row || (filter.verdict && row.verdict !== filter.verdict)) continue
       rows.push(row)
@@ -128,7 +135,7 @@ export async function listReviews(
 const WINDOW_PAGE = 200
 
 /**
- * Sums over every review head of the window `filter` matches (repository, group, verdict, since),
+ * Sums over every review head of the window `filter` matches (repository, team, verdict, since),
  * from stored metrics, reading at most `REVIEWS_SCAN` heads; `partial` when it stopped there.
  */
 async function windowTotals(
@@ -161,7 +168,7 @@ async function windowTotals(
     exhausted = heads.length < take
     for (const head of heads) {
       const target = source.targetOf(head.repo)
-      if (!canRead(target) || (filter.group && !target.groups.includes(filter.group))) continue
+      if (!canRead(target) || (filter.team && !target.teams.includes(filter.team))) continue
       const row = reviewRowOf(head)
       if (!row || (filter.verdict && row.verdict !== filter.verdict)) continue
       totals.reviews += 1
@@ -228,14 +235,15 @@ export function reviewDetail(
 export interface ReviewQualityFilter {
   by: QualityGroup
   repo?: RepoRef
-  group?: string
+  /** Team key: only repositories it owns. */
+  team?: string
   /** Only signals read at or after this time. */
   since: string
 }
 
 /**
  * How review comments fared (`qualityRows`) on repositories `canRead` allows, from the stored
- * signals only; narrowed to one repository or config group, and to signals read since `since`.
+ * signals only; narrowed to one repository or team, and to signals read since `since`.
  */
 export async function reviewQuality(
   source: {
@@ -262,7 +270,7 @@ export async function reviewQuality(
     (signal) =>
       signal.updatedAt >= filter.since &&
       readable(signal.repo) &&
-      (!filter.group || targets.get(signal.repo)?.groups.includes(filter.group)),
+      (!filter.team || targets.get(signal.repo)?.teams.includes(filter.team)),
   )
   return { by: filter.by, ...qualityRows(signals, filter.by) }
 }

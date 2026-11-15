@@ -5,8 +5,8 @@ import type { SettingEntry } from '@holtkeeper/store'
 import { slackReviews } from './definitions.ts'
 import { resolveSlackReviewChannels } from './slack-reviews.ts'
 
-const widget = { forge: 'acme', path: 'shapes/widget', groups: ['shapes'] }
-const gadget = { forge: 'acme', path: 'tools/gadget', groups: ['tools'] }
+const widget = { forge: 'acme', path: 'shapes/widget', teams: ['shapes'] }
+const gadget = { forge: 'acme', path: 'tools/gadget', teams: ['tools'] }
 
 const entry = (id: string, scope: SettingEntry['scope'], value: unknown): SettingEntry => ({
   id,
@@ -26,7 +26,7 @@ describe('slack.reviews', () => {
   test('the most specific entry wins, so groups report to their own channels', () => {
     const entries = [
       entry('all', { all: true }, { channels: ['C0000ALL'] }),
-      entry('shapes', { groups: ['shapes'] }, { channels: ['C0000SHAPES', 'G0000PRIVATE'] }),
+      entry('shapes', { teams: ['shapes'] }, { channels: ['C0000SHAPES', 'G0000PRIVATE'] }),
     ]
     expect(resolveSlackReviewChannels(entries, widget)).toEqual(['C0000SHAPES', 'G0000PRIVATE'])
     expect(resolveSlackReviewChannels(entries, gadget)).toEqual(['C0000ALL'])
@@ -35,7 +35,7 @@ describe('slack.reviews', () => {
   test('an entry without channels keeps a group quiet', () => {
     const entries = [
       entry('all', { all: true }, { channels: ['C0000ALL'] }),
-      entry('shapes', { groups: ['shapes'] }, { channels: [] }),
+      entry('shapes', { teams: ['shapes'] }, { channels: [] }),
     ]
     expect(resolveSlackReviewChannels(entries, widget)).toEqual([])
   })

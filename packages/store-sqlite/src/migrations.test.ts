@@ -285,4 +285,55 @@ describe('migrate', () => {
     })
     db.close()
   })
+
+  test('v30 renames ai usage groups to teams and adds knowledge match', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 29),
+    )
+    db.run(
+      `INSERT INTO ai_usage (id, at, repo_forge, repo_path, groups, task_kind, actor, provider, model,
+         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, cost_source,
+         duration_ms, turns, outcome)
+       VALUES ('u1', '2026-10-01T00:00:00.000Z', 'work', 'shapes/a', '["widgets"]', 'review',
+         'system', 'anthropic', 'm', 1, 1, 0, 0, 0.5, 'reported', 10, 1, 'ok')`,
+    )
+    db.run(
+      `INSERT INTO knowledge (id, title, body, kind, status, source, author, scope, topics,
+         applies_to, evidence, tags, created_at, updated_at, version)
+       VALUES ('k1', 'Round corners', 'Use the radius token.', 'convention', 'accepted', 'human',
+         'jane', '{"teams":["widgets"]}', '[]', '["*"]', '[]', '', '2026-10-01T00:00:00.000Z',
+         '2026-10-01T00:00:00.000Z', 1)`,
+    )
+    migrate(db)
+    expect(versions(db)).toContain(30)
+    db.close()
+    const { aiUsage, knowledge } = sqliteStore({ path })
+    expect((await aiUsage.list({ team: 'widgets' }))[0]).toMatchObject({
+      id: 'u1',
+      teams: ['widgets'],
+    })
+    expect(await knowledge.get('k1')).not.toHaveProperty('match')
+  })
+
+  test('v31 adds embeddings next to existing knowledge', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 30),
+    )
+    expect(
+      db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'embeddings'").get(),
+    ).toBeNull()
+    migrate(db)
+    expect(versions(db)).toContain(31)
+    db.close()
+    const { embeddings } = sqliteStore({ path })
+    const vector = Float32Array.of(0.5, -2)
+    await embeddings.put([{ subject: 'knowledge:k1', model: 'fake:m@2', hash: 'h', vector }])
+    expect((await embeddings.list({ model: 'fake:m@2' }))[0]?.vector).toEqual(vector)
+  })
 })

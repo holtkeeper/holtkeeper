@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test'
 import type { SettingDefinitionView } from '@holtkeeper/api'
 
 import {
+  blockSettingKeys,
   definitionsOf,
   knowledgeSettingsLink,
   pageSettingKeys,
@@ -105,6 +106,15 @@ test('each section lists its own settings in its order, skipping ones the server
   expect(sectionDefinitions(all, 'people').map((d) => d.key)).toEqual(['access.crossTeam'])
   expect(sectionDefinitions(all, 'integrations')).toEqual([])
   expect(sectionDefinitions(all, 'audit')).toEqual([])
+})
+
+test('semantic search lives in AI, in a block of its own rather than under System', () => {
+  const definitions = [...all, definition('knowledge.embeddings')]
+  expect(settingHome('knowledge.embeddings')).toEqual({ section: 'ai' })
+  expect(blockSettingKeys.has('knowledge.embeddings')).toBe(true)
+  expect(sectionDefinitions(definitions, 'system').map((d) => d.key)).not.toContain(
+    'knowledge.embeddings',
+  )
 })
 
 test('System also takes every setting no page or section claims', () => {

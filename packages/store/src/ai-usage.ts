@@ -19,7 +19,7 @@ export const aiUsageDimensions: readonly AiUsageDimension[] = [
   'week',
   'month',
   'repo',
-  'group',
+  'team',
   'model',
   'provider',
   'taskKind',
@@ -36,7 +36,7 @@ export function weekStart(at: string): string {
 
 const dimensionValue = (
   record: AiUsageRecord,
-  dimension: Exclude<AiUsageDimension, 'group'>,
+  dimension: Exclude<AiUsageDimension, 'team'>,
 ): string => {
   switch (dimension) {
     case 'day':
@@ -58,15 +58,14 @@ const dimensionValue = (
 
 /** Whether a record passes every given field of `filter`. */
 export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilter = {}): boolean {
-  const { from, to, repo, group, groups, actor, origin, model, provider, taskKind, analyzer } =
-    filter
+  const { from, to, repo, team, teams, actor, origin, model, provider, taskKind, analyzer } = filter
   const { taskKinds, outcome, jobId, scopes } = filter
   return (
     (from === undefined || record.at >= from) &&
     (to === undefined || record.at < to) &&
     (!repo || (record.repo.forge === repo.forge && record.repo.path === repo.path)) &&
-    (group === undefined || record.groups.includes(group)) &&
-    (groups === undefined || groups.some((name) => record.groups.includes(name))) &&
+    (team === undefined || record.teams.includes(team)) &&
+    (teams === undefined || teams.some((name) => record.teams.includes(name))) &&
     (actor === undefined || record.actor === actor) &&
     (origin === undefined || record.interactive === (origin === 'interactive')) &&
     (model === undefined || record.model === model) &&
@@ -77,7 +76,7 @@ export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilte
     (outcome === undefined || record.outcome === outcome) &&
     (jobId === undefined || record.jobId === jobId) &&
     (scopes === undefined ||
-      scopes.some((scope) => scopeCoversRepo(scope, { ...record.repo, groups: record.groups })))
+      scopes.some((scope) => scopeCoversRepo(scope, { ...record.repo, teams: record.teams })))
   )
 }
 
@@ -112,9 +111,9 @@ export function aggregateAiUsage(
     let keys: AiUsageBucket['key'][] = [{}]
     for (const dimension of groupBy) {
       const values =
-        dimension === 'group'
-          ? record.groups.length
-            ? record.groups
+        dimension === 'team'
+          ? record.teams.length
+            ? record.teams
             : ['']
           : [dimensionValue(record, dimension)]
       keys = keys.flatMap((key) => values.map((value) => ({ ...key, [dimension]: value })))

@@ -22,7 +22,7 @@ Data is fetched only while the palette is open, and only what the principal may 
 | People                | `GET /auth/users/admin/users`, opening the person on Settings › People (`?item=<userId>`)                 | `users:read` and the `users` auth provider |
 | Recent                | pages opened from the palette, kept in `localStorage` per principal                                       | while the viewer can still reach them      |
 
-Remote queries are debounced by 150 ms. A repository result shows its overall tone (Failing, Warnings, Healthy, Not analysed, from `RepoSummary.health`) with the cells that need attention in its subtitle and, while selected, a preview with its groups, forge, the health cells it may read and links to the repository page's tabs the principal can see.
+Remote queries are debounced by 150 ms. A repository result shows its overall tone (Failing, Warnings, Healthy, Not analysed, from `RepoSummary.health`) with the cells that need attention in its subtitle and, while selected, a preview with its owner teams, forge, the health cells it may read and links to the repository page's tabs the principal can see.
 
 ## Matching and ranking
 

@@ -1,20 +1,20 @@
 # @holtkeeper/stack
 
-The tech stack of a config group: which runtimes, package managers, service and base images and other tools every repository uses, in which versions, how far they are behind the latest release and whether their release line is still supported, and whether each repository matches the group's conventions (golden files). Everything is read through the forge API (`getRepository`, `listFiles`, `readFile`); nothing is cloned.
+The tech stack of a team's repositories: which runtimes, package managers, service and base images and other tools every repository uses, in which versions, how far they are behind the latest release and whether their release line is still supported, and whether each repository matches the team's conventions (golden files). Everything is read through the forge API (`getRepository`, `listFiles`, `readFile`); nothing is cloned.
 
 ## Analyzer
 
-`stackAnalyzer` (kind `stack`, scope `group`, needs `forge`) and `createStackAnalyzer({ sources? })` to inject `VersionSources` (called once per run). The record's repo is `{ forge, path: <group> }`. Freshness refreshes it daily (`refresh: { on: 'time', cadence: '1d' }`), so convention drift and new end-of-life dates show up within a day.
+`stackAnalyzer` (kind `stack`, scope `group`, needs `forge`) and `createStackAnalyzer({ sources? })` to inject `VersionSources` (called once per run). The record's repo is `{ forge, path: <team key> }`. Freshness refreshes it daily (`refresh: { on: 'time', cadence: '1d' }`), so convention drift and new end-of-life dates show up within a day.
 
 Options (`stackOptionsSchema`):
 
-| Option        | Default | Meaning                                                                                                                                           |
-| ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ignore`      | `[]`    | Component ids or names to leave out, `*` matches anything: `go`, `image:registry.example.com/*`. A flag takes a comma-separated list.             |
-| `soonDays`    | `180`   | Days before an end of life that count as soon.                                                                                                    |
-| `maxFiles`    | `50`    | Image, compose, CI and deployment files read per repository, shallowest first; the rest become a note.                                            |
-| `lookups`     | `true`  | Look up latest versions and release lines online; `false` only collects what repositories use.                                                    |
-| `conventions` | `[]`    | Golden files every repository of the group should match (below). Set per group in the `analyzers.stack` setting, which the panel edits as a form. |
+| Option        | Default | Meaning                                                                                                                                                   |
+| ------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ignore`      | `[]`    | Component ids or names to leave out, `*` matches anything: `go`, `image:registry.example.com/*`. A flag takes a comma-separated list.                     |
+| `soonDays`    | `180`   | Days before an end of life that count as soon.                                                                                                            |
+| `maxFiles`    | `50`    | Image, compose, CI and deployment files read per repository, shallowest first; the rest become a note.                                                    |
+| `lookups`     | `true`  | Look up latest versions and release lines online; `false` only collects what repositories use.                                                            |
+| `conventions` | `[]`    | Golden files every repository of the team should match (below). Set per team or folder in the `analyzers.stack` setting, which the panel edits as a form. |
 
 ## What is read per repository
 
@@ -74,7 +74,7 @@ Pure helpers, all judged at the record's `checkedAt`:
 
 ```ts
 interface StackData {
-  group: string
+  group: string // the team key
   checkedAt: string // ISO 8601
   soonDays: number
   repos: { path; webUrl?; files: string[]; error?; archived? }[]
@@ -120,7 +120,7 @@ interface StackData {
 - **Versions**: one matrix of repositories × components per kind (the 40 most used components; only repositories that use one; image columns are shortened to the trailing path segments that keep them apart, with the full name as the header hint; the tone is end of life first, then lag) and a stacked chart of the spread per component.
 - **Components**: latest, latest LTS, versions and release lines in use, counts per status, grouped by kind.
 - **Map**: a grouped graph linking repositories to the release lines they use, so repositories on the same line meet at one node that lists its support and the versions written; above 300 links it keeps components several repositories share.
-- **Conventions** (when the group has any): status per repository × file, differences with `new` and `resolved` against the previous record, and the suggested fixes, applicable.
+- **Conventions** (when the team has any): status per repository × file, differences with `new` and `resolved` against the previous record, and the suggested fixes, applicable.
 - **Where versions are set**: every usage with its file and source (first 1000).
 - **Notes**: unreadable or archived repositories, unparsable files, unexpanded variables, unknown latest versions.
 

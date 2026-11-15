@@ -39,10 +39,10 @@ Sources and outputs get ids `<kind>-<n>` (1-based) unless they set `id`; rules d
 
 ### Sources
 
-| Kind       | Config                                                                                                                                                             | Reads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `files`    | `role`, `paths` (globs), `repos?` (paths or globs), `groups?`, `exclude?`, `ref?`, `extract`, `environment?`, `maxFiles` 200, `maxBytes` 5 MB, `maxFileBytes` 1 MB | Without `repos`/`groups`: every repository of the analyzed group. Globs in `repos` match the group's repositories (or those of `groups`); literal paths are read even outside the group (e.g. `infra/helm`). A literal file path is read directly; a glob is expanded with one recursive `listFiles` per literal directory. Caps are per repository; files over them are skipped with an error. `environment` is fixed, or `{ fromPath: <regex> }` with group `env` (or group 1) on the file path. |
-| `document` | `role`, `provider`, `ref`, `extract`, `environment?`                                                                                                               | One page through `documents[provider].read(ref)`. Its version is remembered so outputs writing to the same page expect it.                                                                                                                                                                                                                                                                                                                                                                         |
+| Kind       | Config                                                                                                                                                            | Reads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`    | `role`, `paths` (globs), `repos?` (paths or globs), `teams?`, `exclude?`, `ref?`, `extract`, `environment?`, `maxFiles` 200, `maxBytes` 5 MB, `maxFileBytes` 1 MB | Without `repos`/`teams`: every repository of the analyzed team. Globs in `repos` match the team's repositories (or those of `teams`); literal paths are read even outside the team (e.g. `infra/helm`). A literal file path is read directly; a glob is expanded with one recursive `listFiles` per literal directory. Caps are per repository; files over them are skipped with an error. `environment` is fixed, or `{ fromPath: <regex> }` with group `env` (or group 1) on the file path. |
+| `document` | `role`, `provider`, `ref`, `extract`, `environment?`                                                                                                              | One page through `documents[provider].read(ref)`. Its version is remembered so outputs writing to the same page expect it.                                                                                                                                                                                                                                                                                                                                                                    |
 
 File extractors (`extract` of `files`):
 
@@ -125,16 +125,16 @@ A sink must reject when `expectedVersion` no longer matches; `isVersionConflict(
 
 ## Engine and publishing
 
-- `runTracker(definition, { forge, forgeId?, repos, group?, groupRepos?, documents, sinkProviders?, now, concurrency?, log? }) → TrackerData` — `{ tracker, generatedAt, entities, findings, sourcesRead, errors, publications, changes }`. Invalid definitions throw; read, extraction, provider and output problems end up in `errors` and the run continues.
+- `runTracker(definition, { forge, forgeId?, repos, team?, teamRepos?, documents, sinkProviders?, now, concurrency?, log? }) → TrackerData` — `{ tracker, generatedAt, entities, findings, sourcesRead, errors, publications, changes }`. Invalid definitions throw; read, extraction, provider and output problems end up in `errors` and the run continues.
 - `publishTracker(data, { sinks, outputs? }) → { outcomes, published, conflicts, failed }` executes document publications one by one. Statuses: `published`, `unchanged`, `conflict` (the page changed since the analysis; nothing written — re-run the tracker), `skipped` (no sink for the provider), `failed`. Notifications are left to their consumers.
 
 ## Analyzer and report
 
-`createTrackerAnalyzer({ documentsFor?, sinksFor?, definitionsFor?, groupRepos?, now? })` (kind `tracker`, scope `group`, needs `forge`); `trackerAnalyzer` has no document providers. Options (`trackerOptionsSchema`): `{ tracker: <id> }` looked up in `definitionsFor(repo)` (settings + config), or `{ definition: <inline> }`; flag `--tracker`. `sinksFor` is only used to report outputs nobody could publish.
+`createTrackerAnalyzer({ documentsFor?, sinksFor?, definitionsFor?, teamRepos?, now? })` (kind `tracker`, scope `group`: it runs over one team's repositories, needs `forge`); `trackerAnalyzer` has no document providers. Options (`trackerOptionsSchema`): `{ tracker: <id> }` looked up in `definitionsFor(repo)` (settings + config), or `{ definition: <inline> }`; flag `--tracker`. `sinksFor` is only used to report outputs nobody could publish.
 
 `trackerAnalysis` (kind `tracker`) validates data with `trackerDataSchema`, exposes `changes(data)`, and reports:
 
-- **Metrics** — entities, findings (and per rule), sources read, read errors; deltas against the previous record of the same tracker (records of other trackers on the same group are ignored).
+- **Metrics** — entities, findings (and per rule), sources read, read errors; deltas against the previous record of the same tracker (records of other trackers on the same team are ignored).
 - **Entities** — key, label/description, defined in, used in, environments with values, documented, findings; new keys highlighted, removed keys listed.
 - **Findings** — issues grouped by rule, worst first, tagged `new`; resolved findings.
 - **Matrix** — key × repository (roles with counts) and key × environment (value).
@@ -142,7 +142,7 @@ A sink must reject when `expectedVersion` no longer matches; `isVersionConflict(
 - **Changes** — `repo-file` changes, applicable.
 - **Errors**.
 
-The server publishes with `POST /api/trackers/:analysisId/publish` (body `{ outputs?: string[] }`, permission `analyses:run` on the record's group), using `documentSinks(repo)` from the server dependencies (503 without them), and records a `tracker.publish` audit event.
+The server publishes with `POST /api/trackers/:analysisId/publish` (body `{ outputs?: string[] }`, permission `analyses:run` on the record's team), using `documentSinks(repo)` from the server dependencies (503 without them), and records a `tracker.publish` audit event.
 
 ## Example: feature flags
 
@@ -245,7 +245,7 @@ trackers: [
 ]
 ```
 
-Run the `tracker` analyzer on the group with option `tracker: 'feature-flags'` (or `--tracker feature-flags`). When a tracker both reads and writes the same page, keep the generated section distinguishable (its own heading, or other column headers), otherwise the next run reads the generated table back as documentation.
+Run the `tracker` analyzer on the team with option `tracker: 'feature-flags'` (or `--tracker feature-flags`). When a tracker both reads and writes the same page, keep the generated section distinguishable (its own heading, or other column headers), otherwise the next run reads the generated table back as documentation.
 
 ## Adding a provider
 

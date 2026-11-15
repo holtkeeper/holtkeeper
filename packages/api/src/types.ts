@@ -1,4 +1,5 @@
-import type { Action, Grant, GroupMatch, Principal, Role, Scope } from '@holtkeeper/access'
+import type { Action, Grant, Principal, Role, Scope } from '@holtkeeper/access'
+import type { TeamMember } from '@holtkeeper/access/teams'
 import type { TranscriptLine } from '@holtkeeper/agent'
 import type { ApiEcosystem, ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
 import type {
@@ -71,7 +72,6 @@ import type {
   ExternalVerification,
   ConfigDocumentType,
   ConfigRevision,
-  GroupDocumentData,
   Job as StoredJob,
   JobAttempt,
   JobFailureGroup,
@@ -80,6 +80,7 @@ import type {
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
+  KnowledgeMatch,
   KnowledgePackage,
   KnowledgeVisibility,
   KnowledgeRevision,
@@ -97,6 +98,7 @@ import type {
   RepoTraitsDocumentData,
   RotationPolicy,
   ScheduleDocumentData,
+  TeamDocumentData,
   Timestamp,
   TriggerDocumentData,
 } from '@holtkeeper/store'
@@ -117,7 +119,7 @@ export interface ApiError {
 
 /**
  * Body of every 403 from `/api` and the MCP tools: the action the request needed and, for a
- * repository, the repo key exactly as the client sent it. It never names groups or grants and
+ * repository, the repo key exactly as the client sent it. It never names teams or grants and
  * reads the same whether that repository exists or the caller may not see it.
  */
 export interface ForbiddenError extends ApiError {
@@ -144,12 +146,12 @@ export interface MeResponse {
   /** The instance's own address (`server.publicUrl`), when configured. */
   publicUrl?: string
   /**
-   * Display titles of the titled config groups the principal may know about, by group key: every
-   * group with global `settings:read`, otherwise the groups its grants name and the groups of the
-   * repositories it may list, with their subgroups and the parents of subgroups; empty when signed
-   * out. Show the title wherever a group is shown to people; the key stays the identity.
+   * Display titles of the titled teams the principal may know about, by team key: every team with
+   * global `settings:read`, otherwise the teams its grants name, the teams it is a member of and
+   * the owner teams of the repositories it may list; empty when signed out. Show the title
+   * wherever a team is shown to people; the key stays the identity.
    */
-  groupTitles: Record<string, string>
+  teamTitles: Record<string, string>
 }
 
 /** Levels of the `access.crossTeam` setting. */
@@ -163,17 +165,20 @@ export interface SetAvatarInput {
 /** `GET /api/me/preferences`: the signed-in principal's own UI preferences. */
 export interface UserPreferences {
   /**
-   * Groups the *My teams* scope shows. A UI default, never a permission: the groups in the
-   * principal's grants until it picks its own.
+   * Team keys the *My teams* scope shows. A UI default, never a permission: the teams the
+   * principal is a member of and the teams its grants name, until it picks its own.
    */
-  homeGroups: GroupMatch[]
-  /** `homeGroups` comes from the grants because the principal never picked any. */
-  homeGroupsFromGrants: boolean
+  homeTeams: string[]
+  /** `homeTeams` comes from membership and grants because the principal never picked any. */
+  homeTeamsFromMembership: boolean
 }
 
-/** `PUT /api/me/preferences`; `homeGroups: null` goes back to the groups in the grants. */
+/**
+ * `PUT /api/me/preferences`; `homeTeams: null` goes back to the teams of the principal's
+ * membership and grants.
+ */
 export interface UserPreferencesInput {
-  homeGroups?: GroupMatch[] | null
+  homeTeams?: string[] | null
 }
 
 /**
@@ -190,8 +195,8 @@ export interface HistoryList {
 
 /** `GET /api/history/scope` — what the caller's History can show. */
 export interface HistoryScope {
-  /** Repositories with events the caller may see, with the groups the config puts them in. */
-  repos: { repo: string; groups: string[] }[]
+  /** Repositories with events the caller may see, with their owner teams. */
+  repos: { repo: string; teams: string[] }[]
   /** Whether instance-level events (settings, users, credentials) are visible: global `audit:read`. */
   instance: boolean
 }
@@ -282,8 +287,8 @@ export type FindingStatus = 'open' | 'fixing' | 'allowlisted'
 export interface FindingRepo {
   /** `forge:path`. */
   repo: string
-  /** Config groups of the repository, for folding other teams. */
-  groups: string[]
+  /** Owner teams of the repository, for folding other teams. */
+  teams: string[]
   /** Affected versions installed there. */
   versions: string[]
   /** Lockfiles or manifests they were found in. */
@@ -370,14 +375,16 @@ export interface LicenseViolation {
   culprits: string[]
   /** Only dev dependency groups use it, in every repository. */
   dev: boolean
-  repos: { repo: string; groups: string[] }[]
+  /** Repositories using it with their owner teams. */
+  repos: { repo: string; teams: string[] }[]
 }
 
 /** One repository's newest license scan, counted per verdict. */
 export interface LicensesRepoRow {
   /** `forge:path`. */
   repo: string
-  groups: string[]
+  /** Owner teams of the repository. */
+  teams: string[]
   analysisId: string
   createdAt: Timestamp
   /** Third-party packages, internal ones left out. */
@@ -518,7 +525,8 @@ export interface RepoUpdatesSummary {
 /** One repository Holtkeeper knows about, with its health. */
 export interface RepoSummary {
   repo: RepoRef
-  groups: string[]
+  /** Owner teams of the repository (every team whose `owns` matches it); empty when none. */
+  teams: string[]
   /** Set when the caller holds `settings:write` on this repository. */
   configurable?: true
   health: RepoHealthStatus
@@ -536,8 +544,9 @@ export interface RepoSummary {
 }
 
 /**
- * `GET /api/repos`: every member of the configured groups as the last stored listings name them
- * (plus exact include paths), that the caller may read, sorted by `forge:path`.
+ * `GET /api/repos`: every repository of the fleet (forge includes plus what teams own or consume,
+ * see `fleetPatterns` of `@holtkeeper/core`) as the last stored listings name them, plus exact
+ * paths among those patterns, that the caller may read, sorted by `forge:path`.
  */
 export interface RepoList {
   repos: RepoSummary[]
@@ -576,10 +585,10 @@ export interface ChatThreadView {
   titlePending?: true
   /** `forge:path` of the repository it is about. */
   repo?: string
-  /** Config group it is about. */
-  group?: string
-  /** Config groups of its repository, or its group with the parent of a subgroup; empty for team-wide threads. */
-  groups: string[]
+  /** Team it is about (stored as `ChatThread.group`). */
+  team?: string
+  /** Owner teams of its repository, or its team; empty for threads about neither. */
+  teams: string[]
   createdBy: string
   createdAt: string
   /** Time of the last message or change. */
@@ -654,8 +663,8 @@ export interface ChatCommandView {
 export interface ChatThreadList {
   threads: ChatThreadView[]
   commands: ChatCommandView[]
-  /** Config groups the caller may start a group thread in. */
-  groups: string[]
+  /** Team keys the caller may start a team thread in. */
+  teams: string[]
   /** Archived threads the caller can see that match `q`; counted whatever `archived` asked for. */
   archivedCount: number
 }
@@ -675,7 +684,7 @@ export interface ChatPeopleView {
 }
 
 /**
- * `POST /api/chat/threads` — a new thread, optionally about one repository or group, with
+ * `POST /api/chat/threads` — a new thread, optionally about one repository or team, with
  * repositories (`forge:path`) attached as context; each must be readable by the caller (403).
  */
 export interface ChatThreadInput {
@@ -686,7 +695,8 @@ export interface ChatThreadInput {
    */
   title?: string
   repo?: string
-  group?: string
+  /** Team key; stored as `ChatThread.group`. */
+  team?: string
   autoReply?: boolean
   contextRepos?: string[]
 }
@@ -1006,15 +1016,15 @@ export interface PutSettingInput {
 /**
  * Layers a resolved value comes from, broad to narrow, a narrower one winning: the definition's
  * `default`, an entry scoped `{ all: true }` (`org`), an entry reaching the focus through its
- * groups (`group`), an entry naming the repository by path or path glob (`repo`).
+ * owner teams (`team`), an entry naming the repository by path or path glob (`repo`).
  */
-export type SettingLayer = 'default' | 'org' | 'group' | 'repo'
+export type SettingLayer = 'default' | 'org' | 'team' | 'repo'
 
 /** Where a resolved value comes from. */
 export interface SettingSource {
   layer: SettingLayer
-  /** For `group`: the focus's groups the entry's scope matched on, e.g. `['payments']`. */
-  groups?: string[]
+  /** For `team`: the focus's teams the entry's scope matched on, e.g. `['payments']`. */
+  teams?: string[]
   /** The entry; absent for `default`. */
   entry?: SettingView
 }
@@ -1043,18 +1053,15 @@ export interface ResolvedSettingRow {
 }
 
 /**
- * `GET /api/settings/resolve?repo=forge:path` or `?group=<id>` — the winning entry per key and what
- * it overrides, for one repository or for a repository of the group that no narrower entry names.
- * Exactly one of `repo` and `group` is set, echoing the focus.
+ * `GET /api/settings/resolve?repo=forge:path` or `?team=<key>` — the winning entry per key and what
+ * it overrides, for one repository or for a repository of the team that no narrower entry names.
+ * Exactly one of `repo` and `team` is set, echoing the focus.
  */
 export interface ResolvedSettings {
   repo?: RepoRef
-  group?: string
-  /**
-   * Config groups of the repository; for a group focus the group and, for a subgroup, its parent,
-   * so the parent's entries show as inherited.
-   */
-  groups: string[]
+  team?: string
+  /** Owner teams of the repository; for a team focus, the team. */
+  teams: string[]
   settings: Record<string, SettingView>
   /**
    * Every entry covering the repository per key, the one that applies first, then the ones it
@@ -1087,8 +1094,8 @@ export interface CiRepoCard {
   weeks: (number | null)[]
   /** Jobs on the problem list. */
   problems: number
-  /** Config groups of the repository, for the scope switch. */
-  groups: string[]
+  /** Owner teams of the repository, for the scope switch. */
+  teams: string[]
   /** Worst state of the repository's CI in the record's window. */
   status: CiStatus
   /** Jobs that passed only on retry in the window. */
@@ -1208,8 +1215,8 @@ export interface CoverageTrendPoint {
 /** One repository's newest `coverage` record as a card. */
 export interface CoverageRepoCard {
   repo: RepoRef
-  /** Config groups of the repository, for the scope switch. */
-  groups: string[]
+  /** Owner teams of the repository, for the scope switch. */
+  teams: string[]
   analysisId: string
   createdAt: Timestamp
   ref?: string
@@ -1287,7 +1294,7 @@ export interface AssetsTrendPoint {
  * scope.
  */
 export interface AssetsPolicySource {
-  level: 'default' | 'all' | 'group' | 'repo'
+  level: 'default' | 'all' | 'team' | 'repo'
   entry?: { id: string; scope: Scope }
 }
 
@@ -1315,8 +1322,8 @@ export interface RepoAssetsView {
 /** Headline numbers of one repository's newest assets record, from its stored metrics. */
 export interface AssetsRepoSummary {
   repo: RepoRef
-  /** Config groups of the repository, for the scope switch. */
-  groups: string[]
+  /** Owner teams of the repository, for the scope switch. */
+  teams: string[]
   analysisId: string
   createdAt: Timestamp
   files: number
@@ -1353,8 +1360,8 @@ export type AssetsSort = 'severity' | 'saving' | 'size'
  * the `nextCursor` of the previous page under the same filters and sort.
  */
 export interface AssetsQuery {
-  /** Config group name. */
-  group?: string
+  /** Team key: only repositories the team owns. */
+  team?: string
   /** `forge:path`. */
   repo?: string
   status?: AssetsStatusFilter
@@ -1370,7 +1377,7 @@ export interface AssetsQuery {
 
 /**
  * `GET /api/assets` — the files to act on across the repositories the caller may read, one page
- * at a time. `repos` summarizes every readable repository that matches `group` and `repo`,
+ * at a time. `repos` summarizes every readable repository that matches `team` and `repo`,
  * whatever the other filters; `items` is one page of matching files in the requested order;
  * `total` counts every matching file; `nextCursor` is present exactly when more pages follow.
  */
@@ -1442,7 +1449,7 @@ export type StackLag = 'current' | 'patch' | 'minor' | 'major' | 'ahead' | 'unkn
 
 /** One place one repository names a version of a stack component, judged when the analysis ran. */
 export interface StackUse {
-  /** Repository path on the group's forge. */
+  /** Repository path on the team record's forge. */
   repo: string
   file: string
   via: 'version-file' | 'dockerfile' | 'compose' | 'ci' | 'deploy'
@@ -1460,9 +1467,9 @@ export interface StackUse {
   eolDate?: string
 }
 
-/** A runtime, package manager, image or tool one group uses, with every use. */
+/** A runtime, package manager, image or tool one team's repositories use, with every use. */
 export interface StackTool {
-  /** Stable across records and groups: `node`, `postgres`, `image:registry.test/shapes/base`. */
+  /** Stable across records and teams: `node`, `postgres`, `image:registry.test/shapes/base`. */
   id: string
   name: string
   kind: StackComponentKind
@@ -1492,7 +1499,7 @@ export type StackConventionMode = 'exact' | 'json-subset' | 'yaml-subset' | 'lin
 /** A repository file against a convention's golden content: `error` when it could not be compared. */
 export type StackConventionStatus = 'matches' | 'drifts' | 'missing' | 'error'
 
-/** One repository checked against one convention of its group. */
+/** One repository checked against one convention of its team. */
 export interface StackConventionResult {
   repo: string
   /** The convention's file path. */
@@ -1506,21 +1513,25 @@ export interface StackConventionResult {
   diff?: FileDiff[]
 }
 
-/** A repository of a group's stack record. */
+/** A repository of a team's stack record. */
 export interface StackRepoView {
   path: string
-  /** Config groups of the repository, for folding other teams. */
-  groups: string[]
+  /** Owner teams of the repository, for folding other teams. */
+  teams: string[]
   webUrl?: string
   /** Set when the analysis could not read it. */
   error?: string
   archived?: boolean
 }
 
-/** The newest `stack` record of one config group, limited to the repositories the caller may read. */
-export interface StackGroupView {
+/**
+ * The newest `stack` record of one team (a group-scope analyzer run over the team's repositories),
+ * limited to the repositories the caller may read.
+ */
+export interface StackTeamView {
   forge: string
-  group: string
+  /** Team key (the record's `group`). */
+  team: string
   analysisId: string
   createdAt: Timestamp
   /** When versions and release lines were looked up; support is judged at this time. */
@@ -1529,7 +1540,7 @@ export interface StackGroupView {
   repos: StackRepoView[]
   tools: StackTool[]
   conventions: StackConventionResult[]
-  /** Since the group's previous record: uses that newly reached or left an ended or ending line. */
+  /** Since the team's previous record: uses that newly reached or left an ended or ending line. */
   changes?: {
     since: Timestamp
     newEol: number
@@ -1540,18 +1551,18 @@ export interface StackGroupView {
 }
 
 /**
- * `GET /api/stack` — the newest `stack` record of every config group with a repository the caller
- * may read (`analyses:read`), one entry per group. Reads stored records only.
+ * `GET /api/stack` — the newest `stack` record of every team with a repository the caller may read
+ * (`analyses:read`), one entry per team. Reads stored records only.
  */
 export interface StackOverview {
-  groups: StackGroupView[]
+  teams: StackTeamView[]
 }
 
 /** A repository in the dependency table and the `depgraph` record its dependencies come from. */
 export interface DependencyRepo {
   repo: RepoRef
-  /** Config groups of the repository, for folding other teams. */
-  groups: string[]
+  /** Owner teams of the repository, for folding other teams. */
+  teams: string[]
   analysisId?: string
   ref?: string
   createdAt?: Timestamp
@@ -1576,7 +1587,7 @@ export interface DependencyRow {
   name: string
   /** Defined by one of the organization's repositories; never part of the third-party counts. */
   internal: boolean
-  /** Repositories using it as `forge:path` (see `DependencyTable.repos` for groups) and their versions. */
+  /** Repositories using it as `forge:path` (see `DependencyTable.repos` for teams) and their versions. */
   usedBy: { repo: string; versions: string[] }[]
   /** Lowest version first. */
   versions: DependencyVersionSpread[]
@@ -1674,7 +1685,7 @@ export interface DependencyDecision {
   source: 'human' | 'agent'
   author: string
   updatedAt: Timestamp
-  /** The teams (config groups) the entry belongs to; empty for entries about everything. */
+  /** The teams the entry belongs to; empty for entries about everything. */
   owner: string[]
   /** Read through the cross-team catalog: another team's `shared` entry. */
   shared: boolean
@@ -1710,7 +1721,8 @@ export interface DependencyDetail {
   /** Empty for an internal package no readable repository depends on yet. */
   usedBy: {
     repo: RepoRef
-    groups: string[]
+    /** Owner teams of the repository. */
+    teams: string[]
     versions: string[]
     majorsBehind: number
   }[]
@@ -1855,7 +1867,7 @@ export interface UserView {
   lastSeenAt?: Timestamp
   /** The newest enrollment link while the user has never signed in. */
   invite?: UserInviteView
-  /** The user's teams: their home groups, else the groups their grants name. */
+  /** The user's teams: their home teams, else the teams they are members of or their grants name. */
   teams?: string[]
 }
 
@@ -1900,7 +1912,7 @@ export type LinkRole = Role
 
 /**
  * `GET /auth/users/link/:token` — what a live, unused setup or recovery link is for. `grants`
- * gives only the number of grants and their role, never scopes, group names or who issued it.
+ * gives only the number of grants and their role, never scopes, team names or who issued it.
  */
 export interface LinkInfo {
   purpose: 'enroll' | 'recover'
@@ -1924,9 +1936,9 @@ export type JobSummary = StoredJob
 /**
  * `GET /api/jobs?status=&repo=&repos=&analyzer=&trigger=&schedule=&signature=&analysisId=&q=&limit=&before=`
  * — newest first, only repositories the caller may read (filtered before `limit`). `repos` is a
- * comma list of `forge:path` (group jobs: `forge:<group>`); `signature` matches `errorSignature`
+ * comma list of `forge:path` (group-scope jobs: `forge:<team key>`); `signature` matches `errorSignature`
  * exactly; `analysisId` keeps the jobs that wrote that analysis; `q` (at most 200 characters)
- * keeps jobs whose id starts with it or whose repository path, group, analyzer kind or analyzer
+ * keeps jobs whose id starts with it or whose repository path, team, analyzer kind or analyzer
  * label contains it, ignoring case. `people` resolves the jobs' actors that are users.
  */
 export interface JobList {
@@ -1956,8 +1968,8 @@ export interface JobWorkerView {
 }
 
 /**
- * `GET /api/jobs/stats?repos=`: the queue at a glance, counted only over repositories (and groups)
- * the caller may `analyses:read`, narrowed further to `repos` (comma list of `forge:path`) when given. `queue.queued` and `queue.running` are live; `queue.failed` and
+ * `GET /api/jobs/stats?repos=`: the queue at a glance, counted only over repositories (and teams of
+ * group-scope jobs) the caller may `analyses:read`, narrowed further to `repos` (comma list of `forge:path`) when given. `queue.queued` and `queue.running` are live; `queue.failed` and
  * `queue.blocked` count jobs created in the last `windowHours`. `claimLatency` is the time from a
  * job becoming due (`runAfter`) to its latest claim, over jobs started in the window (percentiles
  * absent without samples). `waits` buckets the oldest queued jobs in claim order (at most 50,
@@ -1978,15 +1990,17 @@ export interface JobStats {
 
 export type { JobAttempt, JobFailureGroup, JobLogLine, JobStep, JobWait, WaitReason }
 
-/** A repository or group that has jobs the caller may read, with its config groups. */
+/** A repository or team (group-scope jobs) that has jobs the caller may read, with its teams. */
 export interface JobTargetView {
-  /** `forge:path`; for group jobs `forge:<group>`. */
+  /** `forge:path`; for group-scope jobs `forge:<team key>`. */
   repo: string
-  group?: string
-  groups: string[]
+  /** Team key of group-scope jobs (`Job.group`). */
+  team?: string
+  /** Owner teams of the repository; for group-scope jobs, `team`. */
+  teams: string[]
 }
 
-/** `GET /api/jobs/targets` — every repository or group with jobs the caller may read. */
+/** `GET /api/jobs/targets` — every repository or team with jobs the caller may read. */
 export interface JobTargetList {
   targets: JobTargetView[]
 }
@@ -2051,7 +2065,7 @@ export interface JobFailureList {
 
 /**
  * `GET /api/jobs/count?status=&repos=&analyzer=&trigger=&since=`: how many jobs match, counted only
- * over repositories (and groups) the caller may read, with the same filters as `JobList`
+ * over repositories (and teams of group-scope jobs) the caller may read, with the same filters as `JobList`
  * (`analysisId`, `repo`, `schedule`, `signature` and `q` too); `since`
  * counts jobs created at or after it. `byStatus` has every status, zero included, and sums to `total`.
  */
@@ -2062,12 +2076,13 @@ export interface JobCountView {
 
 /**
  * `POST /api/jobs` — queues an analyzer run. Repo-scope analyzers take `repo` (`forge:path`),
- * group-scope analyzers take `group`. `options` must match the analyzer's options.
+ * group-scope analyzers take `team` (a team key, stored as `Job.group`). `options` must match the
+ * analyzer's options.
  */
 export interface CreateJobInput {
   analyzer: string
   repo?: string
-  group?: string
+  team?: string
   ref?: string
   options?: Record<string, unknown>
 }
@@ -2075,15 +2090,15 @@ export interface CreateJobInput {
 /**
  * `POST /api/analyses/backfill`: runs a repository analyzer (e.g. `api-surface`, `bundle`) on past
  * releases. Answers 202 at once; repositories are walked in the background and the outcome is
- * audited as `analysis.backfill_result`. Without `repo` or `group` it covers every
- * repository of every group. `limit` newest releases per repository (default 20, at most 100); a
+ * audited as `analysis.backfill_result`. With `team` it covers the repositories the team owns;
+ * without `repo` or `team` every repository of the fleet. `limit` newest releases per repository (default 20, at most 100); a
  * release is a plain tag or a commit carrying monorepo package tags (`@scope/name@1.2.3`).
  * Releases the analyzer has analyzed are skipped.
  */
 export interface AnalysisBackfillInput {
   analyzer: string
   repo?: string
-  group?: string
+  team?: string
   limit?: number
 }
 
@@ -2122,8 +2137,8 @@ export type ReleaseCard = ReleaseBoardRow & {
 }
 
 /**
- * `GET /api/releases/overview?group=&filter=action|all&refresh=1`: one card per repository the
- * caller may read that turned releases on (`releases.enabled`). `filter=action` keeps cards that
+ * `GET /api/releases/overview?team=&filter=action|all&refresh=1`: one card per repository the
+ * caller may read that turned releases on (`releases.enabled`), only the team's with `team`. `filter=action` keeps cards that
  * need action; the default is all.
  */
 export interface ReleaseOverview {
@@ -2198,7 +2213,7 @@ export type ReleaseVersionDetailView = ReleaseVersionDetail & {
 /**
  * `GET /api/releases/detect?repo=`: the release flow suggested from what the repository already
  * does, read from the forge on each request and never kept in the snapshot. `configured` is true
- * when a `releases` setting already names the repository or one of its groups. Needs
+ * when a `releases` setting already names the repository or one of its owner teams. Needs
  * `releases:read` on the repository.
  */
 export interface ReleaseDetectView {
@@ -2368,8 +2383,8 @@ export interface BundleTargetRow {
 /** One repository on the Bundles overview: its targets from the newest bundle records. */
 export interface BundlesRepoRow {
   repo: RepoRef
-  /** Config groups of the repository, for the scope switch. */
-  groups: string[]
+  /** Owner teams of the repository, for the scope switch. */
+  teams: string[]
   /** The newest record. */
   analysisId: string
   createdAt: Timestamp
@@ -2412,7 +2427,7 @@ export interface AnalysisBackfillResult {
 export interface JobAnalyzerView {
   kind: string
   label: string
-  /** `repo`: queued per repository; `group`: once per config group. */
+  /** `repo`: queued per repository; `group`: once per team, over the team's repositories. */
   scope: 'repo' | 'group'
   needs: {
     checkout?: boolean
@@ -2455,13 +2470,13 @@ export interface FreshnessCountsView {
 /**
  * \`GET /api/automation/freshness\`: the last freshness sweep summed per team, over the repositories
  * whose analyses the caller may read. Each repository counts in the every-repository row (no
- * \`group\`) and in the row of each of its config groups. \`at\` is absent before the first sweep.
+ * \`team\`) and in the row of each of its owner teams. \`at\` is absent before the first sweep.
  */
 export interface FreshnessOverview {
   at?: Timestamp
   nextAt?: Timestamp
   sweepMinutes: number
-  teams: { group?: string; analyzers: FreshnessCountsView[] }[]
+  teams: { team?: string; analyzers: FreshnessCountsView[] }[]
 }
 
 /** `GET /api/jobs/analyzers`. */
@@ -2469,7 +2484,7 @@ export interface JobAnalyzerList {
   analyzers: JobAnalyzerView[]
 }
 
-/** The stack of one repository from its groups' newest `stack` records. */
+/** The stack of one repository from its owner teams' newest `stack` records. */
 export interface RepoStackView {
   checkedAt: Timestamp
   /** One row per runtime, tool or image the repository uses, worst support first. */
@@ -2551,7 +2566,7 @@ export interface RepoKnowledgeSummary {
   notes: number
   /** Learnings proposed for the repository, waiting for review. */
   proposed: number
-  /** Broader Guide scopes it inherits from, broad to narrow, e.g. `group web`, `family storefronts`. */
+  /** Broader Guide scopes it inherits from, broad to narrow, e.g. `team web`, `path acme/web`, `family storefronts`. */
   inherits: string[]
 }
 
@@ -2593,7 +2608,8 @@ export interface RepoAccessSummary {
  */
 export interface RepoOverview {
   repo: RepoRef
-  groups: string[]
+  /** Owner teams of the repository. */
+  teams: string[]
   health: RepoHealthStatus
   cells: RepoHealthCells
   /** Supply chain cards, then Quality cards, in display order. */
@@ -2650,12 +2666,13 @@ export interface ReviewRow {
 
 /**
  * Query of `GET /api/reviews`: records created at or after `since` (default 30 days ago), newest
- * first, optionally of one repository or config group and of one verdict.
+ * first, optionally of one repository or team and of one verdict.
  */
 export interface ReviewQuery {
   /** `forge:path`. */
   repo?: string
-  group?: string
+  /** Team key: only repositories the team owns. */
+  team?: string
   verdict?: ReviewRow['verdict']
   since?: Timestamp
   /** Paging: only records created before this time. */
@@ -2691,7 +2708,8 @@ export interface ReviewQualityQuery {
   by?: 'category' | 'severity' | 'model' | 'promptVersion' | 'source'
   /** `forge:path`. */
   repo?: string
-  group?: string
+  /** Team key: only repositories the team owns. */
+  team?: string
   /** Only comments read at or after this time; default 90 days ago. */
   since?: Timestamp
 }
@@ -2811,8 +2829,8 @@ export interface BranchRow {
 /** One repository on the Branches overview, from its newest `branches` record. */
 export interface BranchesRepoRow {
   repo: RepoRef
-  /** Config groups of the repository, for the scope switch. */
-  groups: string[]
+  /** Owner teams of the repository, for the scope switch. */
+  teams: string[]
   analysisId: string
   createdAt: Timestamp
   defaultBranch: string
@@ -2954,10 +2972,78 @@ export interface DeleteEgressCacheResult {
 export interface KnowledgeEntryView extends KnowledgeEntry {
   score?: number
   /**
-   * The teams (config groups) the entry belongs to: the groups its scope names and the groups of
-   * the repositories it names. Empty for entries about everything. The UI folds other teams' notes.
+   * The teams the entry belongs to: the teams its scope names and the owner teams of the
+   * repositories its path patterns cover. Empty for entries about everything. The UI folds other
+   * teams' notes.
    */
   owner: string[]
+  /** How Holtkeeper's review comments citing the entry fared; absent when none cites it. */
+  citations?: KnowledgeCitationSummary
+}
+
+/**
+ * What became of the review comments citing a knowledge entry (`[kb:<id>]`), over the stored
+ * reviews of the last year. `fixed`: merged and the commented lines changed; `resolved`: merged
+ * and the thread resolved, lines unchanged; `dismissed`: merged with the thread open and the lines
+ * unchanged; `open`: the merge request is still open; `closed`: closed without merging;
+ * `unknown`: the forge could not tell.
+ */
+export interface KnowledgeCitationSummary {
+  /** Posted comments citing the entry. */
+  comments: number
+  fixed: number
+  resolved: number
+  dismissed: number
+  open: number
+  closed: number
+  unknown: number
+  /** Comments people replied to. */
+  replied: number
+  /** 👍 and 👎 on the comments. */
+  up: number
+  down: number
+  /**
+   * Comments on repositories the entry's scope does not cover: it reached them as knowledge of a
+   * similar repository.
+   */
+  fromNeighbours: number
+  lastCitedAt?: Timestamp
+}
+
+/** One review comment citing a knowledge entry. */
+export interface KnowledgeCitationView {
+  /** `forge:path`. */
+  repo: string
+  mergeRequest: number
+  /** The comment's title. */
+  title: string
+  severity: string
+  category: string
+  /** The comment on the forge. */
+  href?: string
+  /** When the review that posted it ran. */
+  at: Timestamp
+  outcome: 'fixed' | 'resolved' | 'dismissed' | 'open' | 'closed' | 'unknown'
+  /** Notes people wrote in the thread. */
+  replies: number
+  up: number
+  down: number
+  /** The entry reached the review as knowledge of a similar repository (its scope does not cover `repo`). */
+  neighbour: boolean
+}
+
+/**
+ * `GET /api/knowledge/:id/citations` — how the review comments citing the entry fared. Needs
+ * `knowledge:read` over the entry's scope (or a `shared` entry within cross-team reach). The
+ * summary counts every citing comment; `comments` lists, newest first and at most 50, those on
+ * repositories the caller may read reviews of (`analyses:read`), and `hidden` how many citing
+ * comments are on repositories the caller may not read reviews of.
+ */
+export interface KnowledgeCitations {
+  id: string
+  summary: KnowledgeCitationSummary
+  comments: KnowledgeCitationView[]
+  hidden: number
 }
 
 /**
@@ -2988,6 +3074,8 @@ export interface CreateKnowledgeInput {
   body: string
   kind: KnowledgeKind
   scope: Scope
+  /** Narrows where the entry applies within `scope` (families, touched files). */
+  match?: KnowledgeMatch
   topics?: string[]
   appliesTo: string[]
   packages?: KnowledgePackage[]
@@ -3017,8 +3105,8 @@ export interface KnowledgeSpaceCounts {
   guide: number
   /**
    * Live notes (proposed and accepted) the space's Notes table lists: every note the caller may
-   * read for `all`, notes naming the group or any family member, and notes covering the
-   * repository, inherited ones included.
+   * read for `all`, notes naming the team, notes covering the folder, notes naming the family or
+   * any family member, and notes covering the repository, inherited ones included.
    */
   notes: number
   /** Learning candidates still proposed for the space. */
@@ -3026,8 +3114,8 @@ export interface KnowledgeSpaceCounts {
 }
 
 /**
- * `GET /api/knowledge/counts` — totals per Knowledge space, keyed by space (`all`, `group:<g>`,
- * `family:<id>`, `repo:<forge>:<path>`, the Guide scope keys). Only spaces whose scope the caller
+ * `GET /api/knowledge/counts` — totals per Knowledge space, keyed by space (`all`, `team:<key>`,
+ * `path:<forge>:<folder>`, `family:<id>`, `repo:<forge>:<path>`, the Guide scope keys). Only spaces whose scope the caller
  * may read are present; a space with nothing in it may be left out.
  */
 export interface KnowledgeCounts {
@@ -3039,13 +3127,14 @@ export type GuideChainLayerKind =
   | 'repo-file'
   | 'repo'
   | 'family'
-  | 'subgroup'
-  | 'group'
+  | 'path'
+  | 'team'
   | 'all'
   | 'learnings'
   | 'policies'
   | 'generated'
   | 'notes'
+  | 'neighbours'
 
 /** One numbered layer of a section's Guide chain: the text the agent gets from one source. */
 export interface GuideChainLayer {
@@ -3054,7 +3143,7 @@ export interface GuideChainLayer {
   kind: GuideChainLayerKind
   /** Guide scope of the layer; absent for repository files, policies and notes. */
   scope?: GuideScopeKey
-  /** `REVIEW.md`, `Team games`, `Family Widgets`, `All repositories`, `Commit policy`, … */
+  /** `REVIEW.md`, `Folder acme/games`, `Team games`, `Family Widgets`, `All repositories`, `Commit policy`, … */
   source: string
   /** The text as the agent gets it, cut when `cut` is set. */
   text: string
@@ -3075,8 +3164,9 @@ export interface GuideChainSection {
   section: GuideSectionName
   /**
    * Layers in exactly the order the agent reads them: repository files, repository rules,
-   * family, groups (several, in config order), all repositories, learnings, policies, generated
-   * text, notes. Empty sources are left out; numbering has no gaps.
+   * family, folders (deepest first), owner teams (several, in config order), all repositories,
+   * learnings, policies, generated text, notes, knowledge of similar repositories (`neighbours`).
+   * Empty sources are left out; numbering has no gaps.
    */
   layers: GuideChainLayer[]
 }
@@ -3217,7 +3307,10 @@ export interface GuidePreview {
     used: number
     humanUsed: number
     generatedUsed: number
+    /** Notes and knowledge of similar repositories. */
     notesUsed: number
+    /** Knowledge of similar repositories alone. */
+    neighboursUsed: number
   }
 }
 
@@ -3243,7 +3336,7 @@ export type LearningSourceKind = 'review-reply' | 'mcp' | 'merged'
 /** A candidate as listed; it carries `targetScope` only while that is still one of its repository's scopes. */
 export interface LearningCandidateView extends LearningCandidate {
   canDecide: boolean
-  /** Scope keys of the repository the caller may edit: repository, family, groups, `all`. */
+  /** Scope keys of the repository the caller may edit: repository, family, folders, owner teams, `all`. */
   scopes: GuideScopeKey[]
   sourceKind: LearningSourceKind
   /**
@@ -3286,7 +3379,7 @@ export interface AcceptLearningInput {
 
 /**
  * `PATCH /api/learnings/:id` — edits a candidate; an accepted one's Guide entry follows. A
- * `targetScope` must be a `group:`, `family:` or `repo:` scope of the candidate's repository the
+ * `targetScope` must be a `team:`, `path:`, `family:` or `repo:` scope of the candidate's repository the
  * caller may edit; a `suggestedScope` without one drops the old target.
  */
 export interface EditLearningInput {
@@ -3689,8 +3782,8 @@ export interface AiUsagePeriod {
 }
 
 /**
- * `GET /api/ai/overview?period=week|month|30d&groups=&feature=&origin=&model=&taskKind=`: one
- * period at a glance, limited to what the caller may see; `groups` (comma list of config groups)
+ * `GET /api/ai/overview?period=week|month|30d&teams=&feature=&origin=&model=&taskKind=`: one
+ * period at a glance, limited to what the caller may see; `teams` (comma list of team keys)
  * narrows it further and never widens it. `feature` (a feature's task kinds), `origin`, `model` and
  * `taskKind` narrow the totals, top lists and forecast as well; `budgets` (and so
  * `automaticStopsAt`) and `caps` always show the real, unnarrowed figures. The default period is
@@ -3727,7 +3820,7 @@ export interface AiUsageOverview {
 }
 
 /**
- * `GET /api/ai/week?week=YYYY-MM-DD&groups=`: one budget week (default: the current one) split by
+ * `GET /api/ai/week?week=YYYY-MM-DD&teams=`: one budget week (default: the current one) split by
  * task kind, analyzer and provider, limited to what the caller may see. Each list is most expensive
  * first; runs without an analyzer (chat, other work people start) share the bucket with an empty
  * `analyzer` key.
@@ -3751,6 +3844,10 @@ export interface ForgeConfigView {
   cachePackages?: boolean
   /** Username Holtkeeper posts as on this forge; its own events and merge requests are ignored. */
   botUsername?: string
+  /** Path globs of folders Holtkeeper works on besides what teams own or consume. */
+  include?: string[]
+  /** Path globs left out of the fleet. */
+  exclude?: string[]
   webhook?: {
     /** Where the forge sends events: `${publicUrl}/api/webhooks/<forgeId>`. */
     url: string
@@ -3777,19 +3874,13 @@ export interface ForgeSshKeyView {
   hostKeysPinned: boolean
 }
 
-/**
- * A config group as the panel lists it. Its id is a root group (`shapes`) or a subgroup
- * (`shapes.round`) whose members are the parent's members its own patterns match.
- */
-export interface GroupConfigView extends GroupDocumentData {
-  /** The parent group of a subgroup; absent for a root group. */
-  parent?: string
-}
+/** A team as the panel lists it: its document, ids are flat team keys (`TEAM_KEY_PATTERN`). */
+export type TeamConfigView = TeamDocumentData
 
 /** The data each config collection holds. */
 export interface ConfigViewData {
   forge: ForgeConfigView
-  group: GroupConfigView
+  team: TeamConfigView
   repoTraits: RepoTraitsDocumentData
   schedule: ScheduleDocumentData
   trigger: TriggerDocumentData
@@ -3805,7 +3896,7 @@ export interface ConfigEntryView<T extends ConfigDocumentType = ConfigDocumentTy
   updatedBy?: string
 }
 
-/** `GET /api/config/<collection>`; collections: `forges`, `groups`, `repo-traits`, `schedules`, `triggers`. */
+/** `GET /api/config/<collection>`; collections: `forges`, `teams`, `repo-traits`, `schedules`, `triggers`. */
 export interface ConfigEntryList<T extends ConfigDocumentType = ConfigDocumentType> {
   entries: ConfigEntryView<T>[]
 }
@@ -3825,8 +3916,17 @@ export interface PutConfigInput {
     packages?: boolean
     cachePackages?: boolean
     botUsername?: string
+    include?: string[]
+    exclude?: string[]
   }
-  group: { forge: string; include: string[]; exclude?: string[] }
+  /** Omitted `exclude`, `consumes` and `members` are stored empty. */
+  team: {
+    title?: string
+    owns: string[]
+    exclude?: string[]
+    consumes?: string[]
+    members?: TeamMember[]
+  }
   repoTraits: {
     pattern: string
     forge?: string
@@ -3838,7 +3938,8 @@ export interface PutConfigInput {
 
 /**
  * `POST /api/forges/:id/webhook`: generates (or rotates) the forge's webhook secret. With
- * `register`, the hook is (re-)registered on each target (default: every group of the forge).
+ * `register`, the hook is (re-)registered on each target (default: the forge namespaces holding
+ * the fleet's folders on that forge). Targets are forge groups (namespaces) or projects.
  */
 export interface ForgeWebhookInput {
   register?: boolean
@@ -4133,7 +4234,7 @@ export interface PollAttemptView {
   error?: string
 }
 
-/** One listing of a group's repositories on its forge. */
+/** One listing of the fleet's repositories on a forge. */
 export interface ListingAttemptView {
   at: Timestamp
   trigger: 'scheduled' | 'manual'
@@ -4143,21 +4244,19 @@ export interface ListingAttemptView {
   error?: string
 }
 
-/** `GET /api/repos/updates/groups/:group`: the repositories polling knows for a group. */
-export interface GroupListingView {
-  group: string
+/**
+ * `GET /api/repos/updates/fleet/:forge`: the repositories polling knows for one forge's fleet (the
+ * forge's `include` folders plus what teams own or consume there, `fleetPatterns` of
+ * `@holtkeeper/core`); `POST /api/repos/updates/fleet/:forge/list` lists them on the forge now.
+ */
+export interface FleetListingView {
   forge: string
-  /**
-   * The parent of a subgroup. A subgroup is never listed from the forge: `repos`, `matched`,
-   * `listedAt` and `attempts` come from the parent's listing, `matched` holding every member of the
-   * parent (what the subgroup's patterns pick from), `attempts` only for callers who may read the
-   * parent's settings.
-   */
-  parent?: string
-  /** Members from the last successful listing; kept when a later one fails. */
+  /** The fleet's path globs on this forge (no forge prefix), as `fleetPatterns` gives them. */
+  patterns: string[]
+  /** Fleet repositories from the last successful listing; kept when a later one fails. */
   repos: RepoRef[]
   /**
-   * Every repository an include pattern matched in that listing, before exclude patterns applied,
+   * Every repository a fleet pattern matched in that listing, before exclude patterns applied,
    * so a page can show what each exclude pattern keeps out and preview unsaved patterns. Only for
    * callers with global `settings:write`: excludes often keep other teams' repositories out.
    */
@@ -4385,8 +4484,8 @@ export interface PublicApiSymbol {
 /** How one repository uses a package, from its newest `usages` record. */
 export interface PackageUsageRepo {
   repo: RepoRef
-  /** The config groups the repository is in: its owning teams, for folding other teams. */
-  groups: string[]
+  /** Owner teams of the repository, for folding other teams. */
+  teams: string[]
   analysisId: string
   analyzedAt: Timestamp
   ref?: string
@@ -4588,8 +4687,8 @@ export interface McpPersonUsage {
   daily: number[]
   /** Failed calls per day, aligned with `McpUsageOverview.days`. */
   dailyErrors: number[]
-  /** The person's home groups (picked, else from their grants); empty when unknown. */
-  teams: GroupMatch[]
+  /** The person's home teams (picked, else from membership and grants); empty when unknown. */
+  teams: string[]
   /** MCP tokens the person holds that have not expired. */
   activeTokens: number
 }
@@ -4744,10 +4843,10 @@ export interface GitHubTokenUsage {
   capacity: Record<string, GitHubLimitView>
 }
 
-/** What a Home row points at: a repository (`forge:path`) and the groups the config gives it. */
+/** What a Home row points at: a repository (`forge:path`) and its owner teams. */
 export interface HomeRepoRef {
   repo: string
-  groups: string[]
+  teams: string[]
 }
 
 /** The rule that raised a Needs-attention item. */
@@ -4858,7 +4957,7 @@ export interface HomeSpend {
  * items `audits:read`, release items `releases:read`, learnings and knowledge proposals
  * `knowledge:write` where they would be decided, changes what History shows the caller, spend
  * `ai:read`, allowlist entries `settings:write` on their scope. Scoping to the viewer's teams is
- * left to the client: every row names its repositories and their groups. Repository health lives
+ * left to the client: every row names its repositories and their owner teams. Repository health lives
  * in `/api/repos`, not here.
  */
 export interface HomeView {
@@ -4884,7 +4983,7 @@ interface InboxItemBase {
   title: string
   /** Where the decision applies, as people read it: `acme/widget-kit`, `Team Web`, `All repositories`. */
   scope: string
-  /** Repositories it concerns with their config groups; empty for items above any repository. */
+  /** Repositories it concerns with their owner teams; empty for items above any repository. */
   repos: HomeRepoRef[]
   detail?: string
   /** Web UI path that opens the item, built with `webPaths`. */
@@ -4990,8 +5089,8 @@ export type InboxItem =
 
 /**
  * `GET /api/inbox`: every decision the caller may make, oldest first in each section. `mine` holds
- * what the caller may decide inside their home groups and `teams` what they may decide elsewhere;
- * a caller without home groups gets everything in `mine`. An item sits in one section only.
+ * what the caller may decide inside their home teams and `teams` what they may decide elsewhere;
+ * a caller without home teams gets everything in `mine`. An item sits in one section only.
  * Snoozed items are included with `snoozed: true`. Decisions are not available through MCP.
  */
 export interface InboxFeed {

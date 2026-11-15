@@ -1,3 +1,4 @@
+import type { TeamDefinition } from '@holtkeeper/access/teams'
 import type { AuditStore, ExternalAccountStore, KvStore, UserStore } from '@holtkeeper/store'
 
 import type { SignedCookie } from './cookies.ts'
@@ -28,6 +29,7 @@ interface OidcFlow {
 export interface Context {
   store: UserStore
   kv?: Pick<KvStore, 'get' | 'set'>
+  teams?: () => Readonly<Record<string, TeamDefinition>>
   origin: string
   rpID: string
   rpName: string

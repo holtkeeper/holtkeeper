@@ -6,9 +6,15 @@ const draft = {
   title: 'Prefer Vitest',
   body: 'Use Vitest.',
   kind: 'convention',
-  scope: { groups: ['games'] },
+  scope: { teams: ['games'] },
   topics: ['Testing', 'testing', 'CI'],
   appliesTo: ['tests'],
+}
+
+const parsed = (match: unknown) => {
+  const result = validateEntry({ ...draft, match })
+  if (!result.success) throw new Error(result.issues.join('; '))
+  return result.data
 }
 
 describe('validateEntry', () => {
@@ -40,7 +46,7 @@ describe('validateEntry', () => {
       success: false,
       issues: ['scope: scope must not be empty'],
     })
-    expect(validateEntry({ ...draft, scope: { all: false, groups: [], repos: [] } }).success).toBe(
+    expect(validateEntry({ ...draft, scope: { all: false, teams: [], repos: [] } }).success).toBe(
       false,
     )
     expect(validateEntry({ ...draft, appliesTo: [] })).toEqual({
@@ -52,5 +58,23 @@ describe('validateEntry', () => {
     ).toBeFalse()
     expect(validateEntry({ ...draft, title: '   ' }).success).toBeFalse()
     expect(validateEntry({ ...draft, kind: 'rumor' }).success).toBeFalse()
+  })
+
+  test('normalises match: unique lists, empty lists and empty matches dropped', () => {
+    expect(parsed({ families: ['f-web', 'f-web'], files: [] }).match).toEqual({
+      families: ['f-web'],
+    })
+    expect(parsed({ files: ['src/**/*.ts'] }).match).toEqual({ files: ['src/**/*.ts'] })
+    expect('match' in parsed({ families: [], files: [] })).toBeFalse()
+    expect('match' in parsed(undefined)).toBeFalse()
+  })
+
+  test('rejects blank families and files outside the repository', () => {
+    expect(validateEntry({ ...draft, match: { families: [' '] } }).success).toBeFalse()
+    expect(validateEntry({ ...draft, match: { files: ['/etc/*'] } })).toEqual({
+      success: false,
+      issues: ['match.files.0: must be a repository-relative path glob'],
+    })
+    expect(validateEntry({ ...draft, match: { files: ['../x/**'] } }).success).toBeFalse()
   })
 })

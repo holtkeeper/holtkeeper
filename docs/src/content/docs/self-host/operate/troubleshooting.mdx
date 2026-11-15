@@ -22,7 +22,7 @@ curl -s https://holtkeeper.example.com/readyz
 
 **Write workers refuse to start.** They need `jobs.execution.mode` `mise` or `container`; `host` is refused. The chart's config uses `mise`.
 
-**Warnings about `forges`, `groups` or `jobs.schedules`.** These keys moved to the panel. The process starts and ignores them; add the forge and groups again in [Settings › Integrations](/guide/settings/integrations/) and remove the keys.
+**Warnings about `forges`, `groups`, `teams` or `jobs.schedules`.** These keys moved to the panel. The process starts and ignores them; add the forge again in [Settings › Integrations](/guide/settings/integrations/), create teams on [Repos › Teams](/guide/repos/teams/) (they replace groups) and remove the keys.
 
 ## Sign-in does nothing
 

@@ -32,7 +32,7 @@ Check every third-party package against your license policy, see which repositor
 <Screen title="Supply chain › Licenses" caption="Counts compare with the scans about a week ago.">
   <Toolbar title="Licenses">
     <Segmented slot="start" items={['My teams:6', 'All I can see:21']} />
-    <Tag>Group: Any ▾</Tag>
+    <Tag>Team: Any ▾</Tag>
   </Toolbar>
   <Strip
     items={[
@@ -66,7 +66,7 @@ The newest license scan of every repository you may read analyses of, in four pa
 
 - **The strip**: packages checked, denied, need review and unknown license, each with its change against the scans about a week older. Under _My teams_ the counts sum your teams' repositories, without changes.
 - **The license mix** as a bar.
-- **Violations**: denied, not-allowed and unknown packages with their versions, licenses and repositories. Filter by verdict and ecosystem, sort, and use the scope switch for groups.
+- **Violations**: denied, not-allowed and unknown packages with their versions, licenses and repositories. Filter by verdict and ecosystem, sort, and use the scope switch for teams.
 - **Repositories**: one row per repository with its counts per verdict, whether it has a license file and when it was last scanned. A row opens the repository hub's **Supply chain** tab.
 
 Below them sits the policy summary. Its <Ui>Edit</Ui> opens the license settings. You see the policy only with `settings:read` on the organization.

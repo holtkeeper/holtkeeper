@@ -157,7 +157,7 @@ Some advisories do not apply: a server-side issue in a package only used in the 
         hint="The entry stops hiding the finding after this day"
       />
     </Fields>
-    <Facts items={[['Added to', 'audit.allowlist · group web']]} />
+    <Facts items={[['Added to', 'audit.allowlist · folder acme/round']]} />
     <Toolbar>
       <Button ghost>Cancel</Button>
       <Button primary>Allowlist</Button>
@@ -181,11 +181,11 @@ The **Allowlist** view lists every `audit.allowlist` entry: what it applies to, 
   <Tabs items={['Findings:9', 'Runs', 'Allowlist:3']} active={2} />
   <Scroll>
 
-| Advisory             | Applies to               | Reason                      | Last day     | State                           | Hides in |
-| -------------------- | ------------------------ | --------------------------- | ------------ | ------------------------------- | -------- |
-| `GHSA-made-up0-0003` | `view-lib` · group `web` | Only rendered on the client | `2027-03-31` | <Tag tone="ok">active</Tag>     | 3        |
-| `GHSA-made-up0-0004` | `apps/web/**`            | Dev server only             | `2026-11-20` | <Tag tone="warn">expiring</Tag> | 1        |
-| `CVE-0000-00009`     | all repositories         | Not reachable from our code | `2026-10-31` | <Tag tone="bad">expired</Tag>   | 0        |
+| Advisory             | Applies to                       | Reason                      | Last day     | State                           | Hides in |
+| -------------------- | -------------------------------- | --------------------------- | ------------ | ------------------------------- | -------- |
+| `GHSA-made-up0-0003` | `view-lib` · folder `acme/round` | Only rendered on the client | `2027-03-31` | <Tag tone="ok">active</Tag>     | 3        |
+| `GHSA-made-up0-0004` | `apps/web/**`                    | Dev server only             | `2026-11-20` | <Tag tone="warn">expiring</Tag> | 1        |
+| `CVE-0000-00009`     | all repositories                 | Not reachable from our code | `2026-10-31` | <Tag tone="bad">expired</Tag>   | 0        |
 
   </Scroll>
 </Screen>

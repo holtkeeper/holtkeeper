@@ -45,7 +45,7 @@ const forge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => forge } },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
   jobs: {
     webhookSecret: 'hook-secret',
     botUsernames: { work: 'holtkeeper' },
@@ -235,7 +235,7 @@ describe('merge request policies in webhooks', () => {
       store.settings.put({
         id: 'off',
         key: 'repo.analyzers',
-        scope: { groups: ['games'] },
+        scope: { teams: ['games'] },
         value: { off: kinds },
         secret: false,
         updatedAt: '2026-10-01T00:00:00.000Z',

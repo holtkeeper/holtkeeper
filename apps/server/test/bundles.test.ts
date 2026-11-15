@@ -17,16 +17,16 @@ import { OVERVIEW_RECORDS } from '../src/bundles.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/circle', 'shapes/square'] },
-    tools: { forge: 'work', include: ['tools/lint'] },
+  teams: {
+    shapes: { owns: ['work:shapes/circle', 'work:shapes/square'] },
+    tools: { owns: ['work:tools/lint'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -94,7 +94,7 @@ const add = async (
   return store.analyses.add({ ...record, ...(metrics ? { metrics } : {}) })
 }
 
-const budgets = (value: Record<string, number>, scope: { groups: string[] } | { all: true }) =>
+const budgets = (value: Record<string, number>, scope: { teams: string[] } | { all: true }) =>
   store.settings.put({
     id: `bundle-${JSON.stringify(scope)}`,
     key: 'analyzers.bundle',
@@ -152,7 +152,7 @@ describe('bundles overview', () => {
     const body = await overview()
     expect(body.repos.map((row) => row.repo.path)).toEqual(['shapes/circle', 'tools/lint'])
     const [circle] = body.repos
-    expect(circle).toMatchObject({ groups: ['shapes'], records: 3, failed: 1, overBudget: 0 })
+    expect(circle).toMatchObject({ teams: ['shapes'], records: 3, failed: 1, overBudget: 0 })
     expect(circle?.targets.map((row) => [row.name, row.status, row.gzip])).toEqual([
       ['@acme/widget', 'ok', 90],
       ['admin', 'failed', undefined],
@@ -175,7 +175,7 @@ describe('bundles overview', () => {
     const stored = await overview()
     expect(stored.repos[0]?.targets[0]).toMatchObject({ budget: 5000, verdict: 'ok' })
 
-    await budgets({ web: 1050 }, { groups: ['shapes'] })
+    await budgets({ web: 1050 }, { teams: ['shapes'] })
     await budgets({ '*': 40 }, { all: true })
     const judged = await overview()
     expect(judged.repos.map((row) => row.targets[0]?.verdict)).toEqual(['near', 'over'])

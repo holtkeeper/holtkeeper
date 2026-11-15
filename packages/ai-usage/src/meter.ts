@@ -100,7 +100,7 @@ export function usageEntry(
   base: {
     at: string
     repo: RepoRef
-    groups: string[]
+    teams: string[]
     taskKind: string
     actor: string
     provider: string
@@ -121,7 +121,7 @@ export function usageEntry(
   return {
     at: base.at,
     repo: { forge: base.repo.forge, path: base.repo.path },
-    groups: base.groups,
+    teams: base.teams,
     taskKind: base.taskKind,
     ...(base.analyzer !== undefined && { analyzer: base.analyzer }),
     ...(base.jobId !== undefined && { jobId: base.jobId }),
@@ -173,7 +173,7 @@ export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent 
       const base = {
         at: started.toISOString(),
         repo: context.repo,
-        groups: context.repo.groups,
+        teams: context.repo.teams,
         taskKind,
         actor: context.actor,
         provider: context.provider,
@@ -215,7 +215,8 @@ export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent 
 
 /** What an agent wrapper reports after each run; `result` or `error` is set. */
 export interface AgentRunInfo {
-  repo: RepoRef & { groups?: string[] }
+  /** The repository and, when known, its owner teams (else `teamsOf` or none). */
+  repo: RepoRef & { teams?: string[] }
   taskKind: string
   provider: string
   model: string
@@ -240,8 +241,8 @@ export interface AgentRunInfo {
 export interface UsageRecorderOptions {
   prices?: ModelPrices
   now?: () => Date
-  /** Groups of a repository when the info does not carry them; default none. */
-  groupsOf?: (repo: RepoRef) => string[]
+  /** Owner teams of a repository when the info does not carry them; default none. */
+  teamsOf?: (repo: RepoRef) => string[]
   /** Told about recorded runs so cached spend stays current. */
   budgets?: Pick<BudgetGuard, 'note'>
 }
@@ -252,14 +253,14 @@ export interface UsageRecorderOptions {
  */
 export function usageRecorder(
   store: Pick<AiUsageStore, 'append'>,
-  { prices = defaultPrices, now = () => new Date(), groupsOf, budgets }: UsageRecorderOptions = {},
+  { prices = defaultPrices, now = () => new Date(), teamsOf, budgets }: UsageRecorderOptions = {},
 ): (info: AgentRunInfo) => Promise<void> {
   return async (info) => {
     const at = info.at ?? new Date(now().getTime() - info.durationMs).toISOString()
     const base = {
       at,
       repo: info.repo,
-      groups: info.repo.groups ?? groupsOf?.(info.repo) ?? [],
+      teams: info.repo.teams ?? teamsOf?.(info.repo) ?? [],
       taskKind: info.taskKind,
       actor: info.actor ?? 'system',
       provider: info.provider,

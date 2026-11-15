@@ -1,6 +1,5 @@
 import type {
   CreateJobInput,
-  GroupMatch,
   Job,
   JobAnalyzerView,
   JobAttempt,
@@ -108,7 +107,7 @@ export const rerunJobInput = (
   job: Pick<JobSummary, 'analyzer' | 'repo' | 'group' | 'ref' | 'options'>,
 ): CreateJobInput => ({
   analyzer: job.analyzer,
-  ...(job.group !== undefined ? { group: job.group } : { repo: repoKey(job.repo) }),
+  ...(job.group !== undefined ? { team: job.group } : { repo: repoKey(job.repo) }),
   ...(job.ref ? { ref: job.ref } : {}),
   ...(Object.keys(job.options).length ? { options: job.options } : {}),
 })
@@ -151,14 +150,14 @@ export const logLineTime = (at: string): string =>
   })
 
 /**
- * Analyzers that fit a fixed target: group-scope ones for a group, repo-scope ones for a
+ * Analyzers that fit a fixed target: group-scope ones (they run on a team) for a team, repo-scope ones for a
  * repository, all of them when there is no target.
  */
 export function analyzersFor(
   analyzers: readonly JobAnalyzerView[],
-  target: { repo?: unknown; group?: string | undefined },
+  target: { repo?: unknown; team?: string | undefined },
 ): JobAnalyzerView[] {
-  if (target.group !== undefined) return analyzers.filter((a) => a.scope === 'group')
+  if (target.team !== undefined) return analyzers.filter((a) => a.scope === 'group')
   if (target.repo !== undefined) return analyzers.filter((a) => a.scope === 'repo')
   return [...analyzers]
 }
@@ -200,17 +199,17 @@ export function scheduleRunShares(
 }
 
 /**
- * The `repos` filter of a scope position: every target in the home groups for *My teams*, in the
- * group for a group position; `undefined` (no filter) for *All I can see* or before targets loaded.
+ * The `repos` filter of a scope position: every target of the home teams for *My teams*, of the
+ * team for a team position; `undefined` (no filter) for *All I can see* or before targets loaded.
  */
 export function jobScopeRepos(
   view: ScopeView,
   targets: readonly JobTargetView[] | undefined,
-  homeGroups: readonly GroupMatch[],
+  homeTeams: readonly string[],
 ): string[] | undefined {
   if (view === 'all' || !targets) return undefined
   return targets
-    .filter((target) => inView(view, homeGroups, target.groups))
+    .filter((target) => inView(view, homeTeams, target.teams))
     .map((target) => target.repo)
 }
 

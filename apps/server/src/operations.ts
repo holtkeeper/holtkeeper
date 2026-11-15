@@ -12,6 +12,8 @@ export interface OperationsOptions {
   store: Store
   artifacts?: ArtifactStore
   limiter?: Limiter
+  /** Facts `/readyz` reports under `info` without failing on them (see `ProbeOptions.info`). */
+  readyInfo?: Record<string, () => Promise<string>>
   /** Run only by the leader among processes with the scheduler role. */
   leaderDuties: LeaderDuty[]
   /** Lease timing; see `LeaderElectionOptions`. */
@@ -44,6 +46,7 @@ export function startOperations(options: OperationsOptions): Operations {
     store,
     ...(options.artifacts && { artifacts: options.artifacts }),
     draining: () => draining,
+    ...(options.readyInfo && { info: options.readyInfo }),
   })
   const metrics = createMetrics({
     store,

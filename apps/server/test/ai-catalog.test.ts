@@ -21,7 +21,7 @@ import { MockLanguageModelV4 } from 'ai/test'
 
 import { createApp } from '../src/app.ts'
 
-const config = parseConfig({ forges: {}, groups: {} })
+const config = parseConfig({ forges: {}, teams: {} })
 
 const catalog: AiCatalog = {
   providers: async () => [

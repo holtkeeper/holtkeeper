@@ -6,7 +6,7 @@ import type { Grant } from './model.ts'
  */
 export type Role = 'admin' | 'viewer' | 'custom' | 'none'
 
-/** The `Role` `grants` read as. Scopes count only for `admin`; group names never do. */
+/** The `Role` `grants` read as. Scopes count only for `admin`; team names and paths never do. */
 export function roleOf(grants: readonly Grant[]): Role {
   if (grants.length === 0) return 'none'
   if (grants.some((grant) => grant.scope.all === true && grant.actions.includes('*')))

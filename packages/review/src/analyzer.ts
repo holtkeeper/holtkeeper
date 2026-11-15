@@ -84,18 +84,19 @@ export interface ReviewAnalyzerDeps {
   testsExpected?: (repo: RepoRef) => Promise<boolean>
   /**
    * The repository's Guide for a review or thread reply, from its rules files (read from the
-   * checkout) and the text knowledge notes are ranked by; it becomes the agent's stable context.
-   * Scopes it names are stored with the review as `guideScopes`.
+   * checkout), the text knowledge notes are ranked by and the merge request's changed files (absent
+   * for thread replies: every note may apply); it becomes the agent's stable context. Scopes it
+   * names are stored with the review as `guideScopes`.
    */
   guideFor?: (
     repo: RepoRef,
-    request: { docs: readonly Guideline[]; query?: string },
+    request: { docs: readonly Guideline[]; query?: string; files?: readonly string[] },
   ) => Promise<ReviewGuide | undefined>
   /**
-   * The team knowledge base: the `knowledge` toolset is mounted. `groupsOf` gives the repository's
-   * config groups.
+   * The team knowledge base: the `knowledge` toolset is mounted. `teamsOf` gives the repository's
+   * owner teams.
    */
-  knowledge?: { access: KnowledgeAccess; groupsOf?: (repo: RepoRef) => string[] }
+  knowledge?: { access: KnowledgeAccess; teamsOf?: (repo: RepoRef) => string[] }
   /**
    * Review-specific agent tool sets; default: the `knowledge` toolset when configured. The host
    * attaches the shared code tools to every agent itself.
@@ -188,7 +189,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       }
       const dir = await headCheckout(context, mr.headSha)
       const knowledge = deps.knowledge
-      const knowledgeRepo = { ...repo, groups: knowledge?.groupsOf?.(repo) ?? [] }
+      const knowledgeRepo = { ...repo, teams: knowledge?.teamsOf?.(repo) ?? [] }
       const toolsets =
         dir && deps.toolsetsFor
           ? deps.toolsetsFor({ repo, dir })
@@ -290,7 +291,9 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         ...(context.history ? { analyses: context.history.analyses } : {}),
         options,
         ...(checks ? { checks } : {}),
-        ...(guideFor ? { guide: (docs, query) => guideFor(repo, { docs, query }) } : {}),
+        ...(guideFor
+          ? { guide: (docs, query, files) => guideFor(repo, { docs, query, files }) }
+          : {}),
         ...(toolsets ? { toolsets } : {}),
         ...(!tests && { tests: false as const }),
         ...(botUsername ? { botUsername } : {}),

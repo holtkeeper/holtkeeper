@@ -9,6 +9,7 @@ export type {
   KnowledgeHit,
   KnowledgeKind,
   KnowledgeLink,
+  KnowledgeMatch,
   KnowledgePackage,
   KnowledgeRevision,
   KnowledgeStatus,
@@ -48,7 +49,15 @@ export interface TaskPackage {
 export interface KnowledgeTask {
   /** `review`, `port`, `propagate`, ... */
   kind: string
+  /** The repository with its owner teams. */
   repo: RepoTarget
+  /** The repository's family id, when it belongs to one; entries narrowed to families need it. */
+  family?: string
+  /**
+   * Repository-relative paths the task touches (a merge request's changed files). Absent means
+   * unknown: entries narrowed to files then still apply.
+   */
+  files?: readonly string[]
   packages?: TaskPackage[]
   /** Extra text to rank by, e.g. the merge request title. */
   query?: string

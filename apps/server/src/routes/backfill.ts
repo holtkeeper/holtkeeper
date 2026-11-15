@@ -3,9 +3,8 @@ import type {
   AnalysisBackfillResult,
   AnalysisBackfillStarted,
 } from '@holtkeeper/api'
-import { rootGroups } from '@holtkeeper/core'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
-import { type JobRequest, enqueueUnique, groupRepositories } from '@holtkeeper/jobs'
+import { type JobRequest, enqueueUnique, fleetRepositories } from '@holtkeeper/jobs'
 import { releaseTarget } from '@holtkeeper/release'
 import type { AuditActor } from '@holtkeeper/store'
 import { Hono } from 'hono'
@@ -57,14 +56,14 @@ async function newestReleases(listTags: ListTags, repo: string, limit: number) {
 const backfillSchema = z.object({
   analyzer: z.string().min(1),
   repo: z.string().min(1).optional(),
-  group: z.string().min(1).optional(),
+  team: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(100).default(20),
 })
 
 interface BackfillRun {
   analyzer: string
   repo?: RepoRef | undefined
-  group?: string | undefined
+  team?: string | undefined
   limit: number
   actor: AuditActor
   at: string
@@ -84,14 +83,9 @@ export function backfillRoutes(deps: ServerDeps) {
     ),
   )
 
-  const repositories = async ({ repo, group }: BackfillRun) => {
+  const repositories = async ({ repo, team }: BackfillRun): Promise<RepoRef[]> => {
     if (repo) return [repo]
-    const resolve = groupRepositories(config)
-    const found = new Map<string, RepoRef>()
-    for (const name of group ? [group] : rootGroups(config))
-      // oxlint-disable-next-line no-await-in-loop -- groups one after another keep forge limits
-      for (const member of await resolve(name)) found.set(`${member.forge}:${member.path}`, member)
-    return [...found.values()]
+    return fleetRepositories(config)(team ? { teams: [team] } : undefined)
   }
 
   const backfillRepo = async (
@@ -156,7 +150,7 @@ export function backfillRoutes(deps: ServerDeps) {
       outcome: result.errors.length ? 'error' : 'ok',
       details: {
         analyzer: run.analyzer,
-        ...(run.group ? { group: run.group } : {}),
+        ...(run.team ? { team: run.team } : {}),
         limit: run.limit,
         repos: result.repos,
         releases: result.tags,
@@ -178,14 +172,14 @@ export function backfillRoutes(deps: ServerDeps) {
     const principal = repo
       ? authorize(c, 'analyses:run', { kind: 'repo', repo: repoTarget(config, repo) })
       : authorize(c, 'analyses:run', GLOBAL)
-    if (!repo && input.group && !config.groups[input.group])
-      throw new HTTPException(400, { message: `unknown group ${input.group}` })
+    if (!repo && input.team && !config.teams[input.team])
+      throw new HTTPException(400, { message: `unknown team ${input.team}` })
 
     const startedAt = deps.now().toISOString()
     const done = backfill({
       analyzer: input.analyzer,
       repo,
-      group: repo ? undefined : input.group,
+      team: repo ? undefined : input.team,
       limit: input.limit ?? 20,
       actor: auditActorOf(principal, deps.auth.name),
       at: startedAt,

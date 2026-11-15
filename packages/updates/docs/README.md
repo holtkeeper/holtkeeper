@@ -27,7 +27,7 @@ The cursor is JSON and stays small: open merge requests and those closed in the 
 
 ## Setting
 
-`pollingSetting` is the scoped setting `polling` (section `Updates`), so it can be set for everything, a group or a repository:
+`pollingSetting` is the scoped setting `polling` (section `Updates`), so it can be set for everything, a team, a folder or a repository:
 
 ```ts
 {

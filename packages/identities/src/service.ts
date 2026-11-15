@@ -105,7 +105,7 @@ export interface Identities {
     provider: string
     externalId: string
   }): Promise<Principal | undefined>
-  /** Whether the external actor may perform `action` on the repository (groups included). */
+  /** Whether the external actor may perform `action` on the repository (its owner teams included). */
   authorizeExternal(input: {
     provider: string
     externalId: string

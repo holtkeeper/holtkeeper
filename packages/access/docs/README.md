@@ -1,6 +1,6 @@
 # @holtkeeper/access
 
-Who may do what, on which repositories. Every auth provider produces a `Principal` with grants; every route checks them with `can`. Nothing here knows how people sign in.
+Who may do what, on which repositories. Every auth provider produces a `Principal` with grants; every route checks them with `can`. Nothing here knows how people sign in. The model behind teams and paths is described in [docs/teams-and-paths.md](../../../docs/teams-and-paths.md).
 
 ## Model
 
@@ -12,14 +12,14 @@ interface Grant {
 
 interface Scope {
   all?: boolean // everything, including global objects
-  groups?: GroupMatch[] // config groups: 'games', or ['frontend', 'storefront'] for both at once
-  repos?: string[] // path globs, optionally forge-qualified: 'work:games/app/**'
+  teams?: string[] // repositories these teams own
+  repos?: string[] // path patterns, optionally forge-qualified: 'work:acme/**', 'acme/*/web'
 }
-
-type GroupMatch = string | string[]
 ```
 
-A repository can sit in several groups, so groups work as tags. A group key may name a subgroup one level below a root group (`shapes.round` under `shapes`); a repository in a subgroup is always in its parent too, and its `RepoTarget.groups` holds both. A `groups` entry is a group name or a list of groups the repository must belong to all at once; entries combine with OR. `{ groups: ['tools', ['frontend', 'storefront']] }` covers every repository of `tools` and the repositories that are both `frontend` and `storefront`.
+Entries of a scope combine with OR. A `repos` pattern is a `Bun.Glob` over the repository path: `*` stays within one folder, `**` crosses folders and needs at least one segment when it ends the pattern (`acme/**` does not match `acme` itself). A pattern without a forge prefix matches every forge.
+
+`RepoTarget` is a repository with its owner teams (`{ forge, path, teams }`); the config resolves them (`resolveRepo` of `@holtkeeper/core`).
 
 Actions: `repos:read`, `audits:read`, `audits:run`, `analyses:read`, `analyses:run`, `catalog:read` (implied by `analyses:read` on the same scope), `releases:read`, `releases:run`, `tasks:run` (approve [write tasks](../../write-task/docs/README.md) that push a branch and open a merge request on the repository; for another team's repository the grant must cover it explicitly, see the server's agent tasks), `settings:read`, `settings:write`, `credentials:read`, `credentials:write`, `knowledge:read`, `knowledge:write`, `ai:read`, `ai:admin` (includes `ai:read` for the AI usage views), `users:read`, `users:invite`, `users:write`, `audit:read` (the tamper-evident audit log; only checked globally); `*` allows all.
 
@@ -27,33 +27,46 @@ Actions: `repos:read`, `audits:read`, `audits:run`, `analyses:read`, `analyses:r
 
 ## Checks
 
-| Function                         | Answers                                                                                                                                                                                                                                        |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `can(principal, action, target)` | May the principal do `action` on a repository (`{ kind: 'repo', repo }`), on an object owned by a scope such as a credential or setting (`{ kind: 'scope', scope }`), or on the whole system (`{ kind: 'global' }`, needs a grant with `all`)? |
-| `scopeCoversRepo(scope, repo)`   | Does the scope include the repository (group membership comes from the config)?                                                                                                                                                                |
-| `scopeWithin(inner, outer)`      | Is everything `inner` covers also covered by `outer`?                                                                                                                                                                                          |
-| `grantsWithin(grants, parent)`   | Do `grants` give nothing beyond `parent`?                                                                                                                                                                                                      |
-| `canDelegate(principal, grants)` | May the principal hand these grants to someone else (invites, later API tokens)? Needs `users:invite` over each scope and the grants within their own.                                                                                         |
+| Function                               | Answers                                                                                                                                                                                                                                        |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `can(principal, action, target)`       | May the principal do `action` on a repository (`{ kind: 'repo', repo }`), on an object owned by a scope such as a credential or setting (`{ kind: 'scope', scope }`), or on the whole system (`{ kind: 'global' }`, needs a grant with `all`)? |
+| `scopeCoversRepo(scope, repo)`         | Does the scope include the repository?                                                                                                                                                                                                         |
+| `scopeWithin(inner, outer, teams?)`    | Is everything `inner` covers also covered by `outer`? Never too generous.                                                                                                                                                                      |
+| `scopeSpecificity(scope)`              | How narrowly the scope targets repositories, for picking the entry that applies when several cover one.                                                                                                                                        |
+| `grantsWithin(grants, parent, teams?)` | Do `grants` give nothing beyond `parent`?                                                                                                                                                                                                      |
+| `canDelegate(principal, grants)`       | May the principal hand these grants to someone else (invites, later API tokens)? Needs `users:invite` over each scope and the grants within their own.                                                                                         |
 
-### Subgroups
+**Containment.** `scopeWithin` compares path patterns segment by segment (`patternWithin`): `acme/*/web` is within `acme/**`, `acme/round/web` within `acme/*/web`, `acme/**` within neither `acme/*/web` nor `acme/round/**`. It agrees with `Bun.Glob` on every pattern built from literal segments, `*` and `**`; a segment with a partial wildcard (`app-*`, `{a,b}`) is only within an equal segment or one that matches it literally, so delegation can be too strict but never too generous. A team is within a scope naming it. When `teams` (or `principal.teamDefs`) knows a team's patterns, a pattern inside the team's `owns` is within `{ teams: [key] }` (for a team with `exclude`, only exact paths it owns), and a team is within a scope that holds all of its `owns`. Without the patterns, a team grant covers repositories and objects scoped to that team only.
 
-`groups.ts` (also `@holtkeeper/access/groups`, so the web app can import it without the schemas) reads the group tree from the keys alone:
+**Specificity.** Everything (0) < teams (1) < path globs (2, plus 0.1 per leading literal folder, at most 2.9: `acme/round/**` 2.2 outranks `acme/**` 2.1) < exact paths (3). Entries are OR-ed, so a scope ranks by its broadest entry; an empty scope ranks 0. Settings, merge request policies, knowledge and AI budgets use it.
 
-| Helper                | Answers                                                                                                                    |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `GROUP_KEY_PATTERN`   | `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)?$`: a root group or one subgroup level                                                |
-| `parentGroup(key)`    | the parent of a subgroup, `undefined` for a root group                                                                     |
-| `rootGroup(key)`      | the root group (`key` itself for a root group)                                                                             |
-| `isSubgroup(key)`     | whether `key` names a subgroup                                                                                             |
-| `groupLineage(key)`   | the key and its ancestors, deepest first: `['shapes.round', 'shapes']`                                                     |
-| `leafGroups(groups)`  | the list without any group that has a descendant in it, for naming a repository's teams                                    |
-| `outerGroups(groups)` | the list without any group whose ancestor is in it, for naming OR-ed scope entries (a parent already covers its subgroups) |
+## Paths
 
-`scopeSpecificity` counts a group entry by its ancestor closure: `['shapes']` ranks 1, `['shapes.round']` 1.5 (like a two-group intersection), `[['shapes.round', 'tools']]` 2 − 1/3. A subgroup entry always beats its parent's. Group entries are OR-ed, so a scope ranks by its broadest entry: `['shapes', 'shapes.round']` ranks 1, like `['shapes']`, and ties with it go to the newer entry. `scopeWithin` treats an entry as within a candidate when every group of the candidate is in the entry's closure, so an admin of `shapes` can delegate `shapes.round`, and an admin of `shapes.round` cannot delegate `shapes` or `shapes.flat`. `scopeCoversRepo` needs no change: a repository's groups already hold the full lineage.
+`paths.ts` (also `@holtkeeper/access/paths`, no dependencies, for the web app) holds the path tree. Folders are derived: every prefix of a repository path is one; nothing about them is stored.
 
-`groupsMatch(entries, memberOf)` checks a group list against the groups of one repository; `groupNames(entries)` lists every group named, for validating references. `scopeSpecificity(scope)` ranks scopes for picking the entry that applies when several cover a repository: everything (0) < groups (1) < group intersections (between 1 and 2, more groups rank higher) < path globs (2) < exact paths (3). Settings, merge request policies, knowledge and AI budgets all use it.
+| Helper                           | Answers                                                                                |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| `splitPattern(pattern)`          | `{ forge?, glob }`                                                                     |
+| `globMatches(glob, path)`        | whether a forge-less glob matches a path, like `Bun.Glob` but browser-safe             |
+| `patternMatches(p, forge, path)` | whether the pattern matches the repository                                             |
+| `patternWithin(inner, outer)`    | containment of two patterns, as above                                                  |
+| `literalDepth(pattern)`          | how many leading folders the pattern pins (`acme/round/**` → 2)                        |
+| `isExactPattern(pattern)`        | whether it names one path                                                              |
+| `pathAncestors(path)`            | the folders holding a path, deepest first: `a/b/c` → `['a/b', 'a']`                    |
+| `parentFolder(path)`             | the folder directly holding a path                                                     |
+| `commonFolder(paths)`            | the deepest folder holding every path                                                  |
+| `folderPattern(folder, forge?)`  | `work:acme/round/**`                                                                   |
+| `sharedShape(paths)`             | one pattern for paths differing in exactly one segment: `['a/x/c', 'a/y/c']` → `a/*/c` |
 
-`scopeWithin` treats an intersection as covered by any entry that asks for a subset of its groups: `['frontend', 'storefront']` is within `['frontend']`, never the other way round. It is exact for literal paths and `prefix/**` globs. For other glob shapes it cannot prove containment and answers `false`, so delegation can only ever be too strict, never too generous.
+## Teams
+
+`teams.ts` (also `@holtkeeper/access/teams`) turns team definitions into ownership and grants.
+
+- `TEAM_KEY_PATTERN` (`^[a-z][a-z0-9-]*$`), `teamKeySchema`, `teamMemberSchema`, `pathPatternSchema`.
+- `TeamDefinition { owns, exclude?, consumes?, members? }`, `TeamMember { id, role: 'maintainer' | 'member' }`. A member's `id` is a principal id or an e-mail, compared case-insensitively.
+- `teamOwns(team, forge, path)`, `teamsOwning(teams, forge, path)` — the owners of a repository, in the order of `teams`.
+- `teamRoleOf(team, principal)`, `teamsOfPrincipal(teams, principal)`.
+- `teamGrants(teams, principal)` — what membership gives: `*` on `{ teams: [key] }` for maintainers, `MEMBER_ACTIONS` there for members (read and run: repositories, audits, analyses, releases, tasks, knowledge, settings read), and `CONSUMER_ACTIONS` (`repos:read`, `analyses:read`, `releases:read`, `knowledge:read`) on the team's `consumes` patterns for both. The server adds them to the principal's own grants and sets `principal.teamDefs`, so team grants also cover path-scoped objects inside the team.
 
 ## Roles
 
@@ -61,10 +74,10 @@ Actions: `repos:read`, `audits:read`, `audits:run`, `analyses:read`, `analyses:r
 
 ## Examples
 
-- An admin of `games/**` with `*` can invite an admin of `games/app/**`, but not of `tools/**` or everything.
-- An admin of `{ groups: ['frontend'] }` can invite an admin of `{ groups: [['frontend', 'storefront']] }`, but not of `storefront` alone.
-- An admin of `{ groups: ['shapes'] }` can invite an admin of `{ groups: ['shapes.round'] }`, never the other way round.
-- A credential scoped to `{ groups: ['games'] }` is visible to anyone with `credentials:read` on a scope covering the `games` group, or on everything.
+- An admin of `games/**` with `*` can invite an admin of `games/app/**` or `games/*/web`, but not of `tools/**` or everything.
+- A maintainer of team `gizmo` (owning `acme/round/**`) can write settings scoped to `work:acme/round/web` and invite admins of `acme/round/web/**`, but not of `acme/**`.
+- A member of `gizmo` that consumes `acme/shared/**` reads those repositories but cannot run releases there.
+- A credential scoped to `{ teams: ['games'] }` is visible to anyone with `credentials:read` on a scope covering that team, or on everything.
 - `rootPrincipal(provider)` has `*` on everything; the `none` and `password` providers use it.
 
-`grantSchema`, `scopeSchema` and `groupMatchSchema` validate grants, scopes and group lists from config, API input or storage.
+`grantSchema` and `scopeSchema` validate grants and scopes from config, API input or storage.

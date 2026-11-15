@@ -2,7 +2,7 @@ import type { ScheduleRunList, ScheduleRunResult, ScheduleRunStarted } from '@ho
 import {
   dailyLimitsOf,
   enqueueUnique,
-  groupRepositories,
+  fleetRepositories,
   nextRuns,
   planSchedule,
   scheduleRuns,
@@ -65,7 +65,7 @@ export function scheduleRoutes(deps: ServerDeps) {
       const requests = await planSchedule(schedule, {
         config,
         analyzers: deps.analyzers ?? [],
-        resolveRepos: groupRepositories(config),
+        resolveRepos: fleetRepositories(config),
         skip: automaticSkip(store, config, deps.analyzers),
       })
       const { enqueued, skipped } = await enqueueUnique(

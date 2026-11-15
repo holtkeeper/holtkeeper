@@ -17,16 +17,16 @@ import { noteHead } from '../src/freshness.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -178,7 +178,7 @@ describe('repository overview', () => {
     const { status, body } = await get('/api/repos/overview?repo=work:shapes/circle')
     expect(status).toBe(200)
     const overview = body as RepoOverview
-    expect(overview.groups).toEqual(['shapes'])
+    expect(overview.teams).toEqual(['shapes'])
     expect(overview.head).toEqual({ sha: 'c'.repeat(40), at })
     expect(overview.analyses.map((a) => [a.kind, a.sha])).toEqual([['coverage', 'a'.repeat(40)]])
     expect(overview.dependencies).toBeUndefined()
@@ -354,7 +354,7 @@ describe('repository hub overview', () => {
     await store.settings.put({
       id: 'tests',
       key: 'repo.tests',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       value: { expected: false, reason: 'Config only' },
       secret: false,
       updatedAt: at,
@@ -376,7 +376,7 @@ describe('repository hub overview', () => {
     await store.settings.put({
       id: 'off',
       key: 'repo.analyzers',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       value: { off: ['coverage', 'depgraph'], reason: 'Values only' },
       secret: false,
       updatedAt: at,
@@ -414,7 +414,7 @@ describe('repository hub overview', () => {
     await store.settings.put({
       id: 'off',
       key: 'repo.analyzers',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       value: { off: ['renovate'] },
       secret: false,
       updatedAt: at,
@@ -496,7 +496,7 @@ describe('repository hub overview', () => {
       store.aiUsage.append({
         at,
         repo: circle,
-        groups: ['shapes'],
+        teams: ['shapes'],
         taskKind: 'review',
         ...(jobId ? { jobId } : {}),
         actor: 'system',
@@ -528,7 +528,7 @@ describe('repository hub overview', () => {
       updatedAt: at,
     })
 
-    const section = (scope: 'repo:work:shapes/circle' | 'group:shapes' | 'group:colors') =>
+    const section = (scope: 'repo:work:shapes/circle' | 'team:shapes' | 'team:colors') =>
       store.guides.put({
         scope,
         section: 'general',
@@ -537,7 +537,7 @@ describe('repository hub overview', () => {
         learnings: [],
       })
     await section('repo:work:shapes/circle')
-    await section('group:shapes')
+    await section('team:shapes')
     await store.guides.put({
       scope: 'repo:work:shapes/circle',
       section: 'testing',
@@ -597,7 +597,7 @@ describe('repository hub overview', () => {
       sections: 1,
       notes: 1,
       proposed: 1,
-      inherits: ['group shapes'],
+      inherits: ['team shapes'],
     })
     expect(overview.defaultBranch).toBe('main')
     expect(overview.access).toEqual({
@@ -610,7 +610,7 @@ describe('repository hub overview', () => {
     await store.settings.put({
       id: 'group-freeze',
       key: 'repo.freeze',
-      scope: { groups: ['shapes'] },
+      scope: { teams: ['shapes'] },
       value: { reason: 'Team freeze' },
       secret: false,
       updatedAt: at,

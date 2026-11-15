@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import { commitPolicyFacts, policiesFor, testIdPolicyFacts } from './policies.ts'
 
-const repo = { forge: 'work', path: 'games/a', groups: ['games'] }
+const repo = { forge: 'work', path: 'acme/round/web', teams: ['widgets'] }
 
 test('commit conventions become plain facts', () => {
   expect(
@@ -44,7 +44,7 @@ test('policiesFor reads the setting that applies to the repository', () => {
     policiesFor(
       [
         entry({ all: true }, { commit: { maxLength: 100 } }),
-        entry({ groups: ['games'] }, { commit: { maxLength: 72 } }),
+        entry({ teams: ['widgets'] }, { commit: { maxLength: 72 } }),
       ],
       repo,
     ),
@@ -61,7 +61,10 @@ test('test id overrides from the testids analyzer options become facts of the te
   expect(
     policiesFor(
       [
-        testids({ repos: ['work:games/a'] }, { attributes: ['data-qa'], exclude: ['legacy/**'] }),
+        testids(
+          { repos: ['work:acme/round/web'] },
+          { attributes: ['data-qa'], exclude: ['legacy/**'] },
+        ),
         entry({ all: true }, { commit: { maxLength: 100 } }),
       ],
       repo,
@@ -86,7 +89,7 @@ const assets = (scope: object, value: unknown) => ({
 
 test('an asset policy entry becomes facts of the assets section; without one nothing is added', () => {
   const [policy] = policiesFor(
-    [assets({ groups: ['games'] }, { formats: { raster: 'keep' }, maxDimension: 4096 })],
+    [assets({ teams: ['widgets'] }, { formats: { raster: 'keep' }, maxDimension: 4096 })],
     repo,
   )
   expect(policy?.section).toBe('assets')
@@ -94,14 +97,14 @@ test('an asset policy entry becomes facts of the assets section; without one not
     '- Raster images keep their formats; no modern format is required.',
   )
   expect(policy?.text).toContain('- Images and videos are at most 4096 px wide or tall.')
-  expect(policiesFor([assets({ groups: ['other'] }, {})], repo)).toEqual([])
+  expect(policiesFor([assets({ teams: ['gizmo'] }, {})], repo)).toEqual([])
 })
 
 const tests = (scope: object, value: unknown) => ({ ...entry(scope, value), key: 'repo.tests' })
 
 test('a repository with no tests by design gets a general policy line', () => {
   expect(
-    policiesFor([tests({ groups: ['games'] }, { expected: false, reason: 'Config only' })], repo),
+    policiesFor([tests({ teams: ['widgets'] }, { expected: false, reason: 'Config only' })], repo),
   ).toEqual([
     {
       section: 'general',
@@ -111,8 +114,8 @@ test('a repository with no tests by design gets a general policy line', () => {
   expect(
     policiesFor(
       [
-        tests({ groups: ['games'] }, { expected: false }),
-        tests({ repos: ['work:games/a'] }, { expected: true }),
+        tests({ teams: ['widgets'] }, { expected: false }),
+        tests({ repos: ['work:acme/round/web'] }, { expected: true }),
       ],
       repo,
     ),

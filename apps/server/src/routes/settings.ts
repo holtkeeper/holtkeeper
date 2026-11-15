@@ -1,12 +1,4 @@
-import {
-  type RepoTarget,
-  type Scope,
-  can,
-  groupLineage,
-  groupsMatch,
-  scopeCoversRepo,
-  scopeSchema,
-} from '@holtkeeper/access'
+import { type RepoTarget, type Scope, can, scopeCoversRepo, scopeSchema } from '@holtkeeper/access'
 import type {
   CommitConventionsCheckResult,
   PolicyDraftResult,
@@ -301,29 +293,29 @@ export function settingRoutes(deps: ServerDeps) {
   })
 
   /**
-   * The focus as a repository target and the entries that apply to it. A group focus stands for a
-   * member no narrower entry names: only entries covering everything or the group count, and their
-   * path patterns are ignored.
+   * The focus as a repository target and the entries that apply to it. A team focus stands for a
+   * repository of the team no narrower entry names: only entries covering everything or naming the
+   * team count, and their path patterns are ignored.
    */
   const focusOf = async (c: AppContext) => {
     const entries = (await store.settings.list()).filter((entry) => !isRetiredSetting(entry.key))
-    const group = c.req.query('group')
-    if (group) {
-      const definition = config.groups[group]
-      if (!definition) throw new HTTPException(404, { message: `group ${group} is not configured` })
-      authorize(c, 'settings:read', { kind: 'scope', scope: { groups: [group] } })
-      const target: RepoTarget = { forge: definition.forge, path: '', groups: groupLineage(group) }
+    const team = c.req.query('team')
+    if (team) {
+      if (!config.teams[team])
+        throw new HTTPException(404, { message: `team ${team} is not configured` })
+      authorize(c, 'settings:read', { kind: 'scope', scope: { teams: [team] } })
+      const target: RepoTarget = { forge: '', path: '', teams: [team] }
       const originals = new Map(entries.map((entry) => [entry.id, entry]))
       const covering = entries.flatMap((entry) => {
-        if (!entry.scope.all && !groupsMatch(entry.scope.groups ?? [], target.groups)) return []
-        const scope = entry.scope.all ? { all: true } : { groups: entry.scope.groups ?? [] }
+        if (!entry.scope.all && !entry.scope.teams?.includes(team)) return []
+        const scope: Scope = entry.scope.all ? { all: true } : { teams: entry.scope.teams ?? [] }
         return [{ ...entry, scope }]
       })
       const original = (entry: SettingEntry) => originals.get(entry.id) ?? entry
-      return { focus: { group }, target, entries: covering, original }
+      return { focus: { team }, target, entries: covering, original }
     }
     const repo = parseRepo(c.req.query('repo'))
-    if (!repo) throw new HTTPException(400, { message: 'repo or group is required' })
+    if (!repo) throw new HTTPException(400, { message: 'repo or team is required' })
     const target = repoTarget(config, repo)
     authorize(c, 'settings:read', { kind: 'repo', repo: target })
     return { focus: { repo }, target, entries, original: (entry: SettingEntry) => entry }
@@ -336,11 +328,8 @@ export function settingRoutes(deps: ServerDeps) {
       const { scope } = entry
       if (scope.repos?.length && scopeCoversRepo({ repos: scope.repos }, target))
         return { layer: 'repo', entry: view(entry) }
-      const groups = (scope.groups ?? [])
-        .filter((match) => groupsMatch([match], target.groups))
-        .flatMap((match) => (typeof match === 'string' ? [match] : match))
-      if (!scope.all && groups.length)
-        return { layer: 'group', groups: [...new Set(groups)], entry: view(entry) }
+      const teams = (scope.teams ?? []).filter((team) => target.teams.includes(team))
+      if (!scope.all && teams.length) return { layer: 'team', teams, entry: view(entry) }
       return { layer: 'org', entry: view(entry) }
     }
     const cascades = settingCascades(entries, target)
@@ -373,7 +362,7 @@ export function settingRoutes(deps: ServerDeps) {
     })
     return c.json<ResolvedSettings>({
       ...focus,
-      groups: target.groups,
+      teams: target.teams,
       settings: Object.fromEntries(
         [...cascades].flatMap(([key, [winner]]) => (winner ? [[key, view(winner)]] : [])),
       ),

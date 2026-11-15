@@ -17,16 +17,16 @@ import { readFindings } from '../src/findings.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    web: { forge: 'work', include: ['acme/web-*'] },
-    pay: { forge: 'work', include: ['acme/pay-*'] },
+  teams: {
+    web: { owns: ['work:acme/web-*'] },
+    pay: { owns: ['work:acme/pay-*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    webAuditor: [{ scope: { groups: ['web'] }, actions: ['audits:read'] }],
+    webAuditor: [{ scope: { teams: ['web'] }, actions: ['audits:read'] }],
     reader: [{ scope: { all: true }, actions: ['analyses:read', 'repos:read'] }],
   },
 })
@@ -150,14 +150,14 @@ test('groups findings by advisory and package across the newest audits', async (
   expect(some?.repos).toEqual([
     {
       repo: 'work:acme/web-admin',
-      groups: ['web'],
+      teams: ['web'],
       versions: ['1.0.0'],
       sources: ['apps/a/package-lock.json'],
       status: 'open',
     },
     {
       repo: 'work:acme/web-shop',
-      groups: ['web'],
+      teams: ['web'],
       versions: ['1.0.1'],
       sources: ['package-lock.json'],
       status: 'open',

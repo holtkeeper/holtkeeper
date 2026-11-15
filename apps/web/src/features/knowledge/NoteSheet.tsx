@@ -3,9 +3,16 @@ import { Archive, Check, ExternalLink, Link2, Pencil, RotateCcw, Trash2, X } fro
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useKnowledgeEntry, useKnowledgeMutations } from '../../api/queries.ts'
+import {
+  useKnowledgeCitations,
+  useKnowledgeEntry,
+  useKnowledgeMutations,
+} from '../../api/queries.ts'
+import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import type { Space } from '../../lib/guide.ts'
 import {
+  citationLine,
+  citationOutcomes,
   isInherited,
   kbId,
   kindLabel,
@@ -14,6 +21,7 @@ import {
   noteVersions,
   restoreInput,
   statusTone,
+  matchParts,
   taskKinds,
   visibilityOptions,
 } from '../../lib/knowledge.ts'
@@ -49,7 +57,6 @@ export function NoteSheet({
   entry,
   creating,
   space,
-  groups,
   people,
   writable,
   index,
@@ -63,7 +70,6 @@ export function NoteSheet({
   /** Scope a new note starts with; set while the form for a new note is open. */
   creating?: Scope
   space: Space
-  groups: readonly string[]
   people: Readonly<Record<string, PersonView>>
   writable: boolean
   index?: number
@@ -85,7 +91,6 @@ export function NoteSheet({
       <SideSheet open onClose={onClose} title="New note">
         <NoteEditor
           initialScope={creating}
-          groups={groups}
           onSaved={(saved) => onOpen(saved.id)}
           onCancel={onClose}
         />
@@ -150,6 +155,11 @@ export function NoteSheet({
               </Tag>
               <Tag>{kindLabel(entry.kind)}</Tag>
               <ScopeBadge scope={entry.scope} />
+              {matchParts(entry.match).map((part) => (
+                <Tag key={part} mono>
+                  {part}
+                </Tag>
+              ))}
               {isInherited(entry, space) ? <Tag tone="info">Inherited</Tag> : null}
               {entry.subject ? <Tag mono>{entry.subject}</Tag> : null}
             </div>
@@ -176,7 +186,6 @@ export function NoteSheet({
               <NoteEditor
                 key={entry.version}
                 entry={entry}
-                groups={groups}
                 onSaved={() => setEditingId(undefined)}
                 onCancel={() => setEditingId(undefined)}
               />
@@ -296,7 +305,87 @@ function NoteBody({ entry }: { entry: KnowledgeEntry }) {
           Copy link
         </CopyButton>
       </section>
+      <NoteCitations entry={entry} />
     </div>
+  )
+}
+
+/** The posted review comments that cited the note and how they ended. */
+function NoteCitations({ entry }: { entry: KnowledgeEntry }) {
+  const citations = useKnowledgeCitations(entry.id)
+  const summary = citations.data?.summary
+  return (
+    <section className="flex flex-col gap-2.5 border-t border-line pt-3">
+      <h3 className="text-[11.5px] font-medium text-muted">Cited in reviews</h3>
+      {citations.isPending ? (
+        <Placeholder className="h-10" />
+      ) : citations.isError ? (
+        <ErrorState error={citations.error} />
+      ) : !summary?.comments ? (
+        <p className="text-xs text-dim">
+          No posted review comment cites {kbId(entry.id, true)} yet.
+        </p>
+      ) : (
+        <>
+          <p className="text-[12.5px]">
+            {citationLine(summary)}
+            {summary.lastCitedAt ? (
+              <span className="text-muted" title={formatDateTime(summary.lastCitedAt)}>
+                {' '}
+                · last {formatRelative(summary.lastCitedAt)}
+              </span>
+            ) : null}
+          </p>
+          {summary.fromNeighbours ? (
+            <p className="text-xs text-dim">
+              {summary.fromNeighbours} of them on similar repositories the note was not written for.
+            </p>
+          ) : null}
+          <ul className="flex flex-col gap-1.5 text-[12.5px]">
+            {citations.data.comments.map((comment) => {
+              const outcome = citationOutcomes[comment.outcome]
+              const where = `${comment.repo.slice(comment.repo.indexOf(':') + 1)} !${comment.mergeRequest}`
+              return (
+                <li
+                  key={`${comment.repo}!${comment.mergeRequest}:${comment.title}:${comment.at}`}
+                  className="flex min-w-0 flex-col gap-0.5"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Tag tone={outcome.tone}>{outcome.label}</Tag>
+                    {comment.href ? (
+                      <a
+                        href={comment.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-w-0 items-center gap-1 hover:underline"
+                      >
+                        <span className="truncate">{comment.title}</span>
+                        <ExternalLink className="size-3 shrink-0 text-muted" />
+                      </a>
+                    ) : (
+                      <span className="truncate">{comment.title}</span>
+                    )}
+                  </span>
+                  <span className="mono truncate text-xs text-dim">
+                    {where} · {formatRelative(comment.at)}
+                    {comment.replies ? ` · ${comment.replies} replies` : ''}
+                    {comment.neighbour ? ' · similar repository' : ''}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          {citations.data.comments.length < summary.comments - citations.data.hidden ? (
+            <p className="text-xs text-dim">Showing the newest {citations.data.comments.length}.</p>
+          ) : null}
+          {citations.data.hidden ? (
+            <p className="text-xs text-dim">
+              {citations.data.hidden} more on repositories whose reviews you cannot read.
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
   )
 }
 

@@ -2,12 +2,11 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import {
-  GROUP_KEY_PATTERN,
-  type GroupMatch,
-  groupLineage,
-  groupMatchSchema,
-  groupNames,
-  parentGroup,
+  literalDepth,
+  pathPatternSchema,
+  splitPattern,
+  teamKeySchema,
+  teamMemberSchema,
 } from '@holtkeeper/access'
 import type { AiProviderPlugin } from '@holtkeeper/agent'
 import type { AuthProvider } from '@holtkeeper/auth'
@@ -18,16 +17,7 @@ import { z } from 'zod'
 
 const id = z.string().regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
 
-/**
- * A group key: a root group (`shapes`) or one subgroup level below it (`shapes.round`), see
- * `GROUP_KEY_PATTERN` of `@holtkeeper/access`.
- */
-export const groupKeySchema = z
-  .string()
-  .regex(
-    GROUP_KEY_PATTERN,
-    'use lowercase letters, digits and dashes, with one optional dot for a subgroup (team.sub)',
-  )
+export { teamKeySchema }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -207,13 +197,12 @@ const scheduleSchema = z
     /** Analyzer kinds to run. */
     analyzers: z.array(z.string().min(1)).min(1),
     /**
-     * Config groups whose repositories are analyzed; every group when omitted. An entry can be a
-     * list of groups a repository must all belong to (`GroupMatch`); group-scope analyzers run
-     * only for single-group entries.
+     * Teams whose repositories are analyzed. With neither `teams` nor `repos` every repository is;
+     * with both, a repository matching either. Group-scope analyzers run once per team.
      */
-    groups: z.array(groupMatchSchema).optional(),
-    /** Only repositories matching one of these `forge:path` globs, e.g. `work:games/*`. */
-    repos: z.array(z.string().regex(/^[^:]+:.+$/, 'expected forge:path')).optional(),
+    teams: z.array(teamKeySchema).optional(),
+    /** Repositories matching one of these path patterns, e.g. `acme/*\/game-frontend`. */
+    repos: z.array(pathPatternSchema).optional(),
     /** Options per analyzer kind. */
     options: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
   })
@@ -294,6 +283,15 @@ const jobsFileSchema = z.object({
 })
 
 /**
+ * Which repositories a trigger covers: owned by one of `teams` or matching one of the path
+ * patterns in `repos`. Every repository when both are omitted.
+ */
+const targetShape = {
+  teams: z.array(teamKeySchema).optional(),
+  repos: z.array(pathPatternSchema).optional(),
+}
+
+/**
  * `jobs` of the effective config: the file's worker settings plus the schedules, triggers, bot
  * accounts and webhook secrets built from panel documents.
  */
@@ -303,8 +301,7 @@ const jobsSchema = jobsFileSchema.extend({
   onTag: z
     .object({
       analyzers: z.array(z.string().min(1)).min(1),
-      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
-      groups: z.array(groupMatchSchema).optional(),
+      ...targetShape,
     })
     .optional(),
   /**
@@ -316,8 +313,7 @@ const jobsSchema = jobsFileSchema.extend({
       analyzers: z.array(z.string().min(1)).min(1),
       /** Branch name globs (`main`, `release/*`); every branch when omitted. */
       branches: z.array(z.string().min(1)).min(1).optional(),
-      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
-      groups: z.array(groupMatchSchema).optional(),
+      ...targetShape,
     })
     .optional(),
   /**
@@ -331,13 +327,12 @@ const jobsSchema = jobsFileSchema.extend({
       actions: z.array(z.enum(['open', 'update', 'reopen'])).optional(),
       /** Also run for draft merge requests. Default `false`. */
       draft: z.boolean().default(false),
-      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
-      groups: z.array(groupMatchSchema).optional(),
+      ...targetShape,
     })
     .optional(),
   /**
-   * Analyzers run once for a repository the first time a group listing finds it (a new
-   * repository, or one a new or widened group brings in). Only repository analyzers that do not
+   * Analyzers run once for a repository the first time a listing finds it (a new repository, or
+   * one a new or widened team brings in). Only repository analyzers that do not
    * change repositories (not `exclusive`) are queued, and only where their `appliesTo` matches.
    */
   onNewRepo: z
@@ -346,8 +341,7 @@ const jobsSchema = jobsFileSchema.extend({
       analyzers: z.array(z.string().min(1)).min(1).optional(),
       /** Analyzer kinds left out. */
       exclude: z.array(z.string().min(1)).optional(),
-      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
-      groups: z.array(groupMatchSchema).optional(),
+      ...targetShape,
     })
     .optional(),
   /** Analyzers run when a label is added to a merge request, by label. */
@@ -393,15 +387,26 @@ const limitsSchema = z.object({
   distributed: z.boolean().default(false),
 })
 
-/** A group's display name: trimmed, 1–60 characters. Its key stays the identity everywhere. */
-export const groupTitleSchema = z.string().trim().min(1).max(60)
+/** A team's display name: trimmed, 1–60 characters. Its key stays the identity everywhere. */
+export const teamTitleSchema = z.string().trim().min(1).max(60)
 
-const groupSchema = z.object({
+/**
+ * A team: the path patterns it owns (minus `exclude`) and only consumes, and its members. See
+ * `TeamDefinition` of `@holtkeeper/access`.
+ */
+export const teamSchema = z.object({
   /** Shown to people instead of the key. */
-  title: groupTitleSchema.optional(),
-  forge: z.string(),
-  include: z.array(z.string()).min(1),
-  exclude: z.array(z.string()).default([]),
+  title: teamTitleSchema.optional(),
+  owns: z.array(pathPatternSchema).min(1),
+  exclude: z.array(pathPatternSchema).default([]),
+  consumes: z.array(pathPatternSchema).default([]),
+  members: z.array(teamMemberSchema).default([]),
+})
+
+/** Folders of one forge Holtkeeper works on: path globs without a forge prefix. */
+const fleetSchema = z.object({
+  include: z.array(pathPatternSchema).default([]),
+  exclude: z.array(pathPatternSchema).default([]),
 })
 
 const repoSchema = z.object({
@@ -449,7 +454,8 @@ const automation = `Ops › Automation, ${webPaths.automation()}`
  */
 export const removedConfigKeys: Readonly<Record<string, string>> = {
   forges: `forges are added in the panel (${integrations})`,
-  groups: `groups are edited in the panel (Repos › Groups, ${webPaths.groups()})`,
+  groups: `groups were replaced by teams, edited in the panel (Repos › Teams, ${webPaths.teams()})`,
+  teams: `teams are edited in the panel (Repos › Teams, ${webPaths.teams()})`,
   repos: 'repository traits are edited in the panel',
   plugins: 'plugins were removed',
   'jobs.schedules': `schedules are edited in the panel (${automation})`,
@@ -464,7 +470,7 @@ export const removedConfigKeys: Readonly<Record<string, string>> = {
 }
 
 /**
- * The config the server runs on: the file config plus forges, groups, repository traits,
+ * The config the server runs on: the file config plus forges, teams, repository traits,
  * schedules, triggers, bot usernames and webhook secrets from panel documents. References between
  * them are checked.
  */
@@ -472,37 +478,57 @@ export const configSchema = z
   .object({
     ...fileShape,
     forges: z.record(id, forgeSchema).default({}),
-    groups: z.record(groupKeySchema, groupSchema).default({}),
+    teams: z.record(teamKeySchema, teamSchema).default({}),
+    /**
+     * Path globs per forge id whose repositories Holtkeeper works on besides those teams own or
+     * consume (see `fleetPatterns`).
+     */
+    fleet: z.record(id, fleetSchema).default({}),
     repos: z.record(z.string(), repoSchema).default({}),
     jobs: jobsSchema.prefault({}),
   })
   .superRefine((config, ctx) => {
     uniqueAiProviders(config, ctx)
 
-    for (const [name, group] of Object.entries(config.groups)) {
-      if (!(group.forge in config.forges)) {
+    const unknownForge = (patterns: readonly string[] | undefined, path: PropertyKey[]) => {
+      for (const pattern of patterns ?? []) {
+        const { forge } = splitPattern(pattern)
+        if (forge !== undefined && !(forge in config.forges)) {
+          ctx.addIssue({ code: 'custom', path, message: `unknown forge "${forge}"` })
+        }
+      }
+    }
+    for (const forgeId of Object.keys(config.fleet)) {
+      if (!(forgeId in config.forges)) {
         ctx.addIssue({
           code: 'custom',
-          path: ['groups', name, 'forge'],
-          message: `unknown forge "${group.forge}"`,
+          path: ['fleet', forgeId],
+          message: `unknown forge "${forgeId}"`,
         })
       }
-      const parent = parentGroup(name)
-      if (parent === undefined) continue
-      const parentConfig = config.groups[parent]
-      if (!parentConfig) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['groups', name],
-          message: `parent group "${parent}" is not configured`,
-        })
-      } else if (parentConfig.forge !== group.forge) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['groups', name, 'forge'],
-          message: `forge must match parent "${parent}" (${parentConfig.forge})`,
-        })
+    }
+    // Fleet listing walks forge namespaces: a pattern that adds repositories must name its
+    // top-level namespace, or the whole forge would have to be listed.
+    const rootless = (patterns: readonly string[], path: PropertyKey[]) => {
+      for (const pattern of patterns) {
+        if (literalDepth(pattern) === 0) {
+          ctx.addIssue({
+            code: 'custom',
+            path,
+            message: `pattern "${pattern}" must start with a namespace, e.g. "acme/**"`,
+          })
+        }
       }
+    }
+    for (const [forgeId, fleet] of Object.entries(config.fleet)) {
+      rootless(fleet.include, ['fleet', forgeId, 'include'])
+    }
+    for (const [name, team] of Object.entries(config.teams)) {
+      for (const key of ['owns', 'exclude', 'consumes'] as const) {
+        unknownForge(team[key], ['teams', name, key])
+      }
+      rootless(team.owns, ['teams', name, 'owns'])
+      rootless(team.consumes, ['teams', name, 'consumes'])
     }
 
     for (const [pattern, repo] of Object.entries(config.repos)) {
@@ -515,12 +541,19 @@ export const configSchema = z
       }
     }
 
-    const unknownGroups = (groups: GroupMatch[] | undefined, path: PropertyKey[]) => {
-      for (const group of groupNames(groups ?? [])) {
-        if (!(group in config.groups)) {
-          ctx.addIssue({ code: 'custom', path, message: `unknown group "${group}"` })
+    const unknownTeams = (teams: readonly string[] | undefined, path: PropertyKey[]) => {
+      for (const team of teams ?? []) {
+        if (!(team in config.teams)) {
+          ctx.addIssue({ code: 'custom', path, message: `unknown team "${team}"` })
         }
       }
+    }
+    const checkTarget = (
+      target: { teams?: string[] | undefined; repos?: string[] | undefined } | undefined,
+      path: PropertyKey[],
+    ) => {
+      unknownTeams(target?.teams, [...path, 'teams'])
+      unknownForge(target?.repos, [...path, 'repos'])
     }
     const scheduleNames = new Set<string>()
     for (const [index, schedule] of config.jobs.schedules.entries()) {
@@ -533,22 +566,11 @@ export const configSchema = z
         })
       }
       scheduleNames.add(schedule.name)
-      unknownGroups(schedule.groups, [...path, 'groups'])
-      for (const pattern of schedule.repos ?? []) {
-        const forge = pattern.slice(0, pattern.indexOf(':'))
-        if (!(forge in config.forges)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [...path, 'repos'],
-            message: `unknown forge "${forge}"`,
-          })
-        }
-      }
+      checkTarget(schedule, path)
     }
-    unknownGroups(config.jobs.onTag?.groups, ['jobs', 'onTag', 'groups'])
-    unknownGroups(config.jobs.onPush?.groups, ['jobs', 'onPush', 'groups'])
-    unknownGroups(config.jobs.onMergeRequest?.groups, ['jobs', 'onMergeRequest', 'groups'])
-    unknownGroups(config.jobs.onNewRepo?.groups, ['jobs', 'onNewRepo', 'groups'])
+    for (const trigger of ['onTag', 'onPush', 'onMergeRequest', 'onNewRepo'] as const) {
+      checkTarget(config.jobs[trigger], ['jobs', trigger])
+    }
   })
 
 /** What a config module's default export may contain. */
@@ -558,40 +580,38 @@ export type HoltkeeperFileConfig = z.output<typeof configFileSchema>
 /** The effective config: the file config with panel documents applied. */
 export type HoltkeeperConfig = z.output<typeof configSchema>
 
-/** The configured groups, or anything shaped like them, by key. */
-type GroupTitles = Readonly<Record<string, { title?: string | undefined }>>
-
-/** What people see for group `key`: its title, or the key when it has none or is unknown. */
-export const groupTitle = (groups: GroupTitles, key: string): string => groups[key]?.title ?? key
-
-/** Keys of the configured groups that are not subgroups, in config order. */
-export const rootGroups = (config: Pick<HoltkeeperConfig, 'groups'>): string[] =>
-  Object.keys(config.groups).filter((key) => parentGroup(key) === undefined)
-
-/** Keys of the configured subgroups of `key`, in config order. */
-export const subgroupsOf = (config: Pick<HoltkeeperConfig, 'groups'>, key: string): string[] =>
-  Object.keys(config.groups).filter((candidate) => parentGroup(candidate) === key)
-
 /**
- * Group `key` with its ancestors' titles, root first, and the key: `Shapes › Round (shapes.round)`.
- * A group without a title shows its key in the path.
+ * The path globs (without forge prefix) whose repositories on `forge` make up the fleet: the
+ * forge's own `fleet` includes plus every team's `owns` and `consumes` pattern that applies to
+ * the forge. `exclude` holds the forge's fleet exclusions; team exclusions only narrow ownership.
+ * Repositories outside these patterns are not listed, scheduled or shown.
  */
-export function groupPathLabel(groups: GroupTitles, key: string): string {
-  const path = groupLineage(key)
-    .toReversed()
-    .map((group) => groupTitle(groups, group))
-    .join(' › ')
-  return path === key ? key : `${path} (${key})`
+export function fleetPatterns(
+  config: Pick<HoltkeeperConfig, 'fleet' | 'teams'>,
+  forge: string,
+): { include: string[]; exclude: string[] } {
+  const include = new Set(config.fleet[forge]?.include ?? [])
+  for (const team of Object.values(config.teams)) {
+    for (const pattern of [...team.owns, ...team.consumes]) {
+      const split = splitPattern(pattern)
+      if (split.forge === undefined || split.forge === forge) include.add(split.glob)
+    }
+  }
+  return { include: [...include], exclude: [...(config.fleet[forge]?.exclude ?? [])] }
 }
 
+/** The configured teams, or anything shaped like them, by key. */
+type TeamTitles = Readonly<Record<string, { title?: string | undefined }>>
+
+/** What people see for team `key`: its title, or the key when it has none or is unknown. */
+export const teamTitle = (teams: TeamTitles, key: string): string => teams[key]?.title ?? key
+
 /**
- * Group `key` for text a reader may act on: `Title (key)` when it has a title, else the key, so
- * the key needed for tool calls and settings is always there. A subgroup shows its parent's title
- * first (`groupPathLabel`).
+ * Team `key` for text a reader may act on: `Title (key)` when it has a title, else the key, so
+ * the key needed for tool calls and settings is always there.
  */
-export function groupLabel(groups: GroupTitles, key: string): string {
-  if (parentGroup(key) !== undefined) return groupPathLabel(groups, key)
-  const title = groups[key]?.title
+export function teamLabel(teams: TeamTitles, key: string): string {
+  const title = teams[key]?.title
   return title && title !== key ? `${title} (${key})` : key
 }
 

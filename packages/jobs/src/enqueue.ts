@@ -5,6 +5,7 @@ import type { Job, JobStore, JobTrigger, Timestamp } from '@holtkeeper/store'
 export interface JobRequest {
   analyzer: string
   repo: RepoRef
+  /** The team key of a group-scope analyzer job; see `Job.group`. */
   group?: string
   ref?: string
   options?: Record<string, unknown>

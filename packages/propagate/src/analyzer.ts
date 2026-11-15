@@ -65,7 +65,7 @@ export interface PropagateAnalyzerDependencies {
 }
 
 /**
- * The `propagate` analyzer (group scope). Inject `fixes` to hand failing repositories to write
+ * The `propagate` analyzer (group scope: a team's repositories). Inject `fixes` to hand failing repositories to write
  * tasks, or a registry and pipeline steps for tests.
  */
 export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependencies = {}) {

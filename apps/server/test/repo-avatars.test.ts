@@ -32,7 +32,7 @@ const config = parseConfig({
         }) as never,
     },
   },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
 })
 
 const auth = headerAuth({

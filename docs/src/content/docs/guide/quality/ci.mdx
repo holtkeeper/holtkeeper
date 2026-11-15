@@ -65,7 +65,7 @@ One row per repository with pipelines in the last 30 days, from its newest CI re
 
 | Column     | Meaning                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------- |
-| Repository | Opens the repository hub at Quality › CI; its groups and branch sit under the name.      |
+| Repository | Opens the repository hub at Quality › CI; its owner teams and branch sit under the name. |
 | Status     | **Failing**, **Flaky**, **Slower**, **Healthy** or **Idle** (no pipeline in the window). |
 | Median     | Median pipeline time of passing pipelines on the default branch.                         |
 | Change     | How the median moved. `↑ 12% slower` reads as bad; changes under 5% stay neutral.        |
@@ -76,7 +76,7 @@ One row per repository with pipelines in the last 30 days, from its newest CI re
 | Queue      | Median time jobs waited for a runner.                                                    |
 | Pipelines  | Pipelines in the window, and the age of the last one.                                    |
 
-**Status** filters by state and **Problems only** hides healthy and idle repositories. The scope switch (_My teams_ folds other teams' rows into one row with their failing, flaky and healthy counts) and the header search narrow by team, path or group. Headers re-sort, and filters live in the URL.
+**Status** filters by state and **Problems only** hides healthy and idle repositories. The scope switch (_My teams_ folds other teams' rows into one row with their failing, flaky and healthy counts) and the header search narrow by path or team. Headers re-sort, and filters live in the URL.
 
 :::note
 Pipeline time is how long any job of the pipeline was running, retries included. Idle gaps, such as a manual job started days later, do not count, so it can differ from the forge's own pipeline duration.
@@ -116,7 +116,7 @@ Each job links to its repository's CI area and to its last run on the forge.
 
 ## Inspect a repository
 
-Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. The side sheet shows the pipeline outcomes (passed, failed, canceled) as its progress bar, the state, groups, branch, pipeline count and the newest run.
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. The side sheet shows the pipeline outcomes (passed, failed, canceled) as its progress bar, the state, owner teams, branch, pipeline count and the newest run.
 
 <Screen title="Quality › CI › acme/admin-ui">
   <Sheet title="acme/admin-ui" position="1 of 31">
@@ -166,7 +166,7 @@ A sheet that says the record is in an older format offers <Ui>Run now</Ui>. One 
 
 The analyzer's options are the `analyzers.ci-jobs` setting in **Settings › Analyzers**, per scope like every analyzer. They set the window length, a single branch or tag to read instead of every ref, how many recent days are compared with the rest, and the change in percent and seconds that marks a job slower.
 
-```json title="analyzers.ci-jobs · one group"
+```json title="analyzers.ci-jobs · one team"
 {
   "branch": "main",
   "changePercent": 25,

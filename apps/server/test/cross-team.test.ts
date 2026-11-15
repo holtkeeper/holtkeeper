@@ -29,9 +29,9 @@ import {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
@@ -39,11 +39,12 @@ const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
     shapes: [
-      { scope: { groups: ['shapes'] }, actions: ['analyses:read', 'knowledge:read', 'repos:read'] },
+      { scope: { teams: ['shapes'] }, actions: ['analyses:read', 'knowledge:read', 'repos:read'] },
     ],
-    outsider: [{ scope: { groups: ['shapes'] }, actions: ['ai:read'] }],
-    viewer: [{ scope: { groups: ['shapes'] }, actions: ['repos:read'] }],
-    analyst: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read', 'settings:read'] }],
+    outsider: [{ scope: { teams: ['shapes'] }, actions: ['ai:read'] }],
+    viewer: [{ scope: { teams: ['shapes'] }, actions: ['repos:read'] }],
+    analyst: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read', 'settings:read'] }],
+    fleet: [{ scope: { all: true }, actions: ['settings:read'] }],
   },
 })
 const asShapes = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'shapes' }
@@ -51,6 +52,7 @@ const asOutsider = { 'x-forwarded-user': 'eve', 'x-forwarded-groups': 'outsider'
 const asViewer = { 'x-forwarded-user': 'vic', 'x-forwarded-groups': 'viewer' }
 const asAnalyst = { 'x-forwarded-user': 'ana', 'x-forwarded-groups': 'analyst' }
 const asAdmin = { 'x-forwarded-user': 'ada', 'x-forwarded-groups': 'admin' }
+const asFleet = { 'x-forwarded-user': 'fay', 'x-forwarded-groups': 'fleet' }
 
 const at = '2026-11-10T00:00:00.000Z'
 
@@ -60,7 +62,7 @@ const principal = (grants: Principal['grants']): Principal => ({
   provider: 'test',
   grants,
 })
-const repo = (path: string, groups: string[]) => ({ forge: 'work', path, groups })
+const repo = (path: string, teams: string[]) => ({ forge: 'work', path, teams })
 
 let store: Store
 let app: ReturnType<typeof createApp>
@@ -124,7 +126,7 @@ const note = (id: string, fields: Partial<KnowledgeEntry>) =>
     title: `Note ${id}`,
     body: 'Body.',
     kind: 'decision',
-    scope: { groups: ['colors'] },
+    scope: { teams: ['colors'] },
     topics: [],
     appliesTo: ['*'],
     status: 'accepted',
@@ -217,9 +219,9 @@ const callTool = async (
 describe('grant matrix', () => {
   const shapes = repo('shapes/circle', ['shapes'])
   const colors = repo('colors/red', ['colors'])
-  const reader = principal([{ scope: { groups: ['shapes'] }, actions: ['repos:read'] }])
-  const analyst = principal([{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }])
-  const nobody = principal([{ scope: { groups: ['shapes'] }, actions: ['ai:read'] }])
+  const reader = principal([{ scope: { teams: ['shapes'] }, actions: ['repos:read'] }])
+  const analyst = principal([{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }])
+  const nobody = principal([{ scope: { teams: ['shapes'] }, actions: ['ai:read'] }])
 
   test('catalog reach under each policy', () => {
     const cases: [Principal, typeof shapes, 'off' | 'metadata' | 'snippets', boolean][] = [
@@ -242,8 +244,8 @@ describe('grant matrix', () => {
   })
 
   test('shared notes, the policy default and owners', () => {
-    expect(canReadShared(reader, { groups: ['colors'] }, 'metadata')).toBe(true)
-    expect(canReadShared(reader, { groups: ['colors'] }, 'off')).toBe(false)
+    expect(canReadShared(reader, { teams: ['colors'] }, 'metadata')).toBe(true)
+    expect(canReadShared(reader, { teams: ['colors'] }, 'off')).toBe(false)
     expect(crossTeamOf([])).toBe('snippets')
     expect(
       crossTeamOf([
@@ -259,7 +261,7 @@ describe('grant matrix', () => {
     ).toBe('off')
     expect(
       scopeOwner(
-        { groups: ['colors', ['shapes', 'colors']], repos: ['work:tools/cli', 'x/*'] },
+        { teams: ['colors', 'shapes'], repos: ['work:tools/cli', 'x/*', 'work:tools/*'] },
         () => ['tools'],
       ),
     ).toEqual(['colors', 'shapes', 'tools'])
@@ -359,7 +361,7 @@ describe('knowledge routes', () => {
         title: 'Pin widget-kit 3',
         body: 'Use widget-kit 3 everywhere.',
         kind: 'decision',
-        scope: { groups: ['colors'] },
+        scope: { teams: ['colors'] },
         appliesTo: ['*'],
         packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
       }),
@@ -393,13 +395,14 @@ const getJson = async (path: string, headers: Record<string, string>) => {
 describe('repository fields', () => {
   beforeEach(async () => {
     await Promise.all([
-      ...(['shapes', 'colors'] as const).map((group) =>
-        store.kv?.set(`poll-group:${group}`, {
-          repos: [{ forge: 'work', path: group === 'shapes' ? 'shapes/circle' : 'colors/red' }],
-          listedAt: at,
-          attempts: [],
-        }),
-      ),
+      store.kv?.set('poll-fleet:work', {
+        repos: [
+          { forge: 'work', path: 'shapes/circle' },
+          { forge: 'work', path: 'colors/red' },
+        ],
+        listedAt: at,
+        attempts: [],
+      }),
       auditRecord('shapes/circle'),
       auditRecord('colors/red'),
     ])
@@ -457,9 +460,9 @@ describe('repository fields', () => {
   })
 })
 
-describe('group listing', () => {
-  test('a group-scoped reader gets no paths the excludes keep out', async () => {
-    await store.kv?.set('poll-group:shapes', {
+describe('fleet listing', () => {
+  test('needs global settings:read; only settings:write sees the paths the excludes keep out', async () => {
+    await store.kv?.set('poll-fleet:work', {
       repos: [{ forge: 'work', path: 'shapes/circle' }],
       matched: [
         { forge: 'work', path: 'shapes/circle' },
@@ -468,13 +471,25 @@ describe('group listing', () => {
       listedAt: at,
       attempts: [],
     })
-    const narrow = await getJson('/api/repos/updates/groups/shapes', asAnalyst)
-    expect(narrow.status).toBe(200)
-    expect(narrow.body).not.toHaveProperty('matched')
-    expect(JSON.stringify(narrow.body)).not.toContain('shapes/kept-out')
+    expect((await getJson('/api/repos/updates/fleet/work', asAnalyst)).status).toBe(403)
+    const reader = await getJson('/api/repos/updates/fleet/work', asFleet)
+    expect(reader.status).toBe(200)
+    expect(reader.body).toMatchObject({
+      forge: 'work',
+      patterns: ['shapes/*', 'colors/*'],
+      repos: [{ forge: 'work', path: 'shapes/circle' }],
+    })
+    expect(reader.body).not.toHaveProperty('matched')
+    expect(JSON.stringify(reader.body)).not.toContain('shapes/kept-out')
+    const refused = await app.request('/api/repos/updates/fleet/work/list', {
+      method: 'POST',
+      headers: asFleet,
+    })
+    expect(refused.status).toBe(403)
 
-    const admin = await getJson('/api/repos/updates/groups/shapes', asAdmin)
+    const admin = await getJson('/api/repos/updates/fleet/work', asAdmin)
     expect(JSON.stringify(admin.body)).toContain('shapes/kept-out')
+    expect((await getJson('/api/repos/updates/fleet/elsewhere', asAdmin)).status).toBe(404)
   })
 })
 
@@ -485,7 +500,7 @@ const agentBase = () => ({
   repo: repo('shapes/circle', ['shapes']),
   targetOf: (other: { forge: string; path: string }) => ({
     ...other,
-    groups: [other.path.split('/')[0] ?? ''],
+    teams: [other.path.split('/')[0] ?? ''],
   }),
   now: () => new Date(at),
 })
@@ -498,38 +513,39 @@ describe('internal agents', () => {
     const open = agentCatalogContext({ ...base(), policy: 'metadata' })
     expect(open.canRead(colors)).toBe(true)
     expect(open.canReadSnippets?.(colors)).toBe(false)
-    expect(open.knowledge.canReadShared?.({ groups: ['colors'] })).toBe(true)
+    expect(open.knowledge.canReadShared?.({ teams: ['colors'] })).toBe(true)
     const closed = agentCatalogContext({ ...base(), policy: 'off' })
     expect(closed.canRead(colors)).toBe(false)
     expect(closed.canRead({ forge: 'work', path: 'shapes/square' })).toBe(true)
   })
 
-  test('owners name a repository by its innermost groups and a scope by its outermost', () => {
-    const titles: Record<string, string> = { shapes: 'Shapes', 'shapes.round': 'Shapes › Round' }
+  test('owners name a repository by its owner teams and a scope by the teams it names', () => {
+    const titles: Record<string, string> = { shapes: 'Shapes', round: 'Round' }
     const context = agentCatalogContext({
       ...base(),
       policy: 'metadata',
       targetOf: (other) => ({
         ...other,
-        groups: other.path === 'shapes/circle' ? ['shapes.round', 'shapes'] : ['colors'],
+        teams: other.path === 'shapes/circle' ? ['shapes', 'round'] : ['colors'],
       }),
-      groupLabel: (key) => titles[key] ?? key,
+      teamLabel: (key) => titles[key] ?? key,
     })
-    expect(context.ownerOf?.({ forge: 'work', path: 'shapes/circle' })).toEqual(['Shapes › Round'])
+    expect(context.ownerOf?.({ forge: 'work', path: 'shapes/circle' })).toEqual(['Shapes', 'Round'])
     expect(context.ownerOf?.(colors)).toEqual(['colors'])
-    expect(context.knowledge.ownerOf?.({ groups: ['shapes', 'shapes.round'] })).toEqual(['Shapes'])
-    expect(context.knowledge.ownerOf?.({ groups: ['shapes.round'] })).toEqual(['Shapes › Round'])
+    expect(context.knowledge.ownerOf?.({ teams: ['round'] })).toEqual(['Round'])
     expect(context.knowledge.ownerOf?.({ repos: ['work:shapes/circle'] })).toEqual([
-      'Shapes › Round',
+      'Shapes',
+      'Round',
     ])
+    expect(context.knowledge.ownerOf?.({ repos: ['work:shapes/*'] })).toEqual([])
   })
 
   test('chat follows the asker: their reach under the policy', () => {
-    const asker = principal([{ scope: { groups: ['shapes'] }, actions: ['ai:read'] }])
+    const asker = principal([{ scope: { teams: ['shapes'] }, actions: ['ai:read'] }])
     const chat = agentCatalogContext({ ...base(), policy: 'snippets', requester: asker })
     expect(chat.canRead(colors)).toBe(false)
     expect(chat.canRead({ forge: 'work', path: 'shapes/circle' })).toBe(false)
-    const reader = principal([{ scope: { groups: ['shapes'] }, actions: ['repos:read'] }])
+    const reader = principal([{ scope: { teams: ['shapes'] }, actions: ['repos:read'] }])
     expect(
       agentCatalogContext({ ...base(), policy: 'snippets', requester: reader }).canRead(colors),
     ).toBe(true)

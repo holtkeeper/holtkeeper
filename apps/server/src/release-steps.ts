@@ -8,7 +8,7 @@ import type { KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { appendAudit } from './audit.ts'
-import { type ServerDeps, ForbiddenToolError, groupLabeler, repoTarget } from './context.ts'
+import { type ServerDeps, ForbiddenToolError, repoTarget, teamLabeler } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
 import type { ReleaseStepInput, ReleaseToolsAccess } from './tools/releases.ts'
 import { canSee } from './visibility.ts'
@@ -234,7 +234,7 @@ export function releaseToolsAccess(
 ): ReleaseToolsAccess {
   const { config, store } = deps
   const releases = releaseServiceFor(deps)
-  const resolveGuide = createGuideResolver({ store, groupTitle: groupLabeler(config) })
+  const resolveGuide = createGuideResolver({ store, teamTitle: teamLabeler(config) })
   const kv = store.kv ?? memoryKv()
   const { principal } = options
 
@@ -395,7 +395,7 @@ const agentPrincipal: Principal = { id: 'agent', name: 'agent', provider: 'agent
 
 /**
  * Read-only release tools for an internal agent working on `repo`: the release state of that
- * repository and of repositories sharing a group with it, narrowed to what `requester` may
+ * repository and of repositories sharing an owner team with it, narrowed to what `requester` may
  * `releases:read` when a person asked. No steps, and never who accepted a release.
  */
 export function agentReleaseAccess(
@@ -407,7 +407,7 @@ export function agentReleaseAccess(
     principal: agentPrincipal,
     canRead: (other) =>
       ((other.forge === repo.forge && other.path === repo.path) ||
-        other.groups.some((group) => repo.groups.includes(group))) &&
+        other.teams.some((team) => repo.teams.includes(team))) &&
       (!requester || canSee(requester, 'releases:read', other)),
     channel: 'agent',
   })

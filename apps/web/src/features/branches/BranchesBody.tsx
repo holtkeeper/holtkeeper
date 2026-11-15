@@ -228,7 +228,7 @@ export function BranchesBody({
   update: (patch: Partial<BranchesSearch>) => void
 }) {
   const overview = useBranchesOverview()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
   if (overview.isPending) return <Placeholder className="h-72" />
   if (overview.isError) return <ErrorState error={overview.error} />
@@ -238,11 +238,11 @@ export function BranchesBody({
   const filters = { ...search, ...(key ? { repo: key } : {}) }
   const repos = filterBranchRepos(overview.data.repos, filters)
   const scoped = !key
-  const scopeRepos = scoped ? foldScope(repos, view, homeGroups, (row) => row.groups).shown : repos
+  const scopeRepos = scoped ? foldScope(repos, view, homeTeams, (row) => row.teams).shown : repos
   const all = branchListRows(overview.data)
   const candidates = filterBranchesExceptReason(all, filters)
   const counts = reasonCounts(
-    scoped ? foldScope(candidates, view, homeGroups, (row) => row.groups).shown : candidates,
+    scoped ? foldScope(candidates, view, homeTeams, (row) => row.teams).shown : candidates,
   )
   const rows = sortRows(
     oldestFirst(
@@ -251,7 +251,7 @@ export function BranchesBody({
     branchesSort(search),
     branchSortValue,
   )
-  const visible = scoped ? foldScope(rows, view, homeGroups, (row) => row.groups).shown : rows
+  const visible = scoped ? foldScope(rows, view, homeTeams, (row) => row.teams).shown : rows
   const visibleKeys = visible.map((row) => row.key)
   const selectedRows = all.filter((row) => selected.has(row.key))
   const selectedRepos = new Set(selectedRows.map((row) => row.repoKey)).size
@@ -312,7 +312,7 @@ export function BranchesBody({
             next ? { sort: next.key, dir: next.direction } : { sort: undefined, dir: undefined },
           )
         }
-        {...(scoped ? { scope: { value: view, onChange: setView, homeGroups } } : {})}
+        {...(scoped ? { scope: { value: view, onChange: setView, homeTeams } } : {})}
         strip={() => kpiCells(branchKpis(scopeRepos))}
         noun={{ one: 'branch', many: 'branches' }}
         othersSummary={(others) => `${plural(others.length, 'branch', 'branches')} to clean up`}

@@ -10,7 +10,7 @@ import {
   resolveGuide,
 } from './resolve.ts'
 
-const repo = { forge: 'work', path: 'games/app', groups: ['games', 'web'] }
+const repo = { forge: 'work', path: 'acme/round/web', teams: ['widgets', 'gizmo'] }
 
 const row = (overrides: Partial<GuideSection>): GuideSection => ({
   scope: 'all',
@@ -56,22 +56,26 @@ describe('resolveGuide', () => {
   test('orders layers by precedence and keeps rows of other scopes out', () => {
     const resolved = resolveGuide(
       input({
-        family: { id: 'f1', name: 'Game apps' },
+        family: { id: 'f1', name: 'Widget apps' },
         repoDocs: [{ file: 'AGENTS.md', text: 'Run bun test before pushing.' }],
         policies: [{ section: 'commits', text: '- Commit titles have at most 72 characters.' }],
         task: 'chat',
         section: 'commits',
         sections: [
           row({ scope: 'all', rules: 'ALL rule.' }),
-          row({ scope: 'group:web', rules: 'WEB rule.' }),
-          row({ scope: 'group:games', rules: 'GAMES rule.' }),
+          row({ scope: 'team:gizmo', rules: 'GIZMO rule.' }),
+          row({ scope: 'team:widgets', rules: 'WIDGETS rule.' }),
+          row({ scope: 'path:work:acme', rules: 'ACME rule.' }),
+          row({ scope: 'path:work:acme/round', rules: 'ROUND rule.' }),
           row({ scope: 'family:f1', rules: 'FAMILY rule.' }),
-          row({ scope: 'repo:work:games/other', rules: 'OTHER rule.' }),
-          row({ scope: 'group:shop', rules: 'SHOP rule.' }),
+          row({ scope: 'repo:work:acme/round/other', rules: 'OTHER rule.' }),
+          row({ scope: 'team:sprockets', rules: 'SPROCKETS rule.' }),
+          row({ scope: 'path:work:acme/square', rules: 'SQUARE rule.' }),
+          row({ scope: 'path:other:acme', rules: 'OTHER FORGE rule.' }),
           row({
-            scope: 'group:games',
+            scope: 'team:widgets',
             section: 'commits',
-            rules: 'GAMES commit rule.',
+            rules: 'WIDGETS commit rule.',
             learnings: [
               {
                 id: 'l1',
@@ -83,7 +87,7 @@ describe('resolveGuide', () => {
             ],
           }),
           row({
-            scope: 'repo:work:games/app',
+            scope: 'repo:work:acme/round/web',
             rules: 'REPO rule.',
             generated: {
               version: 1,
@@ -101,14 +105,18 @@ describe('resolveGuide', () => {
     )
     expect(resolved.sections).toEqual(['general', 'commits'])
     expect(resolved.text).not.toContain('OTHER')
-    expect(resolved.text).not.toContain('SHOP')
+    expect(resolved.text).not.toContain('SPROCKETS')
+    expect(resolved.text).not.toContain('SQUARE')
+    expect(resolved.text).not.toContain('OTHER FORGE')
     const order = positions(resolved.text, [
       'AGENTS.md',
       'REPO rule',
       'FAMILY rule',
-      'GAMES rule',
-      'GAMES commit rule',
-      'WEB rule',
+      'ROUND rule',
+      'ACME rule',
+      'WIDGETS rule',
+      'WIDGETS commit rule',
+      'GIZMO rule',
       'ALL rule',
       'Squash fixup commits',
       '72 characters',
@@ -118,7 +126,9 @@ describe('resolveGuide', () => {
     ])
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual(order.toSorted((a, b) => a - b))
-    expect(resolved.text).toContain('## Team rules for the Game apps family')
+    expect(resolved.text).toContain('## Team rules for the Widget apps family')
+    expect(resolved.text).toContain('## Rules for folder acme/round\n')
+    expect(resolved.text).toContain('## Team rules for team widgets\n')
     expect(resolved.warnings).toEqual([])
     expect(resolved.budget.used).toBe(resolved.text.length)
   })
@@ -126,9 +136,10 @@ describe('resolveGuide', () => {
   test('is deterministic whatever order the rows come in', () => {
     const sections = [
       row({ scope: 'all', rules: 'A.' }),
-      row({ scope: 'group:games', section: 'testing', rules: 'B.' }),
-      row({ scope: 'repo:work:games/app', section: 'review', rules: 'C.' }),
-      row({ scope: 'group:web', rules: 'D.' }),
+      row({ scope: 'team:widgets', section: 'testing', rules: 'B.' }),
+      row({ scope: 'path:work:acme', rules: 'E.' }),
+      row({ scope: 'repo:work:acme/round/web', section: 'review', rules: 'C.' }),
+      row({ scope: 'team:gizmo', rules: 'D.' }),
     ]
     const notes = { entries: [note('n1'), note('n2')], kind: 'review' }
     const first = resolveGuide(input({ sections, notes }))
@@ -176,7 +187,7 @@ describe('resolveGuide', () => {
 
   test('proposed generated text only reaches tasks when no human rules or repo docs exist', () => {
     const generated = row({
-      scope: 'repo:work:games/app',
+      scope: 'repo:work:acme/round/web',
       generated: {
         version: 1,
         body: '- Proposed line.',
@@ -199,16 +210,16 @@ describe('resolveGuide', () => {
     ).not.toContain('Proposed line')
   })
 
-  test('over the human budget cuts all first, then groups, never the repository', () => {
+  test('over the human budget cuts all first, then teams, never the repository', () => {
     const resolved = resolveGuide(
       input({
         caps: { total: 3000, human: 2000, generated: 600 },
         sections: [
-          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(900) }),
-          row({ scope: 'group:games', rules: `${'G'.repeat(400)}\n${'g'.repeat(700)}` }),
+          row({ scope: 'repo:work:acme/round/web', rules: 'R'.repeat(900) }),
+          row({ scope: 'team:widgets', rules: `${'G'.repeat(400)}\n${'g'.repeat(700)}` }),
           row({ scope: 'all', rules: 'A'.repeat(800) }),
           row({
-            scope: 'repo:work:games/app',
+            scope: 'repo:work:acme/round/web',
             section: 'testing',
             generated: {
               version: 2,
@@ -236,10 +247,10 @@ describe('resolveGuide', () => {
     expect(layers.all).toMatchObject({ chars: 0, cut: true })
     expect(layers.generated).toMatchObject({ cut: true })
     expect(layers.notes).toMatchObject({ chars: 0, cut: true })
-    expect(layers.group).toMatchObject({ cut: true })
+    expect(layers.team).toMatchObject({ cut: true })
     expect(resolved.warnings).toEqual([
       expect.stringMatching(
-        /^Team rules for team games were cut to fit the budget \(\d+ of \d+ characters\)\.$/,
+        /^Team rules for team widgets were cut to fit the budget \(\d+ of \d+ characters\)\.$/,
       ),
       'Team rules for all repositories were left out: the budget for human rules is used up.',
     ])
@@ -250,8 +261,8 @@ describe('resolveGuide', () => {
       input({
         caps: { total: 4000, human: 1000, generated: 500 },
         sections: [
-          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(1100) }),
-          row({ scope: 'group:games', rules: 'G'.repeat(300) }),
+          row({ scope: 'repo:work:acme/round/web', rules: 'R'.repeat(1100) }),
+          row({ scope: 'team:widgets', rules: 'G'.repeat(300) }),
         ],
       }),
     )
@@ -272,11 +283,11 @@ describe('resolveGuide', () => {
           { file: 'AGENTS.md', text: 'Run bun test before pushing.' },
         ],
         sections: [
-          row({ scope: 'repo:work:games/app', rules: ruleLines('repo', 5) }),
-          row({ scope: 'group:games', rules: ruleLines('team', 15) }),
+          row({ scope: 'repo:work:acme/round/web', rules: ruleLines('repo', 5) }),
+          row({ scope: 'team:widgets', rules: ruleLines('team', 15) }),
           row({ scope: 'all', rules: ruleLines('fleet', 5) }),
           row({
-            scope: 'group:games',
+            scope: 'team:widgets',
             section: 'review',
             learnings: Array.from({ length: 10 }, (_, i) => ({
               id: `l${i}`,
@@ -312,9 +323,9 @@ describe('resolveGuide', () => {
       input({
         repoDocs: [{ file: 'AGENTS.md', text: 'line about widgets\n'.repeat(320) }],
         sections: [
-          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(4000) }),
+          row({ scope: 'repo:work:acme/round/web', rules: 'R'.repeat(4000) }),
           row({
-            scope: 'group:games',
+            scope: 'team:widgets',
             section: 'review',
             learnings: Array.from({ length: 10 }, (_, i) => ({
               id: `l${i}`,
@@ -356,7 +367,7 @@ describe('resolveGuide', () => {
         caps: { total: 3000, human: 2000, generated: 500 },
         repoDocs: [{ file: 'AGENTS.md', text: 'D'.repeat(1000) }],
         sections: [
-          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(300) }),
+          row({ scope: 'repo:work:acme/round/web', rules: 'R'.repeat(300) }),
           row({ scope: 'all', rules: 'A'.repeat(300) }),
         ],
       }),
@@ -374,12 +385,46 @@ describe('resolveGuide', () => {
     const resolved = resolveGuide(
       input({
         caps: { total: 1500, human: 1000, generated: 500 },
-        sections: [row({ scope: 'repo:work:games/app', rules: 'line\n'.repeat(600) })],
+        sections: [row({ scope: 'repo:work:acme/round/web', rules: 'line\n'.repeat(600) })],
       }),
     )
     expect(resolved.text.length).toBeLessThanOrEqual(1500)
     expect(resolved.text).toContain('[...]')
     expect(resolved.warnings[0]).toContain('their end was cut')
+  })
+
+  test('notes see the family and the touched files of the task', () => {
+    const entries = [
+      note('fam', { match: { families: ['f1'] } }),
+      note('src', { match: { files: ['src/**'] } }),
+    ]
+    const cited = (overrides: Partial<ResolveGuideInput>, files?: string[]) =>
+      ['fam', 'src'].filter((id) =>
+        resolveGuide(
+          input({ notes: { entries, kind: 'review', ...(files && { files }) }, ...overrides }),
+        ).text.includes(`[kb:${id}]`),
+      )
+    expect(cited({ family: { id: 'f1', name: 'Discs' } }, ['src/disc.ts'])).toEqual(['fam', 'src'])
+    expect(cited({ family: { id: 'f2', name: 'Squares' } }, ['docs/disc.md'])).toEqual([])
+    expect(cited({})).toEqual(['src'])
+  })
+
+  test('notes are ranked by the semantic cosines when given', () => {
+    const entries = [note('first'), note('second'), note('third')]
+    const order = (semantic?: ReadonlyMap<string, number>) => {
+      const text = resolveGuide(
+        input({ notes: { entries, kind: 'review', ...(semantic && { semantic }) } }),
+      ).text
+      return ['first', 'second', 'third'].toSorted(
+        (a, b) => text.indexOf(`[kb:${a}]`) - text.indexOf(`[kb:${b}]`),
+      )
+    }
+    const semantic = new Map([
+      ['third', 0.9],
+      ['first', 0.5],
+    ])
+    expect(order(semantic)).toEqual(['third', 'first', 'second'])
+    expect(order(new Map([['second', 0.9]]))[0]).toBe('second')
   })
 
   test('notes respect maxChars and the default caps hold', () => {
@@ -394,75 +439,135 @@ describe('resolveGuide', () => {
   })
 })
 
-describe('subgroups', () => {
-  const nested = { forge: 'work', path: 'shapes/disc', groups: ['shapes.round', 'shapes'] }
-  const titles: Record<string, string> = {
-    shapes: 'Shapes (shapes)',
-    'shapes.round': 'Shapes › Round (shapes.round)',
-  }
-  const groupTitle = (key: string) => titles[key] ?? key
+const forSquare = (id: string, overrides: Partial<KnowledgeEntry> = {}) =>
+  note(id, { scope: { repos: ['work:acme/square/web'] }, ...overrides })
 
-  test('the subgroup sits between the family and its parent group, with labelled titles', () => {
+describe('neighbours', () => {
+  const square = { forge: 'work', path: 'acme/square/web', teams: ['shapes'] }
+
+  test('knowledge of similar repositories comes last, in its own block', () => {
     const resolved = resolveGuide(
       input({
-        repo: nested,
+        notes: {
+          entries: [note('own'), forSquare('near')],
+          kind: 'review',
+          neighbours: { repos: [{ repo: square, similarity: 0.8 }] },
+        },
+      }),
+    )
+    const [notes, near] = positions(resolved.text, [
+      '## Team knowledge',
+      '## Knowledge from similar repositories',
+    ])
+    expect(notes).toBeGreaterThan(0)
+    expect(near).toBeGreaterThan(notes ?? 0)
+    expect(resolved.text).toContain('### [kb:near] Note near')
+    expect(resolved.text).toContain('written for acme/square/web (similarity 0.80)')
+    const block = resolved.blocks.find((b) => b.layer === 'neighbours')
+    expect(block).toMatchObject({ source: 'Similar repositories: acme/square/web', cut: false })
+    expect(resolved.blocks.at(-1)?.layer).toBe('neighbours')
+    expect(resolved.budget.neighboursUsed).toBe(block?.chars ?? -1)
+    expect(resolved.budget.notesUsed).toBeGreaterThan(resolved.budget.neighboursUsed)
+    expect(resolved.blocks.map((b) => b.text).join('')).toBe(
+      resolved.text.slice(resolved.text.indexOf('## ')) + '\n\n',
+    )
+  })
+
+  test('uses only the entries given, and nothing without neighbours', () => {
+    const notes = { entries: [forSquare('near')], kind: 'review' }
+    const repos = [{ repo: square, similarity: 0.8 }]
+    expect(resolveGuide(input({ notes })).blocks.some((b) => b.layer === 'neighbours')).toBeFalse()
+    expect(
+      resolveGuide(input({ notes: { ...notes, neighbours: { repos, entries: [] } } })).text,
+    ).not.toContain('kb:near')
+  })
+
+  test('takes at most its share of the budget and is cut first', () => {
+    const entries = Array.from({ length: 20 }, (_, i) =>
+      forSquare(`n${i}`, { body: `Body ${i} `.repeat(40) }),
+    )
+    const repos = [{ repo: square, similarity: 0.8 }]
+    const resolved = resolveGuide(
+      input({ notes: { entries, kind: 'review', neighbours: { repos } } }),
+    )
+    expect(resolved.budget.neighboursUsed).toBeLessThanOrEqual(GUIDE_CAPS.total * 0.15)
+    expect(resolved.blocks.find((b) => b.layer === 'neighbours')?.cut).toBeTrue()
+    const own = Array.from({ length: 50 }, (_, i) =>
+      note(`own${i}`, { body: `Body ${i} `.repeat(40) }),
+    )
+    const crowded = resolveGuide(
+      input({ notes: { entries: [...own, ...entries], kind: 'review', neighbours: { repos } } }),
+    )
+    expect(crowded.budget.neighboursUsed).toBe(0)
+    expect(crowded.text.length).toBeLessThanOrEqual(GUIDE_CAPS.total)
+  })
+})
+
+describe('folders and teams', () => {
+  const titles: Record<string, string> = { widgets: 'Widget crew (widgets)' }
+  const teamTitle = (key: string) => titles[key] ?? key
+
+  test('folders sit between the family and the owner teams, deepest first, with labelled titles', () => {
+    const resolved = resolveGuide(
+      input({
         task: 'chat',
         family: { id: 'f1', name: 'Discs' },
-        groupTitle,
+        teamTitle,
         sections: [
           row({ scope: 'all', rules: 'ALL rule.' }),
-          row({ scope: 'group:shapes', rules: 'PARENT rule.' }),
-          row({ scope: 'group:shapes.round', rules: 'SUB rule.' }),
-          row({ scope: 'group:shapes.flat', rules: 'SIBLING rule.' }),
+          row({ scope: 'team:gizmo', rules: 'GIZMO rule.' }),
+          row({ scope: 'team:widgets', rules: 'WIDGETS rule.' }),
+          row({ scope: 'path:work:acme', rules: 'ACME rule.' }),
+          row({ scope: 'path:work:acme/round', rules: 'ROUND rule.' }),
+          row({ scope: 'path:work:acme/round/web', rules: 'SELF FOLDER rule.' }),
           row({ scope: 'family:f1', rules: 'FAMILY rule.' }),
-          row({ scope: 'repo:work:shapes/disc', rules: 'REPO rule.' }),
+          row({ scope: 'repo:work:acme/round/web', rules: 'REPO rule.' }),
         ],
       }),
     )
-    expect(resolved.text).not.toContain('SIBLING')
+    expect(resolved.text).not.toContain('SELF FOLDER')
     const order = positions(resolved.text, [
       'REPO rule',
       'FAMILY rule',
-      'SUB rule',
-      'PARENT rule',
+      'ROUND rule',
+      'ACME rule',
+      'WIDGETS rule',
+      'GIZMO rule',
       'ALL rule',
     ])
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual(order.toSorted((a, b) => a - b))
     expect(resolved.blocks.map((block) => [block.layer, block.scope, block.source])).toEqual([
-      ['repo', 'repo:work:shapes/disc', 'This repository'],
+      ['repo', 'repo:work:acme/round/web', 'This repository'],
       ['family', 'family:f1', 'Family Discs'],
-      ['subgroup', 'group:shapes.round', 'Team Shapes › Round (shapes.round)'],
-      ['group', 'group:shapes', 'Team Shapes (shapes)'],
+      ['path', 'path:work:acme/round', 'Folder acme/round'],
+      ['path', 'path:work:acme', 'Folder acme'],
+      ['team', 'team:widgets', 'Team Widget crew (widgets)'],
+      ['team', 'team:gizmo', 'Team gizmo'],
       ['all', 'all', 'All repositories'],
     ])
-    expect(resolved.text).toContain('## Team rules for team Shapes › Round (shapes.round)')
-    expect(resolved.text).toContain('## Team rules for team Shapes (shapes)')
+    expect(resolved.text).toContain('## Rules for folder acme/round\n')
+    expect(resolved.text).toContain('## Team rules for team Widget crew (widgets)')
   })
 
-  test('without a labeler titles name the key', () => {
+  test('without a labeler titles name the team key', () => {
     const resolved = resolveGuide(
-      input({
-        repo: nested,
-        task: 'chat',
-        sections: [row({ scope: 'group:shapes.round', rules: 'SUB rule.' })],
-      }),
+      input({ task: 'chat', sections: [row({ scope: 'team:widgets', rules: 'TEAM rule.' })] }),
     )
-    expect(resolved.text).toContain('## Team rules for team shapes.round')
+    expect(resolved.text).toContain('## Team rules for team widgets')
   })
 
-  test('over the human budget cuts all, then the parent, then the subgroup, then the family', () => {
+  test('over the human budget cuts all, then teams, then folders, then the family', () => {
     const sections = [
-      row({ scope: 'repo:work:shapes/disc', rules: 'R'.repeat(400) }),
+      row({ scope: 'repo:work:acme/round/web', rules: 'R'.repeat(400) }),
       row({ scope: 'family:f1', rules: 'F'.repeat(400) }),
-      row({ scope: 'group:shapes.round', rules: 'S'.repeat(400) }),
-      row({ scope: 'group:shapes', rules: 'P'.repeat(400) }),
+      row({ scope: 'path:work:acme/round', rules: 'S'.repeat(400) }),
+      row({ scope: 'team:widgets', rules: 'P'.repeat(400) }),
       row({ scope: 'all', rules: 'A'.repeat(400) }),
     ]
     const resolveWith = (human: number) =>
       resolveGuide(
         input({
-          repo: nested,
           task: 'chat',
           family: { id: 'f1', name: 'Discs' },
           caps: { total: 4000, human, generated: 500 },
@@ -474,9 +579,9 @@ describe('subgroups', () => {
         .blocks.filter((block) => block.chars > 0 && !block.cut)
         .map((block) => block.layer)
     const full = resolveWith(4000).budget.humanUsed
-    expect(kept(4000)).toEqual(['repo', 'family', 'subgroup', 'group', 'all'])
-    expect(kept(full - 300)).toEqual(['repo', 'family', 'subgroup', 'group'])
-    expect(kept(full - 750)).toEqual(['repo', 'family', 'subgroup'])
+    expect(kept(4000)).toEqual(['repo', 'family', 'path', 'team', 'all'])
+    expect(kept(full - 300)).toEqual(['repo', 'family', 'path', 'team'])
+    expect(kept(full - 750)).toEqual(['repo', 'family', 'path'])
     expect(kept(full - 1200)).toEqual(['repo', 'family'])
     expect(kept(full - 1650)).toEqual(['repo'])
   })
@@ -493,10 +598,10 @@ describe('repository files and block texts', () => {
           { file: 'AGENTS.md', text: 'Run bun test before pushing.' },
         ],
         sections: [
-          row({ scope: 'repo:work:games/app', rules: 'REPO rule.' }),
+          row({ scope: 'repo:work:acme/round/web', rules: 'REPO rule.' }),
           row({ scope: 'all', section: 'testing', rules: 'ALL testing rule.' }),
           row({
-            scope: 'repo:work:games/app',
+            scope: 'repo:work:acme/round/web',
             section: 'testing',
             generated: {
               version: 3,

@@ -25,28 +25,28 @@ const config = parseConfig({
       },
     },
   },
-  groups: {
-    web: { forge: 'work', include: ['acme/web-*'] },
-    pay: { forge: 'work', include: ['acme/pay-*'] },
-    'web.docs': { forge: 'work', include: ['acme/web-docs*'], title: 'Docs' },
+  teams: {
+    web: { owns: ['work:acme/web-*'] },
+    pay: { owns: ['work:acme/pay-*'] },
+    docs: { title: 'Docs', owns: ['work:acme/web-docs*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    lead: [{ scope: { groups: ['web', 'pay'] }, actions: ['*'] }],
-    tasker: [{ scope: { groups: ['web'] }, actions: ['tasks:run', 'repos:read'] }],
+    lead: [{ scope: { teams: ['web', 'pay'] }, actions: ['*'] }],
+    tasker: [{ scope: { teams: ['web'] }, actions: ['tasks:run', 'repos:read'] }],
     crosstasker: [
-      { scope: { groups: ['web'] }, actions: ['repos:read'] },
+      { scope: { teams: ['web'] }, actions: ['repos:read'] },
       { scope: { repos: ['work:acme/pay-api'] }, actions: ['tasks:run'] },
     ],
-    writer: [{ scope: { groups: ['web'] }, actions: ['knowledge:read', 'knowledge:write'] }],
-    scribbler: [{ scope: { groups: ['web'] }, actions: ['knowledge:write'] }],
-    releaser: [{ scope: { groups: ['web'] }, actions: ['releases:read', 'releases:run'] }],
-    watcher: [{ scope: { groups: ['web'] }, actions: ['releases:read'] }],
-    configurer: [{ scope: { groups: ['web'] }, actions: ['settings:read', 'settings:write'] }],
-    tweaker: [{ scope: { groups: ['web'] }, actions: ['settings:write'] }],
+    writer: [{ scope: { teams: ['web'] }, actions: ['knowledge:read', 'knowledge:write'] }],
+    scribbler: [{ scope: { teams: ['web'] }, actions: ['knowledge:write'] }],
+    releaser: [{ scope: { teams: ['web'] }, actions: ['releases:read', 'releases:run'] }],
+    watcher: [{ scope: { teams: ['web'] }, actions: ['releases:read'] }],
+    configurer: [{ scope: { teams: ['web'] }, actions: ['settings:read', 'settings:write'] }],
+    tweaker: [{ scope: { teams: ['web'] }, actions: ['settings:write'] }],
     reader: [{ scope: { all: true }, actions: ['repos:read', 'knowledge:read'] }],
   },
 })
@@ -134,8 +134,8 @@ async function seed() {
     })
   }
   for (const [id, scope] of [
-    ['n-web', { groups: ['web'] }],
-    ['n-pay', { groups: ['pay'] }],
+    ['n-web', { teams: ['web'] }],
+    ['n-pay', { teams: ['pay'] }],
     ['n-all', { all: true }],
   ] satisfies [string, Scope][]) {
     await store.knowledge.put({
@@ -205,8 +205,8 @@ async function seed() {
     updatedAt: '2026-10-01T00:00:00.000Z',
   })
   for (const [id, scope] of [
-    ['a-web', { groups: ['web'] }],
-    ['a-pay', { groups: ['pay'] }],
+    ['a-web', { teams: ['web'] }],
+    ['a-pay', { teams: ['pay'] }],
   ] satisfies [string, Scope][])
     await store.settings.put({
       id,
@@ -258,7 +258,7 @@ describe('GET /api/inbox', () => {
       groupId: 'g-web',
       taskKind: 'upgrade',
       scope: 'acme/web-shop',
-      repos: [{ repo: 'work:acme/web-shop', groups: ['web'] }],
+      repos: [{ repo: 'work:acme/web-shop', teams: ['web'] }],
       href: '/ops/tasks?group=g-web',
       proposedBy: 'header:lead',
       snoozed: false,
@@ -310,7 +310,7 @@ describe('GET /api/inbox', () => {
     expect(configurer.mine.find((item) => item.id === 'allowlist:a-web:GHSA-soon')).toMatchObject({
       kind: 'allowlist',
       settingId: 'a-web',
-      settingScope: { groups: ['web'] },
+      settingScope: { teams: ['web'] },
       expires: '2026-11-06',
       expired: false,
       dueAt: '2026-11-06T23:59:59.999Z',
@@ -346,7 +346,7 @@ describe('GET /api/inbox', () => {
     expect((await call('GET', '/task-groups/g-pay', as('crosstasker'))).status).toBe(404)
   })
 
-  test('without home groups everything is mine, oldest first', async () => {
+  test('without home teams everything is mine, oldest first', async () => {
     const feed = await feedOf('admin')
     expect(feed.teams).toEqual([])
     expect(new Set(feed.mine.map((item) => item.kind))).toEqual(
@@ -359,12 +359,12 @@ describe('GET /api/inbox', () => {
     expect(feed.people['header:lead']?.name).toBe('Mira K.')
   })
 
-  test('home groups split mine from teams; items above every team are mine', async () => {
-    expect(
-      (await call('PUT', '/me/preferences', as('admin'), { homeGroups: ['web'] })).status,
-    ).toBe(200)
+  test('home teams split mine from teams; items above every team are mine', async () => {
+    expect((await call('PUT', '/me/preferences', as('admin'), { homeTeams: ['web'] })).status).toBe(
+      200,
+    )
     const feed = await feedOf('admin')
-    expect(feed.mine.every((item) => !item.repos.some((repo) => repo.groups.includes('pay')))).toBe(
+    expect(feed.mine.every((item) => !item.repos.some((repo) => repo.teams.includes('pay')))).toBe(
       true,
     )
     expect(ids(feed.mine)).toContain('note:n-all')
@@ -379,18 +379,20 @@ describe('GET /api/inbox', () => {
     ])
   })
 
-  test('a note on a subgroup names it under its parent; one beside its parent names the parent', async () => {
+  test('a note names its teams by title and key, and folder patterns as written', async () => {
     const note = (await store.knowledge.get('n-web'))!
-    await store.knowledge.put({ ...note, id: 'n-docs', scope: { groups: ['web.docs'] } })
-    await store.knowledge.put({ ...note, id: 'n-wide', scope: { groups: ['web', 'web.docs'] } })
-    await store.knowledge.put({ ...note, id: 'n-both', scope: { groups: [['web.docs', 'pay']] } })
+    await store.knowledge.put({ ...note, id: 'n-docs', scope: { teams: ['docs'] } })
+    await store.knowledge.put({ ...note, id: 'n-both', scope: { teams: ['docs', 'pay'] } })
+    await store.knowledge.put({ ...note, id: 'n-folder', scope: { repos: ['work:acme/web-*'] } })
     const items = [...(await feedOf('admin')).mine, ...(await feedOf('admin')).teams]
     expect(items.find((item) => item.id === 'note:n-docs')).toMatchObject({
-      scope: 'Team web › Docs (web.docs)',
+      scope: 'Team Docs (docs)',
     })
-    expect(items.find((item) => item.id === 'note:n-wide')).toMatchObject({ scope: 'Team web' })
     expect(items.find((item) => item.id === 'note:n-both')).toMatchObject({
-      scope: 'Team web › Docs (web.docs) + pay',
+      scope: 'Team Docs (docs), Team pay',
+    })
+    expect(items.find((item) => item.id === 'note:n-folder')).toMatchObject({
+      scope: 'work:acme/web-*',
     })
   })
 
@@ -430,7 +432,7 @@ describe('GET /api/inbox', () => {
       title: 'Fresh widgets note',
       body: 'Prefer ShapeBase.',
       kind: 'convention',
-      scope: { groups: ['web'] },
+      scope: { teams: ['web'] },
       topics: [],
       appliesTo: ['*'],
       status: 'proposed',
@@ -469,7 +471,7 @@ describe('GET /api/inbox', () => {
 
 describe('GET /api/inbox/count', () => {
   test('counts sections without snoozed items from stored data, with an ETag', async () => {
-    expect((await call('PUT', '/me/preferences', as('lead'), { homeGroups: ['web'] })).status).toBe(
+    expect((await call('PUT', '/me/preferences', as('lead'), { homeTeams: ['web'] })).status).toBe(
       200,
     )
     const response = await call('GET', '/inbox/count', as('lead'))
@@ -493,7 +495,7 @@ describe('GET /api/inbox/count', () => {
   })
 
   test('total equals the rows of the feed that are not snoozed, for the same caller', async () => {
-    expect((await call('PUT', '/me/preferences', as('lead'), { homeGroups: ['web'] })).status).toBe(
+    expect((await call('PUT', '/me/preferences', as('lead'), { homeTeams: ['web'] })).status).toBe(
       200,
     )
     for (const id of ['task:g-web', 'note:n-pay'])

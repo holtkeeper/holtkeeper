@@ -2,7 +2,7 @@ import type { RepoRef } from '@holtkeeper/api'
 import { ArrowRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { useGroupTitles, useRepos } from '../../../api/queries.ts'
+import { useTeamTitles, useRepos } from '../../../api/queries.ts'
 import {
   type SupplySection,
   cardLabels,
@@ -23,23 +23,22 @@ import { RepoStack } from '../../stack/StackPage.tsx'
 function StackLink({ repo }: { repo: RepoRef }) {
   const key = repoKey(repo)
   const repos = useRepos()
-  const { homeGroups } = useScope()
-  const groups = repos.data?.repos.find((summary) => repoKey(summary.repo) === key)?.groups ?? []
-  const home = new Set(homeGroups.flat())
-  const group = groups.find((entry) => home.has(entry)) ?? groups[0]
-  const titleOf = useGroupTitles()
+  const { homeTeams } = useScope()
+  const teams = repos.data?.repos.find((summary) => repoKey(summary.repo) === key)?.teams ?? []
+  const team = teams.find((entry) => homeTeams.includes(entry)) ?? teams[0]
+  const titleOf = useTeamTitles()
   const label = (
     <>
-      {group
-        ? `Open ${titleOf(group)} › ${cardLabels.stack}`
+      {team
+        ? `Open ${titleOf(team)} › ${cardLabels.stack}`
         : `Open in Supply › ${cardLabels.stack}`}
       <ArrowRight className="size-3.5" />
     </>
   )
-  return group ? (
+  return team ? (
     <LinkButton
-      to="/repos/groups/$groupId"
-      params={{ groupId: group }}
+      to="/repos/teams/$teamId"
+      params={{ teamId: team }}
       search={{ tab: 'stack' }}
       variant="ghost"
       size="sm"

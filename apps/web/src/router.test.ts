@@ -16,10 +16,10 @@ describe('router', () => {
     for (const path of paths) expect([path, concrete(path)].map(matched)).toEqual([path, path])
   })
 
-  test('the repositories list, groups and hub resolve apart', () => {
+  test('the repositories list, teams and hub resolve apart', () => {
     expect(matched('/repos')).toBe('/repos/')
-    expect(matched('/repos/groups')).toBe('/repos/groups')
-    expect(matched('/repos/groups/g1')).toBe('/repos/groups/$groupId')
+    expect(matched('/repos/teams')).toBe('/repos/teams')
+    expect(matched('/repos/teams/widgets')).toBe('/repos/teams/$teamId')
     expect(matched('/repos/gitlab/acme/widget-kit')).toBe('/repos/$')
   })
 })

@@ -55,7 +55,7 @@ import { ReviewSheet } from './ReviewSheet.tsx'
 
 interface Row {
   review: ReviewRow
-  groups: readonly string[]
+  teams: readonly string[]
 }
 
 const columns = (narrowed: boolean): FleetColumn<Row, ReviewSortKey>[] => [
@@ -220,7 +220,7 @@ export function ReviewsBody({
   search: ReviewsSearch
   update: (patch: Partial<ReviewsSearch>) => void
 }) {
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeTeams } = useScope()
   const [sort, setSort] = useState<SortState<ReviewSortKey>>(null)
   const since = reviewSince(search.days)
   const reviews = useReviews({
@@ -229,8 +229,8 @@ export function ReviewsBody({
     ...(since ? { since } : {}),
   })
   const repos = useRepos()
-  const groupsOf = new Map(
-    (repos.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.groups]),
+  const teamsOf = new Map(
+    (repos.data?.repos ?? []).map((summary) => [repoKey(summary.repo), summary.teams]),
   )
 
   if (reviews.isPending) return <Placeholder className="h-72" />
@@ -239,9 +239,9 @@ export function ReviewsBody({
   const loaded = reviews.data.pages.flatMap((page) => page.reviews)
   const rows: Row[] = sortReviews(filterReviews(loaded, search), sort).map((review) => ({
     review,
-    groups: groupsOf.get(repoKey(review.repo)) ?? [],
+    teams: teamsOf.get(repoKey(review.repo)) ?? [],
   }))
-  const folded = foldScope(rows, view, homeGroups, (row) => row.groups)
+  const folded = foldScope(rows, view, homeTeams, (row) => row.teams)
   const keys = (repo ? rows : [...folded.shown, ...folded.others]).map(
     (row) => row.review.analysisId,
   )
@@ -270,7 +270,7 @@ export function ReviewsBody({
         columns={columns(repo !== undefined)}
         sort={sort}
         onSort={setSort}
-        {...(repo ? {} : { scope: { value: view, onChange: setView, homeGroups } })}
+        {...(repo ? {} : { scope: { value: view, onChange: setView, homeTeams } })}
         strip={strip}
         noun={{ one: 'review', many: 'reviews' }}
         onOpen={(row) => update({ review: row.review.analysisId })}

@@ -14,7 +14,7 @@ export interface ResolvedMergeRequestComments {
 
 /**
  * `mergeRequests.comments` for `repo`: the most specific covering entry, so a repository entry
- * turns reviews back on under a group that has them off. A secret or invalid winning value counts
+ * turns reviews back on under a folder that has them off. A secret or invalid winning value counts
  * as the default (on), with no entry; `reason` only while it is off.
  */
 export function resolveMergeRequestComments(

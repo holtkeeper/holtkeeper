@@ -44,7 +44,7 @@ export const mergeRequestPoliciesSetting = {
 - Conditions inside one block must all hold. Use an **Any of** group for alternatives and **Not** to exclude cases, e.g. *target branch is \`main\` and author is a bot but not a draft*.
 - Policies run top to bottom; turn on **Stop** to skip later policies once this one matched.
 - **Skip analyzers** keeps noisy analyzers off merge requests the policy handles, e.g. dependency bumps.
-- Put shared policies on a group and override one in a repository by reusing its **id**; the most specific scope wins.
+- Put shared policies on a folder and override one in a repository by reusing its **id**; the most specific scope wins.
 - Try new policies on a single repository first: every decision shows up in Activity.`,
   default: [],
   schema: policiesSchema,
@@ -69,7 +69,7 @@ export interface CombinedPolicies {
  * Combines policies from every entry whose scope covers `repo`: most specific scope first, then the
  * most recently updated. A policy without its own scope takes the entry's; one with its own scope
  * still applies only inside the entry's (`within`). A policy id seen in a more specific entry
- * overrides the same id from less specific ones, so a repository can disable or replace a group
+ * overrides the same id from less specific ones, so a repository can disable or replace a folder
  * policy. Entries with another `key` are ignored.
  */
 export function combinePolicies(

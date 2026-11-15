@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Braces, Copy, Download, Package, Rocket } from 'lucide-react'
 import { useState } from 'react'
 
-import { useDependencies, useDependency, useGroupTitles } from '../../api/queries.ts'
+import { useDependencies, useDependency, useTeamTitles } from '../../api/queries.ts'
 import {
   type DependencyFilter,
   type LibrariesSearch,
@@ -191,11 +191,11 @@ function useLibraryRows(
   state: TableState,
   options: { repo?: string; view: ScopeView },
 ) {
-  const { homeGroups } = useScope()
+  const { homeTeams } = useScope()
   if (!table) return undefined
   const view = options.repo ? 'all' : options.view
-  const scoped = scopeLibraryRows(table.libraries, table.repos, view, homeGroups)
-  const inView = foldScope(scoped, view, homeGroups, (row) => row.groups).shown
+  const scoped = scopeLibraryRows(table.libraries, table.repos, view, homeTeams)
+  const inView = foldScope(scoped, view, homeTeams, (row) => row.teams).shown
   const filter = {
     query: state.query,
     ecosystem: state.ecosystem,
@@ -207,7 +207,7 @@ function useLibraryRows(
   const ecosystems = libraryEcosystems.filter((entry) =>
     table.libraries.some((row) => row.ecosystem === entry.id),
   )
-  return { rows, counts, ecosystems, homeGroups }
+  return { rows, counts, ecosystems, homeTeams }
 }
 
 function Toolbar({
@@ -302,7 +302,7 @@ const emptyState = (filtered: boolean) => (
  * Overview, Upgrade and Docs, and **Open as page** shows all its tabs.
  */
 export function LibrariesPage() {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const search: LibrariesSearch = useSearch({ strict: false })
   const navigate = useNavigate()
   const repo = parseRepoKey(search.repo)
@@ -397,7 +397,7 @@ export function LibrariesPage() {
   const keys = shown
     ? (repo
         ? shown.rows
-        : foldScope(shown.rows, view, shown.homeGroups, (row) => row.groups).shown
+        : foldScope(shown.rows, view, shown.homeTeams, (row) => row.teams).shown
       ).map(libraryKey)
     : []
   const step = neighbours(keys, search.library)
@@ -457,7 +457,7 @@ export function LibrariesPage() {
           onSort={(sort) => onState({ sort })}
           {...(repo
             ? {}
-            : { scope: { value: view, onChange: setView, homeGroups: shown.homeGroups } })}
+            : { scope: { value: view, onChange: setView, homeTeams: shown.homeTeams } })}
           strip={strip(newestRead(data), repo ? '' : scopeSuffix(view, titleOf))}
           legend={behindLegend}
           toolbar={

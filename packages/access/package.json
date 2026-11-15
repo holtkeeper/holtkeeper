@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./groups": "./src/groups.ts",
+    "./paths": "./src/paths.ts",
+    "./teams": "./src/teams.ts",
     "./roles": "./src/roles.ts"
   },
   "dependencies": {

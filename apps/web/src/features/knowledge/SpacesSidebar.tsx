@@ -5,7 +5,7 @@ import type {
   RepoRef,
   RepoSummary,
 } from '@holtkeeper/api'
-import { Boxes, ChevronDown, ChevronRight, Globe, Layers, Pencil, Plus, Users } from 'lucide-react'
+import { Boxes, ChevronDown, ChevronRight, Folder, Globe, Pencil, Plus, Users } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -21,10 +21,11 @@ import {
   spaceKey,
 } from '../../lib/guide.ts'
 import { repoKey, repoName } from '../../lib/repo.ts'
+import { type FolderNode, folderKey } from '../../lib/repos.ts'
 import {
   Button,
   Count,
-  GroupName,
+  TeamName,
   NoTeamsState,
   notify,
   ScopeSwitch,
@@ -46,7 +47,7 @@ const itemClass = (current: boolean, depth: number) =>
             : 'pl-14'
   } ${current ? 'bg-raise text-foreground shadow-[0_0_0_1px_var(--line-strong)]' : 'text-muted hover:bg-raise hover:text-foreground'}`
 
-/** How many subgroups, families and repositories a team lists before "N more". */
+/** How many families and repositories a team lists before "N more". */
 const TEAM_LIMIT = 5
 
 /** Guide sections and notes of a space as a quiet number, learnings waiting as a warning badge. */
@@ -79,9 +80,11 @@ const toggled = (previous: ReadonlySet<string>, key: string): ReadonlySet<string
 }
 
 /**
- * The Knowledge spaces: All, then teams with their subgroups, families and repositories, each
- * with its Knowledge counts; a repository shows under its deepest group. Long teams fold behind "N more"; under *My teams* other teams fold into one
- * collapsed row. Family suggestions wait below for a person to confirm or dismiss them.
+ * The Knowledge spaces: All, then teams with their families and repositories, each with its
+ * Knowledge counts; a repository shows under every team owning it. Long teams fold behind
+ * "N more"; under *My teams* other teams fold into one collapsed row. Folders of the repositories
+ * in scope follow as a collapsible tree. Family suggestions wait below for a person to confirm or
+ * dismiss them.
  */
 
 const MEMBERS_SHOWN = 4
@@ -103,20 +106,21 @@ export function SpacesSidebar({
   counts: KnowledgeCounts | undefined
   canEditFamilies: boolean
 }) {
-  const { view, setView, homeGroups, noTeams } = useScope()
-  const tree = buildSpaceTree(repos, families, view, homeGroups)
+  const { view, setView, homeTeams, noTeams } = useScope()
+  const tree = buildSpaceTree(repos, families, view, homeTeams)
   const current = spaceKey(selected)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [othersOpen, setOthersOpen] = useState(false)
+  const [openFolders, setOpenFolders] = useState<ReadonlySet<string>>(new Set())
   const [editing, setEditing] = useState<{
     family?: Family
     initial?: FamilySuggestion
   } | null>(null)
   const repoKeys = repos.map((r) => repoKey(r.repo))
 
-  const toggle = (group: string) => setCollapsed((previous) => toggled(previous, group))
-  const expand = (group: string) => setExpanded((previous) => toggled(previous, group))
+  const toggle = (team: string) => setCollapsed((previous) => toggled(previous, team))
+  const expand = (team: string) => setExpanded((previous) => toggled(previous, team))
 
   const repoItem = (repo: RepoRef, depth: number) => {
     const space: Space = { kind: 'repo', repo }
@@ -170,40 +174,35 @@ export function SpacesSidebar({
     )
   }
 
-  const teamItem = (team: TeamNode, depth = 0) => {
-    const space: Space = { kind: 'group', group: team.group }
-    const open = !collapsed.has(team.group)
+  const teamItem = (team: TeamNode) => {
+    const space: Space = { kind: 'team', team: team.team }
+    const open = !collapsed.has(team.team)
     const children = [
-      ...team.subgroups.map((sub) => teamItem(sub, depth + 1)),
-      ...team.families.map((node) => familyItem(node, depth + 1, team.group)),
-      ...team.repos.map((repo) => repoItem(repo, depth + 1)),
+      ...team.families.map((node) => familyItem(node, 1, team.team)),
+      ...team.repos.map((repo) => repoItem(repo, 1)),
     ]
-    const { shown, more } = foldList(children, TEAM_LIMIT, expanded.has(team.group))
+    const { shown, more } = foldList(children, TEAM_LIMIT, expanded.has(team.team))
     return (
-      <li key={team.group}>
+      <li key={team.team}>
         <div className="flex items-center">
           <button
             type="button"
-            aria-label={`${team.group} spaces`}
+            aria-label={`${team.team} spaces`}
             aria-expanded={open}
             className="grid size-6 shrink-0 place-items-center text-dim hover:text-foreground"
-            onClick={() => toggle(team.group)}
+            onClick={() => toggle(team.team)}
           >
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           </button>
           <button
             type="button"
-            className={itemClass(current === spaceKey(space), depth ? -1 : 0)}
+            className={itemClass(current === spaceKey(space), 0)}
             aria-current={current === spaceKey(space) ? 'true' : undefined}
             onClick={() => onSelect(space)}
           >
-            {depth ? (
-              <Layers className="size-3.5 shrink-0" />
-            ) : (
-              <Users className="size-3.5 shrink-0" />
-            )}
+            <Users className="size-3.5 shrink-0" />
             <span className="truncate">
-              <GroupName group={team.group} />
+              <TeamName team={team.team} />
             </span>
             <SpaceBadge counts={counts} space={space} />
           </button>
@@ -215,8 +214,8 @@ export function SpacesSidebar({
               <li>
                 <button
                   type="button"
-                  className={`h-6 text-left text-xs text-dim hover:text-foreground ${depth ? 'pl-10' : 'pl-6'}`}
-                  onClick={() => expand(team.group)}
+                  className="h-6 pl-6 text-left text-xs text-dim hover:text-foreground"
+                  onClick={() => expand(team.team)}
                 >
                   {more} more
                 </button>
@@ -224,6 +223,55 @@ export function SpacesSidebar({
             ) : null}
           </ul>
         ) : null}
+      </li>
+    )
+  }
+
+  const folderItem = (node: FolderNode, depth: number): ReactNode => {
+    const key = folderKey(node)
+    const open = openFolders.has(key)
+    const space: Space =
+      node.folder === ''
+        ? { kind: 'all' }
+        : { kind: 'path', forge: node.forge, folder: node.folder }
+    const active = node.folder !== '' && current === spaceKey(space)
+    return (
+      <li key={key}>
+        <div className="flex items-center" style={{ paddingLeft: `${depth * 12}px` }}>
+          {node.children.length ? (
+            <button
+              type="button"
+              aria-label={`${node.folder || node.forge} folders`}
+              aria-expanded={open}
+              className="grid size-6 shrink-0 place-items-center text-dim hover:text-foreground"
+              onClick={() => setOpenFolders((previous) => toggled(previous, key))}
+            >
+              {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            </button>
+          ) : (
+            <span aria-hidden className="size-6 shrink-0" />
+          )}
+          {node.folder === '' ? (
+            <span className="flex h-7 min-w-0 items-center gap-1.5 text-[12.5px] text-muted">
+              <Globe className="size-3.5 shrink-0" />
+              <span className="mono truncate text-xs">{node.forge}</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={itemClass(active, -1)}
+              aria-current={active ? 'true' : undefined}
+              title={`${node.forge}:${node.folder}`}
+              onClick={() => onSelect(space)}
+            >
+              <Folder className="size-3.5 shrink-0" />
+              <span className="mono truncate text-xs">{node.name}</span>
+              <span className="mono text-[11px] text-dim">{node.total}</span>
+              <SpaceBadge counts={counts} space={space} />
+            </button>
+          )}
+        </div>
+        {open ? <ul>{node.children.map((child) => folderItem(child, depth + 1))}</ul> : null}
       </li>
     )
   }
@@ -269,16 +317,23 @@ export function SpacesSidebar({
             {othersOpen ? <ul>{tree.others.map((team) => teamItem(team))}</ul> : null}
           </li>
         ) : null}
-        {tree.ungrouped.families.length || tree.ungrouped.repos.length ? (
+        {tree.unowned.families.length || tree.unowned.repos.length ? (
           <li>
             <SidebarHeading>Not in a team</SidebarHeading>
             <ul>
-              {tree.ungrouped.families.map((node) => familyItem(node, 0, '-'))}
-              {tree.ungrouped.repos.map((repo) => repoItem(repo, 0))}
+              {tree.unowned.families.map((node) => familyItem(node, 0, '-'))}
+              {tree.unowned.repos.map((repo) => repoItem(repo, 0))}
             </ul>
           </li>
         ) : null}
       </ul>
+
+      {tree.folders.length ? (
+        <section className="flex flex-col gap-0.5 border-t border-line pt-3">
+          <SidebarHeading>Folders</SidebarHeading>
+          <ul aria-label="Folders">{tree.folders.map((node) => folderItem(node, 0))}</ul>
+        </section>
+      ) : null}
 
       {canEditFamilies ? (
         <Suggestions onEdit={(initial) => setEditing({ initial })} onNew={() => setEditing({})} />

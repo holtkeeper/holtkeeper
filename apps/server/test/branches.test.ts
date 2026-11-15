@@ -16,16 +16,16 @@ import { BRANCHES_PREVIOUS_SCAN } from '../src/branches.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*'] },
+  teams: {
+    shapes: { owns: ['work:shapes/*'] },
+    colors: { owns: ['work:colors/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    shapes: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -132,7 +132,7 @@ test('rows from metrics with the change against the previous run and authors', a
   expect(result.repos.map((row) => row.repo.path)).toEqual(['shapes/circle', 'colors/red'])
   const [circle, red] = result.repos
   expect(circle).toMatchObject({
-    groups: ['shapes'],
+    teams: ['shapes'],
     analysisId: newest.id,
     createdAt: daysAgo(7),
     defaultBranch: 'main',

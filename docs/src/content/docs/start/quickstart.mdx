@@ -153,12 +153,12 @@ Holtkeeper keeps forge tokens as sealed credentials, so you add the token first 
 
 ## 5. Add repositories
 
-Repositories belong to **groups**: a group is a set of path patterns on one forge, usually one team. The first time, you create the group while adding repositories.
+Holtkeeper works on the repositories in its **fleet**: the paths a forge includes, plus what teams own. Repositories keep the forge's own folders (`acme/round/web`); a team owns some of them by path pattern. You can add repositories before any team exists and give them owners later.
 
 1. Open **Repos** on the rail and choose <Ui>Add repository</Ui>.
 2. **Step 1**: pick the forge `work`.
 3. **Step 2**: pick projects from the token's list, or paste paths or GitLab URLs, one per line. Holtkeeper checks that the token can read each one.
-4. **Step 3**: choose <Ui>New group</Ui>, give it an id such as `web`, and finish.
+4. **Step 3**: choose where they go. With no team yet, the paths join the forge's fleet list; once teams exist, pick <Ui>A team owns them</Ui> and the team, or <Ui>Forge fleet only</Ui>. Finish.
 
 <Screen
   title="Repos › Add repository"
@@ -168,23 +168,23 @@ Repositories belong to **groups**: a group is a set of path patterns on one forg
     <Tag>Step 2 of 3</Tag>
   </Toolbar>
   <Rows>
-    <Row title="acme/checkout-web" sub="Readable by holtkeeper-bot">
+    <Row title="acme/round/web" sub="Readable by holtkeeper-bot">
       <Tag tone="ok">OK</Tag>
     </Row>
-    <Row title="acme/admin-ui" sub="Readable by holtkeeper-bot">
+    <Row title="acme/round/api" sub="Readable by holtkeeper-bot">
       <Tag tone="ok">OK</Tag>
     </Row>
-    <Row title="acme/widget-kit" sub="Not found: invite holtkeeper-bot to the project">
+    <Row title="acme/kit/ui-kit" sub="Not found: invite holtkeeper-bot to the project">
       <Tag tone="bad">Not added</Tag>
     </Row>
   </Rows>
 </Screen>
 
-More on patterns, globs and subgroups: [Add repositories](/start/first-steps/add-repositories/).
+More on path patterns, folders and teams: [Add repositories](/start/first-steps/add-repositories/) and [Teams](/guide/repos/teams/).
 
 ## 6. Watch the first analysis
 
-A repository a group finds for the first time gets every read-only analyzer once, on its default branch: dependencies, advisories, licenses, stack, public API, coverage, bundles and the Guide draft among them. You do not schedule anything. Follow the jobs in **Ops › Runs**; they start within a minute or two.
+A repository the fleet listing finds for the first time gets every read-only analyzer once, on its default branch: dependencies, advisories, licenses, stack, public API, coverage, bundles and the Guide draft among them. You do not schedule anything. Follow the jobs in **Ops › Runs**; they start within a minute or two.
 
 When they finish, **Repos** fills in. Each row has an overall health and one cell per area; a cell opens the part of the repository hub that explains it.
 
@@ -234,7 +234,7 @@ From here on analyses stay current by themselves: polling notices new commits, m
     Personal accounts with passkeys and roles per team.
   </Card>
   <Card title="Concepts" href="/start/concepts/fleet/" icon="book">
-    Forges, groups, analyzers, tasks and policies in a few pages.
+    Forges, folders, teams, analyzers, tasks and policies in a few pages.
   </Card>
   <Card title="Self-host for real" href="/self-host/" icon="server">
     Postgres, S3 and workers with Compose or Kubernetes.

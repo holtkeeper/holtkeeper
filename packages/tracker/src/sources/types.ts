@@ -12,12 +12,12 @@ export interface SourceContext {
   /** The source's id within the tracker. */
   id: string
   forge?: TrackerForge
-  /** Repositories of the analyzed group; sources without `repos`/`groups` read all of them. */
+  /** Repositories of the analyzed team; sources without `repos`/`teams` read all of them. */
   repos: RepoRef[]
-  /** Name of the analyzed group, so `groups: [<it>]` needs no resolver. */
-  group?: string
-  /** Repositories of another config group, for sources that name `groups`. */
-  groupRepos?: (group: string) => RepoRef[] | undefined
+  /** Key of the analyzed team, so `teams: [<it>]` needs no resolver. */
+  team?: string
+  /** Repositories of another team, for sources that name `teams`. */
+  teamRepos?: (team: string) => RepoRef[] | undefined
   documents: Record<string, DocumentSource>
   /** Repositories or files read in parallel. */
   concurrency: number

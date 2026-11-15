@@ -12,11 +12,11 @@ import type {
 import type { StatusTone } from '../ui/colors.ts'
 import type { Segment } from '../ui/SegmentBar.tsx'
 import { formatDuration } from './format.ts'
-import { type GroupTitleOf, groupMatchesQuery, keyAsTitle } from './group-titles.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
 import { defined, median } from './stats.ts'
 import type { SortState, SortValue } from './table-sort.ts'
+import { type TeamTitleOf, teamMatchesQuery, keyAsTitle } from './team-titles.ts'
 
 /** `3 min 5 s` from seconds; `—` when unknown. */
 export const seconds = (value: number | undefined | null): string =>
@@ -222,14 +222,14 @@ export function withCiSort(search: CiSearch, sort: SortState<CiSortKey>): CiSear
 export function filterCiCards<T extends CiRepoCard>(
   cards: readonly T[],
   search: CiSearch,
-  titleOf: GroupTitleOf = keyAsTitle,
+  titleOf: TeamTitleOf = keyAsTitle,
 ): T[] {
   const needle = search.q?.trim().toLowerCase()
   return cards.filter(
     (card) =>
       (!needle ||
         repoKey(card.repo).toLowerCase().includes(needle) ||
-        card.groups.some((group) => groupMatchesQuery(group, titleOf, needle))) &&
+        card.teams.some((group) => teamMatchesQuery(group, titleOf, needle))) &&
       (!search.status?.length || search.status.includes(card.status)) &&
       (!search.problems || card.problems > 0),
   )

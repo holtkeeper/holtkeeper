@@ -26,8 +26,8 @@ describe('webPaths', () => {
     expect(webPaths.knowledge('learnings', { space: 'repo:gitlab:acme/widget-kit' })).toBe(
       '/knowledge/learnings?space=repo%3Agitlab%3Aacme%2Fwidget-kit',
     )
-    expect(webPaths.knowledge('guide', { space: 'group:widgets', section: 'testing' })).toBe(
-      '/knowledge/guide?space=group%3Awidgets&section=testing',
+    expect(webPaths.knowledge('guide', { space: 'team:widgets', section: 'testing' })).toBe(
+      '/knowledge/guide?space=team%3Awidgets&section=testing',
     )
     expect(webPaths.knowledge('notes', { note: 'n-1', space: '' })).toBe(
       '/knowledge/notes?note=n-1',
@@ -56,7 +56,7 @@ describe('webPaths', () => {
     expect(webPaths.repo('gitlab:acme/widget-kit', { tab: 'settings', section: 'updates' })).toBe(
       '/repos/gitlab/acme/widget-kit?tab=settings&section=updates',
     )
-    expect(webPaths.groups()).toBe('/repos/groups')
+    expect(webPaths.teams()).toBe('/repos/teams')
   })
 
   test('a task is only selected inside its group', () => {

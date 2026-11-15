@@ -60,17 +60,17 @@ test('the policy reads as labelled lines', () => {
 test('the source of the effective policy is named', () => {
   expect(policySource({ level: 'default' })).toContain('Default policy')
   expect(policySource({ level: 'all' })).toContain('every repository')
-  expect(policySource({ level: 'group', entry: { id: 'b', scope: { groups: ['web'] } } })).toBe(
-    'Inherited from group web',
+  expect(policySource({ level: 'team', entry: { id: 'b', scope: { teams: ['web'] } } })).toBe(
+    'Inherited from team web',
   )
-  expect(policySource({ level: 'group' })).toBe('Inherited from a group')
+  expect(policySource({ level: 'team' })).toBe('Inherited from a team')
   expect(policySource({ level: 'repo' })).toBe('Set for this repository')
 })
 
-test('the group of a group-scoped source is named, nested matches flattened', () => {
+test('the teams of a team-scoped source are named', () => {
   expect(
-    policySource({ level: 'group', entry: { id: 'c', scope: { groups: [['web', 'apps']] } } }),
-  ).toBe('Inherited from group web, apps')
+    policySource({ level: 'team', entry: { id: 'c', scope: { teams: ['web', 'apps'] } } }),
+  ).toBe('Inherited from team web, apps')
 })
 
 const repo = { forge: 'acme', path: 'acme/widgets' }
@@ -90,7 +90,7 @@ const asset = (path: string, extra: Partial<AssetsOverview['items'][number]> = {
 
 const summary = (extra: Partial<AssetsRepoSummary> = {}): AssetsRepoSummary => ({
   repo,
-  groups: ['web'],
+  teams: ['web'],
   analysisId: 'a1',
   createdAt: '2026-11-01T00:00:00.000Z',
   files: 10,
@@ -105,7 +105,7 @@ const summary = (extra: Partial<AssetsRepoSummary> = {}): AssetsRepoSummary => (
   ...extra,
 })
 
-test('rows carry their repository groups and repeated rows are dropped', () => {
+test('rows carry their repository teams and repeated rows are dropped', () => {
   const pages: AssetsOverview[] = [
     { repos: [summary()], items: [asset('a.png'), asset('b.png')], total: 3, nextCursor: '2' },
     { repos: [summary()], items: [asset('b.png'), asset('c.png', { repo: other })], total: 3 },
@@ -116,8 +116,8 @@ test('rows carry their repository groups and repeated rows are dropped', () => {
     'acme:acme/widgets|b.png',
     'acme:acme/gadgets|c.png',
   ])
-  expect(rows[0]?.groups).toEqual(['web'])
-  expect(rows[2]?.groups).toEqual([])
+  expect(rows[0]?.teams).toEqual(['web'])
+  expect(rows[2]?.teams).toEqual([])
   expect(assetRowKey(asset('x.png'))).toBe('acme:acme/widgets|x.png')
 })
 
@@ -223,7 +223,7 @@ test('the fleet policy is the entry for every repository, else the default', () 
   const fleet = fleetPolicy(
     settingList([
       entry('a', { all: true }, { maxDimension: 4096 }),
-      entry('b', { groups: ['web'] }, {}),
+      entry('b', { teams: ['web'] }, {}),
       entry('c', { repos: ['acme/widgets'] }, {}),
     ]),
   )
@@ -232,8 +232,8 @@ test('the fleet policy is the entry for every repository, else the default', () 
   expect(fleet?.overrides).toBe(2)
   expect(fleetPolicy({ definitions: [], settings: [], people: {} })).toBeUndefined()
   expect(overridesText(0)).toBe('')
-  expect(overridesText(1)).toBe('1 group or repository overrides it')
-  expect(overridesText(3)).toBe('3 groups or repositories override it')
+  expect(overridesText(1)).toBe('1 team or path overrides it')
+  expect(overridesText(3)).toBe('3 teams or paths override it')
 })
 
 test('a single-choice filter keeps the newly picked id', () => {

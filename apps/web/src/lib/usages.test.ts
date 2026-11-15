@@ -73,13 +73,13 @@ test('unusedExports skips re-exports and used names', () => {
 
 const user = (path: string, majorsBehind: number, versions: string[]) => ({
   repo: { forge: 'gitlab', path },
-  groups: ['Web'],
+  teams: ['Web'],
   versions,
   majorsBehind,
 })
 const record = (path: string, fields: Partial<PackageUsageRepo> = {}): PackageUsageRepo => ({
   repo: { forge: 'gitlab', path },
-  groups: ['Platform'],
+  teams: ['Platform'],
   analysisId: 'a1',
   analyzedAt: '2026-11-01T00:00:00.000Z',
   versions: [],
@@ -103,6 +103,6 @@ describe('consumerRows', () => {
       ['acme/notify-svc', ['^4.0.0'], 12],
     ])
     expect(rows[0]?.workspaces).toEqual(['apps/shop'])
-    expect(rows[2]?.groups).toEqual(['Platform'])
+    expect(rows[2]?.teams).toEqual(['Platform'])
   })
 })

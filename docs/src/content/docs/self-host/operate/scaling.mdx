@@ -17,7 +17,7 @@ Job parallelism is workers × concurrency:
 | Compose          | `--scale worker=N`                            | `jobs.concurrency`, or `--concurrency` in the worker command |
 | Kubernetes       | `worker.replicas`, summed over `worker.pools` | `worker.concurrency`, else `jobs.concurrency`                |
 
-More workers help only while there is work they may start. The queue runs at most one job per analyzer and repository at a time, and analyzers that push or open merge requests run alone on their repository or group. Jobs of other analyzers of one repository run side by side. A worker hands a free slot to the oldest job its credential limits admit, so a long-waiting job is not starved by a stream of short ones.
+More workers help only while there is work they may start. The queue runs at most one job per analyzer and repository at a time, and analyzers that push or open merge requests run alone on their repository or team. Jobs of other analyzers of one repository run side by side. A worker hands a free slot to the oldest job its credential limits admit, so a long-waiting job is not starved by a stream of short ones.
 
 Merge request reviews do not wait behind the queue: they are claimed before every other job, and every worker keeps `jobs.prioritySlots` (default 1) extra slots that only reviews take, so a review starts within the 5 s poll even when all regular slots are busy. Budget memory for `concurrency + prioritySlots` jobs per worker.
 

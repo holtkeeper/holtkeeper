@@ -123,7 +123,7 @@ export function CoverageHeadline({
 }) {
   const { totals } = card
   const lines = percentOf(totals.lines)
-  const freshness = coverageFreshness({ repo: card.repo, groups: card.groups, card })
+  const freshness = coverageFreshness({ repo: card.repo, teams: card.teams, card })
   const change = formatPoints(card.change)
   const segments = lineSegments(totals)
   const total = totals.lines.total

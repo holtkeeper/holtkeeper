@@ -9,12 +9,12 @@ Route `/settings/analyzers`, body `features/settings/sections/AnalyzersSection.t
 Every analyzer `GET /api/jobs/analyzers` lists, grouped by the workspace its records feed (`analyzerAreas`: Supply chain, Quality, Releases and knowledge, Other for kinds the panel does not know), sorted by label inside a group. Columns:
 
 - **Analyzer**: label, `kind` in mono, an AI tag when it needs an agent.
-- **State**, read from Automation, never a separate switch (`analyzerRows`): **On** when freshness refreshes it (it has `refresh` and the every-repository freshness entry is not `off`) or an enabled trigger, schedule or merge request policy queues it for every repository; **Some repositories** when enabled rules queue it for some groups only; **Off** when it runs only when someone starts it. Rules that only react to new repositories do not count.
+- **State**, read from Automation, never a separate switch (`analyzerRows`): **On** when freshness refreshes it (it has `refresh` and the every-repository freshness entry is not `off`) or an enabled trigger, schedule or merge request policy queues it for every repository; **Some repositories** when enabled rules queue it for some teams or paths only; **Off** when it runs only when someone starts it. Rules that only react to new repositories do not count.
 - **Scope · runs when**: "Every repository", the groups, or "Only when started", over freshness's cadence and the titles of the rules that queue it.
 - **Last 7 days** from `GET /api/jobs/analyzers/health` (`healthSummary`): "No runs", "4 runs, all fine", "1 of 4 failed" (danger when at least half failed) or "2 stopped by budget", with the repositories (or groups) it ran on.
 - **Overrides**: entries of `analyzers.<kind>` narrower than the organization's.
 
-Above it: state tabs with counts (All, On, Some repositories, Off), a search over label and kind, **Area** and **Uses AI** filters, and a strip with analyzers, overrides, AI analyzers, how many need a look (failed or budget-stopped runs) and the last run. Automation (triggers, schedules, groups) is read only with global `settings:read`; without it every analyzer's state comes from freshness alone. Health needs `analyses:read` and counts only jobs the viewer may read.
+Above it: state tabs with counts (All, On, Some repositories, Off), a search over label and kind, **Area** and **Uses AI** filters, and a strip with analyzers, overrides, AI analyzers, how many need a look (failed or budget-stopped runs) and the last run. Automation (triggers, schedules, teams) is read only with global `settings:read`; without it every analyzer's state comes from freshness alone. Health needs `analyses:read` and counts only jobs the viewer may read.
 
 ## Sheet
 

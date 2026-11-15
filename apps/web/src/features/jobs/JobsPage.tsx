@@ -18,7 +18,7 @@ import {
 import { type ReactNode, useState } from 'react'
 
 import {
-  useGroupTitles,
+  useTeamTitles,
   useJob,
   useJobAnalyzers,
   useJobCount,
@@ -138,7 +138,7 @@ function RunRow({
   now: Date
   onOpen: () => void
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const duration = jobDuration(job, now)
   const subline = runSubline(job, wait, now, labelOf)
   const TriggerIcon = triggerIcons[job.trigger] ?? Clock
@@ -163,7 +163,7 @@ function RunRow({
       </Td>
       <Td className="max-w-[18rem]">
         <span className="mono block truncate text-xs" title={job.repo.path}>
-          {job.group !== undefined ? `group ${titleOf(job.group)}` : job.repo.path}
+          {job.group !== undefined ? `team ${titleOf(job.group)}` : job.repo.path}
           {job.ref ? <span className="text-dim"> {formatRef(job.ref)}</span> : null}
         </span>
       </Td>
@@ -222,10 +222,10 @@ const segmentCaptions: Record<RunsSegment, string> = {
  * failures under the table. A row opens the run in the side sheet (J/K step through the list).
  */
 export function JobsPage() {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const search = useSearch({ from: '/app/ops/runs' })
   const navigate = useNavigate({ from: '/ops/runs' })
-  const { view, setView, homeGroups, ready: scopeReady, noTeams } = useScope()
+  const { view, setView, homeTeams, ready: scopeReady, noTeams } = useScope()
   const { canGlobal } = useSession()
   const targets = useJobTargets()
   const analyzers = useJobAnalyzers()
@@ -237,7 +237,7 @@ export function JobsPage() {
   const searchText = useDebounced(search.q, 300)
   const filter = runsFilter({ ...search, q: searchText })
   const repo = parseRepoKey(search.repo)
-  const scoped = repo ? undefined : jobScopeRepos(view, targets.data?.targets, homeGroups)
+  const scoped = repo ? undefined : jobScopeRepos(view, targets.data?.targets, homeTeams)
   const ready = repo !== undefined || (scopeReady && (view === 'all' || targets.isSuccess))
   const nothingInScope = ready && scoped !== undefined && scoped.length === 0
   const scopeRepos = repo ? [search.repo ?? ''] : scoped
@@ -371,7 +371,7 @@ export function JobsPage() {
             single
             options={(targets.data?.targets ?? []).map((target) => ({
               id: target.repo,
-              label: target.group !== undefined ? `group ${titleOf(target.group)}` : target.repo,
+              label: target.team !== undefined ? `team ${titleOf(target.team)}` : target.repo,
             }))}
             value={search.repo ? [search.repo] : []}
             onChange={(value) => set({ repo: value[0] })}

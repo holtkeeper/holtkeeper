@@ -31,6 +31,7 @@ import { sqliteChat } from './chat.ts'
 import { sqliteCiJobs } from './ci-jobs.ts'
 import { sqliteConfig, sqliteKv } from './config.ts'
 import { sqliteDatabase } from './database.ts'
+import { sqliteEmbeddings } from './embeddings.ts'
 import { sqliteFamilies, sqliteGuides } from './guides.ts'
 import { sqliteKnowledge } from './knowledge.ts'
 import { sqliteLearnings } from './learnings.ts'
@@ -610,6 +611,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
     },
     jobs: sqliteJobs(db),
     knowledge: sqliteKnowledge(db),
+    embeddings: sqliteEmbeddings(db),
     guides: sqliteGuides(db),
     families: sqliteFamilies(db),
     learnings: sqliteLearnings(db),

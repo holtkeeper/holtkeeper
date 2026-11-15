@@ -370,7 +370,7 @@ test('finds the setting that names exactly this repository', () => {
   const repo = { forge: 'w', path: 'acme/widgets' }
   const entries = [
     entry('all', { all: true }),
-    entry('group', { groups: ['acme'] }),
+    entry('group', { teams: ['acme'] }),
     entry('two', { repos: ['w:acme/widgets', 'w:acme/gadgets'] }),
     entry('other', { repos: ['w:acme/widgets'] }, 'review'),
     entry('own', { repos: ['acme/widgets'] }),

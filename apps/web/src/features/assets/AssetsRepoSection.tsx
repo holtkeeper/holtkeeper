@@ -1,7 +1,7 @@
 import type { RepoRef } from '@holtkeeper/api'
 import { useState } from 'react'
 
-import { useGroupTitles, useRepoAssets } from '../../api/queries.ts'
+import { useTeamTitles, useRepoAssets } from '../../api/queries.ts'
 import { type AssetsSearch, policyLines, policySource } from '../../lib/assets.ts'
 import { formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
@@ -27,7 +27,7 @@ export function AssetsRepoSection({
   file?: string
   ref?: string
 }) {
-  const titleOf = useGroupTitles()
+  const titleOf = useTeamTitles()
   const view = useRepoAssets(repo)
   const [search, setSearch] = useState<AssetsSearch>({})
   const update = (patch: Partial<AssetsSearch>) => setSearch((prev) => patchSearch(prev, patch))

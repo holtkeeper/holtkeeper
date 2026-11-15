@@ -28,9 +28,9 @@ const fakeForge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
-  groups: {
-    libs: { forge: 'work', include: ['libs/*'] },
-    games: { forge: 'work', include: ['games/*'] },
+  teams: {
+    libs: { owns: ['work:libs/*'] },
+    games: { owns: ['work:games/*'] },
   },
   jobs: { onTag: { analyzers: ['changelog'] }, onMergeRequest: { analyzers: ['review'] } },
 })
@@ -39,7 +39,7 @@ const vault = aesVault('v'.repeat(32))
 const credentials = () => createCredentialService({ credentials: store.credentials, vault })
 
 const freeze = (
-  scope: { groups: string[] } | { repos: string[] },
+  scope: { teams: string[] } | { repos: string[] },
   value: { frozen?: boolean; reason?: string; until?: string } = { reason: 'Shared library' },
 ) =>
   store.settings.put({
@@ -59,8 +59,8 @@ beforeEach(() => {
 })
 
 describe('repo.freeze', () => {
-  test('resolves by group and repository and counts only before until', async () => {
-    await freeze({ groups: ['libs'] })
+  test('resolves by team and repository and counts only before until', async () => {
+    await freeze({ teams: ['libs'] })
     await freeze(
       { repos: ['games/a'] },
       { reason: 'Code freeze', until: '2026-11-01T00:00:00.000Z' },
@@ -79,8 +79,8 @@ describe('repo.freeze', () => {
     expect(await readOnly(repo('libs/ui'))).toBe(true)
   })
 
-  test('an expired repository freeze leaves the group freeze in force', async () => {
-    await freeze({ groups: ['libs'] })
+  test('an expired repository freeze leaves the team freeze in force', async () => {
+    await freeze({ teams: ['libs'] })
     await freeze({ repos: ['libs/open'] }, { reason: 'Hotfix', until: '2026-10-01T00:00:00.000Z' })
     const readOnly = readOnlyRepos(
       store,
@@ -90,8 +90,8 @@ describe('repo.freeze', () => {
     expect(await readOnly(repo('libs/open'))).toBe(true)
   })
 
-  test('a repository lift keeps only that repository of a frozen group writable', async () => {
-    await freeze({ groups: ['libs'] })
+  test('a repository lift keeps only that repository of a frozen team writable', async () => {
+    await freeze({ teams: ['libs'] })
     await freeze(
       { repos: ['libs/open'] },
       { frozen: false, reason: 'Reviewed library', until: '2026-11-01T00:00:00.000Z' },
@@ -109,7 +109,7 @@ describe('repo.freeze', () => {
   })
 
   test('forge clients of the managed config refuse writes to read-only repositories', async () => {
-    await freeze({ groups: ['libs'] })
+    await freeze({ teams: ['libs'] })
     const service = credentials()
     const credential = await service.create({
       name: 'work',
@@ -126,9 +126,9 @@ describe('repo.freeze', () => {
       updatedAt: at,
     })
     await store.config?.put({
-      type: 'group',
+      type: 'team',
       id: 'libs',
-      data: { forge: 'work', include: ['libs/*'], exclude: [] },
+      data: { owns: ['work:libs/*'], exclude: [], consumes: [], members: [] },
       updatedAt: at,
     })
     const managed = await startManagedConfig({
@@ -151,7 +151,7 @@ describe('repo.freeze', () => {
   })
 
   test('events of read-only repositories are ignored, except tags and lifted repositories', async () => {
-    await freeze({ groups: ['libs'] })
+    await freeze({ teams: ['libs'] })
     const deps: ServerDeps = {
       config,
       auth: noAuth(),

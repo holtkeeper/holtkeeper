@@ -62,7 +62,7 @@ const fakeForge = {
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => fakeForge } },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
+  teams: { games: { owns: ['work:games/*'] } },
 })
 
 let engineCalls = 0
@@ -311,7 +311,7 @@ describe('media variants', () => {
       (await post(app, '/api/media/variants', { repo: 'games/a', file: 'a.png' })).status,
     ).toBe(400)
     const games = headerAuth({
-      roles: { viewers: [{ scope: { groups: ['other'] }, actions: ['analyses:read'] }] },
+      roles: { viewers: [{ scope: { teams: ['other'] }, actions: ['analyses:read'] }] },
     })
     const denied = await post(
       setup(games),

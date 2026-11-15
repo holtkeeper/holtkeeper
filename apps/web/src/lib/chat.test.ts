@@ -226,23 +226,23 @@ test('mention options match handles and name words, the agent first', () => {
   expect(mentionOptions(people, '', 2)).toHaveLength(2)
 })
 
-test('threads scope by home groups, team-wide threads count as mine', () => {
+test('threads scope by home teams, team-wide threads count as mine', () => {
   const threads = [
-    { id: 'a', groups: [] },
-    { id: 'b', groups: ['games'] },
-    { id: 'c', groups: ['puzzles'] },
+    { id: 'a', teams: [] },
+    { id: 'b', teams: ['games'] },
+    { id: 'c', teams: ['puzzles'] },
   ]
   const ids = (view: ScopeView) =>
     scopeThreads(threads, view, ['games']).shown.map((thread) => thread.id)
   expect(ids('mine')).toEqual(['a', 'b'])
   expect(ids('all')).toEqual(['a', 'b', 'c'])
-  expect(ids('group:puzzles')).toEqual(['c'])
+  expect(ids('team:puzzles')).toEqual(['c'])
   expect(scopeThreads(threads, 'mine', ['games']).counts).toEqual({
     mine: 2,
     all: 3,
-    groups: [
-      { group: 'games', count: 1 },
-      { group: 'puzzles', count: 1 },
+    teams: [
+      { team: 'games', count: 1 },
+      { team: 'puzzles', count: 1 },
     ],
   })
   expect(scopeThreads(threads, 'mine', ['games'])).toMatchObject({
@@ -250,15 +250,15 @@ test('threads scope by home groups, team-wide threads count as mine', () => {
     teams: ['puzzles'],
   })
   expect(scopeThreads(threads, 'all', ['games'])).toMatchObject({ others: [], teams: [] })
-  expect(scopeThreads(threads, 'group:puzzles', ['games'])).toMatchObject({ others: [] })
+  expect(scopeThreads(threads, 'team:puzzles', ['games'])).toMatchObject({ others: [] })
   expect(scopeThreads(threads, 'mine', [])).toMatchObject({ shown: [{ id: 'a' }], others: [] })
   expect(threadScope({ repo: 'work:g/app' })).toBe('g/app')
-  expect(threadScope({ group: 'games' })).toBe('games')
-  expect(threadScope({})).toBe('Team')
-  expect([{ repo: 'work:g/app' }, { group: 'games' }, {}].map(threadKind)).toEqual([
+  expect(threadScope({ team: 'games' })).toBe('games')
+  expect(threadScope({})).toBe('Everyone')
+  expect([{ repo: 'work:g/app' }, { team: 'games' }, {}].map(threadKind)).toEqual([
     'Repository thread',
-    'Group thread',
     'Team thread',
+    'Shared thread',
   ])
 })
 
@@ -349,7 +349,7 @@ test('polls fold newer messages in, older pages go in front', () => {
   const thread: ChatThreadView = {
     id: 't1',
     title: 'Planning',
-    groups: [],
+    teams: [],
     createdBy: 'u1',
     createdAt: '2026-11-02T12:00:00Z',
     updatedAt: '2026-11-02T12:00:00Z',

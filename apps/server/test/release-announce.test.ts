@@ -73,7 +73,7 @@ const setting = (key: string, value: unknown, scope: SettingEntry['scope'] = { a
   })
 
 const announce = (value: Record<string, unknown> = {}) =>
-  setting('releases.announce', { channels: [CHANNEL], ...value }, { groups: ['libs'] })
+  setting('releases.announce', { channels: [CHANNEL], ...value }, { teams: ['libs'] })
 
 const fakeAgent = (
   fail = false,
@@ -229,9 +229,9 @@ const fixRelease = async (version: string) => {
 const makeDeps = (): ServerDeps => {
   const config = parseConfig({
     forges: { work: { kind: 'gitlab', url: 'https://git.acme.test', create: () => fake.forge } },
-    groups: {
-      libs: { forge: 'work', include: ['g/app'] },
-      shops: { forge: 'work', include: ['g/shop'] },
+    teams: {
+      libs: { owns: ['work:g/app'] },
+      shops: { owns: ['work:g/shop'] },
     },
   })
   return {
@@ -315,7 +315,7 @@ describe('detection', () => {
     await announce({ impact: false })
     await announcer.sweep()
     expect(await announcer.stateOf(app)).toBeDefined()
-    await setting('releases.announce', { channels: [] }, { groups: ['libs'] })
+    await setting('releases.announce', { channels: [] }, { teams: ['libs'] })
     await announcer.sweep()
     expect(await announcer.stateOf(app)).toBeUndefined()
   })

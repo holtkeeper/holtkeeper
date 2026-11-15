@@ -1,12 +1,11 @@
-import { groupsMatch } from '@holtkeeper/access'
 import type { AnyAnalyzer, ApplicabilityContext } from '@holtkeeper/analyzer'
-import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core'
+import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { GitForge, RepoRef, TreeEntry } from '@holtkeeper/forge'
 import type { Job, JobStore } from '@holtkeeper/store'
 
 import { cronError } from './cron.ts'
 import { type JobRequest, dailyLimitsOf, enqueueUnique } from './enqueue.ts'
-import { type ResolveRepos, groupRepositories, matchesRepoGlob } from './repos.ts'
+import { type ResolveRepos, fleetRepositories, teamForges } from './repos.ts'
 import { nextRuns, runWindowEnd } from './smart.ts'
 
 type Schedule = NonNullable<HoltkeeperConfig['jobs']>['schedules'][number]
@@ -17,14 +16,14 @@ export type CheckedSchedule = Pick<Schedule, 'name' | 'analyzers' | 'options'> &
 
 export interface SchedulerOptions {
   /**
-   * Schedules come from `config.jobs.schedules`; groups from `config.groups`. Both are read again
+   * Schedules come from `config.jobs.schedules`; teams from `config.teams`. Both are read again
    * on every tick, so a live config (e.g. `@holtkeeper/managed-config`) takes effect without restart.
    */
   config: HoltkeeperConfig
   store: { jobs: JobStore }
   /** Registry the schedules' analyzer kinds are looked up in. */
   analyzers: AnyAnalyzer[]
-  /** Default: `groupRepositories(config)`, which lists repositories from the forge. */
+  /** Default: `fleetRepositories(config)`, which lists repositories from the forges. */
   resolveRepos?: ResolveRepos
   /** Reads files for analyzers' `appliesTo` checks. Default: the forge clients of `config`. */
   forgeFor?: ForgeReaderFor
@@ -137,14 +136,15 @@ function memoizedReader(forge: ApplicabilityContext['forge']): ApplicabilityCont
 }
 
 /**
- * The jobs one schedule produces: repo-scope analyzers once per repository of the schedule's
- * groups (every root group when it names none, so subgroups add no second group-scope run) that matches its `repos` globs and the analyzer's
- * `appliesTo` (a failing check counts as applying) and that `skip` does not leave out, group-scope
- * analyzers once per group with
- * `repo` = `{ forge, path: <group> }`.
+ * The jobs one schedule produces: repo-scope analyzers once per fleet repository the schedule
+ * covers (owned by one of its `teams` or matching one of its `repos` patterns; every repository
+ * when it names neither) that the analyzer's `appliesTo` accepts (a failing check counts as
+ * applying) and that `skip` does not leave out; group-scope (team) analyzers once per team the
+ * schedule names (every configured team when it names none) and forge the team can live on
+ * (`teamForges`), with `repo` = `{ forge, path: <team> }` and `group` = the team key.
  */
 export async function planSchedule(
-  schedule: Pick<Schedule, 'analyzers' | 'groups' | 'repos' | 'options'> &
+  schedule: Pick<Schedule, 'analyzers' | 'teams' | 'repos' | 'options'> &
     Partial<Pick<Schedule, 'name'>>,
   {
     config,
@@ -164,7 +164,6 @@ export async function planSchedule(
   },
 ): Promise<JobRequest[]> {
   const byKind = new Map(analyzers.map((analyzer) => [analyzer.kind, analyzer]))
-  const entries = schedule.groups ?? rootGroups(config)
   const selected = schedule.analyzers.flatMap((kind) => {
     const analyzer = byKind.get(kind)
     return analyzer ? [analyzer] : []
@@ -173,16 +172,10 @@ export async function planSchedule(
   const requests: JobRequest[] = []
 
   if (selected.some((analyzer) => analyzer.scope === 'repo')) {
-    const repos = new Map<string, RepoRef>()
-    for (const entry of entries) {
-      const [first = '', ...rest] = typeof entry === 'string' ? [entry] : entry
-      for (const repo of await resolveRepos(first)) {
-        if (schedule.repos && !schedule.repos.some((pattern) => matchesRepoGlob(pattern, repo)))
-          continue
-        if (rest.length && !groupsMatch([entry], resolveRepo(config, repo).groups)) continue
-        repos.set(`${repo.forge}:${repo.path}`, repo)
-      }
-    }
+    const repos = await resolveRepos({
+      ...(schedule.teams && { teams: schedule.teams }),
+      ...(schedule.repos && { repos: schedule.repos }),
+    })
     const readers = new Map<string, ApplicabilityContext['forge']>()
     const readerOf = (repo: RepoRef) => {
       const key = `${repo.forge}:${repo.path}`
@@ -207,7 +200,7 @@ export async function planSchedule(
     for (const analyzer of selected.filter((a) => a.scope === 'repo')) {
       let skipped = 0
       let excluded = 0
-      for (const repo of repos.values()) {
+      for (const repo of repos) {
         // oxlint-disable-next-line no-await-in-loop -- one repository after another keeps rate limits
         if (skip && (await skip(analyzer.kind, repo))) {
           excluded++
@@ -238,17 +231,17 @@ export async function planSchedule(
   }
 
   for (const analyzer of selected.filter((a) => a.scope === 'group')) {
-    for (const group of entries.filter((entry) => typeof entry === 'string')) {
-      const forge = config.groups[group]?.forge
-      if (!forge) continue
-      requests.push({
-        analyzer: analyzer.kind,
-        repo: { forge, path: group },
-        group,
-        options: optionsOf(analyzer.kind),
-        trigger: 'schedule',
-        ...(schedule.name ? { schedule: schedule.name } : {}),
-      })
+    for (const team of schedule.teams ?? Object.keys(config.teams)) {
+      for (const forge of teamForges(config, team)) {
+        requests.push({
+          analyzer: analyzer.kind,
+          repo: { forge, path: team },
+          group: team,
+          options: optionsOf(analyzer.kind),
+          trigger: 'schedule',
+          ...(schedule.name ? { schedule: schedule.name } : {}),
+        })
+      }
     }
   }
   return requests
@@ -257,7 +250,7 @@ export async function planSchedule(
 /**
  * Gives the repository jobs of one run start times spread evenly from `start` to `end`, one slot
  * per repository (all analyzers of a repository share it), in the order the repositories appear.
- * Group jobs and a single repository start at `start`.
+ * Team (group-scope) jobs and a single repository start at `start`.
  */
 export function spreadRequests(requests: JobRequest[], start: Date, end: Date): JobRequest[] {
   const repoKeys = [
@@ -287,7 +280,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   const { config, store, analyzers, timezone } = options
   const now = options.now ?? (() => new Date())
   const log = options.log ?? (() => {})
-  const resolveRepos = options.resolveRepos ?? groupRepositories(config)
+  const resolveRepos = options.resolveRepos ?? fleetRepositories(config)
   const schedules = () => config.jobs?.schedules ?? []
   const reported = new Set<string>()
   const zone = timezone ? { timezone } : {}

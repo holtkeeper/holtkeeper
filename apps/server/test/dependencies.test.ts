@@ -28,16 +28,16 @@ import { librariesSetting } from '../src/libraries.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*'] },
   },
 })
 
 const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
-    games: [{ scope: { groups: ['games'] }, actions: ['analyses:read', 'knowledge:read'] }],
+    games: [{ scope: { teams: ['games'] }, actions: ['analyses:read', 'knowledge:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
@@ -300,12 +300,12 @@ const seed = async () => {
   })
   await knowledge('tools-only', {
     title: 'Tools team note',
-    scope: { groups: ['tools'] },
+    scope: { teams: ['tools'] },
     packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
   })
   await knowledge('tools-shared', {
     title: 'Tools team picked widget-kit 3',
-    scope: { groups: ['tools'] },
+    scope: { teams: ['tools'] },
     visibility: 'shared',
     subject: 'npm:widget-kit',
     updatedAt: '2026-09-01T00:00:00.000Z',
@@ -429,7 +429,7 @@ describe('dependency table', () => {
       renovateOpen: 0,
       renovateBroken: 1,
     })
-    expect(table.repos.map((repo) => [repo.repo.path, repo.groups, repo.dependencies])).toEqual([
+    expect(table.repos.map((repo) => [repo.repo.path, repo.teams, repo.dependencies])).toEqual([
       ['games/arcade', ['games'], 2],
       ['games/engine', ['games'], 1],
       ['tools/cli', ['tools'], 1],
@@ -438,7 +438,7 @@ describe('dependency table', () => {
 
   test('other teams count through the cross-team catalog; audits still need audits:read', async () => {
     const table = await get<DependencyTable>('/api/dependencies', asGames)
-    expect(table.repos.map((repo) => [repo.repo.path, repo.groups])).toEqual([
+    expect(table.repos.map((repo) => [repo.repo.path, repo.teams])).toEqual([
       ['games/arcade', ['games']],
       ['games/engine', ['games']],
       ['tools/cli', ['tools']],
@@ -512,7 +512,7 @@ describe('dependency detail', () => {
       latestCheckedAt: at,
       description: 'Widgets',
     })
-    expect(detail.usedBy.map((user) => [user.repo.path, user.groups, user.majorsBehind])).toEqual([
+    expect(detail.usedBy.map((user) => [user.repo.path, user.teams, user.majorsBehind])).toEqual([
       ['games/arcade', ['games'], 2],
       ['games/engine', ['games'], 0],
     ])

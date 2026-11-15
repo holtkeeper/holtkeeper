@@ -8,7 +8,8 @@ import { defineTool } from './tool.ts'
 export interface KnowledgeRepo {
   forge: string
   path: string
-  groups: string[]
+  /** Teams owning the repository; empty when nobody does. */
+  teams: string[]
 }
 
 /** A package (and optionally a version step) a knowledge entry is about. */

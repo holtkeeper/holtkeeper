@@ -20,7 +20,7 @@ import {
   runnerFactory,
   startOnFirstRun,
 } from './execution.ts'
-import { type ResolveRepos, groupRepositories } from './repos.ts'
+import { type ResolveRepos, fleetRepositories } from './repos.ts'
 
 /** The LLM agent type analyzers receive. */
 export type JobAgent = NonNullable<AnalyzerContext<unknown>['agent']>
@@ -102,7 +102,7 @@ export interface ContextFactoryOptions {
   /** Default: `localRunner`. */
   runner?: CommandRunner
   agentFor?: AgentFor
-  /** Repositories of a group, for group analyzers. Default: `groupRepositories(config)`. */
+  /** Fleet repositories, for team (group-scope) analyzers. Default: `fleetRepositories(config)`. */
   resolveRepos?: ResolveRepos
   /** Default: `checkout` from `@holtkeeper/workspace`. */
   checkout?: (options: CheckoutOptions) => Promise<Checkout & Partial<GitCheckout>>
@@ -175,7 +175,8 @@ export function toRepoRef(repo: RepoRef | string): RepoRef {
  * analyzers that need one, `context.checkout` for checking out other repositories on demand (every
  * checkout is a private worktree, so read-only and writable ones are made the same way), the
  * repository's forge client, the agent from `agentFor`, the store as history, `cache` when
- * given, and for group analyzers the group's repositories.
+ * given, and for group-scope analyzers the repositories of the team in `job.group` on the job's
+ * forge.
  *
  * With `config.jobs.execution.mode` `mise` or `container`, `context.runner` runs commands with the
  * checkout's detected toolchain (and, for `container`, in a sandbox started before the analyzer
@@ -186,7 +187,7 @@ export function toRepoRef(repo: RepoRef | string): RepoRef {
 export function createContextFactory(factory: ContextFactoryOptions): ContextFor {
   const { config, store, cacheDir } = factory
   const runner = factory.runner ?? localRunner
-  const resolveRepos = factory.resolveRepos ?? groupRepositories(config)
+  const resolveRepos = factory.resolveRepos ?? fleetRepositories(config)
   const checkoutRepo = factory.checkout ?? checkout
   const sandboxFor = runnerFactory({
     execution: config.jobs?.execution,
@@ -330,8 +331,10 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
       }
 
       if (analyzer.scope === 'group') {
-        context.repos = await resolveRepos(job.group ?? job.repo.path)
-        log(`group ${job.group ?? job.repo.path}: ${context.repos.length} repositories`)
+        const team = job.group ?? job.repo.path
+        const repos = await resolveRepos({ teams: [team] })
+        context.repos = repos.filter((repo) => repo.forge === job.repo.forge)
+        log(`team ${team}: ${context.repos.length} repositories`)
       } else if (analyzer.needs.checkout) {
         const own = await step('checkout', () => checkoutOf(job.repo, job.ref))
         context.dir = own.dir

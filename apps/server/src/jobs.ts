@@ -209,7 +209,7 @@ async function scopedToolchain(
 }
 
 /**
- * The `analyzers.<kind>` setting that applies to a job's repository or group, without the options
+ * The `analyzers.<kind>` setting that applies to a job's repository or team, without the options
  * another setting owns: those come from that setting (`assets.policy`; `audit.fix`,
  * `audit.allowlist` and `audit.upgrade` for audits), never from `analyzers.<kind>`.
  */

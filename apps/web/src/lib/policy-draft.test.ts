@@ -27,14 +27,14 @@ const entry = (id: string, key: string, scope: SettingView['scope'], value: unkn
 
 const entries: SettingView[] = [
   entry('lic-org', 'analyzers.licenses', { all: true }, { allow: ['MIT'] }),
-  entry('lic-web', 'analyzers.licenses', { groups: ['web'] }, { allow: ['MIT', 'ISC'] }),
-  entry('lic-shared', 'analyzers.licenses', { groups: ['web', 'pay'] }, { allow: [] }),
+  entry('lic-web', 'analyzers.licenses', { teams: ['web'] }, { allow: ['MIT', 'ISC'] }),
+  entry('lic-shared', 'analyzers.licenses', { teams: ['web', 'pay'] }, { allow: [] }),
   entry('fix-org', 'audit.fix', { all: true }, true),
 ]
 
 const org: PolicyFocus = { kind: 'org' }
-const web: PolicyFocus = { kind: 'group', group: 'web' }
-const pay: PolicyFocus = { kind: 'group', group: 'pay' }
+const web: PolicyFocus = { kind: 'team', team: 'web' }
+const pay: PolicyFocus = { kind: 'team', team: 'pay' }
 
 test('the focus reads its own entry, else the organization, else the fallback', () => {
   expect(focusEntry(entries, 'analyzers.licenses', web)?.id).toBe('lic-web')
@@ -65,7 +65,7 @@ test('edits, resets and the changes they save at the focus', () => {
     allow: ['MIT'],
   })
   expect(draftChanges(entries, draft, web)).toEqual([
-    { op: 'put', key: 'audit.fix', scope: { groups: ['web'] }, value: false },
+    { op: 'put', key: 'audit.fix', scope: { teams: ['web'] }, value: false },
     { op: 'remove', id: 'lic-web' },
   ])
   expect(withEdit(entries, { 'audit.fix': false }, 'audit.fix', org, true)).toEqual({})
@@ -112,14 +112,14 @@ test('focusUnknownKeys lists ignored keys of the entries shown at the focus', ()
       unknownKeys: [{ key: 'color', movedTo: 'acme.style › color' }],
     },
     {
-      ...entry('w-web', 'acme.widget', { groups: ['web'] }, { legacy: true }),
+      ...entry('w-web', 'acme.widget', { teams: ['web'] }, { legacy: true }),
       unknownKeys: [{ key: 'legacy' }],
     },
   ]
   expect(focusUnknownKeys(stale, {}, ['acme.widget'], web)).toEqual([
     { key: 'acme.widget › legacy' },
   ])
-  expect(focusUnknownKeys(stale, {}, ['acme.widget'], { kind: 'group', group: 'pay' })).toEqual([
+  expect(focusUnknownKeys(stale, {}, ['acme.widget'], { kind: 'team', team: 'pay' })).toEqual([
     { key: 'acme.widget › color', movedTo: 'acme.style › color' },
   ])
   expect(focusUnknownKeys(stale, { 'acme.widget': null }, ['acme.widget'], web)).toEqual([])

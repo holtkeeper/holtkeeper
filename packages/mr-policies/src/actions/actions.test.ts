@@ -10,7 +10,7 @@ const policy = (actions: PolicyAction[], extra: Partial<Policy> = {}): Policy =>
   id: 'p',
   name: 'Policy',
   enabled: true,
-  scope: { groups: ['games'] },
+  scope: { teams: ['games'] },
   when: {},
   actions,
   ...extra,

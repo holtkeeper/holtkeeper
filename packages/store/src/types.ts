@@ -1,4 +1,4 @@
-import type { Grant, GroupMatch, Scope } from '@holtkeeper/access'
+import type { Grant, Scope, TeamMember } from '@holtkeeper/access'
 import type { Card } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AuditReport } from '@holtkeeper/vuln'
@@ -275,14 +275,15 @@ export type JobTrigger =
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'canceled'
 
 /**
- * One run of one analyzer for one repository, or for one config group when the analyzer has
- * group scope (then `repo` is `{ forge, path: <group name> }` and `group` is set).
+ * One run of one analyzer for one repository, or for one team's repositories when the analyzer has
+ * group scope (then `repo` is `{ forge, path: <team key> }` and `group` holds the team key).
  */
 export interface Job {
   id: string
   /** Analyzer kind, e.g. `changelog`. */
   analyzer: string
   repo: RepoRef
+  /** Team key of a group-scope run (the field keeps its name). */
   group?: string
   /** Release, tag or commit to analyze; the default branch when omitted. */
   ref?: string
@@ -342,6 +343,7 @@ export interface JobAttempt {
 export interface NewJob {
   analyzer: string
   repo: RepoRef
+  /** Team key of a group-scope run. */
   group?: string
   ref?: string
   options?: Record<string, unknown>
@@ -371,12 +373,12 @@ export interface JobQuery {
   /** Only jobs whose stored result is this analysis: the job (or jobs) that produced it. */
   analysisId?: string
   /**
-   * Only jobs of these repositories (group jobs by `{ forge, path: <group name> }`); an empty list
+   * Only jobs of these repositories (group-scope jobs by `{ forge, path: <team key> }`); an empty list
    * matches nothing. Lets callers apply visibility before `limit`.
    */
   repos?: RepoRef[]
   /**
-   * Only jobs whose id starts with `search.text`, whose repository path, group or analyzer
+   * Only jobs whose id starts with `search.text`, whose repository path, team (`group`) or analyzer
    * contains it (all case-insensitive), or whose analyzer is one of `search.analyzers`.
    */
   search?: JobSearch
@@ -420,7 +422,7 @@ export interface JobFailureGroup {
   analyzer: string
   errorSignature: string
   count: number
-  /** Distinct repositories (or groups) among them. */
+  /** Distinct repositories (or teams of group-scope jobs) among them. */
   repos: number
   firstAt: Timestamp
   lastAt: Timestamp
@@ -429,9 +431,10 @@ export interface JobFailureGroup {
   error: string
 }
 
-/** A repository or group that has jobs, as `JobStore.targets` lists it. */
+/** A repository or team (group-scope jobs) that has jobs, as `JobStore.targets` lists it. */
 export interface JobTarget {
   repo: RepoRef
+  /** Team key of group-scope jobs. */
   group?: string
 }
 
@@ -542,14 +545,33 @@ export interface KnowledgeLink {
   url: string
 }
 
+/**
+ * Narrows a knowledge entry within its scope. Every given field must hold. Applicability stays
+ * deterministic: nothing here depends on similarity search.
+ */
+export interface KnowledgeMatch {
+  /** Only repositories in one of these families (`Store.families` ids). */
+  families?: string[]
+  /**
+   * Only tasks touching a file matching one of these path globs (relative to the repository
+   * root). A task that does not say which files it touches is not narrowed by this.
+   */
+  files?: string[]
+}
+
 /** The editable content of a knowledge entry. */
 export interface KnowledgeContent {
   title: string
   /** Markdown. */
   body: string
   kind: KnowledgeKind
-  /** Which repositories the entry applies to. */
+  /**
+   * The widest set of repositories the entry applies to, and its authority: people with
+   * `knowledge:write` over the scope accept and edit it.
+   */
   scope: Scope
+  /** Narrows where the entry applies within `scope`; absent applies everywhere in the scope. */
+  match?: KnowledgeMatch
   /** Free tags, e.g. `testing`, `i18n`. */
   topics: string[]
   /** Task kinds the entry is relevant for (`review`, `port`, `propagate`, ...) or `*`. */
@@ -602,7 +624,7 @@ export interface KnowledgeFilter {
   /** Exact topic, case-insensitive. */
   topic?: string
   /**
-   * Text matched case-insensitively as a substring of the scope's groups and repo patterns;
+   * Text matched case-insensitively as a substring of the scope's teams and path patterns;
    * `all` also matches scopes covering everything.
    */
   scope?: string
@@ -641,6 +663,34 @@ export interface KnowledgeStore {
   search(text: string, filter?: KnowledgeFilter, limit?: number): Promise<KnowledgeHit[]>
 }
 
+/** One stored vector: what it is of, which embedder made it from which text. */
+export interface StoredEmbedding {
+  /** What the vector is of: `knowledge:<entry id>`. */
+  subject: string
+  /** `Embedder.id` that produced it. */
+  model: string
+  /** `contentHash` of the embedded text. */
+  hash: string
+  /** Kept exactly (float32); stores keep it as little-endian float32 bytes. */
+  vector: Float32Array
+  updatedAt: Timestamp
+}
+
+/**
+ * Vectors per subject and embedder. Vectors only rank and dedupe, so a store may lose them: the
+ * indexer embeds again what is missing.
+ */
+export interface EmbeddingStore {
+  /** Upserts by (subject, model); `updatedAt` is the time of the call. */
+  put(entries: readonly Omit<StoredEmbedding, 'updatedAt'>[]): Promise<void>
+  /** Every vector of `model`, optionally only subjects starting with `prefix`; ordered by subject. */
+  list(filter: { model: string; prefix?: string }): Promise<StoredEmbedding[]>
+  /** Drops these subjects for every model. */
+  remove(subjects: readonly string[]): Promise<void>
+  /** Drops vectors of every other model; returns how many. */
+  pruneModels(keep: string): Promise<number>
+}
+
 /** The fixed sections of a Guide, in the order prompts and the panel show them. */
 export type GuideSectionName =
   | 'general'
@@ -652,10 +702,16 @@ export type GuideSectionName =
   | 'releases'
 
 /**
- * Where a Guide section applies, as a key: `all`, `group:<config group>`, `family:<family id>` or
- * `repo:<forge>:<path>`.
+ * Where a Guide section applies, as a key, broad to narrow: `all`, `team:<team key>`,
+ * `path:<forge>:<folder>` (a folder of the forge's path tree and everything under it),
+ * `family:<family id>` or `repo:<forge>:<path>`.
  */
-export type GuideScopeKey = 'all' | `group:${string}` | `family:${string}` | `repo:${string}`
+export type GuideScopeKey =
+  | 'all'
+  | `team:${string}`
+  | `path:${string}`
+  | `family:${string}`
+  | `repo:${string}`
 
 /** The text a generator proposed for a section from repository signals; humans accept it. */
 export interface GuideGenerated {
@@ -822,7 +878,7 @@ export interface LearningSource {
 export type LearningStatus = 'proposed' | 'accepted' | 'rejected'
 
 /** Where a candidate's rule should apply once accepted. */
-export type LearningScopeKind = 'repo' | 'family' | 'group'
+export type LearningScopeKind = 'repo' | 'family' | 'path' | 'team'
 
 /** Who proposed a rule directly (an MCP client, through `propose_rule_change`) and why. */
 export interface LearningProposal {
@@ -1040,8 +1096,8 @@ export interface AiUsageRecord {
   id: string
   at: Timestamp
   repo: RepoRef
-  /** Config groups of the repository at the time of the run; access and budgets use them. */
-  groups: string[]
+  /** Owner teams of the repository at the time of the run; access and budgets use them. */
+  teams: string[]
   /** `review`, `refactor`, `triage`, ... */
   taskKind: string
   /** Analyzer kind that started the run, when an analyzer did. */
@@ -1086,10 +1142,10 @@ export interface AiUsageFilter {
   from?: Timestamp
   to?: Timestamp
   repo?: RepoRef
-  /** Records whose `groups` contain this group. */
-  group?: string
-  /** Records whose `groups` contain at least one of these groups; an empty list matches nothing. */
-  groups?: string[]
+  /** Records whose `teams` contain this team. */
+  team?: string
+  /** Records whose `teams` contain at least one of these teams; an empty list matches nothing. */
+  teams?: string[]
   actor?: string
   /** `interactive` records only, or automatic ones only. */
   origin?: AiRunOrigin
@@ -1103,7 +1159,7 @@ export interface AiUsageFilter {
   jobId?: string
   /**
    * Records covered by at least one of these scopes (`scopeCoversRepo` with the record's repo and
-   * groups). An empty list matches nothing; absent means no restriction.
+   * teams). An empty list matches nothing; absent means no restriction.
    */
   scopes?: Scope[]
 }
@@ -1118,7 +1174,7 @@ export interface AiUsageQuery extends AiUsageFilter {
 /**
  * What aggregates can be split by. `day` is `YYYY-MM-DD`, `week` the Monday starting the ISO week
  * (`YYYY-MM-DD`), `month` `YYYY-MM`, all in UTC; `repo` is `forge:path`. Missing analyzers are `''`.
- * With `group` a record counts once in each of its groups, and records without groups under `''`.
+ * With `team` a record counts once in each of its teams, and records without teams under `''`.
  * `origin` is `interactive` or `automatic` (`AiRunOrigin`).
  */
 export type AiUsageDimension =
@@ -1126,7 +1182,7 @@ export type AiUsageDimension =
   | 'week'
   | 'month'
   | 'repo'
-  | 'group'
+  | 'team'
   | 'model'
   | 'provider'
   | 'taskKind'
@@ -1222,7 +1278,7 @@ export interface CiJobStore {
 }
 
 /** Kinds of configuration documents the panel manages. */
-export type ConfigDocumentType = 'forge' | 'group' | 'repoTraits' | 'schedule' | 'trigger'
+export type ConfigDocumentType = 'forge' | 'team' | 'repoTraits' | 'schedule' | 'trigger'
 
 /** A webhook Holtkeeper registered on the forge for this forge document. */
 export interface RegisteredWebhook {
@@ -1265,22 +1321,33 @@ export interface ForgeDocumentData {
   cachePackages?: boolean
   /** Username Holtkeeper posts as on this forge; its own events and merge requests are ignored. */
   botUsername?: string
+  /**
+   * Path globs of folders Holtkeeper works on besides what teams own or consume (`acme/**`);
+   * see `fleetPatterns` of `@holtkeeper/core`.
+   */
+  include?: string[]
+  /** Path globs left out of the fleet even when included or owned. */
+  exclude?: string[]
   webhook?: ForgeWebhook
   sshKey?: ForgeSshKey
 }
 
 /**
- * A group of repositories, as `groups.<id>` of the effective config. The id is a root group
- * (`shapes`) or a subgroup (`shapes.round`, see `GROUP_KEY_PATTERN` in `@holtkeeper/access`): a
- * subgroup's parent is the part before the dot, its forge equals the parent's and its members are
- * the parent's members its own patterns match.
+ * A team, as `teams.<id>` of the effective config (see `TeamDefinition` in `@holtkeeper/access`).
+ * The id is a flat key (`TEAM_KEY_PATTERN`). `owns` and `consumes` are path patterns, optionally
+ * forge-qualified; a repository may be owned by several teams.
  */
-export interface GroupDocumentData {
+export interface TeamDocumentData {
   /** Display name shown instead of the id; the id stays the identity in grants, scopes and guides. */
   title?: string
-  forge: string
-  include: string[]
+  /** Path patterns the team is responsible for. */
+  owns: string[]
+  /** Path patterns cut out of `owns`. */
   exclude: string[]
+  /** Path patterns the team reads without answering for them. */
+  consumes: string[]
+  /** People in the team, by principal id or e-mail. */
+  members: TeamMember[]
 }
 
 /** Traits for repositories matching `pattern`, as `repos.<pattern>` of the effective config. */
@@ -1315,7 +1382,9 @@ export interface ScheduleDocumentData {
   name: string
   enabled: boolean
   analyzers: string[]
-  groups?: GroupMatch[]
+  /** Repositories owned by these teams; with `repos`, a repository matching either. */
+  teams?: string[]
+  /** Repositories matching these path patterns. */
   repos?: string[]
   options?: Record<string, Record<string, unknown>>
   cron?: string
@@ -1328,27 +1397,35 @@ export interface ScheduleDocumentData {
 }
 
 /**
+ * Which repositories a trigger covers: owned by one of `teams` or matching one of the path
+ * patterns in `repos`; every repository when both are absent.
+ */
+export interface TriggerTarget {
+  teams?: string[]
+  repos?: string[]
+}
+
+/**
  * An event trigger managed in the panel. Document ids are fixed per entry: `tag`, `push`,
  * `merge-request`, `new-repo`, `label:<label>` and `command:<name>`.
  */
 export type TriggerDocumentData =
-  | { on: 'tag'; analyzers: string[]; groups?: GroupMatch[] }
-  | { on: 'push'; analyzers: string[]; branches?: string[]; groups?: GroupMatch[] }
-  | {
+  | ({ on: 'tag'; analyzers: string[] } & TriggerTarget)
+  | ({ on: 'push'; analyzers: string[]; branches?: string[] } & TriggerTarget)
+  | ({
       on: 'mergeRequest'
       analyzers: string[]
       actions?: ('open' | 'update' | 'reopen')[]
       draft?: boolean
-      groups?: GroupMatch[]
-    }
-  | { on: 'newRepo'; analyzers?: string[]; exclude?: string[]; groups?: GroupMatch[] }
+    } & TriggerTarget)
+  | ({ on: 'newRepo'; analyzers?: string[]; exclude?: string[] } & TriggerTarget)
   | { on: 'label'; label: string; analyzers: string[] }
   | { on: 'command'; command: string; analyzer: string; args?: string[] }
 
 /** The data shape of each configuration document type. */
 export interface ConfigDocumentDataMap {
   forge: ForgeDocumentData
-  group: GroupDocumentData
+  team: TeamDocumentData
   repoTraits: RepoTraitsDocumentData
   schedule: ScheduleDocumentData
   trigger: TriggerDocumentData
@@ -2054,7 +2131,7 @@ export interface ChatThreadSummary {
 }
 
 /**
- * A team chat thread. Scoped to a repository (`repo`, `forge:path`) or a config group (`group`)
+ * A team chat thread. Scoped to a repository (`repo`, `forge:path`) or a team (`group`, a team key)
  * it is visible to people who may read that scope; unscoped it is visible to everyone with chat
  * access. `updatedAt` moves with every new message.
  */
@@ -2067,6 +2144,7 @@ export interface ChatThread {
    */
   titlePending?: boolean
   repo?: string
+  /** Team key the thread is scoped to (the field keeps its name). */
   group?: string
   createdBy: string
   createdAt: Timestamp
@@ -2300,7 +2378,7 @@ export type AgentTaskStatus =
 export type AgentTaskSource =
   | { type: 'chat'; threadId: string; messageId?: string }
   | { type: 'dependency-upgrade'; ecosystem: string; package: string; from?: string; to: string }
-  | { type: 'propagate'; group?: string }
+  | { type: 'propagate'; /** Team key the propagation started from. */ group?: string }
   | { type: 'mcp'; client?: string }
   | { type: 'api' }
 
@@ -2450,6 +2528,8 @@ export interface Store {
   users: UserStore
   jobs: JobStore
   knowledge: KnowledgeStore
+  /** Vectors of knowledge entries (and later other subjects) per embedder. */
+  embeddings: EmbeddingStore
   guides: GuideStore
   families: FamilyStore
   learnings: LearningStore
@@ -2458,7 +2538,7 @@ export interface Store {
   chat: ChatStore
   /** Agent tasks (write tasks people or automation asked for) and their groups. */
   tasks: AgentTaskStore
-  /** Panel-managed configuration; servers without it have no forges, groups or triggers. */
+  /** Panel-managed configuration; servers without it have no forges, teams or triggers. */
   config?: ConfigStore
   /** Small expiring state; servers without it keep such state in memory. */
   kv?: KvStore

@@ -199,7 +199,10 @@ describe('review analyzer', () => {
     expect(result.data.verdict).toBe('looks-good')
     expect(tasks[0]?.context).toContain('Team rule.')
     expect(asked).toEqual([
-      { target: repo, request: { docs: [], query: expect.stringContaining('a.ts') } },
+      {
+        target: repo,
+        request: { docs: [], query: expect.stringContaining('a.ts'), files: ['a.ts'] },
+      },
     ])
     expect(submissions).toHaveLength(1)
   })
@@ -295,7 +298,7 @@ describe('review analyzer', () => {
       review: [{ action: 'concede', body: 'Right.', resolve: false }],
     })
     const analyzer = createReviewAnalyzer({
-      guideFor: async () => ({ text: 'Prices are integer cents.', scopes: ['all', 'group:web'] }),
+      guideFor: async () => ({ text: 'Prices are integer cents.', scopes: ['all', 'team:web'] }),
     })
     const result = await analyzer.run({
       repo,
@@ -306,7 +309,7 @@ describe('review analyzer', () => {
     })
     expect(tasks[0]?.context).toBe('Prices are integer cents.')
     expect(result.data.summary).toBe('Answered thread d1 (concede).')
-    expect(result.data.guideScopes).toEqual(['all', 'group:web'])
+    expect(result.data.guideScopes).toEqual(['all', 'team:web'])
     expect(result.data.usage?.model).toBe('fake-main')
     expect(result.data.durationMs).toBeGreaterThanOrEqual(0)
   })
@@ -335,13 +338,13 @@ test('review metrics carry the model, wall time and Guide scopes of newer runs',
     data({
       usage: { turns: 2, model: 'model-a' },
       durationMs: 4200,
-      guideScopes: ['all', 'group:web'],
+      guideScopes: ['all', 'team:web'],
     }),
   )
   expect(metrics).toMatchObject({
     model: 'model-a',
     durationMs: 4200,
-    guideScopes: ['all', 'group:web'],
+    guideScopes: ['all', 'team:web'],
   })
   expect(reviewMetricsSchema.parse(metrics)).toEqual(metrics)
 })

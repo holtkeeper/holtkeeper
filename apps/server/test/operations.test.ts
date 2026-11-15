@@ -134,7 +134,7 @@ describe('metrics', () => {
     await store.aiUsage.append({
       at: new Date(at).toISOString(),
       repo,
-      groups: [],
+      teams: [],
       taskKind: 'review',
       actor: 'system',
       provider: 'anthropic',

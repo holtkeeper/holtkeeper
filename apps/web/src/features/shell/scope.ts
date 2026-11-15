@@ -1,14 +1,13 @@
-import type { GroupMatch } from '@holtkeeper/api'
 import { useCallback, useState } from 'react'
 
-import { useGroupNames, usePreferences, useRepos } from '../../api/queries.ts'
+import { useTeamNames, usePreferences, useRepos } from '../../api/queries.ts'
 import {
   type ScopedList,
   type ScopeView,
   parseScopeView,
   resolveScopeView,
   scopeList,
-  viewGroup,
+  viewTeam,
 } from '../../lib/home-scope.ts'
 
 const storageKey = 'holtkeeper.scope'
@@ -25,30 +24,30 @@ const settled = (query: { isSuccess: boolean; isError: boolean }) =>
   query.isSuccess || query.isError
 
 /**
- * The viewer's scope switch position, remembered in this browser, and the home groups it filters
+ * The viewer's scope switch position, remembered in this browser, and the home teams it filters
  * by. *My teams* until the viewer picks a position, or when the stored one is retired, names a
- * group the viewer can no longer see, or the repositories behind that check failed to load.
+ * team the viewer can no longer see, or the repositories behind that check failed to load.
  */
 export function useScope(): {
   view: ScopeView
   setView: (view: ScopeView) => void
-  homeGroups: readonly GroupMatch[]
+  homeTeams: readonly string[]
   /**
-   * The position and its home groups are known: preferences loaded for *My teams*, repositories
-   * loaded for a group. Until then lists show a placeholder rather than empty or unscoped data.
+   * The position and its home teams are known: preferences loaded for *My teams*, repositories
+   * loaded for a team. Until then lists show a placeholder rather than empty or unscoped data.
    */
   ready: boolean
-  /** *My teams* is on and the viewer has chosen no home groups: lists show `NoTeamsState`. */
+  /** *My teams* is on and the viewer has chosen no home teams: lists show `NoTeamsState`. */
   noTeams: boolean
-  /** Splits a list of what the viewer may already see by its home groups. */
-  scope: <T extends { groups: readonly string[] }>(items: readonly T[]) => ScopedList<T>
+  /** Splits a list of what the viewer may already see by its home teams. */
+  scope: <T extends { teams: readonly string[] }>(items: readonly T[]) => ScopedList<T>
 } {
   const preferences = usePreferences()
-  const homeGroups = preferences.data?.homeGroups ?? []
+  const homeTeams = preferences.data?.homeTeams ?? []
   const repos = useRepos()
-  const groups = useGroupNames()
+  const teams = useTeamNames()
   const [chosen, setChosen] = useState(readStored)
-  const view = resolveScopeView(chosen, repos.isSuccess ? groups : repos.isError ? [] : undefined)
+  const view = resolveScopeView(chosen, repos.isSuccess ? teams : repos.isError ? [] : undefined)
   const setView = useCallback((next: ScopeView) => {
     setChosen(next)
     try {
@@ -60,11 +59,10 @@ export function useScope(): {
   return {
     view,
     setView,
-    homeGroups,
+    homeTeams,
     ready:
-      (viewGroup(view) === undefined || settled(repos)) &&
-      (view !== 'mine' || settled(preferences)),
-    noTeams: view === 'mine' && preferences.isSuccess && !homeGroups.length,
-    scope: (items) => scopeList(items, view, homeGroups),
+      (viewTeam(view) === undefined || settled(repos)) && (view !== 'mine' || settled(preferences)),
+    noTeams: view === 'mine' && preferences.isSuccess && !homeTeams.length,
+    scope: (items) => scopeList(items, view, homeTeams),
   }
 }

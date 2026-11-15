@@ -68,17 +68,18 @@ import { aesVault } from '@holtkeeper/vault'
 import { mirrorStorage } from '@holtkeeper/workspace'
 import { WRITE_POOL, createWriteTaskAnalyzer } from '@holtkeeper/write-task'
 
-import { autoAcceptFrom, settingsAgentFor } from './agent.ts'
+import { autoAcceptFrom, semanticAccess, settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createApp } from './app.ts'
 import { assetsPolicyFor } from './assets.ts'
 import { verifyAuditChainIfDue } from './audit-verify.ts'
 import { startAuditRetention } from './audit.ts'
-import { type ServerDeps, forgeFor, groupLabeler, repoTarget } from './context.ts'
+import { type ServerDeps, forgeFor, repoTarget, teamLabeler } from './context.ts'
 import { startDatabaseSnapshots } from './database.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
+import { createKnowledgeEmbeddings, guideSemantic, watchKnowledgeWrites } from './embeddings.ts'
 import { createEventDispatcher } from './events.ts'
 import { fleetPackagesOf } from './fleet-packages.ts'
 import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
@@ -105,6 +106,7 @@ import { startManagedConfig } from './managed.ts'
 import type { MediaEngine } from './media/engine.ts'
 import { createMediaReviewer } from './media/reviewer.ts'
 import { noteReviewJob } from './mr-status.ts'
+import { createNeighbourIndex, guideNeighbours } from './neighbours.ts'
 import { startOperations } from './operations.ts'
 import { agentOpsAccess } from './ops-tools.ts'
 import { releaseAnnouncerFor } from './release-announce.ts'
@@ -269,24 +271,27 @@ export async function startServer(
       validateJiraCredentialOptions(kind, values) ??
       aiProviderOptionsValidatorFor(aiProviders)(kind, values),
   })
+  // Vectors of knowledge notes; every knowledge write through `store` below re-embeds it.
+  const embeddings = createKnowledgeEmbeddings({ store: server.store, credentials, log })
+  const store = watchKnowledgeWrites(server.store, () => embeddings.touch())
   const duties = roleDuties(options.roles ?? ['all'])
-  const limiterOptions = limiterOptionsFor(fileConfig, server.store)
+  const limiterOptions = limiterOptionsFor(fileConfig, store)
   const limiter = createLimiter(limiterOptions)
-  const retired = await retireSeededSchedules({ store: server.store })
+  const retired = await retireSeededSchedules({ store })
   if (retired.length > 0) log(`config: removed seeded schedules ${retired.join(', ')}`)
   if (options.defaultConfig !== false) {
     const seeded = await seedDefaults({
-      store: server.store,
+      store,
       analyzers: (options.analyzers ?? builtinAnalyzers).map((analyzer) => analyzer.kind),
       ...options.defaultConfig,
     })
     if (seeded.length > 0) log(`config: seeded defaults ${seeded.join(', ')}`)
   }
-  const leftoverReadOnly = await retiredReadOnlyCheck(server.store).catch(() => undefined)
+  const leftoverReadOnly = await retiredReadOnlyCheck(store).catch(() => undefined)
   if (leftoverReadOnly) log(`warning: ${leftoverReadOnly.detail}`)
   const managed = await startManagedConfig({
     file: fileConfig,
-    store: server.store,
+    store,
     vault,
     credentials,
     limiter,
@@ -305,63 +310,80 @@ export async function startServer(
   const mediaCache = artifactCache(artifacts, {
     onError: (error) => log(`cache: ${error instanceof Error ? error.message : String(error)}`),
   })
+  // Repositories like each other share knowledge through the Guide's lowest-priority block.
+  const neighbourIndex = createNeighbourIndex({ store, config })
   // The review analyzer needs server state: the Guide and the knowledge base.
   const resolveGuide = createGuideResolver({
-    store: server.store,
-    groupTitle: groupLabeler(config),
+    store,
+    teamTitle: teamLabeler(config),
   })
-  const testsOf = repoTestsFor(server.store, () => config)
-  const testsExpected = testsExpectedFor(server.store, () => config)
+  const testsOf = repoTestsFor(store, () => config)
+  const testsExpected = testsExpectedFor(store, () => config)
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
     checksFor: async (repo) =>
       reviewChecks({
         testids: testIdOverridesFor(
-          await server.store.settings.list(testIdsSettingKey),
+          await store.settings.list(testIdsSettingKey),
           repoTarget(config, repo),
         ),
       }),
     testsExpected,
-    goGuidelines: goGuidelinesSource(server.store.kv),
+    goGuidelines: goGuidelinesSource(store.kv),
     botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
     mediaReviewer: createMediaReviewer({
       cache: mediaCache,
-      policyFor: async (repo) =>
-        (await assetsPolicyFor(server.store, repoTarget(config, repo))).policy,
+      policyFor: async (repo) => (await assetsPolicyFor(store, repoTarget(config, repo))).policy,
       ...(server.publicUrl ? { publicUrl: server.publicUrl } : {}),
     }),
     knowledge: {
       access: knowledgeAccess({
-        store: server.store,
+        store,
         now: () => new Date(),
-        autoAccept: async (repo) => autoAcceptFrom(await server.store.settings.list(), repo),
+        autoAccept: async (repo) => autoAcceptFrom(await store.settings.list(), repo),
+        ...semanticAccess(embeddings),
       }),
-      groupsOf: (repo) => repoTarget(config, repo).groups,
+      teamsOf: (repo) => repoTarget(config, repo).teams,
     },
-    async guideFor(repo, { docs, query }) {
+    async guideFor(repo, { docs, query, files }) {
+      const target = repoTarget(config, repo)
+      const neighbours = await guideNeighbours(
+        { index: neighbourIndex, store, config, log },
+        target,
+      )
+      const semantic = await guideSemantic(
+        embeddings,
+        store,
+        target,
+        [query, ...(files ?? [])].filter(Boolean).join('\n'),
+        neighbours?.repos.map((neighbour) => neighbour.repo),
+      )
       const resolved = await resolveGuide({
-        repo: repoTarget(config, repo),
+        repo: target,
         task: 'review',
         repoDocs: docs,
         ...(query && { query }),
+        ...(files && { files }),
+        ...(semantic && { semantic }),
+        ...(neighbours && { neighbours }),
       })
       return resolved.text ? { text: resolved.text, scopes: guideScopesOf(resolved) } : undefined
     },
   })
-  const documentDeps = { config, store: server.store, credentials }
+  const documentDeps = { config, store, credentials }
   const documentSinks = documentSinksFor(documentDeps)
   const tracker = createTrackerAnalyzer({
     documentsFor: documentSourcesFor(documentDeps),
     sinksFor: documentSinks,
     definitionsFor: trackerDefinitionsFor(documentDeps),
-    groupRepos: () => undefined,
+    teamRepos: () => undefined,
   })
   const guide = createGuideAnalyzer({
-    store: server.store,
-    groupsOf: (repo) => repoTarget(config, repo).groups,
+    store,
+    teamsOf: (repo) => repoTarget(config, repo).teams,
     testsExpected,
     autoAccept: async (repo) => {
-      const entries = await server.store.settings.list(guideAutoAccept.key)
+      const entries = await store.settings.list(guideAutoAccept.key)
       const parsed = guideAutoAccept.schema.safeParse(
         resolveSetting(entries, guideAutoAccept.key, repoTarget(config, repo))?.value,
       )
@@ -369,23 +391,21 @@ export async function startServer(
     },
   })
   const knowledgeBootstrap = createKnowledgeBootstrapAnalyzer({
-    store: server.store,
-    groupsOf: (repo) => repoTarget(config, repo).groups,
+    store,
+    teamsOf: (repo) => repoTarget(config, repo).teams,
     botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
     fleetPackages: async () =>
-      fleetPackagesOf(
-        await createApiCatalog({ analyses: server.store.analyses }).packages(() => true),
-      ),
+      fleetPackagesOf(await createApiCatalog({ analyses: store.analyses }).packages(() => true)),
   })
   const conventionsOf = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),
-    settings: server.store.settings,
+    settings: store.settings,
     now: () => new Date(),
   })
-  const taskDeps = { store: server.store, config, now: () => new Date() }
+  const taskDeps = { store, config, now: () => new Date() }
   const writeTask = createWriteTaskAnalyzer({
     policy: writeTaskPolicy({
-      store: server.store,
+      store,
       readOnly: managed.readOnly,
       tests: testsOf,
       dryRun: () => config.dryRun,
@@ -409,8 +429,7 @@ export async function startServer(
     registry: () => {
       let matcher: Promise<(path: string) => boolean> | undefined
       return createHttpRegistry({
-        isPrivateGo: async (path) =>
-          (await (matcher ??= privateGoModules(server.store, config)))(path),
+        isPrivateGo: async (path) => (await (matcher ??= privateGoModules(store, config)))(path),
       })
     },
   })
@@ -437,7 +456,7 @@ export async function startServer(
     ? undefined
     : settingsAgentFor({
         config,
-        store: server.store,
+        store,
         vault,
         credentials,
         rateLimiter: limiter,
@@ -450,6 +469,8 @@ export async function startServer(
             releaseServiceFor(deps).snapshot(requester),
           ),
         supply: (requester) => (supplyFor ??= supplyToolsAccess(deps))(requester),
+        semantics: embeddings,
+        neighbours: neighbourIndex,
       })
   const agentFor: AgentFor = options.agentFor ?? settingsAgent ?? (() => undefined)
   // Areas on the disks of the process that runs jobs; web processes see them through reports.
@@ -471,12 +492,14 @@ export async function startServer(
     supply: (principal) => (supplyFor ??= supplyToolsAccess(deps))(principal),
     config,
     auth: server.auth,
-    store: server.store,
+    store,
     vault,
     configSource: managed.source,
     readOnly: managed.readOnly,
     limiter,
     credentials,
+    embeddings,
+    neighbours: neighbourIndex,
     settings: [
       ...builtinSettings,
       mergeRequestPoliciesSetting,
@@ -511,7 +534,7 @@ export async function startServer(
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),
-      databaseStorage(server.databasePath, server.store.database),
+      databaseStorage(server.databasePath, store.database),
       ...workerStorage,
       ...(options.storage ?? []),
     ],
@@ -520,7 +543,7 @@ export async function startServer(
 
   if (options.defaultSettings !== false) {
     const seeded = await seedDefaultSettings({
-      store: server.store,
+      store,
       definitions: deps.settings,
       defaults: options.defaultSettings ?? [...defaultSettings, defaultPolling],
       now: deps.now,
@@ -541,7 +564,7 @@ export async function startServer(
   const { admission } = serverLimits({
     limiter,
     config,
-    store: server.store,
+    store,
     forgeCredential: (forgeId) => managed.source.effective().forges[forgeId]?.credentialId,
     needsAgent: (kind) =>
       analyzers.find((analyzer) => analyzer.kind === kind)?.needs.agent !== undefined,
@@ -549,10 +572,10 @@ export async function startServer(
   let metrics: { observeJob(job: Job): void } | undefined
   const jobs = await startJobs({
     config,
-    store: server.store,
+    store,
     analyzers,
     agentFor,
-    gitKeyFor: forgeGitKeys({ store: server.store, credentials }),
+    gitKeyFor: forgeGitKeys({ store, credentials }),
     readOnly: managed.readOnly,
     admission,
     artifacts,
@@ -561,7 +584,7 @@ export async function startServer(
     ...(options.worker && { worker: options.worker }),
     onFinished: async (job, record) => {
       metrics?.observeJob(job)
-      if (record) await noteLibraryUses(server.store.kv, record.kind, deps.now())
+      if (record) await noteLibraryUses(store.kv, record.kind, deps.now())
       await taskJobFinished(taskDeps, job, record)
       noteReviewJob(deps, job)
       void announcer.indexFinished(job)
@@ -572,10 +595,11 @@ export async function startServer(
 
   const ops = startOperations({
     duties,
-    store: server.store,
+    store,
     artifacts,
     limiter,
     log,
+    readyInfo: { embeddings: async () => (await embeddings.status()).state },
     leaderDuties: [
       () =>
         server.rotationIntervalMinutes > 0
@@ -585,7 +609,7 @@ export async function startServer(
           : () => {},
       () => startArtifactRetention(artifacts, server.retention, { log }),
       () =>
-        startAuditRetention(server.store, {
+        startAuditRetention(store, {
           retentionDays: options.auditRetentionDays ?? 365,
           log,
         }),
@@ -601,11 +625,11 @@ export async function startServer(
         log,
       }),
       () => startLibraryIndex(deps, log),
-      () => startDatabaseSnapshots(server.store, { log }),
+      () => startDatabaseSnapshots(store, { log }),
       periodicDuty(
         'storage snapshot',
         async () => {
-          const { kv } = server.store
+          const { kv } = store
           if (!kv) return
           const overview = await storageOverview({
             providers: deps.storage ?? [],
@@ -616,24 +640,25 @@ export async function startServer(
         },
         { intervalMs: 6 * 3_600_000, log },
       ),
-      periodicDuty('audit chain check', () => verifyAuditChainIfDue(server.store, deps.now()), {
+      periodicDuty('audit chain check', () => verifyAuditChainIfDue(store, deps.now()), {
         intervalMs: 3_600_000,
         log,
       }),
       goGuidelinesDuty({
-        kv: server.store.kv,
-        settings: server.store.settings,
+        kv: store.kv,
+        settings: store.settings,
         now: deps.now,
         log,
       }),
       () => releaseServiceFor(deps).startBoardRefresh(),
+      embeddings.duty,
     ],
   })
   metrics = ops.metrics
   const stopStorageReports =
-    workerStorage.length && server.store.kv
+    workerStorage.length && store.kv
       ? startStorageReports({
-          kv: server.store.kv,
+          kv: store.kv,
           providers: workerStorage,
           directories: {
             'git-mirrors': config.jobs.cacheDir,
@@ -664,12 +689,13 @@ export async function startServer(
         log(`drained: ${drained.finished} job(s) finished, ${drained.requeued} requeued`)
       }
       await ops.stop()
+      await embeddings.flush()
       await stopStorageReports?.()
       managed.stop()
       await listener.stop()
       await jobs.stop()
       limiterOptions.state?.close()
-      await server.store.close()
+      await store.close()
     },
   }
 }

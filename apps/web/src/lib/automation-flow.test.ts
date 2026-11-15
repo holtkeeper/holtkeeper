@@ -61,7 +61,7 @@ const setting = (id: string, key: string, scope: SettingView['scope'], value: un
 })
 
 const input = (extra: Partial<AutomationInput> = {}): AutomationInput => ({
-  groups: ['toys', 'games'],
+  teams: ['toys', 'games'],
   triggers: [],
   schedules: [],
   settings: [],
@@ -79,7 +79,7 @@ const ids = (found: AutomationLane, kind: string) =>
   found.nodes.filter((node) => node.kind === kind).map((node) => node.id)
 
 describe('automation lanes', () => {
-  test('one lane for every repository, then one per group, each with freshness', () => {
+  test('one lane for every repository, then one per team, each with freshness', () => {
     const lanes = automationLanes(input())
     expect(lanes.map((l) => [l.id, l.label])).toEqual([
       [ALL_LANE, 'All repositories'],
@@ -97,18 +97,19 @@ describe('automation lanes', () => {
     expect(ids(lane(lanes, ALL_LANE), 'rule')).toEqual(['rule:freshness', 'rule:release'])
   })
 
-  test('triggers and schedules sit in the lanes of their groups', () => {
+  test('triggers and schedules sit in the lanes of their teams', () => {
     const lanes = automationLanes(
       input({
         triggers: [
-          trigger('tag', { on: 'tag', analyzers: ['shapes'], groups: ['games'] }),
+          trigger('tag', { on: 'tag', analyzers: ['shapes'], teams: ['games'] }),
           trigger('push', { on: 'push', analyzers: ['colors'], branches: ['main'] }),
           trigger('label:deep', { on: 'label', label: 'deep', analyzers: ['review'] }),
         ],
         schedules: [
           schedule('nightly', {
             analyzers: ['colors'],
-            groups: [['games', 'toys']],
+            teams: ['games', 'toys'],
+            repos: ['acme/round/**'],
             cron: '0 3 * * *',
             every: undefined,
           }),
@@ -132,7 +133,7 @@ describe('automation lanes', () => {
     const nightly = games.nodes.find((node) => node.id === 'rule:schedule:nightly')
     expect(nightly?.data).toMatchObject({
       title: 'nightly',
-      chips: ['Every day at 03:00', 'only games + toys'],
+      chips: ['Every day at 03:00', 'only acme/round/**'],
       events: ['schedule'],
       analyzers: ['colors'],
     })
@@ -145,35 +146,34 @@ describe('automation lanes', () => {
     })
   })
 
-  test('subgroup rules sit in the root group lane, tagged with the subgroup', () => {
+  test('path-limited rules sit in the every-repository lane, tagged with their patterns', () => {
     const lanes = automationLanes(
       input({
-        groups: ['toys', 'toys.blocks', 'games'],
-        titleOf: (key) => (key === 'toys.blocks' ? 'Blocks' : key),
-        triggers: [trigger('tag', { on: 'tag', analyzers: ['shapes'], groups: ['toys.blocks'] })],
+        teams: ['toys', 'games'],
+        triggers: [trigger('tag', { on: 'tag', analyzers: ['shapes'], repos: ['acme/blocks/**'] })],
         settings: [
-          setting('p1', 'mergeRequests.policies', { groups: ['toys.blocks'] }, [
+          setting('p1', 'mergeRequests.policies', { repos: ['acme/blocks/**'] }, [
             { id: 'bots', name: 'Bots', when: { event: ['open'] }, actions: [] },
           ]),
         ],
       }),
     )
     expect(lanes.map((found) => found.id)).toEqual([ALL_LANE, 'games', 'toys'])
-    const toys = lane(lanes, 'toys')
-    expect(toys.nodes.find((node) => node.id === 'rule:trigger:tag')?.data).toMatchObject({
-      chips: ['subgroup Blocks'],
+    const all = lane(lanes, ALL_LANE)
+    expect(all.nodes.find((node) => node.id === 'rule:trigger:tag')?.data).toMatchObject({
+      chips: ['only acme/blocks/**'],
     })
-    expect(toys.nodes.find((node) => node.id === 'rule:policy:p1:bots')?.data).toMatchObject({
-      chips: ['on open', 'subgroup Blocks'],
+    expect(all.nodes.find((node) => node.id === 'rule:policy:p1:bots')?.data).toMatchObject({
+      chips: ['on open', 'only acme/blocks/**'],
     })
-    expect(jobLanes(['toys.blocks', 'toys'])).toEqual([ALL_LANE, 'toys'])
+    expect(jobLanes(['toys', 'toys'])).toEqual([ALL_LANE, 'toys'])
   })
 
   test('policies project their events, condition chips and actions, scoped like their entry', () => {
     const lanes = automationLanes(
       input({
         settings: [
-          setting('p1', 'mergeRequests.policies', { groups: ['toys'] }, [
+          setting('p1', 'mergeRequests.policies', { teams: ['toys'] }, [
             {
               id: 'bots',
               name: 'Bot bumps',
@@ -222,7 +222,7 @@ describe('automation lanes', () => {
 
   test('the freshness rule follows the team override', () => {
     const settings = [
-      setting('f1', 'freshness', { groups: ['games'] }, { mode: 'off' }),
+      setting('f1', 'freshness', { teams: ['games'] }, { mode: 'off' }),
       setting('f2', 'freshness', { all: true }, { mode: 'slower', factor: 4 }),
     ]
     const lanes = automationLanes(input({ settings }))
@@ -239,14 +239,14 @@ describe('automation lanes', () => {
     expect(laneFreshness([], undefined)).toEqual({ mode: 'on', factor: 3, inherited: false })
   })
 
-  test('an entry shared by several groups is inherited, not a team override', () => {
-    const shared = setting('f3', 'freshness', { groups: ['games', 'toys'] }, { mode: 'off' })
+  test('an entry shared by several teams is inherited, not a team override', () => {
+    const shared = setting('f3', 'freshness', { teams: ['games', 'toys'] }, { mode: 'off' })
     expect(laneFreshness([shared], 'games')).toMatchObject({
       mode: 'off',
       inherited: true,
       entry: shared,
     })
-    const own = setting('f4', 'freshness', { groups: ['games'] }, { mode: 'slower', factor: 2 })
+    const own = setting('f4', 'freshness', { teams: ['games'] }, { mode: 'slower', factor: 2 })
     expect(laneFreshness([shared, own], 'games')).toMatchObject({ entry: own, inherited: false })
   })
 
@@ -267,7 +267,7 @@ describe('why a job ran', () => {
         trigger('merge-request', { on: 'mergeRequest', analyzers: ['review'] }),
         trigger('tag', { on: 'tag', analyzers: ['shapes'] }),
       ],
-      schedules: [schedule('weekly', { analyzers: ['colors'], groups: ['games'] })],
+      schedules: [schedule('weekly', { analyzers: ['colors'], teams: ['games'] })],
       settings: [
         setting('p1', 'mergeRequests.policies', { all: true }, [
           {
@@ -308,7 +308,7 @@ describe('why a job ran', () => {
               actions: [{ type: 'enqueue', analyzer: 'review' }],
             },
           ]),
-          setting('f1', 'freshness', { groups: ['games'] }, { mode: 'off' }),
+          setting('f1', 'freshness', { teams: ['games'] }, { mode: 'off' }),
         ],
       }),
     )
@@ -377,13 +377,13 @@ const sample = () =>
   input({
     triggers: [
       trigger('push', { on: 'push', analyzers: ['colors'] }),
-      trigger('tag', { on: 'tag', analyzers: ['shapes'], groups: ['games'] }),
+      trigger('tag', { on: 'tag', analyzers: ['shapes'], teams: ['games'] }),
     ],
     schedules: [
-      schedule('nightly', { analyzers: ['review'], groups: ['games'], enabled: false }),
-      schedule('weekly', { analyzers: ['colors'], groups: ['toys'] }),
+      schedule('nightly', { analyzers: ['review'], teams: ['games'], enabled: false }),
+      schedule('weekly', { analyzers: ['colors'], teams: ['toys'] }),
     ],
-    settings: [setting('f1', 'freshness', { groups: ['games'] }, { mode: 'off' })],
+    settings: [setting('f1', 'freshness', { teams: ['games'] }, { mode: 'off' })],
   })
 
 describe('one canvas per team', () => {
@@ -405,7 +405,7 @@ describe('one canvas per team', () => {
   test('a team lane merged with every repository, the team winning shared nodes', () => {
     const lanes = automationLanes(sample())
     const games = mergedLane(lanes, 'games')
-    expect(games).toMatchObject({ id: 'games', group: 'games', label: 'games' })
+    expect(games).toMatchObject({ id: 'games', team: 'games', label: 'games' })
     expect(ids(games, 'event')).toEqual([
       'event:push',
       'event:tag',
@@ -442,7 +442,7 @@ describe('one canvas per team', () => {
         .toSorted(),
     ).toEqual(all.nodes.map((n) => n.id).toSorted())
     expect(mergedLane(lanes, 'nobody')).toMatchObject({ id: ALL_LANE, label: 'All repositories' })
-    expect(mergedLane(lanes, 'nobody').group).toBeUndefined()
+    expect(mergedLane(lanes, 'nobody').team).toBeUndefined()
   })
 
   test('rule counts per lane', () => {

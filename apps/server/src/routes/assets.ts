@@ -22,7 +22,7 @@ import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { canSee } from '../visibility.ts'
 
 const overviewQuery = z.object({
-  group: z.string().max(200).optional(),
+  team: z.string().max(200).optional(),
   repo: z.string().max(500).optional(),
   status: z.enum(['policy', 'saving', 'any']).optional(),
   kind: z.enum(assetKinds).optional(),
@@ -51,7 +51,7 @@ export function assetsRoutes(deps: ServerDeps) {
   const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
 
   app.get('/assets', async (c) => {
-    const { group, repo: repoParam, cursor, limit, ...filters } = readQuery(c, overviewQuery)
+    const { team, repo: repoParam, cursor, limit, ...filters } = readQuery(c, overviewQuery)
     const principal = principalOf(c)
     const repo = parseRepo(repoParam)
     const [heads, off] = await Promise.all([
@@ -66,12 +66,12 @@ export function assetsRoutes(deps: ServerDeps) {
       .filter(
         ({ head, target }) =>
           canSee(principal, 'analyses:read', target) &&
-          (group === undefined || target.groups.includes(group)) &&
+          (team === undefined || target.teams.includes(team)) &&
           !off(head.repo),
       )
     const table = await cache.read(
       {
-        endpoint: `assets?${JSON.stringify([group, repoParam, filters])}`,
+        endpoint: `assets?${JSON.stringify([team, repoParam, filters])}`,
         analysisIds: newest.map(({ head }) => head.id),
         repos: newest.map(({ head }) => repoKey(head.repo)),
       },

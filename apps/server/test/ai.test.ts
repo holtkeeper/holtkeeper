@@ -16,9 +16,9 @@ import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+  teams: {
+    games: { owns: ['work:games/*'] },
+    tools: { owns: ['work:tools/*'] },
   },
 })
 
@@ -42,12 +42,12 @@ const setup = (auth: AuthProvider = noAuth(), at = '2026-11-16T00:00:00.000Z') =
 
 const teams = headerAuth({
   roles: {
-    'games-ai': [{ scope: { groups: ['games'] }, actions: ['ai:read'] }],
-    'games-knowledge': [{ scope: { groups: ['games'] }, actions: ['knowledge:read'] }],
-    'tools-ai': [{ scope: { groups: ['tools'] }, actions: ['ai:read'] }],
+    'games-ai': [{ scope: { teams: ['games'] }, actions: ['ai:read'] }],
+    'games-knowledge': [{ scope: { teams: ['games'] }, actions: ['knowledge:read'] }],
+    'tools-ai': [{ scope: { teams: ['tools'] }, actions: ['ai:read'] }],
     'people-reader': [
-      { scope: { groups: ['tools'] }, actions: ['ai:read'] },
-      { scope: { groups: ['tools'] }, actions: ['users:read'] },
+      { scope: { teams: ['tools'] }, actions: ['ai:read'] },
+      { scope: { teams: ['tools'] }, actions: ['users:read'] },
     ],
   },
 })
@@ -60,7 +60,7 @@ const run = (
 ): NewAiUsageRecord => ({
   at,
   repo: { forge: 'work', path },
-  groups: [path.split('/')[0] ?? ''],
+  teams: [path.split('/')[0] ?? ''],
   taskKind: 'review',
   actor: 'system',
   provider: 'anthropic',
@@ -146,7 +146,7 @@ async function seedWeeks(budget: { weeklyUsd: number; reserveUsd: number }) {
   await store.settings.put({
     id: 'games-budget',
     key: 'llm.budget',
-    scope: { groups: ['games'] },
+    scope: { teams: ['games'] },
     value: { weeklyUsd: 3, reserveUsd: 1, action: 'block' },
     secret: false,
     updatedAt: '2026-11-01T00:00:00.000Z',
@@ -179,7 +179,7 @@ beforeEach(async () => {
   await store.settings.put({
     id: 'games-budget',
     key: 'llm.budget',
-    scope: { groups: ['games'] },
+    scope: { teams: ['games'] },
     value: { weeklyUsd: 3, reserveUsd: 1, action: 'block' },
     secret: false,
     updatedAt: '2026-11-01T00:00:00.000Z',
@@ -274,7 +274,7 @@ describe('ai routes', () => {
     const games = body.budgets.find((b) => b.id === 'games-budget')
     expect(games).toEqual({
       id: 'games-budget',
-      scope: { groups: ['games'] },
+      scope: { teams: ['games'] },
       action: 'block',
       weeklyUsd: 3,
       reserveUsd: 1,
@@ -287,7 +287,7 @@ describe('ai routes', () => {
     })
   })
 
-  test('overview: month and 30 days, groups narrow and never widen', async () => {
+  test('overview: month and 30 days, teams narrow and never widen', async () => {
     await seedWeeks({ weeklyUsd: 100, reserveUsd: 25 })
     const month = await getOverview(setup(noAuth(), thursday), '/api/ai/overview?period=month')
     expect(month.body.current).toMatchObject({ key: '2026-11', totals: { costUsd: 10 } })
@@ -297,23 +297,21 @@ describe('ai routes', () => {
     expect(days.body.current.key).toBe('30d:2026-11-12')
     expect((await get(setup(), '/api/ai/overview?period=year')).status).toBe(400)
 
-    const tools = await getOverview(setup(noAuth(), thursday), '/api/ai/overview?groups=tools')
+    const tools = await getOverview(setup(noAuth(), thursday), '/api/ai/overview?teams=tools')
     expect(tools.body.current.totals.costUsd).toBe(3)
     expect(tools.body.forecast).toMatchObject({ spentUsd: 3, weeks: 0 })
     expect(tools.body.topRepos.map((b) => b.key.repo)).toEqual(['work:tools/cli'])
 
     const app = setup(teams, thursday)
-    const narrow = await getOverview(app, '/api/ai/overview?groups=tools,games', as('games-ai'))
+    const narrow = await getOverview(app, '/api/ai/overview?teams=tools,games', as('games-ai'))
     expect(narrow.body.current.totals.costUsd).toBe(2)
     expect(narrow.body.topRepos.map((b) => b.key.repo)).not.toContain('work:tools/cli')
     expect(narrow.body.forecast.spentUsd).toBe(2)
-    const outside = await getOverview(app, '/api/ai/overview?groups=tools', as('games-ai'))
+    const outside = await getOverview(app, '/api/ai/overview?teams=tools', as('games-ai'))
     expect(outside.body.current.totals.runs).toBe(0)
     expect(outside.body.topRepos).toEqual([])
     expect(outside.body.budgets.map((b) => b.id)).toEqual(['games-budget'])
-    expect((await get(app, '/api/ai/overview?groups=tools', as('games-knowledge'))).status).toBe(
-      403,
-    )
+    expect((await get(app, '/api/ai/overview?teams=tools', as('games-knowledge'))).status).toBe(403)
   })
 
   test('overview: feature, origin and model narrow everything but budgets and caps', async () => {
@@ -386,13 +384,13 @@ describe('ai routes', () => {
     const narrow = await getWeek(app, '/api/ai/week', as('games-ai'))
     expect(narrow.body.totals.costUsd).toBe(2)
     expect(narrow.body.byTaskKind.map((b) => b.key.taskKind)).toEqual(['review'])
-    expect((await getWeek(app, '/api/ai/week?groups=tools', as('games-ai'))).body.totals.runs).toBe(
+    expect((await getWeek(app, '/api/ai/week?teams=tools', as('games-ai'))).body.totals.runs).toBe(
       0,
     )
     expect((await get(app, '/api/ai/week', as('games-knowledge'))).status).toBe(403)
   })
 
-  test('runs and usage filter by actor, origin and groups', async () => {
+  test('runs and usage filter by actor, origin and teams', async () => {
     await seedWeeks({ weeklyUsd: 100, reserveUsd: 25 })
     const app = setup(noAuth(), thursday)
     const people = await getRuns(app, '/api/ai/runs?origin=interactive')
@@ -400,14 +398,10 @@ describe('ai routes', () => {
       ['jane', 'thread about widgets'],
     ])
     expect((await getRuns(app, '/api/ai/runs?actor=jane')).body.runs).toHaveLength(1)
-    const automatic = await getUsage(app, '/api/ai/usage?origin=automatic&groups=games')
+    const automatic = await getUsage(app, '/api/ai/usage?origin=automatic&teams=games')
     expect(automatic.body.totals).toMatchObject({ runs: 4, costUsd: 7 })
     expect((await get(app, '/api/ai/runs?origin=bot')).status).toBe(400)
-    const narrow = await getRuns(
-      setup(teams, thursday),
-      '/api/ai/runs?groups=tools',
-      as('games-ai'),
-    )
+    const narrow = await getRuns(setup(teams, thursday), '/api/ai/runs?teams=tools', as('games-ai'))
     expect(narrow.body.runs).toEqual([])
   })
 

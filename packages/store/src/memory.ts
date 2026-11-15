@@ -4,6 +4,7 @@ import { memoryAudit } from './audit.ts'
 import { memoryChat } from './chat.ts'
 import { memoryCiJobs } from './ci-jobs.ts'
 import { memoryConfig, memoryKv } from './config.ts'
+import { memoryEmbeddings } from './embeddings.ts'
 import { memoryFamilies, memoryGuides } from './guides.ts'
 import {
   claimDueBy,
@@ -198,6 +199,7 @@ export function memoryStore(): Store {
     },
     jobs,
     knowledge: memoryKnowledge(),
+    embeddings: memoryEmbeddings(),
     guides: memoryGuides(),
     families: memoryFamilies(),
     learnings: memoryLearnings(),

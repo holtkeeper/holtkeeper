@@ -1,10 +1,10 @@
 import {
   type RepoTarget,
   type Scope,
-  groupLineage,
-  groupNames,
+  hasWildcard,
   scopeCoversRepo,
   scopeSpecificity,
+  scopeWithin,
 } from '@holtkeeper/access'
 import {
   type AiUsageStore,
@@ -126,9 +126,10 @@ export const withDefaultBudget = (budgets: readonly ScopedBudget[]): ScopedBudge
 
 /**
  * The budgets that apply to a repository: the most specific one covering it (newest among equally
- * specific ones), the most specific covering budget on its parent groups when the winner names
- * only subgroups (so a subgroup budget never lifts its repositories out of the parent's cap), and
- * the newest global (`all`) budget, each at most once.
+ * specific ones), the most specific other covering budget whose scope contains the winner's when
+ * the winner names only folder patterns (so a budget on `acme/round/**` never lifts its
+ * repositories out of the cap on `acme/**`), and the newest global (`all`) budget, each at most
+ * once.
  */
 export function applicableBudgets(
   budgets: readonly ScopedBudget[],
@@ -139,19 +140,14 @@ export function applicableBudgets(
     .filter((b) => scopeCoversRepo(b.scope, repo))
     .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope) || newest(a, b))
   const specific = ranked[0]
-  const ancestors = new Set(
-    specific && !specific.scope.repos?.length
-      ? groupNames(specific.scope.groups ?? []).flatMap((group) => groupLineage(group).slice(1))
-      : [],
-  )
-  const parent = ancestors.size
-    ? ranked.find(
-        (b) =>
-          b !== specific &&
-          !b.scope.all &&
-          !b.scope.repos?.length &&
-          groupNames(b.scope.groups ?? []).every((group) => ancestors.has(group)),
-      )
+  const folders =
+    specific !== undefined &&
+    !specific.scope.all &&
+    !specific.scope.teams?.length &&
+    (specific.scope.repos ?? []).length > 0 &&
+    (specific.scope.repos ?? []).every(hasWildcard)
+  const parent = folders
+    ? ranked.find((b) => b !== specific && !b.scope.all && scopeWithin(specific.scope, b.scope))
     : undefined
   const global = budgets.filter((b) => b.scope.all).toSorted(newest)[0]
   return [specific, parent, global].filter(
@@ -304,7 +300,7 @@ export function budgetGuard({
           if (entry.taskKind !== record.taskKind) continue
           if (record.outcome !== 'denied-budget') entry.runs += 1
         }
-        if (entry.scope && !scopeCoversRepo(entry.scope, { ...record.repo, groups: record.groups }))
+        if (entry.scope && !scopeCoversRepo(entry.scope, { ...record.repo, teams: record.teams }))
           continue
         entry.costUsd += record.costUsd
       }
