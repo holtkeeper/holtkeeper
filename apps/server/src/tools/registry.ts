@@ -59,6 +59,7 @@ const TASK_TOOLSETS: Record<string, readonly string[]> = {
   learning: [],
   guide: [],
   'release-notes': [],
+  'security-triage': [],
   'library-digest': [],
   'knowledge-bootstrap': [],
   'knowledge-verify': [],

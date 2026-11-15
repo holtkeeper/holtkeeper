@@ -68,6 +68,7 @@
     "@holtkeeper/usages": "workspace:*",
     "@holtkeeper/vault": "workspace:*",
     "@holtkeeper/vuln": "workspace:*",
+    "@holtkeeper/vuln-triage": "workspace:*",
     "@holtkeeper/web-paths": "workspace:*",
     "@holtkeeper/workspace": "workspace:*",
     "@holtkeeper/write-task": "workspace:*",

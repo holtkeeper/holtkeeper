@@ -15,7 +15,7 @@ holtkeeper serve --role web|worker|scheduler|all   # also HOLTKEEPER_ROLE; defau
 
 Roles combine with commas: `--role web,scheduler` is the API plus the scheduler, which is what the Helm chart runs in its web pods by default.
 
-Scheduler duties are the freshness sweep (the main source of automatic work), schedules, repository polling, webhook sync, the library index, credential rotation, artifact retention, audit retention, the daily storage snapshot (Settings › System's 7-day change) and the daily audit chain check (`GET /api/audit/verify/last`). Every process with the scheduler role contends for a lease in the store (`kv.acquireLease`, key `leader:scheduler`, TTL 30 s, renewed every 10 s); only the holder runs the duties. When the holder dies, another process takes over within one TTL. When a renewal fails (store unreachable), the holder stops its duties at once, so two leaders do not overlap past one lease.
+Scheduler duties are the freshness sweep (the main source of automatic work), schedules, repository polling, webhook sync, the library index, credential rotation, artifact retention, audit retention, the daily storage snapshot (Settings › System's 7-day change), the [urgent vulnerability alerts](../apps/server/docs/slack.md#urgent-vulnerability-alerts) and the daily audit chain check (`GET /api/audit/verify/last`). Every process with the scheduler role contends for a lease in the store (`kv.acquireLease`, key `leader:scheduler`, TTL 30 s, renewed every 10 s); only the holder runs the duties. When the holder dies, another process takes over within one TTL. When a renewal fails (store unreachable), the holder stops its duties at once, so two leaders do not overlap past one lease.
 
 Worker flags:
 

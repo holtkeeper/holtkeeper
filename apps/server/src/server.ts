@@ -74,6 +74,7 @@ import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
 import { defaultPolling, pollingSetting } from '@holtkeeper/updates'
 import { aesVault } from '@holtkeeper/vault'
+import { securityAlertsDefinition } from '@holtkeeper/vuln-triage'
 import { mirrorStorage } from '@holtkeeper/workspace'
 import { WRITE_POOL, createWriteTaskAnalyzer } from '@holtkeeper/write-task'
 
@@ -124,6 +125,7 @@ import { releaseServiceFor } from './releases.ts'
 import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
 import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
+import { createSecurityAlerts } from './security-alerts.ts'
 import { createSlackReviews } from './slack/service.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { startStorageReports } from './storage-reports.ts'
@@ -529,6 +531,7 @@ export async function startServer(
       releaseSettingsDefinition,
       releaseNotifyDefinition,
       releaseAnnounceDefinition,
+      securityAlertsDefinition,
       commitConventionsSetting,
       assetsPolicySetting,
       librariesSetting,
@@ -575,6 +578,7 @@ export async function startServer(
   deps.slackReviews = slack
   deps.mergeRequestStatus = slack
   const announcer = releaseAnnouncerFor(deps, { log })
+  const securityAlerts = createSecurityAlerts(deps, { log })
   const app = createApp(deps)
   if (duties.http === 'api') {
     const webRoot = server.webRoot ?? defaultWebRoot
@@ -660,6 +664,10 @@ export async function startServer(
         },
         { intervalMs: 6 * 3_600_000, log },
       ),
+      periodicDuty('security alerts', () => securityAlerts.sweep(), {
+        intervalMs: 5 * 60_000,
+        log,
+      }),
       periodicDuty('audit chain check', () => verifyAuditChainIfDue(store, deps.now()), {
         intervalMs: 3_600_000,
         log,

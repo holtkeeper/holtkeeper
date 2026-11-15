@@ -98,6 +98,7 @@
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
+        "@holtkeeper/vuln-triage": "workspace:*",
         "@holtkeeper/web-paths": "workspace:*",
         "@holtkeeper/workspace": "workspace:*",
         "@holtkeeper/write-task": "workspace:*",
@@ -1032,6 +1033,15 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/vuln-triage": {
+      "name": "@holtkeeper/vuln-triage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/vuln": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/web-paths": {
       "name": "@holtkeeper/web-paths",
       "version": "0.0.0",
@@ -1431,6 +1441,8 @@
     "@holtkeeper/vuln-js": ["@holtkeeper/vuln-js@workspace:packages/vuln-js"],
 
     "@holtkeeper/vuln-osv": ["@holtkeeper/vuln-osv@workspace:packages/vuln-osv"],
+
+    "@holtkeeper/vuln-triage": ["@holtkeeper/vuln-triage@workspace:packages/vuln-triage"],
 
     "@holtkeeper/waibee-ai-provider": ["@holtkeeper/waibee-ai-provider@0.1.0", "", { "dependencies": { "@ai-sdk/anthropic": "^4.0.92", "@ai-sdk/openai-compatible": "^3.0.81", "@ai-sdk/provider": "^4.0.34", "@ai-sdk/provider-utils": "^5.0.71" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ScN/VbVS2v0Rytbp47LNVb8KUcD2ajGsU2tREiGDNvQ0mzQkQXVsnQR8tA3/DHuN3DPhTsx+ClIp51H5atoN+Q=="],
 

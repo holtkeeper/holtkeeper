@@ -46,6 +46,7 @@ export const settingsSections: Readonly<
       'limits.credentials',
       'slack.reviews',
       'releases.announce',
+      'security.alerts',
     ],
   },
   analyzers: {

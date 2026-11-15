@@ -54,6 +54,7 @@
 | `@holtkeeper/analyzers`           | Registry of built-in analyzers                                                | [packages/analyzers/docs](../packages/analyzers/docs/README.md)                     |
 | `@holtkeeper/vuln`                | Vulnerability audit contracts, allowlist, orchestration                       | [packages/vuln/docs](../packages/vuln/docs/README.md)                               |
 | `@holtkeeper/vuln-osv`            | OSV-Scanner scanner and fixer                                                 | [packages/vuln-osv/docs](../packages/vuln-osv/docs/README.md)                       |
+| `@holtkeeper/vuln-triage`         | Urgency triage of advisories: malware rule, AI verdict, `security.alerts`     | [packages/vuln-triage/docs](../packages/vuln-triage/docs/README.md)                 |
 | `@holtkeeper/vuln-js`             | npm/bun/pnpm/yarn fixer                                                       | [packages/vuln-js/docs](../packages/vuln-js/docs/README.md)                         |
 | `@holtkeeper/vuln-go`             | Go modules fixer                                                              | [packages/vuln-go/docs](../packages/vuln-go/docs/README.md)                         |
 | `@holtkeeper/commit-conventions`  | Commit and branch naming rules from settings, push rules, commitlint, history | [packages/commit-conventions/docs](../packages/commit-conventions/docs/README.md)   |
