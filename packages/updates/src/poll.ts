@@ -218,15 +218,23 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
     }
   }
 
-  const tags = { ...previous?.tags }
+  let tags = { ...previous?.tags }
   if (wants.has('tags') && forge.listTags) {
     const listTags = forge.listTags.bind(forge)
     const listed = await call(() => listTags(repo.path, { limit: LISTED_TAGS }))
     for (const tag of listed.toReversed()) {
       if (tags[tag.name] === tag.sha) continue
-      tags[tag.name] = tag.sha
       if (!baseline) events.push({ kind: 'tag', repo, tag: tag.name, sha: tag.sha })
     }
+    // Every tag of this listing stays in the cursor, so it is never reported again; older ones
+    // fill the rest. Key order cannot decide what is dropped: JSONB stores keys sorted by length.
+    const kept: Record<string, string> = {}
+    for (const tag of listed) kept[tag.name] = tag.sha
+    for (const [name, sha] of Object.entries(tags)) {
+      if (Object.keys(kept).length >= MAX_TAGS) break
+      if (!(name in kept)) kept[name] = sha
+    }
+    tags = kept
   }
 
   let branches = previous?.branches
@@ -261,7 +269,7 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
           .toSorted(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
           .slice(0, MAX_MERGE_REQUESTS * 2),
       ),
-      tags: Object.fromEntries(Object.entries(tags).slice(-MAX_TAGS)),
+      tags,
       pipelines: pipelines.slice(-MAX_PIPELINES),
       ...(branches && { branches }),
     },

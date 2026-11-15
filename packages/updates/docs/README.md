@@ -23,7 +23,7 @@ const { events, cursor, requests } = await pollRepository({
 
 Kinds the forge cannot list are skipped. Windows overlap by two minutes for clock skew; a change already in the cursor is not reported again. `requests` counts forge calls (about one HTTP request each) for budgeting. Polling cannot see who made a change, so `actor` is empty: changes the bot made itself are not filtered out the way webhook events by `jobs.botUsername` are.
 
-The cursor is JSON and stays small: open merge requests and those closed in the last week (at most 200), the last 100 tags, 200 reported pipelines and up to 500 branch heads.
+The cursor is JSON and stays small: open merge requests and those closed in the last week (at most 200), the last 100 tags (every tag of the latest listing first, then older ones; what is dropped never depends on key order, which JSONB does not keep), 200 reported pipelines and up to 500 branch heads.
 
 ## Setting
 

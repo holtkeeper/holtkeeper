@@ -72,6 +72,17 @@ const branch = (name: string, sha: string, committedAt: string): BranchRecord =>
 const poll = (forge: GitForge, cursor: RepoCursor | undefined, at: string) =>
   pollRepository({ forge, repo, cursor, now: new Date(at), events: pollEventKinds })
 
+const tagSha = (index: number) => index.toString(16).padStart(40, '0')
+// Postgres JSONB returns object keys shortest first, not in insertion order.
+const jsonb = (cursor: RepoCursor): RepoCursor => ({
+  ...cursor,
+  tags: Object.fromEntries(
+    Object.entries(cursor.tags).toSorted(
+      ([a], [b]) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0),
+    ),
+  ),
+})
+
 describe('pollRepository', () => {
   test('the first poll records the state and reports nothing', async () => {
     const { forge, calls } = fakeForge({
@@ -155,6 +166,37 @@ describe('pollRepository', () => {
     state.mergeRequests = [mr({ state: 'merged', updatedAt: '2026-10-30T11:03:00Z' })]
     const merged = await poll(forge, opened.cursor, '2026-10-30T11:04:00Z')
     expect(merged.events).toMatchObject([{ kind: 'mergeRequest', action: 'merge' }])
+  })
+
+  test('a full tag cursor never reports a listed tag twice, whatever order its keys come back in', async () => {
+    // 120 tags, newest first; the newest has the shortest name.
+    const all: TagRecord[] = Array.from({ length: 120 }, (_, index) => ({
+      name:
+        index === 0 ? 'w@2.0.0' : `@acme/widget-kit-number-${String(index).padStart(3, '0')}@1.0.0`,
+      sha: tagSha(index + 1),
+      committedAt: new Date(Date.parse('2026-10-30T00:00:00Z') - index * 60_000).toISOString(),
+    }))
+    const { forge } = fakeForge({ mergeRequests: [], tags: all.slice(0, 20) })
+    const tagsOnly = (cursor: RepoCursor | undefined, at: string) =>
+      pollRepository({ forge, repo, cursor, now: new Date(at), events: ['tags'] })
+    const older = Object.fromEntries(all.slice(20).map((tag) => [tag.name, tag.sha]))
+    let cursor: RepoCursor = jsonb({
+      since: '2026-10-30T10:00:00Z',
+      mergeRequests: {},
+      tags: { ...older, ...Object.fromEntries(all.slice(1, 20).map((tag) => [tag.name, tag.sha])) },
+      pipelines: [],
+    })
+    const first = await tagsOnly(cursor, '2026-10-30T11:00:00Z')
+    expect(first.events).toEqual([{ kind: 'tag', repo, tag: 'w@2.0.0', sha: tagSha(1) }])
+    expect(Object.keys(first.cursor.tags)).toHaveLength(100)
+    cursor = jsonb(first.cursor)
+    for (const at of ['2026-10-30T11:15:00Z', '2026-10-30T11:30:00Z']) {
+      // oxlint-disable-next-line no-await-in-loop -- polls follow each other
+      const next = await tagsOnly(cursor, at)
+      expect(next.events).toEqual([])
+      expect(next.cursor.tags['w@2.0.0']).toBe(tagSha(1))
+      cursor = jsonb(next.cursor)
+    }
   })
 
   test('skips what the forge cannot list and what is not asked for', async () => {
