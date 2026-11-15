@@ -41,6 +41,7 @@ import { libraryIndexRoutes } from './routes/library-index.ts'
 import { licensesRoutes } from './routes/licenses.ts'
 import { limitRoutes } from './routes/limits.ts'
 import { mediaRoutes } from './routes/media.ts'
+import { messageRoutes } from './routes/messages.ts'
 import { preferenceRoutes } from './routes/preferences.ts'
 import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
@@ -152,6 +153,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', licensesRoutes(supply))
   api.route('/', credentialRoutes(deps))
   api.route('/', limitRoutes(deps))
+  api.route('/', messageRoutes(deps))
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))
   api.route('/', taskRoutes(deps))

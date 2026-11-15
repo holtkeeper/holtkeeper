@@ -72,3 +72,37 @@ test('sizeAdviceBlock lists the parts with their files and the note for AI agent
   })
   expect(atomic).toBe(`**${texts.estimate} ${texts.limit}**\n\nA mechanical rename.`)
 })
+
+test('summaryNote takes fixed texts from the messages and ends reviews with the feedback request', () => {
+  const data = {
+    head: 'a'.repeat(40),
+    mode: 'full' as const,
+    verdict: 'needs-changes' as const,
+    summary: 'The widget shelf needs a guard.',
+    comments: [],
+    threads: [],
+    skipped: [{ path: 'shelf.bin', reason: 'binary' as const }],
+    stats: {
+      files: 2,
+      changedLines: 9,
+      dropped: { belowSeverity: 1, overLimit: 0, duplicates: 0, invalid: 0 },
+    },
+    checks: [],
+  }
+  const english = summaryNote(data)
+  expect(english).toContain('Holtkeeper learns from your answers')
+  expect(english).toContain('| Severity | Findings |')
+  const marked = summaryNote(data, {
+    locale: 'xx',
+    t: (key, params) => `«${key}${params ? ` ${JSON.stringify(params)}` : ''}»`,
+  })
+  expect(marked.startsWith('### Holtkeeper review: «verdict.needsChanges»')).toBe(true)
+  expect(marked).toContain('| Severity | «findings.count» |')
+  expect(marked).toContain('- `shelf.bin` — «notReviewed.binary»')
+  expect(marked).toContain('«notReviewed.belowSeverity {"count":1}»')
+  expect(marked).toContain('«summary.feedback»')
+  expect(isSummaryNote(marked)).toBe(true)
+  expect(summaryNote({ ...data, mode: 'skipped', verdict: 'skipped' })).not.toContain(
+    'learns from your answers',
+  )
+})

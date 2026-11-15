@@ -41,6 +41,7 @@ import {
   readGuidelines,
 } from './guidelines.ts'
 import { type MediaReviewer, noopMediaReviewer, reviewMedia } from './media.ts'
+import { type ReviewMessages, englishReviewMessages } from './messages.ts'
 import {
   type ReviewData,
   type ReviewFinding,
@@ -174,6 +175,11 @@ export interface ReviewRun {
    * a guidelines section.
    */
   goGuidelines?: (tag?: string) => Promise<GoGuidelineSet>
+  /**
+   * The fixed texts of the summary note, thread replies and skipped summaries, in the review
+   * language. Default: English.
+   */
+  messages?: ReviewMessages
   /** Replaces pipeline steps, e.g. in tests or for another review strategy. */
   steps?: Partial<ReviewSteps>
   log?: (line: string) => void
@@ -574,7 +580,7 @@ const post: ReviewSteps['post'] = async (run, loaded, data) => {
   const outcome = await run.forge.submitReview(run.repo.path, loaded.mr.id, {
     refs: loaded.diff.refs,
     comments,
-    summary: summaryNote(data),
+    summary: summaryNote(data, run.messages),
     event: approve ? 'approve' : 'comment',
   })
   const failed = new Map(outcome.failed.map((f) => [f.comment, f.error]))
@@ -737,6 +743,7 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
 
 async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
   const steps = { ...defaultSteps, ...run.steps }
+  const messages = run.messages ?? englishReviewMessages
   const usage: ReviewUsage = { turns: 0 }
   const loaded = await steps.load(run)
   const planned = await steps.plan(run, loaded)
@@ -755,8 +762,11 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       mode: 'skipped',
       verdict: 'skipped',
       summary: tooLarge
-        ? `The diff has ${scope.changedLines} changed lines, more than the limit of ${run.options.maxDiffLines}; it was not reviewed. Split the merge request or review it with \`/holtkeeper review maxDiffLines=<n>\`.`
-        : 'Nothing new to review.',
+        ? messages.t('summary.tooLarge', {
+            lines: scope.changedLines,
+            limit: run.options.maxDiffLines,
+          })
+        : messages.t('summary.nothingNew'),
       ...(size ? { size } : {}),
       comments: [],
       threads: [],
@@ -923,7 +933,7 @@ async function applyThreadActions(run: ReviewRun, loaded: LoadedReview, threads:
       run.repo.path,
       loaded.mr.id,
       thread.discussionId,
-      threadNote(thread.action, thread.reason, head),
+      threadNote(thread.action, thread.reason, head, run.messages),
     )
     if (thread.action === 'resolved')
       // oxlint-disable-next-line no-await-in-loop

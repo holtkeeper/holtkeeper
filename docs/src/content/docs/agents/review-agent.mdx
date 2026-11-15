@@ -23,6 +23,8 @@ Some merge requests are skipped by default, with the reason stored and nothing p
 
 ## How it reviews
 
+Before the first review of a merge request, Holtkeeper posts a short note saying the review is running and asking to wait for it; the note goes away when the review is posted, or says the review could not finish and how to start it again. The `progressNote` option posts it before every review (`always`) or never (`never`).
+
 1. **Scope.** Only lines the merge request adds in reviewable files. Lockfiles, generated code, snapshots, `dist` and similar are ignored, as are globs listed in the repository's `REVIEW.md`. After the first review, only lines added since the last reviewed head are in scope.
 2. **Context.** The agent gets the repository's `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`, then the team's Guide for reviews: team rules, learned rules, policies and the most relevant knowledge notes, then, with lower priority, notes written for [similar repositories](/guide/knowledge/guide/#knowledge-from-similar-repositories). Comments cite the notes they rely on as `[kb:<id>]`, and **Knowledge › Notes** counts how those comments ended. It reads more code with its tools instead of getting whole files, and asks the package catalog and library index about dependencies, since the checkout is never installed.
 3. **Checks.** Deterministic checks run first. By default that is the test id check: new interactive elements without a test id, with an id suggested in the repository's style. The agent comments on the ones it agrees with.
@@ -58,6 +60,8 @@ The summary note carries the verdict, a short summary, how hard the change is to
 
 The review writes in the language of the merge request's description: a description in German gets German comments, summary, walkthrough and replies. Code, suggestions, code comments and technical terms stay in English. Teams can fix the language with the `language` option of `analyzers.review`.
 
+The texts Holtkeeper writes itself (the "review is running" note, the summary's lines, the notes on resolved threads) follow the same language. The first review in a language has the AI model translate them once; the translation is kept and reused. Terms such as Severity, Critical, Package and Kind, the summary heading and code stay in English. Admins check and edit the translations in **Settings › Analyzers › Bot messages**, where they can also turn automatic translation off or add more terms to keep in English. When Holtkeeper's English text changes in an update, its translation counts as outdated: English is posted until the next review translates it again.
+
 ## Suggestions
 
 When the fix is local, a comment carries a suggestion block that the author applies with one click in GitLab. Suggestions replace exactly the commented lines; no-op suggestions and ones that would copy neighbouring lines are dropped before posting. Suggestions are applied in the forge, never by Holtkeeper.
@@ -77,6 +81,8 @@ Its own **summary threads** are resolved when a later review comes back clean (v
 ## Replies and learnings
 
 Reply in one of the agent's threads and it answers that thread: it explains, concedes and resolves, or updates the suggestion. A reply that teaches a lasting rule ("we always keep shape sizes in `ShapeSize`") becomes a rule candidate in **Knowledge › Learnings**. Once a person accepts it, it is part of the Guide for every later review and agent. 👍 and 👎 reactions on comments are counted per finding category when the merge request closes; **Quality › Reviews** shows them under the table.
+
+Every summary ends with this request: when a comment is wrong or misses the point, reply in its thread and say how it should be.
 
 ## In the panel
 
@@ -114,6 +120,7 @@ Options are the `analyzers.review` setting, per repository, path pattern, team o
 | `depth`          | `standard`              | `deep` reviews on the deeper model tier.                                  |
 | `language`       | the description's       | Language of comments, summary and replies.                                |
 | `maxDiffLines`   | 3000                    | Larger diffs are skipped with a note.                                     |
+| `progressNote`   | `first`                 | The "review is running" note: `first`, `always` or `never`.               |
 | `ignore`         | lockfiles, generated, … | Path globs never reviewed.                                                |
 | `goGuidelines`   | on                      | Modern Go guidelines for Go changes; `tag` pins an upstream release.      |
 

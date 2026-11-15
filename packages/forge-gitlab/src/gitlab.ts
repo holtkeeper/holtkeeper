@@ -1392,6 +1392,14 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
       })
     },
 
+    async deleteMergeRequestNote(repo, id, noteId) {
+      try {
+        await client.text('DELETE', `${mrPath(repo, id)}/notes/${noteId}`)
+      } catch (error) {
+        if (!isNotFound(error)) throw error
+      }
+    },
+
     async resolveDiscussion(repo, id, discussionId, resolved) {
       await client.json(
         'PUT',

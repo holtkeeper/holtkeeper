@@ -1,4 +1,5 @@
 import { findingMarker, MARKER_PREFIX, markerOf } from './dedupe.ts'
+import { type ReviewMessageKey, type ReviewMessages, englishReviewMessages } from './messages.ts'
 import {
   type ReviewCategory,
   type ReviewData,
@@ -20,13 +21,13 @@ const severityLabel: Record<ReviewSeverity, string> = {
   info: 'Info',
 }
 
-const skipLabel: Record<SkippedFile['reason'], string> = {
-  ignored: 'ignored path',
-  binary: 'binary',
-  collapsed: 'diff too large for the forge',
-  deleted: 'deleted',
-  unchanged: 'no new lines to review',
-  'too-large': 'merge request over the size limit',
+const skipLabel: Record<SkippedFile['reason'], ReviewMessageKey> = {
+  ignored: 'notReviewed.ignored',
+  binary: 'notReviewed.binary',
+  collapsed: 'notReviewed.collapsed',
+  deleted: 'notReviewed.deleted',
+  unchanged: 'notReviewed.unchanged',
+  'too-large': 'notReviewed.tooLarge',
 }
 
 /** The note body of one inline finding, with the marker later runs recognize. */
@@ -68,12 +69,15 @@ export const isSummaryNote = (body: string) =>
 const cell = (text: string) => text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
 
 /** The walkthrough as a Markdown table: files of each logical change and what changed. */
-export function walkthroughTable(walkthrough: ReviewWalkthrough): string {
+export function walkthroughTable(
+  walkthrough: ReviewWalkthrough,
+  messages: ReviewMessages = englishReviewMessages,
+): string {
   const rows = walkthrough.map(
     (step) =>
       `| ${step.files.map((file) => `\`${cell(file)}\``).join('<br>')} | ${cell(step.change)} |`,
   )
-  return `| Files | Change |\n| --- | --- |\n${rows.join('\n')}`
+  return `| ${cell(messages.t('walkthrough.files'))} | ${cell(messages.t('walkthrough.change'))} |\n| --- | --- |\n${rows.join('\n')}`
 }
 
 /** Counts of posted findings per severity, most severe first. */
@@ -115,8 +119,9 @@ export function sizeAdviceBlock(size: ReviewSize | undefined): string {
 
 /**
  * The summary note: verdict, the agent's summary, the estimated review time (or the advice to
- * split the merge request), a table of findings by severity, what happened to earlier threads and
- * what was not reviewed.
+ * split the merge request), a table of findings by severity, what happened to earlier threads,
+ * what was not reviewed and, after a review, the request to answer wrong comments. Fixed texts
+ * come from `messages` (English by default); the heading, severity labels and markers never change.
  */
 export function summaryNote(
   data: Pick<
@@ -135,36 +140,44 @@ export function summaryNote(
     | 'stats'
     | 'checks'
   >,
+  messages: ReviewMessages = englishReviewMessages,
 ): string {
+  const { t } = messages
   const posted = data.comments.filter((c) => c.posted)
   const verdict =
     data.verdict === 'needs-changes'
-      ? 'Needs changes'
+      ? t('verdict.needsChanges')
       : data.verdict === 'looks-good'
-        ? 'Looks good'
-        : 'Not reviewed'
+        ? t('verdict.looksGood')
+        : t('verdict.notReviewed')
   const scope =
     data.mode === 'incremental'
-      ? `Reviewed the changes from \`${data.previousHead?.slice(0, 8)}\` to \`${data.head.slice(0, 8)}\``
-      : `Reviewed \`${data.head.slice(0, 8)}\``
-  const time =
+      ? t('scope.incremental', {
+          from: data.previousHead?.slice(0, 8) ?? '',
+          to: data.head.slice(0, 8),
+        })
+      : t('scope.full', { head: data.head.slice(0, 8) })
+  const stats = [
+    t('scope.stats', { scope, files: data.stats.files, lines: data.stats.changedLines }),
+    data.effort ? t('scope.effort', { effort: data.effort }) : '',
     data.size && !data.size.advice && data.size.minutes
-      ? ` Estimated review time: ${formatDuration(data.size.minutes)}.`
-      : ''
+      ? t('scope.time', { time: formatDuration(data.size.minutes) })
+      : '',
+  ]
   const lines = [
     `${SUMMARY_HEADING} ${verdict}`,
     data.summary.trim(),
-    `${scope}: ${data.stats.files} file(s), ${data.stats.changedLines} changed line(s).${data.effort ? ` Review effort: ${data.effort}/5.` : ''}${time}`,
+    stats.filter(Boolean).join(' '),
     sizeAdviceBlock(data.size),
   ]
   if (data.walkthrough?.length)
     lines.push(
-      `<details><summary>Walkthrough</summary>\n\n${walkthroughTable(data.walkthrough)}\n\n</details>`,
+      `<details><summary>Walkthrough</summary>\n\n${walkthroughTable(data.walkthrough, messages)}\n\n</details>`,
     )
   if (data.mode !== 'skipped') {
     lines.push(
       [
-        '| Severity | Findings |',
+        `| Severity | ${cell(t('findings.count'))} |`,
         '| --- | ---: |',
         ...countBySeverity(posted).map(
           ({ severity, count }) => `| ${severityLabel[severity]} | ${count} |`,
@@ -173,26 +186,29 @@ export function summaryNote(
     )
   }
 
-  const resolved = data.threads.filter((t) => t.action === 'resolved').length
-  const replied = data.threads.filter((t) => t.action === 'replied').length
-  if (resolved || replied)
-    lines.push(`Earlier threads: ${resolved} resolved, ${replied} still relevant.`)
+  const resolved = data.threads.filter((thread) => thread.action === 'resolved').length
+  const replied = data.threads.filter((thread) => thread.action === 'replied').length
+  if (resolved || replied) lines.push(t('threads.earlier', { resolved, replied }))
 
   const notReviewed: string[] = data.skipped
     .filter((s) => s.reason !== 'unchanged')
-    .map((s) => `- \`${s.path}\` — ${skipLabel[s.reason]}`)
+    .map((s) => `- \`${s.path}\` — ${t(skipLabel[s.reason])}`)
   const { belowSeverity, overLimit } = data.stats.dropped
-  if (belowSeverity) notReviewed.push(`- ${belowSeverity} finding(s) below the severity threshold`)
-  if (overLimit) notReviewed.push(`- ${overLimit} finding(s) over the comment limit`)
+  if (belowSeverity)
+    notReviewed.push(`- ${t('notReviewed.belowSeverity', { count: belowSeverity })}`)
+  if (overLimit) notReviewed.push(`- ${t('notReviewed.overLimit', { count: overLimit })}`)
   for (const check of data.checks.filter((c) => !c.ok))
-    notReviewed.push(`- check ${check.name} failed: ${check.error ?? 'unknown error'}`)
+    notReviewed.push(
+      `- ${t('notReviewed.checkFailed', { name: check.name, error: check.error ?? 'unknown error' })}`,
+    )
   const failed = data.comments.filter((c) => !c.posted).length
-  if (failed) notReviewed.push(`- ${failed} comment(s) the forge rejected`)
+  if (failed) notReviewed.push(`- ${t('notReviewed.rejected', { count: failed })}`)
   if (notReviewed.length)
     lines.push(
-      `<details><summary>Not reviewed</summary>\n\n${notReviewed.join('\n')}\n\n</details>`,
+      `<details><summary>${t('notReviewed.title')}</summary>\n\n${notReviewed.join('\n')}\n\n</details>`,
     )
 
+  if (data.mode !== 'skipped') lines.push(t('summary.feedback'))
   lines.push(summaryMarker(data.head))
   return lines.filter(Boolean).join('\n\n')
 }
@@ -201,9 +217,15 @@ export function summaryNote(
 export const replyBody = (text: string) => `${text.trim()}\n\n<!-- ${MARKER_PREFIX} reply -->`
 
 /** Reply text for a thread we resolve or keep. */
-export const threadNote = (action: ThreadAction['action'], note: string, head: string) =>
+export const threadNote = (
+  action: ThreadAction['action'],
+  note: string,
+  head: string,
+  messages: ReviewMessages = englishReviewMessages,
+) =>
   replyBody(
-    action === 'resolved'
-      ? `Resolved at \`${head.slice(0, 8)}\`: ${note}`
-      : `Still applies at \`${head.slice(0, 8)}\`: ${note}`,
+    messages.t(action === 'resolved' ? 'thread.resolved' : 'thread.stillApplies', {
+      head: head.slice(0, 8),
+      note,
+    }),
   )

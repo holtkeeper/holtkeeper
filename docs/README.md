@@ -67,6 +67,7 @@
 | `@holtkeeper/quality-tests`       | Test framework detection and coverage collection                              | [packages/quality-tests/docs](../packages/quality-tests/docs/README.md)             |
 | `@holtkeeper/quality-secrets`     | Leaked secrets (gitleaks)                                                     | [packages/quality-secrets/docs](../packages/quality-secrets/docs/README.md)         |
 | `@holtkeeper/review`              | AI review of merge requests, thread replies                                   | [packages/review/docs](../packages/review/docs/README.md)                           |
+| `@holtkeeper/messages`            | Translations of the bot's fixed texts: catalogs, staleness, AI translation    | [packages/messages/docs](../packages/messages/docs/README.md)                       |
 | `@holtkeeper/guide`               | Team rules per scope and section, families, the prompt resolver               | [packages/guide/docs](../packages/guide/docs/README.md)                             |
 | `@holtkeeper/guide-generator`     | The `guide` analyzer: evidence, hash-gated generation, proposals              | [packages/guide-generator/docs](../packages/guide-generator/docs/README.md)         |
 | `@holtkeeper/coverage`            | Test coverage per source file, folder treemap and trend                       | [packages/coverage/docs](../packages/coverage/docs/README.md)                       |

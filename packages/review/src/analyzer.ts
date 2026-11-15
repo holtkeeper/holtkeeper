@@ -1,7 +1,14 @@
 import type { Toolset } from '@holtkeeper/agent'
 import { type KnowledgeAccess, knowledgeTools } from '@holtkeeper/agent-tools'
 import { type AnalyzerContext, defineAnalyzer } from '@holtkeeper/analyzer'
-import type { RepoRef } from '@holtkeeper/forge'
+import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import {
+  type MessageStore,
+  agentTranslator,
+  detectLocale,
+  normalizeLocale,
+  resolveMessages,
+} from '@holtkeeper/messages'
 import type { QualityCheck } from '@holtkeeper/quality'
 import { z } from 'zod'
 
@@ -11,14 +18,17 @@ import { GO_GUIDELINES_TAG, type GoGuidelineSet } from './go-guidelines/schema.t
 import { bundledGoGuidelines } from './go-guidelines/snapshot.ts'
 import { type Guideline, readGuidelines } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
+import { type ReviewMessages, englishReviewMessages, reviewMessageCatalog } from './messages.ts'
 import {
   type ReviewGuide,
   type ReviewOptions,
   type ReviewSteps,
+  previousReview,
   requireReviewForge,
   reviewMergeRequest,
   reviewRef,
 } from './pipeline.ts'
+import { startProgress } from './progress.ts'
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
 import { DEFAULT_SIZE_THRESHOLDS } from './size.ts'
@@ -61,6 +71,12 @@ export const reviewOptionsSchema = z.object({
   releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
   reviewOwn: flag.default(false),
   force: flag.default(false),
+  progressNote: z
+    .enum(['first', 'always', 'never'])
+    .default('first')
+    .describe(
+      'Note saying the review is running, removed when it ends: first (default) only before the first review of a merge request, always before every review, never.',
+    ),
   goGuidelines: z
     .object({
       enabled: flag.default(true),
@@ -132,7 +148,44 @@ export interface ReviewAnalyzerDeps {
    * markers in note bodies identify our notes either way.
    */
   botUsername?: string | ((repo: RepoRef) => string | undefined)
+  /**
+   * Translations of the review's fixed texts (`reviewMessageCatalog`). Without it every note is in
+   * English; with it notes use the review language, and missing or outdated translations are made
+   * with the run's agent when the store's settings allow it.
+   */
+  messages?: MessageStore
   steps?: Partial<ReviewSteps>
+}
+
+/**
+ * The language of a review's fixed texts as a base language code: `language` when it names one,
+ * else the language of the merge request description (the language the agent writes in), else
+ * English.
+ */
+export function reviewLocale(language: string | undefined, description: string): string {
+  return normalizeLocale(language) ?? detectLocale(description) ?? 'en'
+}
+
+const sum = (a: number | undefined, b: number | undefined) =>
+  a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0)
+
+/** `data` with the usage of runs outside the pipeline (text translations) added. */
+const addUsage = (data: ReviewData, extra: ReviewUsage): ReviewData => {
+  if (!extra.turns) return data
+  const base = data.usage ?? { turns: 0 }
+  const costUsd = sum(base.costUsd, extra.costUsd)
+  const inputTokens = sum(base.inputTokens, extra.inputTokens)
+  const outputTokens = sum(base.outputTokens, extra.outputTokens)
+  return {
+    ...data,
+    usage: {
+      ...base,
+      turns: base.turns + extra.turns,
+      ...(costUsd !== undefined && { costUsd }),
+      ...(inputTokens !== undefined && { inputTokens }),
+      ...(outputTokens !== undefined && { outputTokens }),
+    },
+  }
 }
 
 async function headCheckout(context: AnalyzerContext<ReviewOptions>, headSha: string) {
@@ -144,6 +197,62 @@ async function headCheckout(context: AnalyzerContext<ReviewOptions>, headSha: st
   if (!context.checkout) return dir
   context.log?.(`checking out the merge request head ${headSha.slice(0, 8)}`)
   return (await context.checkout(context.repo, { ref: headSha })).dir
+}
+
+/**
+ * The review's fixed texts in the review language and, unless `progressNote` rules it out, the
+ * posted "review is running" note. Translating runs on the job's agent; `usage` collects its cost.
+ */
+async function startTexts(
+  context: AnalyzerContext<ReviewOptions & { progressNote?: 'first' | 'always' | 'never' }>,
+  deps: ReviewAnalyzerDeps,
+  forge: GitForge,
+  mr: { id: number; description: string },
+  botUsername: string | undefined,
+) {
+  const { options, repo } = context
+  const usage: ReviewUsage = { turns: 0 }
+  const messages: ReviewMessages = deps.messages
+    ? await resolveMessages({
+        catalog: reviewMessageCatalog,
+        locale: reviewLocale(options.language, mr.description),
+        store: deps.messages,
+        ...(context.agent && {
+          translator: agentTranslator({
+            agent: context.agent,
+            ...(context.signal && { signal: context.signal }),
+            track: (result) => {
+              usage.turns += result.turns
+              if (result.costUsd !== undefined)
+                usage.costUsd = (usage.costUsd ?? 0) + result.costUsd
+              if (result.usage) {
+                usage.inputTokens = (usage.inputTokens ?? 0) + result.usage.inputTokens
+                usage.outputTokens = (usage.outputTokens ?? 0) + result.usage.outputTokens
+              }
+            },
+          }),
+        }),
+        ...(context.log && { log: context.log }),
+      })
+    : englishReviewMessages
+  const policy = options.progressNote ?? 'first'
+  const first =
+    policy !== 'first' ||
+    !context.history ||
+    !(await previousReview(context.history.analyses, repo, mr.id).catch(() => undefined))
+  const owner = (await forge.getCurrentUser?.().catch(() => undefined))?.username ?? botUsername
+  const progress =
+    policy !== 'never' && first
+      ? await startProgress({
+          forge,
+          repo: repo.path,
+          mergeRequest: mr.id,
+          messages,
+          ...(owner && { owner }),
+          ...(context.log && { log: context.log }),
+        })
+      : undefined
+  return { messages, usage, progress }
 }
 
 /**
@@ -206,123 +315,138 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         context.log?.(`not reviewing: ${skip}`)
         return { data: skippedReview(mr, skip), ref: reviewRef(mr.id) }
       }
-      const dir = await headCheckout(context, mr.headSha)
-      const knowledge = deps.knowledge
-      const knowledgeRepo = { ...repo, teams: knowledge?.teamsOf?.(repo) ?? [] }
-      const toolsets =
-        dir && deps.toolsetsFor
-          ? deps.toolsetsFor({ repo, dir })
-          : knowledge
-            ? [
-                knowledgeTools({
-                  access: knowledge.access,
-                  repo: knowledgeRepo,
-                  taskKind: 'review',
-                  actor: 'agent:review',
-                }),
-              ]
+      // Posted before the checkout, which can take a while on large repositories.
+      const texts = options.replyTo
+        ? undefined
+        : await startTexts(context, deps, forge, mr, botUsername)
+      // A failed run must not leave the progress note saying the review is running.
+      const reviewOrReply = async () => {
+        const dir = await headCheckout(context, mr.headSha)
+        const knowledge = deps.knowledge
+        const knowledgeRepo = { ...repo, teams: knowledge?.teamsOf?.(repo) ?? [] }
+        const toolsets =
+          dir && deps.toolsetsFor
+            ? deps.toolsetsFor({ repo, dir })
+            : knowledge
+              ? [
+                  knowledgeTools({
+                    access: knowledge.access,
+                    repo: knowledgeRepo,
+                    taskKind: 'review',
+                    actor: 'agent:review',
+                  }),
+                ]
+              : undefined
+
+        if (options.replyTo) {
+          if (!context.agent) throw new Error('answering a thread needs an agent')
+          const started = performance.now()
+          const usage: ReviewUsage = { turns: 0 }
+          const guide = deps.guideFor
+            ? await deps
+                .guideFor(repo, { docs: dir ? await readGuidelines(dir) : [], query: mr.title })
+                .catch((error: unknown) => {
+                  context.log?.(
+                    `guide lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+                  )
+                  return undefined
+                })
             : undefined
-
-      if (options.replyTo) {
-        if (!context.agent) throw new Error('answering a thread needs an agent')
-        const started = performance.now()
-        const usage: ReviewUsage = { turns: 0 }
-        const guide = deps.guideFor
-          ? await deps
-              .guideFor(repo, { docs: dir ? await readGuidelines(dir) : [], query: mr.title })
-              .catch((error: unknown) => {
-                context.log?.(
-                  `guide lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-                )
-                return undefined
-              })
-          : undefined
-        const reply = await replyToThread({
-          forge,
-          repo,
-          mr: mr.id,
-          discussion: options.replyTo,
-          agent: context.agent,
-          ...(dir ? { dir } : {}),
-          ...(botUsername ? { botUsername } : {}),
-          ...(options.language ? { language: options.language } : {}),
-          ...(toolsets ? { toolsets } : {}),
-          ...(guide?.text ? { context: guide.text } : {}),
-          usage,
-          ...(context.signal ? { signal: context.signal } : {}),
-        })
-        const data: ReviewData = {
-          mergeRequest: {
-            id: mr.id,
-            title: mr.title,
-            webUrl: mr.webUrl,
-            sourceBranch: mr.sourceBranch,
-            targetBranch: mr.targetBranch,
-            author: mr.author,
-          },
-          head: mr.headSha,
-          mode: 'reply',
-          verdict: 'skipped',
-          summary: reply.replied
-            ? `Answered thread ${reply.discussionId} (${reply.action}).`
-            : `Did not answer: ${reply.reason ?? 'nothing to do'}.`,
-          comments: [],
-          threads: reply.replied
-            ? [
-                {
-                  discussionId: reply.discussionId,
-                  action: reply.resolved ? 'resolved' : 'replied',
-                  reason: reply.action,
-                },
-              ]
-            : [],
-          skipped: [],
-          stats: {
-            files: 0,
-            changedLines: 0,
-            dropped: { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0 },
-          },
-          approved: false,
-          checks: [],
-          ...(usage.turns ? { usage } : {}),
-          ...(guide?.text && guide.scopes.length ? { guideScopes: guide.scopes } : {}),
-          durationMs: Math.round(performance.now() - started),
-        }
-        return { data, ref: reviewRef(mr.id) }
-      }
-
-      const guideFor = deps.guideFor
-      const checks = deps.checksFor
-        ? await deps.checksFor(repo).catch((error: unknown) => {
-            context.log?.(
-              `checks setup failed: ${error instanceof Error ? error.message : String(error)}`,
-            )
-            return deps.checks
+          const reply = await replyToThread({
+            forge,
+            repo,
+            mr: mr.id,
+            discussion: options.replyTo,
+            agent: context.agent,
+            ...(dir ? { dir } : {}),
+            ...(botUsername ? { botUsername } : {}),
+            ...(options.language ? { language: options.language } : {}),
+            ...(toolsets ? { toolsets } : {}),
+            ...(guide?.text ? { context: guide.text } : {}),
+            usage,
+            ...(context.signal ? { signal: context.signal } : {}),
           })
-        : deps.checks
-      const tests = deps.testsExpected ? await deps.testsExpected(repo) : true
-      const data = await reviewMergeRequest({
-        repo,
-        forge,
-        ...(dir ? { dir } : {}),
-        runner: context.runner,
-        ...(context.agent ? { agent: context.agent } : {}),
-        ...(context.history ? { analyses: context.history.analyses } : {}),
-        options,
-        ...(checks ? { checks } : {}),
-        ...(guideFor
-          ? { guide: (docs, query, files) => guideFor(repo, { docs, query, files }) }
-          : {}),
-        ...(toolsets ? { toolsets } : {}),
-        ...(!tests && { tests: false as const }),
-        ...(botUsername ? { botUsername } : {}),
-        ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),
-        goGuidelines: deps.goGuidelines ?? (() => bundledGoGuidelines()),
-        ...(deps.steps ? { steps: deps.steps } : {}),
-        ...(context.log ? { log: context.log } : {}),
-        ...(context.signal ? { signal: context.signal } : {}),
-      })
-      return { data, ref: reviewRef(mr.id) }
+          const data: ReviewData = {
+            mergeRequest: {
+              id: mr.id,
+              title: mr.title,
+              webUrl: mr.webUrl,
+              sourceBranch: mr.sourceBranch,
+              targetBranch: mr.targetBranch,
+              author: mr.author,
+            },
+            head: mr.headSha,
+            mode: 'reply',
+            verdict: 'skipped',
+            summary: reply.replied
+              ? `Answered thread ${reply.discussionId} (${reply.action}).`
+              : `Did not answer: ${reply.reason ?? 'nothing to do'}.`,
+            comments: [],
+            threads: reply.replied
+              ? [
+                  {
+                    discussionId: reply.discussionId,
+                    action: reply.resolved ? 'resolved' : 'replied',
+                    reason: reply.action,
+                  },
+                ]
+              : [],
+            skipped: [],
+            stats: {
+              files: 0,
+              changedLines: 0,
+              dropped: { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0 },
+            },
+            approved: false,
+            checks: [],
+            ...(usage.turns ? { usage } : {}),
+            ...(guide?.text && guide.scopes.length ? { guideScopes: guide.scopes } : {}),
+            durationMs: Math.round(performance.now() - started),
+          }
+          return { data, ref: reviewRef(mr.id) }
+        }
+
+        const guideFor = deps.guideFor
+        const checks = deps.checksFor
+          ? await deps.checksFor(repo).catch((error: unknown) => {
+              context.log?.(
+                `checks setup failed: ${error instanceof Error ? error.message : String(error)}`,
+              )
+              return deps.checks
+            })
+          : deps.checks
+        const tests = deps.testsExpected ? await deps.testsExpected(repo) : true
+        const data = await reviewMergeRequest({
+          repo,
+          forge,
+          ...(dir ? { dir } : {}),
+          runner: context.runner,
+          ...(context.agent ? { agent: context.agent } : {}),
+          ...(context.history ? { analyses: context.history.analyses } : {}),
+          options,
+          ...(checks ? { checks } : {}),
+          ...(guideFor
+            ? { guide: (docs, query, files) => guideFor(repo, { docs, query, files }) }
+            : {}),
+          ...(toolsets ? { toolsets } : {}),
+          ...(!tests && { tests: false as const }),
+          ...(botUsername ? { botUsername } : {}),
+          ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),
+          goGuidelines: deps.goGuidelines ?? (() => bundledGoGuidelines()),
+          ...(deps.steps ? { steps: deps.steps } : {}),
+          ...(context.log ? { log: context.log } : {}),
+          ...(context.signal ? { signal: context.signal } : {}),
+          ...(texts && { messages: texts.messages }),
+        })
+        await texts?.progress?.finish()
+        return { data: texts ? addUsage(data, texts.usage) : data, ref: reviewRef(mr.id) }
+      }
+      try {
+        return await reviewOrReply()
+      } catch (error) {
+        await texts?.progress?.fail()
+        throw error
+      }
     },
   })
 }

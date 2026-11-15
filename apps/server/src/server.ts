@@ -51,6 +51,7 @@ import {
   retireSeededSchedules,
   seedDefaults,
 } from '@holtkeeper/managed-config'
+import { kvMessageStore } from '@holtkeeper/messages'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
 import { createHttpRegistry, createPropagateAnalyzer } from '@holtkeeper/propagate'
 import {
@@ -341,6 +342,7 @@ export async function startServer(
       }),
     testsExpected,
     goGuidelines: goGuidelinesSource(store.kv),
+    ...(store.kv && { messages: kvMessageStore(store.kv) }),
     botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
     mediaReviewer: createMediaReviewer({
       cache: mediaCache,

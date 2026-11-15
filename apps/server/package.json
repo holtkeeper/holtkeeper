@@ -51,6 +51,7 @@
     "@holtkeeper/limits": "workspace:*",
     "@holtkeeper/managed-config": "workspace:*",
     "@holtkeeper/media": "workspace:*",
+    "@holtkeeper/messages": "workspace:*",
     "@holtkeeper/mr-policies": "workspace:*",
     "@holtkeeper/notify": "workspace:*",
     "@holtkeeper/propagate": "workspace:*",

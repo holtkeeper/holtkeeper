@@ -5,6 +5,7 @@ export type * from './settings-people.ts'
 export type * from './settings-ai.ts'
 export type * from './settings-analyzers.ts'
 export type * from './settings-system.ts'
+export type * from './settings-messages.ts'
 
 export type { Action, Grant, Principal, Scope } from '@holtkeeper/access'
 export {

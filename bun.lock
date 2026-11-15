@@ -81,6 +81,7 @@
         "@holtkeeper/limits": "workspace:*",
         "@holtkeeper/managed-config": "workspace:*",
         "@holtkeeper/media": "workspace:*",
+        "@holtkeeper/messages": "workspace:*",
         "@holtkeeper/mr-policies": "workspace:*",
         "@holtkeeper/notify": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",
@@ -773,6 +774,14 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/messages": {
+      "name": "@holtkeeper/messages",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/mr-policies": {
       "name": "@holtkeeper/mr-policies",
       "version": "0.0.0",
@@ -874,6 +883,7 @@
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/go-source": "workspace:*",
+        "@holtkeeper/messages": "workspace:*",
         "@holtkeeper/quality": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
@@ -1387,6 +1397,8 @@
     "@holtkeeper/managed-config": ["@holtkeeper/managed-config@workspace:packages/managed-config"],
 
     "@holtkeeper/media": ["@holtkeeper/media@workspace:packages/media"],
+
+    "@holtkeeper/messages": ["@holtkeeper/messages@workspace:packages/messages"],
 
     "@holtkeeper/mr-policies": ["@holtkeeper/mr-policies@workspace:packages/mr-policies"],
 

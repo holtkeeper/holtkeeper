@@ -222,6 +222,19 @@ describe('editable notes', () => {
     expect(mr.notes).toEqual(['Deployed'])
   })
 
+  test('deletes a standalone note, and a note already gone is fine', async () => {
+    const { server, forge, mr } = setup()
+    const first = await forge.postMergeRequestNote('g/a', 1, 'Working')
+    await forge.postMergeRequestNote('g/a', 1, 'Other')
+    await forge.deleteMergeRequestNote('g/a', 1, first.noteId)
+    expect(server.calls.at(-1)).toMatchObject({
+      method: 'DELETE',
+      url: `${API}/notes/${first.noteId}`,
+    })
+    expect(mr.notes).toEqual(['Other'])
+    await forge.deleteMergeRequestNote('g/a', 1, first.noteId)
+  })
+
   test('replies in a thread and edits the reply', async () => {
     const { forge, server, mr } = setup()
     const discussion = server.addDiscussion(mr, [{ body: 'q' }])

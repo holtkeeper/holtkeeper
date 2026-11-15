@@ -43,6 +43,7 @@ import {
 } from '../../../ui/index.ts'
 import { useRunJob } from '../../jobs/RunJobDialog.tsx'
 import { useSession } from '../../shell/session.ts'
+import { BotMessages } from '../BotMessages.tsx'
 import { useSectionHeader } from '../section-header.ts'
 import { SettingEntries } from '../SettingEntries.tsx'
 
@@ -500,6 +501,7 @@ export function AnalyzersSection() {
         Audit log.
         {rows.some(needsLook) ? ' Analyzers with failed or budget-stopped runs need a look.' : ''}
       </p>
+      <BotMessages />
       {current ? (
         <AnalyzerSheet
           key={current.kind}

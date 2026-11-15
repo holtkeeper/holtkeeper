@@ -559,6 +559,8 @@ export interface GitForge {
   ): Promise<{ noteId: number; discussionId?: string }>
   /** Replaces the body of a note of the token's own account. */
   updateMergeRequestNote?(repo: string, id: number, noteId: number, body: string): Promise<void>
+  /** Deletes a note of the token's own account; a note that is already gone is not an error. */
+  deleteMergeRequestNote?(repo: string, id: number, noteId: number): Promise<void>
   resolveDiscussion?(
     repo: string,
     id: number,

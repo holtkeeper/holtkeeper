@@ -1057,6 +1057,16 @@ export class FakeGitLab {
       if (!known) return json(404, { message: '404 Note Not Found' })
       return this.page(url, this.awards.get(Number(rest[1])) ?? [])
     }
+    if (rest[0] === 'notes' && method === 'DELETE' && rest[1]) {
+      const id = Number(rest[1])
+      const standalone = this.standaloneNotes.get(id)
+      if (standalone?.mr !== mr) return json(404, { message: '404 Note Not Found' })
+      mr.notes.splice(standalone.index, 1)
+      this.standaloneNotes.delete(id)
+      for (const other of this.standaloneNotes.values())
+        if (other.mr === mr && other.index > standalone.index) other.index--
+      return new Response(null, { status: 204 })
+    }
     if (rest[0] === 'notes' && method === 'PUT' && rest[1]) {
       const standalone = this.standaloneNotes.get(Number(rest[1]))
       if (standalone?.mr === mr) {

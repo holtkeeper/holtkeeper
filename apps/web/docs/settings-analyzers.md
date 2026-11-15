@@ -26,6 +26,16 @@ The header's primary **Run analyzer…** (`useRunJob`, `analyses:run`) opens the
 
 Analyzers without an `analyzers.<kind>` setting (run-only ones such as `guide`) say they have no options.
 
+## Bot messages
+
+Below the table, `features/settings/BotMessages.tsx` (hooks in `api/settings-messages.ts`, global `settings:read`; changes need global `settings:write`) manages the translations of the fixed texts Holtkeeper posts on merge requests (`/api/messages`, see [@holtkeeper/server](../../server/docs/README.md#bot-messages)):
+
+- **Translate automatically** (on by default) and **Also keep in English**: extra terms on top of the built-in ones, which are listed.
+- Per catalog, its languages with how many messages are translated, edited by a person, outdated (the English text changed) or missing, and the last failed translation; a language code field opens a language that has no translations yet.
+- **Edit** opens a dialog with every message: English text and translator note, state, translation, **Edit** (save, cancel) and **Reset**; **Translate again** (confirmed) drops the model's translations of the language and keeps people's.
+
+Without a key-value store the block says every text is posted in English.
+
 ## Tests
 
 `lib/analyzer-catalog.test.ts`: state, scope and triggers from rules and freshness, overrides, counts, filters and health words.

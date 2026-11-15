@@ -24,7 +24,7 @@ export type FilterableFeature = Exclude<AiFeature, 'other'>
 
 /** The task kinds each named feature covers; `other` is every kind none of them lists. */
 export const featureTaskKinds: Readonly<Record<FilterableFeature, readonly string[]>> = {
-  reviews: ['review', 'triage'],
+  reviews: ['review', 'triage', 'translate'],
   tasks: ['write-task', 'fix', 'port', 'propagate', 'upgrade', 'propagate-fix', 'tests'],
   chat: ['chat', 'chat-summary'],
   knowledge: [

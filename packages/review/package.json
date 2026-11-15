@@ -15,6 +15,7 @@
     "@holtkeeper/exec": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/go-source": "workspace:*",
+    "@holtkeeper/messages": "workspace:*",
     "@holtkeeper/quality": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/store": "workspace:*",
