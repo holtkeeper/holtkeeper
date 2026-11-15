@@ -29,7 +29,7 @@ describe('sshCloneUrl', () => {
 describe('gitSshCommand', () => {
   test('pins the key and known hosts and quotes paths for the shell', () => {
     expect(gitSshCommand("/tmp/it's/id", '/tmp/kh')).toBe(
-      "ssh -i '/tmp/it'\\''s/id' -o IdentitiesOnly=yes -o UserKnownHostsFile='/tmp/kh' -o StrictHostKeyChecking=yes -o BatchMode=yes -F /dev/null",
+      "ssh -i '/tmp/it'\\''s/id' -o IdentitiesOnly=yes -o UserKnownHostsFile='/tmp/kh' -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -F /dev/null",
     )
   })
 })

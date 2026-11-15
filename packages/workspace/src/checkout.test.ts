@@ -38,6 +38,15 @@ describe('checkout credentials', () => {
       const clone = calls.find((call) => call.command.includes('clone'))
       expect(clone?.command).toContain('--mirror')
       expect(clone?.options.env?.HOLTKEEPER_GIT_PASSWORD).toBe('s3cret')
+      // git has no network timeout of its own; a stalled transfer must fail, not hang.
+      expect(clone?.options.timeoutMs).toBe(20 * 60_000)
+      expect(clone?.options.env).toMatchObject({
+        GIT_CONFIG_KEY_2: 'http.lowSpeedLimit',
+        GIT_CONFIG_VALUE_2: '1000',
+        GIT_CONFIG_KEY_3: 'http.lowSpeedTime',
+        GIT_CONFIG_VALUE_3: '120',
+      })
+      expect(calls.every((call) => call.options.timeoutMs !== undefined)).toBeTrue()
       expect(calls.some((call) => call.command.join(' ').includes('s3cret'))).toBeFalse()
       const local = calls.filter((call) => !call.command.includes('clone'))
       expect(

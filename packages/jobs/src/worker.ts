@@ -3,7 +3,7 @@ import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AnalysisRecord, AnalysisStore, Job, JobStore, KvStore } from '@holtkeeper/store'
 
-import type { ContextFor } from './context.ts'
+import type { ContextFor, PreparedContext } from './context.ts'
 import { type JobLog, type JobLogOptions, createJobLog } from './log.ts'
 import { removeWorker, touchWorker } from './registry.ts'
 import { claimRulesOf } from './wait.ts'
@@ -412,9 +412,19 @@ export function createWorker(options: WorkerOptions): Worker {
         throw new PermanentJobError(`invalid options for ${analyzer.kind}: ${issues.join('; ')}`)
       }
 
-      const prepared = await step('prepare', () =>
-        abortable(contextFor(job, analyzer, { signal, log, step, options: parsed.data }), signal),
-      )
+      let preparing: Promise<PreparedContext> | undefined
+      const prepared = await step('prepare', () => {
+        preparing = contextFor(job, analyzer, { signal, log, step, options: parsed.data })
+        return abortable(preparing, signal)
+      }).catch((error: unknown) => {
+        // The job gave up waiting; whatever the preparation still finishes must be released.
+        if (signal.aborted)
+          void preparing?.then(
+            (late) => late.cleanup(),
+            () => {},
+          )
+        throw error
+      })
       let result: {
         data: unknown
         ref?: string

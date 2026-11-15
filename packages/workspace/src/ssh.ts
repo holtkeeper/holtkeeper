@@ -40,7 +40,10 @@ export function sshCloneUrl(cloneUrl: string, user = 'git'): string {
 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
-/** The `GIT_SSH_COMMAND` that uses only `keyFile` and trusts only hosts in `knownHostsFile`. */
+/**
+ * The `GIT_SSH_COMMAND` that uses only `keyFile`, trusts only hosts in `knownHostsFile` and gives
+ * up on a host that does not connect within 30 s or stops answering keepalives for a minute.
+ */
 export function gitSshCommand(keyFile: string, knownHostsFile: string): string {
   return [
     'ssh',
@@ -54,6 +57,12 @@ export function gitSshCommand(keyFile: string, knownHostsFile: string): string {
     'StrictHostKeyChecking=yes',
     '-o',
     'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=30',
+    '-o',
+    'ServerAliveInterval=15',
+    '-o',
+    'ServerAliveCountMax=4',
     '-F',
     '/dev/null',
   ].join(' ')

@@ -42,6 +42,12 @@ export interface CheckoutOptions {
   signal?: AbortSignal
   /** Parent of the per-checkout temporary directory. Default: the OS temp directory. */
   workDir?: string
+  /**
+   * Longest a clone, fetch or push may take before git is stopped. Default 20 minutes. A stalled
+   * connection fails sooner: HTTP transfers slower than 1 KB/s for 2 minutes are aborted, and SSH
+   * gives up on a peer that does not answer keepalives for a minute.
+   */
+  remoteTimeoutMs?: number
   log?: (line: string) => void
 }
 
@@ -79,17 +85,26 @@ const passwordVariable = 'HOLTKEEPER_GIT_PASSWORD'
 const credentialHelper = `!f() { test "$1" = get || exit 0; printf 'username=%s\\npassword=%s\\n' "$${usernameVariable}" "$${passwordVariable}"; }; f`
 
 // Repository scripts can write the shared mirror's hooks and config; Holtkeeper's own git runs
-// neither hooks nor an fsmonitor command from there.
+// neither hooks nor an fsmonitor command from there. git has no network timeout of its own: without
+// the low-speed limit a stalled HTTP connection hangs the fetch, and with it the mirror, for good.
 const baseEnv = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_ASKPASS: undefined,
   SSH_ASKPASS: undefined,
-  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_COUNT: '4',
   GIT_CONFIG_KEY_0: 'core.hooksPath',
   GIT_CONFIG_VALUE_0: '/dev/null',
   GIT_CONFIG_KEY_1: 'core.fsmonitor',
   GIT_CONFIG_VALUE_1: 'false',
+  GIT_CONFIG_KEY_2: 'http.lowSpeedLimit',
+  GIT_CONFIG_VALUE_2: '1000',
+  GIT_CONFIG_KEY_3: 'http.lowSpeedTime',
+  GIT_CONFIG_VALUE_3: '120',
 }
+
+const REMOTE_TIMEOUT_MS = 20 * 60_000
+/** Local git calls (rev-parse, worktree add, prune) on a slow shared volume still finish in this. */
+const LOCAL_TIMEOUT_MS = 10 * 60_000
 
 const remoteGit = (args: string[], credentials: GitCredentials | undefined) =>
   credentials
@@ -131,25 +146,6 @@ const exists = (path: string) =>
     () => false,
   )
 
-const locks = new Map<string, Promise<unknown>>()
-
-/**
- * Runs `task` after every earlier task for the same mirror in this process has settled, holding
- * the mirror's file lock against other processes sharing the cache directory.
- */
-function serialized<T>(key: string, task: () => Promise<T>): Promise<T> {
-  const previous = locks.get(key) ?? Promise.resolve()
-  const locked = () => withMirrorLock(key, task)
-  const next = previous.then(locked, locked)
-  const settled: Promise<unknown> = next
-    .catch(() => undefined)
-    .finally(() => {
-      if (locks.get(key) === settled) locks.delete(key)
-    })
-  locks.set(key, settled)
-  return next
-}
-
 const LOCK_REASON = 'holtkeeper'
 const ABANDONED_MS = 86_400_000
 
@@ -180,11 +176,26 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
   const cloneUrl = ssh ? sshCloneUrl(options.cloneUrl, ssh.user) : options.cloneUrl
   const log = options.log ?? (() => {})
   const mirror = join(cacheDir, mirrorName(cloneUrl))
+  const remoteTimeoutMs = options.remoteTimeoutMs ?? REMOTE_TIMEOUT_MS
+  // The mirror lock (in this process too) and every git call honor `signal`, so an aborted job
+  // stops its git and leaves the mirror to the next one instead of holding it while git hangs.
+  const locked = <T>(task: () => Promise<T>, abortable = true) =>
+    withMirrorLock(mirror, task, { log, ...(abortable && signal ? { signal } : {}) })
   const git = (args: string[], cwd: string) =>
-    runChecked(runner, ['git', ...args], { cwd, env: baseEnv, ...(signal ? { signal } : {}) })
+    runChecked(runner, ['git', ...args], {
+      cwd,
+      env: baseEnv,
+      timeoutMs: LOCAL_TIMEOUT_MS,
+      ...(signal ? { signal } : {}),
+    })
   const remote = (args: string[], cwd: string) => {
     const run = (command: string[], env: Record<string, string | undefined>) =>
-      runChecked(runner, command, { cwd, env, ...(signal ? { signal } : {}) })
+      runChecked(runner, command, {
+        cwd,
+        env,
+        timeoutMs: remoteTimeoutMs,
+        ...(signal ? { signal } : {}),
+      })
     if (ssh)
       return withSshEnv(ssh, options.workDir, (env) =>
         run(['git', '-c', 'credential.helper=', ...args], { ...baseEnv, ...env }),
@@ -193,7 +204,7 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
     return run(call.command, call.env)
   }
 
-  const { sha, ref, dir, temp } = await serialized(mirror, async () => {
+  const { sha, ref, dir, temp } = await locked(async () => {
     await mkdir(cacheDir, { recursive: true })
     if (await exists(join(mirror, 'HEAD'))) {
       log(`fetching ${mirrorName(cloneUrl)}`)
@@ -261,6 +272,7 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
     const result = await runner.run(['git', 'rev-parse', '--verify', '--quiet', expression], {
       cwd: dir,
       env: baseEnv,
+      timeoutMs: LOCAL_TIMEOUT_MS,
     })
     return result.exitCode === 0 ? result.stdout.trim() : undefined
   }
@@ -278,7 +290,7 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
       const staged = await runChecked(
         runner,
         ['git', 'diff', '--cached', '--quiet'],
-        { cwd: dir, env: baseEnv },
+        { cwd: dir, env: baseEnv, timeoutMs: LOCAL_TIMEOUT_MS },
         [0, 1],
       )
       if (staged.exitCode === 0) return undefined
@@ -286,7 +298,7 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
         runChecked(
           runner,
           ['git', ...config, 'commit', '--quiet', '--no-verify', '--message', message],
-          { cwd: dir, env: { ...baseEnv, ...identityEnv } },
+          { cwd: dir, env: { ...baseEnv, ...identityEnv }, timeoutMs: LOCAL_TIMEOUT_MS },
         )
       await (options.signing ? withSigningConfig(options.signing, options.workDir, run) : run([]))
       const head = await rev('HEAD')
@@ -313,23 +325,20 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
         ],
         dir,
       )
-      await serialized(mirror, () => git(['update-ref', remoteRef, head], mirror))
+      await locked(() => git(['update-ref', remoteRef, head], mirror))
       log(`pushed ${head.slice(0, 12)} to ${branch}`)
       return { pushed: true, sha: head }
     },
     cleanup() {
-      cleaned ??= serialized(mirror, async () => {
+      // Cleanup runs after an abort as well, so it ignores `signal`.
+      const local = { cwd: mirror, env: baseEnv, timeoutMs: LOCAL_TIMEOUT_MS }
+      cleaned ??= locked(async () => {
         await runner
-          .run(['git', 'worktree', 'remove', '--force', '--force', dir], {
-            cwd: mirror,
-            env: baseEnv,
-          })
+          .run(['git', 'worktree', 'remove', '--force', '--force', dir], local)
           .catch(() => undefined)
         await rm(temp, { recursive: true, force: true })
-        await runner
-          .run(['git', 'worktree', 'prune'], { cwd: mirror, env: baseEnv })
-          .catch(() => undefined)
-      })
+        await runner.run(['git', 'worktree', 'prune'], local).catch(() => undefined)
+      }, false)
       return cleaned
     },
   }

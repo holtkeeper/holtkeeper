@@ -431,6 +431,28 @@ describe('worker', () => {
     expect(cleanups).toBe(1)
   })
 
+  test('releases a preparation that finishes after the job timed out', async () => {
+    let finish!: () => void
+    const late: ContextFor = (job, target, io) =>
+      new Promise((resolve) => {
+        finish = () => void contextFor(job, target, io).then(resolve)
+      })
+    const worker = createWorker({
+      store,
+      analyzers: [analyzer('plain', async () => ({ data: {} }))],
+      contextFor: late,
+      now: () => clock,
+      timeoutMs: 20,
+    })
+    await enqueue('plain', { maxAttempts: 1 })
+    const job = await worker.runNext()
+    expect(job?.error).toContain('timed out')
+    expect(cleanups).toBe(0)
+    finish()
+    await Bun.sleep(10)
+    expect(cleanups).toBe(1)
+  })
+
   test('a canceled job stops at the next heartbeat and stores nothing', async () => {
     let started!: () => void
     const running = new Promise<void>((resolve) => {

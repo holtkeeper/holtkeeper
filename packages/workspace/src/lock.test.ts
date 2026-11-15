@@ -63,4 +63,29 @@ describe('withMirrorLock', () => {
     }).catch(() => 'aborted')
     expect(outcome).toBe('aborted')
   })
+
+  test('says once who holds a busy lock', async () => {
+    const mirror = await mirrorIn()
+    await writeFile(`${mirror}.lock`, 'busy-host 42 x')
+    const lines: string[] = []
+    setTimeout(() => void rm(`${mirror}.lock`, { force: true }), 60)
+    await withMirrorLock(mirror, async () => {}, { pollMs: 5, log: (line) => lines.push(line) })
+    expect(lines).toEqual(['waiting for the mirror lock held by busy-host pid 42'])
+  })
+
+  test('a holder that hangs stops refreshing the lock so others take it over', async () => {
+    const mirror = await mirrorIn()
+    const lines: string[] = []
+    const { promise: holding, resolve: release } = Promise.withResolvers<void>()
+    const hung = withMirrorLock(mirror, () => holding, {
+      refreshMs: 10,
+      maxHoldMs: 40,
+      log: (line) => lines.push(line),
+    })
+    const next = await withMirrorLock(mirror, async () => 'ran', { pollMs: 5, staleMs: 100 })
+    expect(next).toBe('ran')
+    expect(lines.some((line) => line.includes('no longer refreshing'))).toBeTrue()
+    release()
+    await hung
+  })
 })

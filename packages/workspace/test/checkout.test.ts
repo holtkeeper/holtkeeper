@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 
 import { localRunner, runChecked } from '@holtkeeper/exec'
 
-import { checkout } from '../src/index.ts'
+import { checkout, mirrorName } from '../src/index.ts'
 
 const isolated = {
   GIT_CONFIG_GLOBAL: '/dev/null',
@@ -158,4 +158,52 @@ describe.skipIf(!Bun.which('git'))('checkout with real git', () => {
     )
     expect(leftovers).toEqual([])
   })
+
+  test('an aborted fetch from a stalled remote frees the mirror for the next checkout', async () => {
+    // Accepts connections and never answers, like a peer that went away mid-transfer.
+    const stalled = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } })
+    try {
+      const url = `http://127.0.0.1:${stalled.port}/team/widgets.git`
+      const cacheDir = join(root, 'stalled-cache')
+      const mirror = join(cacheDir, mirrorName(url))
+      await git(root, 'clone', '-q', '--mirror', origin, mirror)
+      await git(mirror, 'remote', 'set-url', 'origin', url)
+      const helpers = () =>
+        Bun.spawnSync(['ps', '-eo', 'command'])
+          .stdout.toString()
+          .split('\n')
+          .filter((line) => line.includes(url))
+
+      const first = new AbortController()
+      setTimeout(() => first.abort(new Error('job timed out')), 300)
+      const started = Date.now()
+      const aborted = await checkout({
+        cloneUrl: url,
+        cacheDir,
+        runner: localRunner,
+        workDir: root,
+        signal: first.signal,
+      }).catch((error: unknown) => error)
+      expect(aborted).toBeInstanceOf(Error)
+      expect(Date.now() - started).toBeLessThan(5000)
+      expect(await Bun.file(`${mirror}.lock`).exists()).toBeFalse()
+      expect(helpers()).toEqual([])
+
+      const lines: string[] = []
+      const timedOut = await checkout({
+        cloneUrl: url,
+        cacheDir,
+        runner: localRunner,
+        workDir: root,
+        remoteTimeoutMs: 300,
+        log: (line) => lines.push(line),
+      }).catch((error: unknown) => error)
+      expect(String(timedOut)).toContain('fetch')
+      expect(lines[0]).toStartWith('fetching')
+      expect(await Bun.file(`${mirror}.lock`).exists()).toBeFalse()
+      expect(helpers()).toEqual([])
+    } finally {
+      stalled.stop(true)
+    }
+  }, 20_000)
 })
