@@ -1,6 +1,6 @@
 import type { Principal, RepoTarget } from '@holtkeeper/access'
 import type { LearningSourceKind } from '@holtkeeper/api'
-import type { Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
+import type { DiffFile, Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
 import { reactionCounts } from '@holtkeeper/forge'
 import {
   type CaptureOutcome,
@@ -13,7 +13,14 @@ import {
   repoKey,
   scopesFor,
 } from '@holtkeeper/guide'
-import { commentFinding, markerOf, reviewRef } from '@holtkeeper/review'
+import {
+  commentFinding,
+  findingOrigins,
+  markerOf,
+  outcomeFields,
+  reviewDataSchema,
+  reviewRef,
+} from '@holtkeeper/review'
 import {
   type LearningAutoAcceptSource,
   type LearningsAutoAccept,
@@ -186,22 +193,63 @@ export async function captureReplyLearning(
   return accepted ? { ...outcome, candidate: accepted } : outcome
 }
 
+/** How a merge request ended, as `harvestReviewSignals` needs it. */
+export interface EndedMergeRequest {
+  state: 'merged' | 'closed'
+  /** Head of the merge request when it ended; read from the forge when the event did not carry it. */
+  headSha?: string
+  /** The forge account Holtkeeper comments as, to tell its notes from replies of people. */
+  botUsername?: string
+}
+
 /**
- * Reads 👍/👎 on every inline comment Holtkeeper posted on a merge request and stores the counts
- * per comment under its finding category. Forge reads only, no LLM; reading again replaces the
- * counts. Merge requests without a stored `review` record (Holtkeeper never reviewed them) and
- * forges without `listNoteReactions` are skipped before any forge request. Returns how many
- * comments were read.
+ * Reads what became of every inline comment Holtkeeper posted on a merge request that has ended
+ * and stores it per comment under its finding category: the 👍/👎 counts, whether the commented
+ * lines changed after the review (`compareCommits` from the head the comment was written at to the
+ * final head), the thread's state, replies of people, and the severity, model and prompt version
+ * of the review run that first posted the finding. Forge reads only, no LLM; reading again
+ * replaces the signals. Merge requests without a stored `review` record (Holtkeeper never reviewed
+ * them) and forges without `listNoteReactions` are skipped before any forge request. A forge that
+ * cannot compare commits, or fails to, leaves the outcome of open threads `unknown`. Returns how
+ * many comments were read.
  */
-export async function harvestReactions(
+export async function harvestReviewSignals(
   deps: Pick<ServerDeps, 'store' | 'now'>,
   forge: GitForge | undefined,
   repo: RepoRef,
   mergeRequest: number,
+  ended: EndedMergeRequest,
 ): Promise<number> {
   if (!forge?.listDiscussions || !forge.listNoteReactions) return 0
-  const reviews = await deps.store.analyses.heads({ repo, kind: 'review', limit: 500 })
-  if (!reviews.some((head) => head.ref === reviewRef(mergeRequest))) return 0
+  const heads = await deps.store.analyses.heads({ repo, kind: 'review', limit: 500 })
+  if (!heads.some((head) => head.ref === reviewRef(mergeRequest))) return 0
+  const records = await deps.store.analyses.list({ repo, kind: 'review', limit: 500 })
+  const runs = records
+    .filter((record) => record.ref === reviewRef(mergeRequest))
+    .toReversed()
+    .flatMap((record) => {
+      const parsed = reviewDataSchema.safeParse(record.data)
+      return parsed.success ? [parsed.data] : []
+    })
+  const origins = findingOrigins(runs)
+  const finalHead =
+    ended.headSha ??
+    (await forge.getMergeRequest?.(repo.path, mergeRequest).then(
+      (mr) => mr.headSha,
+      () => undefined,
+    ))
+  const changesSince = new Map<string, Promise<DiffFile[] | undefined>>()
+  const changes = (head: string) => {
+    if (!finalHead || !forge.compareCommits) return Promise.resolve(undefined)
+    const known = changesSince.get(head)
+    if (known) return known
+    const read =
+      head === finalHead
+        ? Promise.resolve<DiffFile[]>([])
+        : forge.compareCommits(repo.path, head, finalHead).catch(() => undefined)
+    changesSince.set(head, read)
+    return read
+  }
   const discussions = await forge.listDiscussions(repo.path, mergeRequest)
   let read = 0
   for (const discussion of discussions) {
@@ -209,8 +257,11 @@ export async function harvestReactions(
     if (!first || markerOf(first.body) === undefined) continue
     const finding = commentFinding(first.body)
     if (!finding) continue
+    const origin = origins.get(finding.findingId)
     // oxlint-disable-next-line no-await-in-loop -- one request per comment, kept sequential for the forge's rate limit
     const counts = reactionCounts(await forge.listNoteReactions(repo.path, mergeRequest, first.id))
+    // oxlint-disable-next-line no-await-in-loop -- compared once per head, then cached
+    const diff = origin ? await changes(origin.head) : undefined
     // oxlint-disable-next-line no-await-in-loop
     await deps.store.learnings.putReactions({
       repo: repoKey(repo),
@@ -219,6 +270,13 @@ export async function harvestReactions(
       category: finding.category,
       findingId: finding.findingId,
       ...counts,
+      ...outcomeFields({
+        state: ended.state,
+        discussion,
+        ...(origin ? { origin } : {}),
+        ...(diff ? { changes: diff } : {}),
+        ...(ended.botUsername ? { botUsername: ended.botUsername } : {}),
+      }),
       updatedAt: deps.now().toISOString(),
     })
     read++

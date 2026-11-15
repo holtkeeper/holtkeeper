@@ -41,18 +41,24 @@ export function sumReactions(
   return [...totals.values()].toSorted((a, b) => binary(a.category, b.category))
 }
 
-/** Signals of `filter.repo`, only those of `filter.mergeRequests` when given, sorted by key. */
+/**
+ * Signals of `filter.repo` (of every repository without it), only those of `filter.mergeRequests`
+ * when given, sorted by repository, merge request and note.
+ */
 export function reactionsOf(
   signals: Iterable<ReactionSignal>,
-  filter: { repo: string; mergeRequests?: readonly number[] },
+  filter: { repo?: string; mergeRequests?: readonly number[] } = {},
 ): ReactionSignal[] {
   return [...signals]
     .filter(
       (signal) =>
-        signal.repo === filter.repo &&
+        (filter.repo === undefined || signal.repo === filter.repo) &&
         (!filter.mergeRequests || filter.mergeRequests.includes(signal.mergeRequest)),
     )
-    .toSorted((a, b) => a.mergeRequest - b.mergeRequest || binary(a.noteId, b.noteId))
+    .toSorted(
+      (a, b) =>
+        binary(a.repo, b.repo) || a.mergeRequest - b.mergeRequest || binary(a.noteId, b.noteId),
+    )
 }
 
 /** The key reaction counts are stored under. */

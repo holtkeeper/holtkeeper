@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util'
 
 import { ConfigError, loadConfig } from '@holtkeeper/core'
 
+import { reviewEvalCommand } from './review-eval.ts'
 import { type StartServer, UsageError, serve, serveOptions } from './serve.ts'
 import { usersCommand } from './users.ts'
 
@@ -12,6 +13,8 @@ Commands:
   users <action>            Manage accounts of \`users\` sign-in in the config's store:
                             list, add <name>, login-link <user>, enroll-link <user>,
                             recover-link <user> (user is an id, email or name)
+  review-eval               Measure Code Review: precision and recall on the golden set (needs
+                            ANTHROPIC_API_KEY) and acceptance of real review comments
 
 Options:
   -c, --config <file>       Config file (default: holtkeeper.config.ts)
@@ -32,6 +35,17 @@ Users options:
   --admin                   users add: every action on everything (default: no grants)
   --email <address>         users add: the account's email
   --ttl <time>              Link lifetime, e.g. 15m or 2h (login 15m, others 72h)
+  --json                    Print JSON
+
+Review-eval options:
+  --case <id>               Review only this golden case (repeatable)
+  --repeat <n>              Review each case n times, models vary (default 1)
+  --concurrency <n>         Reviews at once (default 3)
+  --by <group>              Acceptance grouped by category (default), severity, model,
+                            promptVersion or source
+  --days <n>                Acceptance of comments updated in the last n days (default 90)
+  --no-golden               Print only the acceptance of real review comments
+  --no-acceptance           Print only the golden set result
   --json                    Print JSON
 
 A login link signs its holder in once, without a passkey: hand it to an AI agent that drives
@@ -74,6 +88,12 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
       admin: { type: 'boolean', default: false },
       email: { type: 'string' },
       ttl: { type: 'string' },
+      case: { type: 'string', multiple: true },
+      repeat: { type: 'string' },
+      by: { type: 'string' },
+      days: { type: 'string' },
+      'no-golden': { type: 'boolean', default: false },
+      'no-acceptance': { type: 'boolean', default: false },
     },
   })
   const [command, ...args] = positionals
@@ -101,6 +121,8 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
         return await usersCommand(await loadConfig(values.config), args, values, (line) =>
           io.out(line),
         )
+      case 'review-eval':
+        return await reviewEvalCommand(values.config, values, (line) => io.out(line))
       default:
         throw new UsageError(`unknown command "${command}"\n\n${usage}`)
     }

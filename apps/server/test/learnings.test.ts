@@ -12,7 +12,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { Discussion, GitForge, NoteReaction } from '@holtkeeper/forge'
+import type { DiffFile, Discussion, GitForge, NoteReaction } from '@holtkeeper/forge'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -29,6 +29,8 @@ let discussions: Discussion[]
 let reactions: Map<string, NoteReaction[]>
 let mergeRequestReads: number
 let discussionReads: number
+let comparison: DiffFile[] | undefined
+let compared: [string, string][]
 
 const fakeForge = {
   kind: 'gitlab',
@@ -38,6 +40,11 @@ const fakeForge = {
   },
   listNoteReactions: async (_repo: string, _id: number, noteId: number | string) =>
     reactions.get(String(noteId)) ?? [],
+  compareCommits: async (_repo: string, from: string, to: string) => {
+    compared.push([from, to])
+    if (!comparison) throw new Error('cannot compare')
+    return comparison
+  },
   getMergeRequest: async (_repo: string, id: number) => {
     mergeRequestReads++
     return { id, webUrl: `https://forge.test/toys/kite/-/merge_requests/${id}`, headSha: 'h' }
@@ -105,6 +112,8 @@ beforeEach(() => {
   reactions = new Map()
   mergeRequestReads = 0
   discussionReads = 0
+  comparison = []
+  compared = []
 })
 
 const dispatcher = (agent: Agent | undefined, background: Promise<unknown>[]) => {
@@ -293,6 +302,145 @@ describe('events', () => {
       { category: 'bug', comments: 1, up: 1, down: 0 },
       { category: 'style', comments: 1, up: 0, down: 2 },
     ])
+  })
+
+  describe('what became of the comments', () => {
+    const repo = { forge: 'work', path: 'toys/kite' }
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- helper sits with its tests
+    const finding = (id: string, path: string, line: number, category = 'style') => ({
+      id,
+      path,
+      line,
+      severity: 'minor' as const,
+      category: category as 'style',
+      title: 'Extract the constant',
+      body: 'Name the 42.',
+      source: 'agent',
+      posted: true,
+    })
+    const run = (head: string, comments: ReturnType<typeof finding>[], model: string) => ({
+      mergeRequest: {
+        id: 4,
+        title: 'Spools',
+        webUrl: 'https://forge.test/toys/kite/-/merge_requests/4',
+        sourceBranch: 'spools',
+        targetBranch: 'main',
+        author: 'robin',
+      },
+      head,
+      mode: 'full' as const,
+      verdict: 'needs-changes' as const,
+      summary: '',
+      comments,
+      threads: [],
+      skipped: [],
+      stats: {
+        files: 1,
+        changedLines: 3,
+        dropped: { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0 },
+      },
+      approved: false,
+      checks: [],
+      usage: { turns: 2, model },
+      promptVersion: `p-${model}`,
+    })
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- helper sits with its tests
+    const threadFor = (
+      id: string,
+      noteId: number,
+      extra: Partial<Discussion> = {},
+    ): Discussion => ({
+      id,
+      resolvable: true,
+      resolved: false,
+      notes: [
+        {
+          ...ourComment(noteId),
+          body: ourComment(noteId).body.replace('f-1', id),
+        },
+        { id: noteId + 100, author: 'robin', body: 'Why?', createdAt: '', system: false },
+      ],
+      position: { path: 'src/spool.ts', line: 3, side: 'new', headSha: 'a'.repeat(40) },
+      ...extra,
+    })
+
+    beforeEach(async () => {
+      await store.analyses.add({
+        repo,
+        kind: 'review',
+        ref: '!4',
+        createdAt: '2026-11-04T08:00:00.000Z',
+        data: run(
+          'a'.repeat(40),
+          [finding('fix', 'src/spool.ts', 3), finding('keep', 'src/reel.ts', 8, 'bug')],
+          'model-old',
+        ),
+      })
+      await store.analyses.add({
+        repo,
+        kind: 'review',
+        ref: '!4',
+        createdAt: '2026-11-04T09:00:00.000Z',
+        data: run(
+          'c'.repeat(40),
+          [finding('keep', 'src/reel.ts', 8, 'bug'), finding('late', 'src/reel.ts', 20)],
+          'model-new',
+        ),
+      })
+      discussions = [
+        threadFor('fix', 1),
+        threadFor('keep', 2),
+        threadFor('late', 3, { resolved: true }),
+      ]
+    })
+
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- helper sits with its tests
+    const signals = async () =>
+      Object.fromEntries(
+        (await store.learnings.reactions({ repo: 'work:toys/kite' })).map((signal) => [
+          signal.findingId,
+          signal,
+        ]),
+      )
+
+    test('tells fixed, ignored and resolved comments apart, with the run that wrote them', async () => {
+      comparison = [
+        {
+          oldPath: 'src/spool.ts',
+          newPath: 'src/spool.ts',
+          status: 'modified',
+          diff: '@@ -3,1 +3,1 @@\n-const n = 42\n+const n = SPOOL_SIZE\n',
+        },
+      ]
+      await mergeMergeRequest(4)
+      const result = await signals()
+      expect(result.fix).toMatchObject({
+        outcome: 'fixed',
+        mergeRequestState: 'merged',
+        severity: 'minor',
+        source: 'agent',
+        model: 'model-old',
+        promptVersion: 'p-model-old',
+        humanReplies: 1,
+      })
+      expect(result.keep).toMatchObject({ outcome: 'ignored', model: 'model-old' })
+      expect(result.late).toMatchObject({ outcome: 'resolved', model: 'model-new' })
+      // Compared once per head a finding was first posted at, to the merge request's head.
+      // oxlint-disable-next-line typescript/require-array-sort-compare -- plain strings
+      expect(compared.toSorted()).toEqual([
+        ['a'.repeat(40), 'h'],
+        ['c'.repeat(40), 'h'],
+      ])
+    })
+
+    test('keeps open threads unknown when the forge cannot compare the commits', async () => {
+      comparison = undefined
+      await mergeMergeRequest(4)
+      const result = await signals()
+      expect(result.fix?.outcome).toBe('unknown')
+      expect(result.keep?.outcome).toBe('unknown')
+      expect(result.late?.outcome).toBe('resolved')
+    })
   })
 })
 

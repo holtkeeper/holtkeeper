@@ -876,7 +876,23 @@ export interface LearningFilter {
   status?: readonly LearningStatus[]
 }
 
-/** 👍/👎 counts on one of Holtkeeper's review comments, as last read from the forge. */
+/**
+ * What became of one of Holtkeeper's review comments once its merge request ended; see
+ * `findingOutcome` of `@holtkeeper/review`.
+ *
+ * - `fixed`: the code of the commented lines changed after the review.
+ * - `resolved`: the thread was resolved while those lines stayed as they were (dismissed, or
+ *   fixed somewhere else).
+ * - `ignored`: the thread stayed open and the lines stayed as they were.
+ * - `unknown`: the forge could not tell (no comparison of the commits, the file's history lost).
+ */
+export type FindingOutcome = 'fixed' | 'resolved' | 'ignored' | 'unknown'
+
+/**
+ * 👍/👎 counts on one of Holtkeeper's review comments, as last read from the forge, and, once the
+ * merge request ended, what became of the comment and which run wrote it. Every field after `down`
+ * is absent in signals stored before it existed.
+ */
 export interface ReactionSignal {
   /** `forge:path`. */
   repo: string
@@ -888,6 +904,20 @@ export interface ReactionSignal {
   up: number
   down: number
   updatedAt: Timestamp
+  /** What became of the comment; set when the merge request is merged or closed. */
+  outcome?: FindingOutcome
+  /** State of the merge request when `outcome` was read; only `merged` ones are judged. */
+  mergeRequestState?: 'merged' | 'closed'
+  /** Severity of the finding, as posted. */
+  severity?: string
+  /** Who found it: `agent` or the quality check's name. */
+  source?: string
+  /** Provider id of the model of the review run that first posted the finding. */
+  model?: string
+  /** Prompt fingerprint of that run (`ReviewData.promptVersion`). */
+  promptVersion?: string
+  /** Notes in the thread written by people other than Holtkeeper. */
+  humanReplies?: number
 }
 
 /** Reaction counts summed over comments of one category. */
@@ -989,8 +1019,14 @@ export interface LearningStore {
   putReactions(signal: ReactionSignal): Promise<void>
   /** Counts per category, sorted by category; `repos` limits them to those repositories. */
   reactionTotals(filter?: { repos?: readonly string[] }): Promise<ReactionTotals[]>
-  /** The counts of every comment on `repo`'s merge requests, only those of `mergeRequests` when given. */
-  reactions(filter: { repo: string; mergeRequests?: readonly number[] }): Promise<ReactionSignal[]>
+  /**
+   * The signals of every comment on `repo`'s merge requests, only those of `mergeRequests` when
+   * given; of every repository when `repo` is absent.
+   */
+  reactions(filter?: {
+    repo?: string
+    mergeRequests?: readonly number[]
+  }): Promise<ReactionSignal[]>
 }
 
 /** Where an AI run's `costUsd` came from: the provider's report, our price table, or nowhere. */

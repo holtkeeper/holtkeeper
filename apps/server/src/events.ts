@@ -39,7 +39,7 @@ import { CHAT_MARKER, chatFor } from './chat.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { noteDefaultBranchPush } from './freshness.ts'
 import { automaticJobReady } from './jobs.ts'
-import { captureReplyLearning, harvestReactions } from './learnings.ts'
+import { captureReplyLearning, harvestReviewSignals } from './learnings.ts'
 import { commentsOffFor, isReviewAnalyzer } from './mr-comments.ts'
 import { noteReviewJob } from './mr-status.ts'
 import { releaseAnnouncerFor } from './release-announce.ts'
@@ -149,8 +149,9 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  *   `verify`, `help`) answer in the merge request; a reply in a review thread Holtkeeper started
  *   queues `review` with `{ mergeRequest, replyTo: discussionId }` and, in the background, is
  *   looked at for a lasting rule (`captureReplyLearning`).
- * - A merge request seen closed or merged that Holtkeeper reviewed has the 👍/👎 on its review
- *   comments read in the background (`harvestReactions`).
+ * - A merge request seen closed or merged that Holtkeeper reviewed has what became of its review
+ *   comments read in the background (`harvestReviewSignals`): 👍/👎, whether the commented lines
+ *   changed afterwards, the thread's state.
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
@@ -436,9 +437,14 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
           })
         : undefined
       if (mr.state === 'closed' || mr.state === 'merged') {
+        const bot = botUsername(repo)
         inBackground(
-          'learnings: reading reactions failed',
-          harvestReactions(deps, config.forges[repo.forge]?.create(), repo, mr.id),
+          'learnings: reading review signals failed',
+          harvestReviewSignals(deps, config.forges[repo.forge]?.create(), repo, mr.id, {
+            state: mr.state,
+            ...(mr.headSha ? { headSha: mr.headSha } : {}),
+            ...(bot ? { botUsername: bot } : {}),
+          }),
         )
         return ignore(`merge request is ${mr.state}`)
       }

@@ -1,9 +1,21 @@
 import type { RepoTarget } from '@holtkeeper/access'
-import type { ReviewDetail, ReviewList, ReviewRow, ReviewWindowTotals } from '@holtkeeper/api'
+import type {
+  ReviewDetail,
+  ReviewList,
+  ReviewQuality,
+  ReviewRow,
+  ReviewWindowTotals,
+} from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { ResolvedGuide } from '@holtkeeper/guide'
-import { type ReviewData, reviewMetrics, reviewMetricsSchema } from '@holtkeeper/review'
-import type { AnalysisHead, AnalysisRecord, AnalysisStore } from '@holtkeeper/store'
+import {
+  type QualityGroup,
+  type ReviewData,
+  qualityRows,
+  reviewMetrics,
+  reviewMetricsSchema,
+} from '@holtkeeper/review'
+import type { AnalysisHead, AnalysisRecord, AnalysisStore, LearningStore } from '@holtkeeper/store'
 
 /** Rows `GET /api/reviews` returns by default and at most. */
 export const REVIEWS_LIMIT = { default: 50, max: 200 }
@@ -210,4 +222,47 @@ export function reviewDetail(
         }
       : {}),
   }
+}
+
+/** What `reviewQuality` filters by. */
+export interface ReviewQualityFilter {
+  by: QualityGroup
+  repo?: RepoRef
+  group?: string
+  /** Only signals read at or after this time. */
+  since: string
+}
+
+/**
+ * How review comments fared (`qualityRows`) on repositories `canRead` allows, from the stored
+ * signals only; narrowed to one repository or config group, and to signals read since `since`.
+ */
+export async function reviewQuality(
+  source: {
+    learnings: Pick<LearningStore, 'reactions'>
+    targetOf: (repo: RepoRef) => RepoTarget
+  },
+  canRead: (target: RepoTarget) => boolean,
+  filter: ReviewQualityFilter,
+): Promise<ReviewQuality> {
+  const targets = new Map<string, RepoTarget>()
+  const readable = (key: string) => {
+    const known = targets.get(key)
+    if (known) return canRead(known)
+    const split = key.indexOf(':')
+    const target = source.targetOf({ forge: key.slice(0, split), path: key.slice(split + 1) })
+    targets.set(key, target)
+    return canRead(target)
+  }
+  const signals = (
+    await source.learnings.reactions(
+      filter.repo ? { repo: `${filter.repo.forge}:${filter.repo.path}` } : {},
+    )
+  ).filter(
+    (signal) =>
+      signal.updatedAt >= filter.since &&
+      readable(signal.repo) &&
+      (!filter.group || targets.get(signal.repo)?.groups.includes(filter.group)),
+  )
+  return { by: filter.by, ...qualityRows(signals, filter.by) }
 }

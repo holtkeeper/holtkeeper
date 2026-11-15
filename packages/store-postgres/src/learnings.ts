@@ -66,8 +66,10 @@ export function postgresLearnings(db: () => Promise<Db>): LearningStore {
     },
     async reactions(filter) {
       const { sql, t } = await db()
-      const rows: { data: ReactionSignal }[] = await sql`
-        SELECT data FROM ${t.reviewReactions} WHERE repo = ${filter.repo}`
+      const rows: { data: ReactionSignal }[] =
+        filter?.repo === undefined
+          ? await sql`SELECT data FROM ${t.reviewReactions}`
+          : await sql`SELECT data FROM ${t.reviewReactions} WHERE repo = ${filter.repo}`
       return reactionsOf(
         rows.map((row) => row.data),
         filter,

@@ -2684,6 +2684,51 @@ export interface ReviewList {
   nextBefore?: Timestamp
 }
 
+/** Query of `GET /api/reviews/quality`. */
+export interface ReviewQualityQuery {
+  /** What to group the comments by; default `category`. */
+  by?: 'category' | 'severity' | 'model' | 'promptVersion' | 'source'
+  /** `forge:path`. */
+  repo?: string
+  group?: string
+  /** Only comments read at or after this time; default 90 days ago. */
+  since?: Timestamp
+}
+
+/** What happened to the review comments of one group on merged merge requests. */
+export interface ReviewQualityRow {
+  /** The group's value; `unknown` for comments stored without it. */
+  key: string
+  /** Comments counted. */
+  comments: number
+  /** Their lines changed after the review. */
+  fixed: number
+  /** Thread resolved, lines unchanged. */
+  resolved: number
+  /** Thread open, lines unchanged. */
+  ignored: number
+  /** The forge could not tell. */
+  unknown: number
+  /** 👍 and 👎 on the comments. */
+  up: number
+  down: number
+  /** `fixed` over the judged comments (`fixed + resolved + ignored`); absent when none is judged. */
+  acceptance?: number
+  /** `fixed + resolved` over the judged comments; absent when none is judged. */
+  addressed?: number
+}
+
+/**
+ * `GET /api/reviews/quality` — how Holtkeeper's review comments fared: per group, how many ended
+ * in changed code, were resolved or ignored. Counts the comments of merged merge requests on
+ * repositories the caller may read analyses of; no forge or model is asked.
+ */
+export interface ReviewQuality {
+  by: NonNullable<ReviewQualityQuery['by']>
+  rows: ReviewQualityRow[]
+  total: ReviewQualityRow
+}
+
 /** A Reviews window in figures, for the strip above the table. */
 export interface ReviewWindowTotals {
   reviews: number

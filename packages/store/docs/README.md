@@ -72,7 +72,7 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 
 - `put` (by id), `get`, `list({ repos?, status? })` newest `updatedAt` first (`byLearningUpdate`, `matchesLearningFilter`), `find(repo, key)` the oldest candidate of a repository with that normalized rule.
 - `claim(key, at)` is `true` only for the first caller of a key, atomically across processes; `release(key)` forgets it. Capture claims each reply note before its LLM call.
-- `putReactions(signal)` replaces the 👍/👎 counts of one review comment (repository, merge request, note) with its finding category; `reactionTotals({ repos? })` sums them per category (`sumReactions`); `reactions({ repo, mergeRequests? })` returns one repository's counts per comment (`reactionsOf`), for the Reviews tab of the repository page.
+- `putReactions(signal)` replaces the 👍/👎 counts of one review comment (repository, merge request, note) with its finding category; `reactionTotals({ repos? })` sums them per category (`sumReactions`); `reactions({ repo?, mergeRequests? })` returns the counts per comment (`reactionsOf`) of one repository, for the Reviews tab of the repository page, or of every repository without `repo`, for the review quality aggregate. A signal also keeps what became of the comment once its merge request ended: `outcome` (`fixed`, `resolved`, `ignored`, `unknown`), `mergeRequestState`, `severity`, `source`, `model`, `promptVersion` and `humanReplies`; all optional, so signals stored before them still read.
 
 ## Team chat
 

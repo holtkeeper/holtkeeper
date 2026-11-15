@@ -76,6 +76,12 @@ export function sqliteLearnings(db: Database): LearningStore {
     reactionTotals: async (filter) =>
       sumReactions(sql.reactions.all().map(toSignal), filter?.repos),
     reactions: async (filter) =>
-      reactionsOf(sql.reactionsOfRepo.all(filter.repo).map(toSignal), filter),
+      reactionsOf(
+        (filter?.repo === undefined
+          ? sql.reactions.all()
+          : sql.reactionsOfRepo.all(filter.repo)
+        ).map(toSignal),
+        filter,
+      ),
   }
 }

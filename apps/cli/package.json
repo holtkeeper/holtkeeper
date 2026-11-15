@@ -10,8 +10,11 @@
     ".": "./src/cli.ts"
   },
   "dependencies": {
+    "@holtkeeper/agent": "workspace:*",
     "@holtkeeper/auth-users": "workspace:*",
     "@holtkeeper/core": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/review": "workspace:*",
     "@holtkeeper/server": "workspace:*",
     "@holtkeeper/store": "workspace:*"
   },

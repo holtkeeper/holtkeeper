@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { ReviewDetail, ReviewList } from '@holtkeeper/api'
+import type { ReviewDetail, ReviewList, ReviewQuality } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import type { GuideBlock } from '@holtkeeper/guide'
 import { type ReviewData, reviewMetrics } from '@holtkeeper/review'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { AnalysisQuery, AnalysisStore, GuideScopeKey, Store } from '@holtkeeper/store'
+import type {
+  AnalysisQuery,
+  AnalysisStore,
+  GuideScopeKey,
+  ReactionSignal,
+  Store,
+} from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
@@ -379,4 +385,76 @@ test('ingest stores a review only with http(s) links', async () => {
   expect((await ingest({ ...base, comments: [{ ...first!, href: script }, ...rest] })).status).toBe(
     400,
   )
+})
+
+describe('GET /api/reviews/quality', () => {
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- helper sits with its tests
+  const signal = (overrides: Partial<ReactionSignal>): ReactionSignal => ({
+    repo: 'work:shapes/circle',
+    mergeRequest: 1,
+    noteId: '1',
+    category: 'bug',
+    up: 0,
+    down: 0,
+    updatedAt: daysAgo(1),
+    outcome: 'fixed',
+    mergeRequestState: 'merged',
+    model: 'model-a',
+    promptVersion: 'p-1',
+    ...overrides,
+  })
+
+  // oxlint-disable-next-line unicorn/consistent-function-scoping -- helper sits with its tests
+  const quality = async (query = '', headers = asAdmin) => {
+    const response = await app.request(`/api/reviews/quality${query}`, { headers })
+    expect(response.status).toBe(200)
+    return (await response.json()) as ReviewQuality
+  }
+
+  beforeEach(async () => {
+    await store.learnings.putReactions(signal({ noteId: '1' }))
+    await store.learnings.putReactions(signal({ noteId: '2', outcome: 'ignored', down: 1 }))
+    await store.learnings.putReactions(
+      signal({ noteId: '3', category: 'style', outcome: 'resolved', promptVersion: 'p-2' }),
+    )
+    await store.learnings.putReactions(signal({ noteId: '4', mergeRequestState: 'closed' }))
+    await store.learnings.putReactions(signal({ noteId: '5', updatedAt: daysAgo(200) }))
+    await store.learnings.putReactions(
+      signal({ repo: 'work:colors/red', noteId: '6', outcome: 'fixed' }),
+    )
+  })
+
+  test('groups merged comments of the last 90 days, by category by default', async () => {
+    const result = await quality()
+    expect(result.by).toBe('category')
+    expect(result.rows.map((row) => [row.key, row.comments])).toEqual([
+      ['bug', 3],
+      ['style', 1],
+    ])
+    expect(result.rows[0]).toMatchObject({ fixed: 2, ignored: 1, down: 1, acceptance: 2 / 3 })
+    expect(result.total.comments).toBe(4)
+  })
+
+  test('groups by prompt version or model, and narrows to a repository or group', async () => {
+    expect((await quality('?by=promptVersion')).rows.map((row) => [row.key, row.comments])).toEqual(
+      [
+        ['p-1', 3],
+        ['p-2', 1],
+      ],
+    )
+    expect((await quality('?by=model')).rows).toHaveLength(1)
+    expect((await quality('?repo=work:colors/red')).total.comments).toBe(1)
+    expect((await quality('?group=colors')).total.comments).toBe(1)
+    expect((await quality(`?since=${encodeURIComponent(daysAgo(300))}`)).total.comments).toBe(5)
+  })
+
+  test('counts only repositories the caller may read, and refuses a repository outside them', async () => {
+    expect((await quality('', asShapes)).total.comments).toBe(3)
+    const denied = await app.request('/api/reviews/quality?repo=work:colors/red', {
+      headers: asShapes,
+    })
+    expect(denied.status).toBe(403)
+    const invalid = await app.request('/api/reviews/quality?by=mood', { headers: asAdmin })
+    expect(invalid.status).toBe(400)
+  })
 })

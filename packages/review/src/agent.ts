@@ -315,6 +315,92 @@ function partInput(
   }
 }
 
+/** A one-line changed file, for the synthetic input `reviewPromptVersion` hashes. */
+const sampleFile = (path: string): FileScope => ({
+  path,
+  oldPath: path,
+  status: 'modified',
+  hunks: [
+    {
+      oldStart: 1,
+      oldLines: 1,
+      newStart: 1,
+      newLines: 1,
+      lines: [{ kind: 'add', text: 'x', newLine: 1 }],
+    },
+  ],
+  lines: new Set([1]),
+  visible: new Map([[1, 'x']]),
+})
+
+/** A synthetic review prompt input for `reviewPromptVersion`. */
+const sampleInput = (path: string, extra: Partial<ReviewPromptInput> = {}): ReviewPromptInput => ({
+  repo: 'group/project',
+  mergeRequest: { id: 1, title: 'Title', description: 'Description' },
+  files: [sampleFile(path)],
+  mode: 'full',
+  guidelines: [],
+  threads: [],
+  maxComments: 15,
+  ...extra,
+})
+
+let cachedPromptVersion: string | undefined
+
+/**
+ * A short fingerprint of everything the review agent is told and how its passes are cut: the
+ * system prompt in each variant the code builds (with and without tests, npm and Go), the task
+ * prompt with every optional block set, the follow-up text and the split and follow-up limits.
+ * It changes whenever one of them does, so findings can be compared per prompt version without
+ * anyone bumping a number. It does not cover the prompts of thread re-checks, replies and
+ * translations.
+ */
+export function reviewPromptVersion(): string {
+  cachedPromptVersion ??= (() => {
+    const everything = sampleInput('src/a.ts', {
+      mode: 'incremental',
+      previousHead: 'abcdef0123456789',
+      guide: 'Guide',
+      instructions: 'Instructions',
+      pathInstructions: [{ glob: 'src/**', text: 'Rule', files: ['src/a.ts'] }],
+      requests: [{ path: 'src/a.ts', line: 1, text: 'Request', category: 'tests' }],
+      threads: [
+        {
+          discussionId: 'd',
+          path: 'src/a.ts',
+          line: 1,
+          text: 'Thread',
+          ours: true,
+          findingId: 'f',
+        },
+      ],
+      part: { index: 1, count: 2, files: ['src/a.ts', 'src/b.ts'] },
+      goGuidelines: 'Go guidelines',
+      dependencies: 'Dependencies',
+    })
+    const hasher = new Bun.CryptoHasher('sha256')
+    for (const text of [
+      reviewSystemPrompt(sampleInput('src/a.ts')),
+      reviewSystemPrompt(sampleInput('src/a.ts', { tests: false })),
+      reviewSystemPrompt(sampleInput('main.go')),
+      reviewSystemPrompt(sampleInput('main.go', { tests: false, language: 'English' })),
+      reviewSystemPrompt(sampleInput('main.go', { requests: everything.requests ?? [] })),
+      reviewContext(everything),
+      reviewPrompt(everything),
+      INVESTIGATE_FOLLOW_UP,
+      JSON.stringify([
+        INVESTIGATE_MIN_LINES,
+        INVESTIGATE_MIN_FILES,
+        SPLIT_MAX_LINES,
+        SPLIT_MAX_FILES,
+      ]),
+    ])
+      hasher.update(`${text}\u0000`)
+    return `p-${hasher.digest('hex').slice(0, 8)}`
+  })()
+  return cachedPromptVersion
+}
+
 type ReviewPass = Pick<AgentReview, 'summary' | 'verdict' | 'walkthrough' | 'effort'> & {
   candidates: Candidate[]
 }

@@ -14,7 +14,13 @@ import type {
 import type { QualityCheck } from '@holtkeeper/quality'
 import type { AnalysisStore } from '@holtkeeper/store'
 
-import { type RecheckVerdict, localizeFindings, recheckThreads, runAgentReview } from './agent.ts'
+import {
+  type RecheckVerdict,
+  localizeFindings,
+  recheckThreads,
+  reviewPromptVersion,
+  runAgentReview,
+} from './agent.ts'
 import {
   type ReviewCheckName,
   agentCompletedChecks,
@@ -182,6 +188,8 @@ export interface AgentOutcome {
   effort?: number
   /** Guide scopes whose rules reached the agent, broad to narrow. */
   guideScopes?: string[]
+  /** `reviewPromptVersion()` of the prompts that were sent. */
+  promptVersion?: string
 }
 
 /** The replaceable steps of a review. */
@@ -426,7 +434,10 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
     ...(run.signal ? { signal: run.signal } : {}),
   })
-  return guide?.text && guide.scopes.length ? { ...outcome, guideScopes: guide.scopes } : outcome
+  const versioned = { ...outcome, promptVersion: reviewPromptVersion() }
+  return guide?.text && guide.scopes.length
+    ? { ...versioned, guideScopes: guide.scopes }
+    : versioned
 }
 
 const media: ReviewSteps['media'] = async (run, loaded, usage) => {
@@ -783,6 +794,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
     ...(agentOutcome?.walkthrough ? { walkthrough: agentOutcome.walkthrough } : {}),
     ...(agentOutcome?.effort ? { effort: agentOutcome.effort } : {}),
     ...(agentOutcome?.guideScopes?.length ? { guideScopes: agentOutcome.guideScopes } : {}),
+    ...(agentOutcome?.promptVersion ? { promptVersion: agentOutcome.promptVersion } : {}),
     comments,
     threads,
     skipped: scope.skipped,

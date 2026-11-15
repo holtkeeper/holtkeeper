@@ -1,6 +1,6 @@
 # @holtkeeper/cli
 
-The `holtkeeper` command: the server's entrypoint. It starts the server (`serve`, the command of the container image and the Helm chart) and handles operator account tasks (`users`). Everything else happens in the web panel, or over MCP for AI agents. It runs from source with Bun.
+The `holtkeeper` command: the server's entrypoint. It starts the server (`serve`, the command of the container image and the Helm chart), handles operator account tasks (`users`) and measures Code Review (`review-eval`). Everything else happens in the web panel, or over MCP for AI agents. It runs from source with Bun.
 
 ```sh
 bunx holtkeeper <command> [options]
@@ -25,6 +25,18 @@ Manages accounts of `users` sign-in (see [@holtkeeper/auth-users](../../../packa
 - `enroll-link <user>` / `recover-link <user>` (`--ttl`, default `72h`) — the web UI's passkey registration link, as an admin would issue it.
 
 Links need `server.publicUrl`. In Kubernetes run it in a web pod: `kubectl exec deploy/<release>-web -- holtkeeper users login-link Claude -c /app/config/holtkeeper.config.ts`.
+
+### `review-eval`
+
+Measures Code Review in one command: precision and recall of the [golden set](../../../packages/review/docs/README.md#measuring-quality) reviewed by a real model, then the acceptance of Holtkeeper's review comments on merged merge requests of the config's store, grouped by category.
+
+```sh
+ANTHROPIC_API_KEY=sk-... bunx holtkeeper review-eval --repeat 3
+```
+
+- The golden half reviews every invented case in a temporary checkout with the real pipeline and prints precision, recall, f1, clean changes that still drew a comment, cost, and the missed problems and false positives. The model comes from `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` for an Anthropic-compatible endpoint); the cases cost real tokens. `--case <id>` limits it (repeatable), `--repeat <n>` reviews each case n times, `--concurrency <n>` sets how many run at once (default 3).
+- The acceptance half reads the outcomes stored when merge requests were merged (see [@holtkeeper/server](../../server/docs/README.md#review-learnings)). `--by category|severity|model|promptVersion|source` groups it, `--days <n>` limits it to comments updated in the last n days (default 90). It is skipped with a note when the config file does not exist.
+- `--no-golden` prints only the acceptance, `--no-acceptance` only the golden set, `--json` prints both as JSON. The exit code is 1 when a golden run failed.
 
 ### `serve`
 

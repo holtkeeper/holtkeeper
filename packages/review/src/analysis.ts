@@ -186,6 +186,8 @@ export const reviewMetricsSchema = z.object({
   durationMs: z.number().optional(),
   /** As `ReviewData.guideScopes`; absent when the run named none. */
   guideScopes: z.array(z.string()).optional(),
+  /** As `ReviewData.promptVersion`. */
+  promptVersion: z.string().optional(),
 })
 
 /** Parsed stored metrics of one review record; fields newer than the record are absent. */
@@ -213,6 +215,7 @@ export function reviewMetrics(data: ReviewData): ReviewMetrics {
     ...(data.usage?.model ? { model: data.usage.model } : {}),
     ...(data.durationMs === undefined ? {} : { durationMs: data.durationMs }),
     ...(data.guideScopes?.length ? { guideScopes: data.guideScopes } : {}),
+    ...(data.promptVersion ? { promptVersion: data.promptVersion } : {}),
   }
 }
 

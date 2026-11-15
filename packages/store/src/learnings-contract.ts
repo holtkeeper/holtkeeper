@@ -108,4 +108,48 @@ export function learningStoreTests(store: () => Store) {
       ),
     ).toEqual(['60'])
   })
+
+  test('learnings: signals keep what became of a comment and list across repositories', async () => {
+    const learnings = store().learnings
+    const signal = {
+      repo: 'work:games/arcade',
+      mergeRequest: 7,
+      noteId: '50',
+      category: 'bug',
+      up: 0,
+      down: 0,
+      updatedAt: at(0),
+    }
+    await learnings.putReactions(signal)
+    await learnings.putReactions({
+      ...signal,
+      outcome: 'fixed',
+      mergeRequestState: 'merged',
+      severity: 'major',
+      source: 'agent',
+      model: 'fast-model',
+      promptVersion: 'p-1',
+      humanReplies: 2,
+      updatedAt: at(1),
+    })
+    await learnings.putReactions({ ...signal, repo: 'work:games/puzzle', noteId: '9' })
+
+    expect(await learnings.reactions({ repo: 'work:games/arcade' })).toEqual([
+      {
+        ...signal,
+        outcome: 'fixed',
+        mergeRequestState: 'merged',
+        severity: 'major',
+        source: 'agent',
+        model: 'fast-model',
+        promptVersion: 'p-1',
+        humanReplies: 2,
+        updatedAt: at(1),
+      },
+    ])
+    expect((await learnings.reactions()).map((s) => [s.repo, s.noteId])).toEqual([
+      ['work:games/arcade', '50'],
+      ['work:games/puzzle', '9'],
+    ])
+  })
 }
