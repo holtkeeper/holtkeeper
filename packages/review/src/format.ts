@@ -4,12 +4,14 @@ import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
+  type ReviewSize,
   type ReviewWalkthrough,
   type SkippedFile,
   type ThreadAction,
   categories,
   severities,
 } from './schema.ts'
+import { formatDuration } from './size.ts'
 
 const severityLabel: Record<ReviewSeverity, string> = {
   critical: 'Critical',
@@ -82,9 +84,39 @@ export function countBySeverity(findings: readonly Pick<ReviewFinding, 'severity
   }))
 }
 
+const MAX_PART_FILES = 5
+
 /**
- * The summary note: verdict, the agent's summary, a table of findings by severity, what happened to
- * earlier threads and what was not reviewed.
+ * The advice to split a large merge request: the estimate, the advice, the proposed parts and the
+ * note for code an AI agent writes; `''` without advice. When the agent found that splitting would
+ * not help, only the estimate and its reason.
+ */
+export function sizeAdviceBlock(size: ReviewSize | undefined): string {
+  const advice = size?.advice
+  if (!advice) return ''
+  const { texts } = advice
+  const lead = `**${[texts.estimate, texts.limit].filter(Boolean).join(' ')}**`
+  if (!advice.splittable) return [lead, advice.reason ?? ''].filter(Boolean).join('\n\n')
+  const parts = advice.parts?.map((part, index) => {
+    const shown = part.files.slice(0, MAX_PART_FILES).map((file) => `\`${file}\``)
+    const more = part.files.length - shown.length
+    return `${index + 1}. **${part.title}**: ${shown.join(', ')}${more > 0 ? ` (+${more})` : ''}`
+  })
+  return [
+    `${lead} ${texts.split}`,
+    parts?.length
+      ? [advice.reason ?? '', `${texts.parts}\n\n${parts.join('\n')}`].filter(Boolean).join('\n\n')
+      : '',
+    `_${texts.ai}_`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/**
+ * The summary note: verdict, the agent's summary, the estimated review time (or the advice to
+ * split the merge request), a table of findings by severity, what happened to earlier threads and
+ * what was not reviewed.
  */
 export function summaryNote(
   data: Pick<
@@ -96,6 +128,7 @@ export function summaryNote(
     | 'summary'
     | 'walkthrough'
     | 'effort'
+    | 'size'
     | 'comments'
     | 'threads'
     | 'skipped'
@@ -114,10 +147,15 @@ export function summaryNote(
     data.mode === 'incremental'
       ? `Reviewed the changes from \`${data.previousHead?.slice(0, 8)}\` to \`${data.head.slice(0, 8)}\``
       : `Reviewed \`${data.head.slice(0, 8)}\``
+  const time =
+    data.size && !data.size.advice && data.size.minutes
+      ? ` Estimated review time: ${formatDuration(data.size.minutes)}.`
+      : ''
   const lines = [
     `${SUMMARY_HEADING} ${verdict}`,
     data.summary.trim(),
-    `${scope}: ${data.stats.files} file(s), ${data.stats.changedLines} changed line(s).${data.effort ? ` Review effort: ${data.effort}/5.` : ''}`,
+    `${scope}: ${data.stats.files} file(s), ${data.stats.changedLines} changed line(s).${data.effort ? ` Review effort: ${data.effort}/5.` : ''}${time}`,
+    sizeAdviceBlock(data.size),
   ]
   if (data.walkthrough?.length)
     lines.push(

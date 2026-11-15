@@ -948,3 +948,174 @@ describe('summary threads', () => {
     expect(resolved).toEqual(['old-summary', 'summary-1'])
   })
 })
+
+const splitAnswer = (texts: Record<string, string | undefined>) => ({
+  splittable: true,
+  reason: 'Prices and gadgets are independent.',
+  parts: [
+    { title: 'Prices', files: ['src/price.ts'] },
+    { title: 'Gadgets', files: ['src/gadget.ts', 'bun.lock'] },
+  ],
+  texts,
+})
+
+describe('review size', () => {
+  const twoFiles = [
+    ...files,
+    {
+      oldPath: 'src/gadget.ts',
+      newPath: 'src/gadget.ts',
+      status: 'added' as const,
+      diff: addedFile(['export const gadget = 1']),
+    },
+  ]
+  const strict = { enabled: true, largeMinutes: 5, tooLargeMinutes: 5 }
+
+  test('a small merge request gets the estimated time only, lockfiles left out', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+    const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
+    expect(data.size).toEqual({ minutes: 5, level: 'ok', files: 1, lines: 4, groups: 0 })
+    expect(submissions[0]?.summary).toContain('Estimated review time: ~5 min.')
+    expect(tasks.map((task) => task.taskKind)).not.toContain('review-split')
+  })
+
+  test('a too-large merge request gets the split plan and the note for AI agents', async () => {
+    const { forge, submissions } = fakeForge({ files: twoFiles, discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        {
+          ...review([], 'looks-good'),
+          walkthrough: [{ files: ['src/price.ts'], change: 'Adds prices.' }],
+          effort: 3,
+        },
+      ],
+      'review-split': [
+        splitAnswer({
+          estimate: 'Translated estimate.',
+          limit: 'Translated limit.',
+          split: 'Translated split.',
+          parts: 'Translated parts:',
+          ai: 'Translated AI note.',
+        }),
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        options: { ...options, sizeAdvice: strict, language: 'German' },
+      }),
+    )
+    expect(data.size?.level).toBe('too-large')
+    expect(data.size?.advice?.parts).toEqual([
+      { title: 'Prices', files: ['src/price.ts'] },
+      { title: 'Gadgets', files: ['src/gadget.ts'] },
+    ])
+    const split = tasks.find((task) => task.taskKind === 'review-split')
+    expect(split?.prompt).toContain('Adds prices.')
+    expect(split?.prompt).not.toContain('bun.lock')
+    expect(split?.system).toContain('in German')
+    const summary = submissions[0]?.summary ?? ''
+    expect(summary).toContain('**Translated estimate. Translated limit.** Translated split.')
+    expect(summary).toContain('Translated parts:\n\n1. **Prices**: `src/price.ts`')
+    expect(summary).toContain('_Translated AI note._')
+    expect(summary).not.toContain('Estimated review time')
+    expect(data.usage?.turns).toBe(4)
+  })
+
+  test('without an agent the advice is in English, with no plan', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        options: {
+          ...options,
+          sizeAdvice: { enabled: true, largeMinutes: 5, tooLargeMinutes: 60 },
+        },
+      }),
+    )
+    expect(data.size?.level).toBe('large')
+    expect(data.size?.advice?.texts.limit).toBeUndefined()
+    expect(submissions[0]?.summary).toContain('Consider splitting it into smaller merge requests')
+    expect(submissions[0]?.summary).toContain('_If this code is written by an AI agent')
+  })
+
+  test('sizeAdvice off leaves the size out', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        options: { ...options, sizeAdvice: { enabled: false } },
+      }),
+    )
+    expect(data.size).toBeUndefined()
+    expect(submissions[0]?.summary).not.toContain('review time')
+  })
+
+  test('incremental runs repeat the advice only when the level gets worse', async () => {
+    const previousHead = 'p'.repeat(40)
+    const reviewOnTopOf = async (level: 'large' | 'too-large') => {
+      const store = memoryStore()
+      const previous: ReviewData = {
+        ...(await reviewMergeRequest(
+          runOf({ forge: requireReviewForge(fakeForge({ files, discussions: [] }).forge) }),
+        )),
+        head: previousHead,
+      }
+      previous.size = { minutes: 5, level, files: 1, lines: 4, groups: 1 }
+      await store.analyses.add({
+        repo,
+        kind: 'review',
+        ref: '!7',
+        createdAt: '2026-10-29T00:00:00Z',
+        data: previous,
+      })
+      const { forge } = fakeForge({
+        files,
+        discussions: [],
+        compare: [
+          {
+            oldPath: 'src/price.ts',
+            newPath: 'src/price.ts',
+            status: 'modified',
+            diff: '@@ -3,1 +3,2 @@\n }\n+export const tax = 0.2\n',
+          },
+        ],
+      })
+      const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')], 'review-split': [] })
+      const data = await reviewMergeRequest(
+        runOf({
+          forge: requireReviewForge(forge),
+          agent,
+          runner: createFakeRunner(() => ({ exitCode: 0 })).runner,
+          analyses: store.analyses,
+          options: { ...options, sizeAdvice: strict },
+        }),
+      )
+      return { data, tasks }
+    }
+    const same = await reviewOnTopOf('too-large')
+    expect(same.data.mode).toBe('incremental')
+    expect(same.data.size).toMatchObject({ level: 'too-large', lines: 4, groups: 1 })
+    expect(same.data.size?.advice).toBeUndefined()
+    expect(same.tasks.map((task) => task.taskKind)).not.toContain('review-split')
+
+    const worse = await reviewOnTopOf('large')
+    expect(worse.data.size?.advice?.texts.limit).toContain('more than a person can review')
+  })
+
+  test('a merge request over maxDiffLines gets the advice in its skip note', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        options: { ...options, maxDiffLines: 2, sizeAdvice: strict },
+      }),
+    )
+    expect(data.mode).toBe('skipped')
+    expect(data.size?.level).toBe('too-large')
+    expect(submissions[0]?.summary).toContain('more than the limit of 2')
+    expect(submissions[0]?.summary).toContain('more than a person can review thoroughly')
+  })
+})

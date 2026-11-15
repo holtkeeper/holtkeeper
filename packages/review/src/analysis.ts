@@ -11,13 +11,14 @@ import {
 import type { AnalysisRecord } from '@holtkeeper/store'
 import { z } from 'zod'
 
-import { countBySeverity, walkthroughTable } from './format.ts'
+import { countBySeverity, sizeAdviceBlock, walkthroughTable } from './format.ts'
 import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
   reviewDataSchema,
 } from './schema.ts'
+import { formatDuration } from './size.ts'
 
 const tones: Record<ReviewSeverity, Tone> = {
   critical: 'bad',
@@ -188,6 +189,8 @@ export const reviewMetricsSchema = z.object({
   guideScopes: z.array(z.string()).optional(),
   /** As `ReviewData.promptVersion`. */
   promptVersion: z.string().optional(),
+  /** As `ReviewData.size.minutes`: estimated human review time of the whole merge request. */
+  reviewMinutes: z.number().optional(),
 })
 
 /** Parsed stored metrics of one review record; fields newer than the record are absent. */
@@ -216,6 +219,7 @@ export function reviewMetrics(data: ReviewData): ReviewMetrics {
     ...(data.durationMs === undefined ? {} : { durationMs: data.durationMs }),
     ...(data.guideScopes?.length ? { guideScopes: data.guideScopes } : {}),
     ...(data.promptVersion ? { promptVersion: data.promptVersion } : {}),
+    ...(data.size?.minutes ? { reviewMinutes: data.size.minutes } : {}),
   }
 }
 
@@ -234,6 +238,11 @@ export const reviewAnalysis = defineAnalysis<ReviewData, ReviewMetrics>({
         ? `Incremental review from \`${data.previousHead.slice(0, 8)}\` to \`${data.head.slice(0, 8)}\`.`
         : `Mode: ${data.mode}, head \`${data.head.slice(0, 8)}\`.`,
       data.effort ? `Review effort: ${data.effort}/5.` : '',
+      data.size?.advice
+        ? sizeAdviceBlock(data.size)
+        : data.size?.minutes
+          ? `Estimated review time: ${formatDuration(data.size.minutes)}.`
+          : '',
       data.approved ? 'The merge request was approved.' : '',
       data.walkthrough?.length ? `#### Walkthrough\n\n${walkthroughTable(data.walkthrough)}` : '',
     ]

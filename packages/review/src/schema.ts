@@ -69,6 +69,51 @@ const walkthroughSchema = z.array(
 /** How hard the change is for a human to review: 1 trivial … 5 needs a long careful look. */
 const effortSchema = z.number().int().min(1).max(5)
 
+/** How long a careful human review of the whole merge request takes, by `estimateReviewMinutes`. */
+export const reviewSizeLevels = ['ok', 'large', 'too-large'] as const
+
+/** One merge request a too-large one could be split into, in merge order. */
+const sizePartSchema = z.object({
+  title: z.string(),
+  /** New-side paths of the merge request that belong to this part. */
+  files: z.array(z.string()),
+})
+
+/**
+ * The estimated human review time of the whole merge request (ignored paths such as lockfiles and
+ * generated code left out) and, when the summary note carries it, the advice to split.
+ */
+const reviewSizeSchema = z.object({
+  minutes: z.number().int().nonnegative(),
+  level: z.enum(reviewSizeLevels),
+  /** Files and added plus removed lines the estimate counted. */
+  files: z.number().int().nonnegative(),
+  lines: z.number().int().nonnegative(),
+  /** Logical changes (walkthrough entries) the estimate counted. */
+  groups: z.number().int().nonnegative(),
+  /** Present when this run's note advises splitting; texts are in the review language. */
+  advice: z
+    .object({
+      texts: z.object({
+        /** The estimated time, as a sentence. */
+        estimate: z.string(),
+        /** Only for `too-large`: a person cannot review this thoroughly in one sitting. */
+        limit: z.string().optional(),
+        /** The advice to split. */
+        split: z.string(),
+        /** Heading of the proposed parts. */
+        parts: z.string(),
+        /** The note for authors whose code an AI agent writes. */
+        ai: z.string(),
+      }),
+      /** `false` when splitting would not make the review easier (`reason` says why). */
+      splittable: z.boolean(),
+      reason: z.string().optional(),
+      parts: z.array(sizePartSchema).optional(),
+    })
+    .optional(),
+})
+
 /** What one review run did; stored as the `review` analysis with `ref` `!<iid>`. */
 export const reviewDataSchema = z.object({
   mergeRequest: z.object({
@@ -90,6 +135,8 @@ export const reviewDataSchema = z.object({
   /** The agent's tour of the change, grouped by logical change. */
   walkthrough: walkthroughSchema.optional(),
   effort: effortSchema.optional(),
+  /** Estimated human review time of the whole merge request; absent when the advice is off. */
+  size: reviewSizeSchema.optional(),
   comments: z.array(findingSchema),
   threads: z.array(threadSchema),
   skipped: z.array(skippedSchema),
@@ -130,6 +177,9 @@ export type ThreadAction = z.infer<typeof threadSchema>
 export type SkippedFile = z.infer<typeof skippedSchema>
 export type ReviewUsage = NonNullable<ReviewData['usage']>
 export type ReviewWalkthrough = NonNullable<ReviewData['walkthrough']>
+export type ReviewSize = NonNullable<ReviewData['size']>
+export type ReviewSizeLevel = ReviewSize['level']
+export type ReviewSizeAdvice = NonNullable<ReviewSize['advice']>
 
 /** The answer the review agent must give. */
 export const agentReviewSchema = z.object({

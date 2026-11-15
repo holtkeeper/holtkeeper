@@ -21,6 +21,7 @@ import {
 } from './pipeline.ts'
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
+import { DEFAULT_SIZE_THRESHOLDS } from './size.ts'
 import { DEFAULT_RELEASE_BRANCHES, skipReason, skippedReview } from './skip.ts'
 import { replyToThread } from './thread.ts'
 
@@ -68,6 +69,24 @@ export const reviewOptionsSchema = z.object({
     .default({ enabled: true })
     .describe(
       'Modern Go guidelines (JetBrains/go-modern-guidelines) for merge requests changing Go modules: enabled (default true) and an optional release tag to pin, e.g. v0.1.1.',
+    ),
+  sizeAdvice: z
+    .object({
+      enabled: flag.default(true),
+      largeMinutes: z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(DEFAULT_SIZE_THRESHOLDS.largeMinutes),
+      tooLargeMinutes: z.coerce
+        .number()
+        .int()
+        .positive()
+        .default(DEFAULT_SIZE_THRESHOLDS.tooLargeMinutes),
+    })
+    .default({ enabled: true, ...DEFAULT_SIZE_THRESHOLDS })
+    .describe(
+      'Estimated human review time in the summary; from largeMinutes (default 60) the summary advises splitting the merge request by functionality, from tooLargeMinutes (default 120) it says a person cannot review it thoroughly.',
     ),
 })
 

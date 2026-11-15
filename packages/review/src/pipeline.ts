@@ -45,12 +45,23 @@ import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
+  type ReviewSize,
   type ReviewUsage,
   type ReviewWalkthrough,
   type ThreadAction,
   reviewDataSchema,
 } from './schema.ts'
 import { type FileScope, type ReviewScope, matchesAny, scopeDiff } from './scope.ts'
+import {
+  DEFAULT_SIZE_THRESHOLDS,
+  type SizeThresholds,
+  adviceTexts,
+  estimateReviewMinutes,
+  planSplit,
+  reviewSizeLevel,
+  sizeEscalated,
+  sizedFiles,
+} from './size.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
@@ -87,6 +98,12 @@ export interface ReviewOptions {
    * is `false`. `tag` pins an upstream release.
    */
   goGuidelines?: { enabled: boolean; tag?: string }
+  /**
+   * The estimated human review time in the summary and, from `largeMinutes`, the advice to split
+   * the merge request; on unless `enabled` is `false`. Thresholds default to
+   * `DEFAULT_SIZE_THRESHOLDS`.
+   */
+  sizeAdvice?: { enabled: boolean } & Partial<SizeThresholds>
 }
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
@@ -178,6 +195,11 @@ export interface ReviewPlan {
   mode: 'full' | 'incremental'
   previousHead?: string
   scope: ReviewScope
+  /**
+   * The whole merge request minus ignored paths, when `scope` is narrowed to new commits; the
+   * review time is estimated on it.
+   */
+  fullScope?: ReviewScope
   /** Files changed since `previousHead`, when incremental. */
   since?: DiffFile[]
   guidelines: Guideline[]
@@ -302,6 +324,7 @@ const plan: ReviewSteps['plan'] = async (run, loaded) => {
     mode: since ? 'incremental' : 'full',
     ...(since && last ? { previousHead: last, since } : {}),
     scope: scopeDiff(loaded.diff.files, { ignore, ...(since ? { since } : {}) }),
+    ...(since ? { fullScope: scopeDiff(loaded.diff.files, { ignore }) } : {}),
     guidelines,
     ...(reviewMd ? { pathInstructions: pathInstructionsInReviewMd(reviewMd.text) } : {}),
   }
@@ -609,6 +632,68 @@ async function resolveSummaries(run: ReviewRun, loaded: LoadedReview, data: Revi
   }
 }
 
+/**
+ * The estimated review time of the whole merge request and, when it reaches `largeMinutes`, the
+ * advice to split it (with a plan from the agent when there is one). The advice is given in full
+ * and skipped runs, and in incremental runs only when the level got worse than the last review's,
+ * so pushes to a large merge request do not repeat it.
+ */
+async function reviewSize(
+  run: ReviewRun,
+  loaded: LoadedReview,
+  planned: ReviewPlan,
+  usage: ReviewUsage,
+  outcome?: AgentOutcome,
+): Promise<ReviewSize | undefined> {
+  const settings = run.options.sizeAdvice
+  if (settings?.enabled === false) return undefined
+  const thresholds: SizeThresholds = {
+    largeMinutes: settings?.largeMinutes ?? DEFAULT_SIZE_THRESHOLDS.largeMinutes,
+    tooLargeMinutes: settings?.tooLargeMinutes ?? DEFAULT_SIZE_THRESHOLDS.tooLargeMinutes,
+  }
+  const files = sizedFiles((planned.fullScope ?? planned.scope).files)
+  const previous = planned.mode === 'incremental' ? loaded.previous : undefined
+  // An incremental run sees only the new commits; the earlier review saw the rest.
+  const effort = Math.max(outcome?.effort ?? 0, previous?.effort ?? 0)
+  const groups = Math.max(
+    outcome?.walkthrough?.length ?? 0,
+    previous?.size?.groups ?? previous?.walkthrough?.length ?? 0,
+  )
+  const minutes = estimateReviewMinutes({
+    files,
+    ...(effort ? { effort } : {}),
+    ...(groups ? { groups } : {}),
+  })
+  const level = reviewSizeLevel(minutes, thresholds)
+  const size: ReviewSize = {
+    minutes,
+    level,
+    files: files.length,
+    lines: files.reduce((sum, file) => sum + file.added + file.removed, 0),
+    groups,
+  }
+  if (level === 'ok' || (previous && !sizeEscalated(level, previous.size?.level))) return size
+  const texts = adviceTexts(level, minutes)
+  const advice =
+    run.agent && run.dir
+      ? await planSplit({
+          agent: run.agent,
+          dir: run.dir,
+          usage,
+          mergeRequest: { title: loaded.mr.title, description: loaded.mr.description },
+          files,
+          ...(outcome?.walkthrough ? { walkthrough: outcome.walkthrough } : {}),
+          texts,
+          ...(run.options.language ? { language: run.options.language } : {}),
+          ...(run.signal ? { signal: run.signal } : {}),
+        })
+      : { texts, splittable: true }
+  run.log?.(
+    `review time ~${minutes} min (${level}): ${advice.parts ? `${advice.parts.length} parts proposed` : advice.splittable ? 'no split plan' : 'not splittable'}`,
+  )
+  return { ...size, advice }
+}
+
 /** The default steps. */
 export const defaultSteps: ReviewSteps = {
   load,
@@ -664,6 +749,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
 
   if (scope.changedLines > run.options.maxDiffLines || scope.files.length === 0) {
     const tooLarge = scope.files.length > 0
+    const size = tooLarge ? await reviewSize(run, loaded, planned, usage) : undefined
     const data: ReviewData = {
       ...baseData(loaded, planned),
       mode: 'skipped',
@@ -671,6 +757,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       summary: tooLarge
         ? `The diff has ${scope.changedLines} changed lines, more than the limit of ${run.options.maxDiffLines}; it was not reviewed. Split the merge request or review it with \`/holtkeeper review maxDiffLines=<n>\`.`
         : 'Nothing new to review.',
+      ...(size ? { size } : {}),
       comments: [],
       threads: [],
       skipped: tooLarge
@@ -682,6 +769,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       stats,
       approved: false,
       checks: [],
+      ...(usage.turns > 0 || usage.costUsd !== undefined ? { usage } : {}),
     }
     if (!tooLarge) return data
     const last = run.analyses
@@ -704,6 +792,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       : []
   const agentOutcome = await steps.agentReview(run, loaded, planned, usage, requests)
   const mediaOutcome = await steps.media(run, loaded, usage)
+  const size = await reviewSize(run, loaded, planned, usage, agentOutcome)
 
   const validate = (candidates: readonly Candidate[]) =>
     candidates.flatMap((candidate) => {
@@ -799,6 +888,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       .join('\n\n'),
     ...(agentOutcome?.walkthrough ? { walkthrough: agentOutcome.walkthrough } : {}),
     ...(agentOutcome?.effort ? { effort: agentOutcome.effort } : {}),
+    ...(size ? { size } : {}),
     ...(agentOutcome?.guideScopes?.length ? { guideScopes: agentOutcome.guideScopes } : {}),
     ...(agentOutcome?.promptVersion ? { promptVersion: agentOutcome.promptVersion } : {}),
     comments,
