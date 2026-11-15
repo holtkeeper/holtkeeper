@@ -172,3 +172,28 @@ test('posts and updates messages, answering the message ts', async () => {
   ])
   expect(lines).toEqual(['slack chat.postMessage: not_in_channel'])
 })
+
+test('reads a message permalink with form fields, undefined when Slack gives none', async () => {
+  const bodies: string[] = []
+  const types: string[] = []
+  const responses = [
+    answer({
+      ok: true,
+      channel: 'C0123ABCD',
+      permalink: 'https://widgets.slack.com/archives/C0123ABCD/p1',
+    }),
+    answer({ ok: false, error: 'message_not_found' }),
+  ]
+  const fetch = (async (_url: string, init: RequestInit) => {
+    bodies.push(typeof init.body === 'string' ? init.body : '')
+    types.push(new Headers(init.headers).get('content-type') ?? '')
+    return responses.shift()
+  }) as unknown as typeof globalThis.fetch
+  const poster = slackWebPoster({ token: 'xoxb-widget', fetch, log: () => {} })
+  expect(await poster.permalink?.({ channel: 'C0123ABCD', ts: '1.2' })).toBe(
+    'https://widgets.slack.com/archives/C0123ABCD/p1',
+  )
+  expect(await poster.permalink?.({ channel: 'C0123ABCD', ts: '1.3' })).toBeUndefined()
+  expect(bodies[0]).toBe('channel=C0123ABCD&message_ts=1.2')
+  expect(types[0]).toBe('application/x-www-form-urlencoded')
+})

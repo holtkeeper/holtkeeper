@@ -171,7 +171,33 @@ describe('findings', () => {
       repos: 3,
       severities: { critical: 1, high: 1, medium: 0, low: 1, unknown: 0 },
       status: { open: 1, fixing: 1, allowlisted: 1 },
+      urgent: 0,
     })
+  })
+
+  test('urgent findings filter, sort first by severity and count unless allowlisted', () => {
+    const urgency = {
+      urgent: true,
+      category: 'code-execution' as const,
+      reason: 'Runs code from untrusted widgets.',
+      by: 'ai' as const,
+      at: '2026-11-02T00:00:00Z',
+    }
+    const judged = [
+      ...groups.slice(0, 2),
+      { ...groups[2]!, urgency },
+      group({
+        advisory: 'GHSA-quiet',
+        package: 'quiet-lib',
+        urgency: { ...urgency, urgent: false },
+      }),
+    ]
+    expect(ids(filterFindings(judged, { urgent: 'only' }))).toEqual(['GHSA-zzzz-yyyy-xxxx'])
+    expect(sortFindings(judged, 'severity')[0]?.package).toBe('zod')
+    expect(findingCounts(judged).urgent).toBe(0)
+    expect(findingCounts([{ ...groups[0]!, urgency }]).urgent).toBe(1)
+    expect(parseSecuritySearch({ urgent: 'only' })).toEqual({ urgent: 'only' })
+    expect(parseSecuritySearch({ urgent: 'yes' })).toEqual({})
   })
 
   test('rows carry a key and the teams of their repositories', () => {

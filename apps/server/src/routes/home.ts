@@ -11,6 +11,7 @@ import { Hono } from 'hono'
 
 import { latestHeadsWithMetrics } from '../analyses.ts'
 import { type Env, type ServerDeps, parseRepo, principalOf, repoTarget } from '../context.ts'
+import { readFindings } from '../findings.ts'
 import {
   CHANGES_DAYS,
   changeActionPrefixes,
@@ -144,6 +145,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     heads,
     allowlists,
     switches,
+    findings,
   ] = await Promise.all([
     store.jobs.list({ status: 'failed', ...scoped, limit: 200 }),
     store.jobs.list({ status: 'blocked', ...scoped, limit: 100 }),
@@ -155,6 +157,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     latestHeadsWithMetrics(store.analyses, kinds),
     store.settings.list('audit.allowlist'),
     store.settings.list(repoAnalyzersKey),
+    readFindings({ config, store, kinds, today: now.toISOString().slice(0, 10) }, principal),
   ])
   const off = (repo: RepoRef, kind: string) =>
     analyzerOff(switches, repoTarget(config, repo), kind) !== undefined
@@ -196,6 +199,9 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     failedJobs: failedJobs.filter((job) => (job.finishedAt ?? job.createdAt) >= since),
     blockedJobs: blockedJobs.filter((job) => (job.finishedAt ?? job.createdAt) >= since),
     audits: [...audits.values()],
+    urgentFindings: findings.groups.filter(
+      (group) => group.urgency?.urgent && group.status !== 'allowlisted',
+    ),
     releases: cards,
     learnings: learnings.filter((candidate) => {
       const repo = parseRepo(candidate.repo)

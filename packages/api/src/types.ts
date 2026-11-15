@@ -298,6 +298,32 @@ export interface FindingRepo {
   taskId?: string
 }
 
+/** What an urgent advisory lets an attacker do, as the urgency verdict names it. */
+export type UrgencyCategory =
+  | 'malware'
+  | 'code-execution'
+  | 'code-or-secret-theft'
+  | 'auth-bypass'
+  | 'data-exposure'
+  | 'other'
+
+/**
+ * Whether a finding needs a reaction now, beyond its severity: malicious packages are urgent by
+ * rule (`by: 'rule'`), advisories of the severities `security.alerts` lists are judged once by the
+ * AI (`by: 'ai'`). Absent while nothing judged the advisory.
+ */
+export interface FindingUrgency {
+  urgent: boolean
+  category: UrgencyCategory
+  /** Why, in the language `security.alerts` sets; for rule verdicts in English. */
+  reason: string
+  by: 'rule' | 'ai'
+  /** When the verdict was made. */
+  at: Timestamp
+  /** Link to the Slack alert of an urgent finding, once posted. */
+  slackUrl?: string
+}
+
 /** One advisory affecting one package, across the repositories the caller may read audits of. */
 export interface FindingGroup {
   /** Primary advisory id, e.g. `GHSA-xxxx-xxxx-xxxx`. */
@@ -326,6 +352,8 @@ export interface FindingGroup {
    * sighting was stored.
    */
   firstSeenAt: Timestamp
+  /** The urgency verdict; absent while nothing judged the advisory. */
+  urgency?: FindingUrgency
 }
 
 /**
@@ -333,10 +361,12 @@ export interface FindingGroup {
  * read audits of (`audits:read`), one group per advisory and package. Read from stored metrics.
  */
 export interface FindingsResponse {
-  /** Worst severity first, then most repositories, then advisory id. */
+  /** Urgent groups first, then worst severity, then most repositories, then advisory id. */
   groups: FindingGroup[]
   /** Groups per severity, every status included. */
   severities: SeverityCounts
+  /** Urgent groups that some repository has not allowlisted. */
+  urgent: number
 }
 
 /**
@@ -4918,6 +4948,7 @@ export interface HomeRepoRef {
 export type HomeAttentionKind =
   | 'job-failures'
   | 'budget-blocked'
+  | 'urgent-vulnerability'
   | 'vulnerabilities'
   | 'allowlist'
   | 'allowlist-expiring'

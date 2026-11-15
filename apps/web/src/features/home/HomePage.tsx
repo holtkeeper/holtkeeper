@@ -25,6 +25,7 @@ import {
   Rocket,
   Settings2,
   ShieldAlert,
+  Siren,
   ShieldCheck,
   Users,
   Wallet,
@@ -96,6 +97,7 @@ import { useSession } from '../shell/session.ts'
 const attentionIcons: Record<HomeAttentionKind, LucideIcon> = {
   'job-failures': CircleX,
   'budget-blocked': Wallet,
+  'urgent-vulnerability': Siren,
   vulnerabilities: ShieldAlert,
   allowlist: Clock,
   'allowlist-expiring': Clock,

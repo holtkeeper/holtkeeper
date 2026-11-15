@@ -17,9 +17,11 @@ import {
   findingRows,
   findingStatusLabel,
   findingStatusTone,
+  isUrgent,
   parseSecuritySearch,
   sortFindings,
   statusNote,
+  urgencyCategoryLabel,
 } from '../../lib/security.ts'
 import { severities, severityLabel, severityTone } from '../../lib/severity.ts'
 import {
@@ -85,9 +87,21 @@ const columns: readonly FleetColumn<FindingGroupRow>[] = [
     id: 'severity',
     header: 'Severity',
     cell: ({ group }) => (
-      <Tag tone={severityTone(group.severity)} dot>
-        {severityLabel[group.severity]}
-      </Tag>
+      <span className="flex flex-col items-start gap-0.5">
+        {isUrgent(group) ? (
+          <Tag tone="danger" title={group.urgency?.reason}>
+            {group.urgency?.category === 'malware' ? 'Malware' : 'Urgent'}
+          </Tag>
+        ) : null}
+        <Tag tone={severityTone(group.severity)} dot>
+          {severityLabel[group.severity]}
+        </Tag>
+        {isUrgent(group) && group.urgency && group.urgency.category !== 'malware' ? (
+          <span className="text-[11px] text-dim">
+            {urgencyCategoryLabel[group.urgency.category]}
+          </span>
+        ) : null}
+      </span>
     ),
   },
   {
@@ -160,6 +174,7 @@ function strip(rows: readonly FindingGroupRow[], narrowed: boolean): StripCell[]
       label: counts.groups === 1 ? 'finding' : 'findings',
       ...(narrowed ? {} : { caption: `in ${plural(counts.repos, 'repository', 'repositories')}` }),
     },
+    ...(counts.urgent ? [{ value: counts.urgent, label: 'urgent', tone: 'danger' as const }] : []),
     ...severities
       .filter((severity) => severity !== 'unknown' || counts.severities.unknown > 0)
       .map((severity) => ({
@@ -212,7 +227,11 @@ export function FindingsBody({
   const step = neighbours(keys, search.finding)
   const current = step.index >= 0 ? rows.find((row) => row.key === search.finding) : undefined
   const filtered = Boolean(
-    search.q || search.severity?.length || search.status?.length || search.ecosystem?.length,
+    search.q ||
+    search.urgent ||
+    search.severity?.length ||
+    search.status?.length ||
+    search.ecosystem?.length,
   )
 
   if (findings.isPending) return <Placeholder className="h-72" />
@@ -241,6 +260,15 @@ export function FindingsBody({
                 onChange={([key]) => update({ repo: key, finding: undefined })}
               />
             ) : null}
+            <FilterButton
+              single
+              label="Urgency"
+              options={[{ id: 'only', label: 'Urgent only' }]}
+              value={search.urgent ? [search.urgent] : []}
+              onChange={([urgent]) =>
+                update({ urgent: parseSecuritySearch({ urgent }).urgent, finding: undefined })
+              }
+            />
             <FilterButton
               label="Severity"
               options={severities.map((id) => ({ id, label: severityLabel[id] }))}

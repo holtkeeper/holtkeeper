@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import { auditAnalysis } from '@holtkeeper/analyzers'
-import type { AuditRunSummary, HomeView, ReleaseCard } from '@holtkeeper/api'
+import type { AuditRunSummary, FindingGroup, HomeView, ReleaseCard } from '@holtkeeper/api'
 import { emptySeverities } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -24,6 +24,7 @@ import {
   releaseItems,
   staleItems,
   summarizeChanges,
+  urgentFindingItems,
 } from '../src/home.ts'
 import { addSnooze } from '../src/snoozes.ts'
 
@@ -158,6 +159,31 @@ const event = (
   ...(details && { details }),
 })
 
+const findingGroup = (advisory: string, urgent: boolean, statuses: string[]): FindingGroup => ({
+  advisory,
+  aliases: [],
+  package: 'some-lib',
+  ecosystem: 'npm',
+  severity: 'critical',
+  fixedIn: ['2.0.0'],
+  repos: statuses.map((status, index) => ({
+    repo: index ? 'work:colors/red' : 'work:shapes/circle',
+    teams: [],
+    versions: ['1.0.0'],
+    sources: ['package-lock.json'],
+    status: status as 'open' | 'allowlisted',
+  })),
+  status: 'open',
+  firstSeenAt: '2026-10-29T00:00:00.000Z',
+  urgency: {
+    urgent,
+    category: 'code-execution',
+    reason: 'Runs code from untrusted widgets.\nMore words.',
+    by: 'ai',
+    at: '2026-10-29T10:00:00.000Z',
+  },
+})
+
 describe('Needs attention rules', () => {
   test('failures group by analyzer and signature across repositories, old ones drop out', () => {
     const items = failureItems(
@@ -266,6 +292,38 @@ describe('Needs attention rules', () => {
       label: 'Open audit',
       href: '/supply/security/runs/run-shapes%2Fcircle',
     })
+  })
+
+  test('urgent findings come first among critical items and open the finding sheet', () => {
+    const urgentFindings = [
+      findingGroup('GHSA-1', true, ['open', 'allowlisted']),
+      findingGroup('GHSA-2', false, ['open']),
+    ]
+    expect(urgentFindingItems(sources({ urgentFindings }))).toEqual([
+      {
+        id: 'urgent-vulnerability:GHSA-1|npm|some-lib',
+        kind: 'urgent-vulnerability',
+        severity: 'critical',
+        title: 'Urgent: some-lib (GHSA-1)',
+        detail: 'Runs code from untrusted widgets.',
+        repos: [expect.objectContaining({ repo: 'work:shapes/circle' })],
+        count: 1,
+        at: '2026-10-29T10:00:00.000Z',
+        href: '/supply/security?urgent=only&finding=GHSA-1%3Asome-lib',
+        action: {
+          type: 'open',
+          label: 'Open finding',
+          href: '/supply/security?urgent=only&finding=GHSA-1%3Asome-lib',
+        },
+      },
+    ])
+    const all = attentionItems(
+      sources({
+        urgentFindings,
+        audits: [{ latest: summary('shapes/circle', { critical: 1 }) }],
+      }),
+    )
+    expect(all.map((item) => item.kind)).toEqual(['urgent-vulnerability', 'vulnerabilities'])
   })
 
   test('allowlist entries that expired or expire within 7 days open their Inbox item', () => {

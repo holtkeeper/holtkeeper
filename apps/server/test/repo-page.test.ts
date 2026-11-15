@@ -14,6 +14,7 @@ import { aesVault } from '@holtkeeper/vault'
 import { builtinAnalyses } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
 import { noteHead } from '../src/freshness.ts'
+import { saveAlertsState } from '../src/security-alert-state.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
@@ -242,6 +243,20 @@ const publicApi = async () => (await overviewOf()).cards.find((card) => card.key
 const librariesCard = async () =>
   (await overviewOf()).cards.find((card) => card.key === 'libraries')
 
+const advisory = (id: string, pkg: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  aliases: [],
+  summary: `Widget flaw in ${pkg}`,
+  url: `https://osv.test/${id}`,
+  severity: 'critical',
+  package: pkg,
+  ecosystem: 'npm',
+  version: '1.0.0',
+  source: 'package-lock.json',
+  fixedIn: [],
+  ...extra,
+})
+
 describe('repository hub overview', () => {
   test('health strip and cards follow the caller’s permissions', async () => {
     await metricsRecord('audit', {
@@ -305,6 +320,41 @@ describe('repository hub overview', () => {
     expect(reader.cells.coverage?.tone).toBe('bad')
     expect(reader.knowledge).toBeUndefined()
     expect(reader.release).toBeUndefined()
+  })
+
+  test('the security card names urgent packages first, leaving allowlisted ones out', async () => {
+    await metricsRecord('audit', {
+      findings: 2,
+      severities: { critical: 1, high: 0, medium: 0, low: 0, unknown: 1 },
+      ignored: 1,
+      expired: 0,
+      resolved: 0,
+      advisories: [
+        advisory('GHSA-1', 'some-lib'),
+        advisory('MAL-2026-1', 'bad-widget', { severity: 'unknown' }),
+        advisory('MAL-2026-2', 'hidden-widget', { allowlisted: {} }),
+      ],
+    })
+    await saveAlertsState(store.kv, {
+      alerts: {
+        'GHSA-1|npm|some-lib': {
+          advisory: 'GHSA-1',
+          ecosystem: 'npm',
+          package: 'some-lib',
+          firstSeenAt: at,
+          lastSeenAt: at,
+          verdict: { urgent: true, category: 'code-execution', reason: 'RCE', by: 'ai', at },
+          triageAttempts: 0,
+          status: 'waiting',
+          postAttempts: 0,
+          posts: [],
+          repos: [],
+        },
+      },
+    })
+    const card = (await overviewOf()).cards.find((entry) => entry.key === 'security')
+    expect(card).toMatchObject({ tone: 'bad', status: '2 urgent', value: '2' })
+    expect(card?.lines[0]).toBe('Urgent: bad-widget, some-lib')
   })
 
   test('the public API card tells a Go service and an empty snapshot apart from indexed packages', async () => {

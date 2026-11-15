@@ -28,6 +28,8 @@ export interface SlackMessageBody {
 interface SlackPostResult extends SlackResult {
   ts?: string
   channel?: string
+  /** Set by `chat.getPermalink` only. */
+  permalink?: string
 }
 
 /**
@@ -42,6 +44,8 @@ export interface SlackPoster {
   post(input: { channel: string; threadTs?: string } & SlackMessageBody): Promise<SlackPostResult>
   /** `chat.update` of a message the bot posted. */
   update(input: { channel: string; ts: string } & SlackMessageBody): Promise<SlackPostResult>
+  /** `chat.getPermalink`: a link that opens the message; `undefined` when Slack gave none. */
+  permalink?(input: { channel: string; ts: string }): Promise<string | undefined>
 }
 
 /** Options of `slackWebApi` and `slackWebPoster`. */
@@ -72,6 +76,7 @@ const answerSchema = z
     error: z.string().optional().catch(undefined),
     ts: z.string().optional().catch(undefined),
     channel: z.string().optional().catch(undefined),
+    permalink: z.string().optional().catch(undefined),
   })
   .catch({})
 
@@ -93,6 +98,8 @@ function slackCaller(options: SlackWebApiOptions) {
     body: Record<string, unknown>,
     harmless: readonly string[] = [],
     quiet: readonly string[] = [],
+    // Read methods such as chat.getPermalink take form fields, not JSON.
+    form = false,
   ): Promise<SlackPostResult> => {
     for (let attempt = 0; ; attempt++) {
       let response: Response
@@ -102,9 +109,18 @@ function slackCaller(options: SlackWebApiOptions) {
           method: 'POST',
           headers: {
             authorization: `Bearer ${options.token}`,
-            'content-type': 'application/json; charset=utf-8',
+            'content-type': form
+              ? 'application/x-www-form-urlencoded'
+              : 'application/json; charset=utf-8',
           },
-          body: JSON.stringify(body),
+          body: form
+            ? new URLSearchParams(
+                Object.entries(body).map(([name, value]): [string, string] => [
+                  name,
+                  String(value),
+                ]),
+              ).toString()
+            : JSON.stringify(body),
           signal: AbortSignal.timeout(timeoutMs),
         })
       } catch (error) {
@@ -134,6 +150,7 @@ function slackCaller(options: SlackWebApiOptions) {
           ok: true,
           ...(answer.ts !== undefined && { ts: answer.ts }),
           ...(answer.channel !== undefined && { channel: answer.channel }),
+          ...(answer.permalink !== undefined && { permalink: answer.permalink }),
         }
       const error = answer.error ?? `HTTP ${response.status}`
       if (harmless.includes(error)) return { ok: true }
@@ -197,5 +214,7 @@ export function slackWebPoster(options: SlackWebApiOptions): SlackPoster {
       }),
     update: ({ channel, ts, ...message }) =>
       call('chat.update', { channel, ts, ...messageBody(message) }),
+    permalink: async ({ channel, ts }) =>
+      (await call('chat.getPermalink', { channel, message_ts: ts }, [], [], true)).permalink,
   }
 }

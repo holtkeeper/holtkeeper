@@ -9,6 +9,9 @@ describe('webPaths', () => {
     expect(webPaths.tasks()).toBe('/ops/tasks')
     expect(webPaths.automation()).toBe('/ops/automation')
     expect(webPaths.security()).toBe('/supply/security')
+    expect(webPaths.security({ urgent: 'only', finding: 'GHSA-1:some-lib' })).toBe(
+      '/supply/security?urgent=only&finding=GHSA-1%3Asome-lib',
+    )
   })
 
   test('drops empty and undefined search parameters and encodes the rest', () => {

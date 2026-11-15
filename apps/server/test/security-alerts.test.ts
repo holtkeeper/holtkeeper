@@ -50,6 +50,7 @@ const poster: SlackPoster = {
     sent.push({ kind: 'update', channel, ts, ...message })
     return { ok: true, channel, ts }
   },
+  permalink: async ({ channel, ts }) => `https://acme.slack.test/archives/${channel}/p${ts}`,
 }
 
 /** Urgent when the advisory summary says "injection". */
@@ -207,6 +208,12 @@ describe('security alerts', () => {
     expect(shown(render)).toContain('https://holtkeeper.test/supply/security')
     const mal = posts().find((entry) => entry.text.includes('shape-utilz'))
     expect(shown(mal)).toContain('Malicious package')
+    const posted = Object.values((await alerts.state()).alerts).filter(
+      (alert) => alert.status === 'posted',
+    )
+    expect(
+      posted.map((alert) => alert.posts[0]?.url?.startsWith('https://acme.slack.test/')),
+    ).toEqual([true, true])
 
     tick(30)
     await alerts.sweep()

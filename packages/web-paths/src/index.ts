@@ -20,6 +20,15 @@ interface RunsSearch {
   view?: string
 }
 
+/**
+ * What a Supply › Security link opens: `urgent: 'only'` keeps urgent findings, `finding` opens a
+ * finding group's sheet (`<advisory>:<package>`).
+ */
+interface SecuritySearch {
+  urgent?: 'only'
+  finding?: string
+}
+
 /** Tabs of the repository hub; `overview` is the default. */
 type RepoHubTab =
   | 'overview'
@@ -99,7 +108,7 @@ export const webPaths = {
   repos: () => '/repos',
   repo: (repo: string, search: RepoHubSearch = {}) => withSearch(repoHubPath(repo), { ...search }),
   teams: () => '/repos/teams',
-  security: () => '/supply/security',
+  security: (search: SecuritySearch = {}) => withSearch('/supply/security', { ...search }),
   securityRun: (runId: string) => `/supply/security/runs/${segment(runId)}`,
   releaseTimeline: (repo: string) => withSearch('/releases/timeline', { repo }),
   knowledge: (tab: KnowledgeSection, search: KnowledgeSearch = {}) =>

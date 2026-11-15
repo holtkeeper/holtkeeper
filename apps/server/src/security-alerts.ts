@@ -10,13 +10,19 @@ import {
   securityAlertsSettingKey,
   securityAlertsSettings,
   triageAdvisory,
-  triageCategories,
 } from '@holtkeeper/vuln-triage'
 import { webPaths, webUrl } from '@holtkeeper/web-paths'
-import { z } from 'zod'
 
 import type { ServerDeps } from './context.ts'
 import { readFindings } from './findings.ts'
+import {
+  type SecurityAlert,
+  type SecurityAlertsState,
+  alertKeyOf,
+  malwareReason,
+  readAlertsState,
+  saveAlertsState,
+} from './security-alert-state.ts'
 import { type SlackPoster, slackWebPoster } from './slack/client.ts'
 import { slackConnection } from './slack/connection.ts'
 import {
@@ -26,8 +32,6 @@ import {
   securityAlertReply,
 } from './slack/security-alert.ts'
 
-/** Where the alerts' state lives in `store.kv`. */
-const SECURITY_ALERTS_KEY = 'security:alerts:state'
 const AGENT_ACTOR = 'agent:security-alerts'
 /** AI triage calls per sweep at most; the rest wait for the next sweep. */
 const TRIAGE_PER_SWEEP = 10
@@ -43,67 +47,6 @@ const GONE_ERRORS: ReadonlySet<string> = new Set([
 /** Alerts nobody has seen for this long are forgotten. */
 const FORGET_MS = 90 * 86_400_000
 
-const repoSchema = z.object({
-  label: z.string(),
-  url: z.string().optional(),
-  versions: z.array(z.string()),
-  fixing: z.boolean().optional(),
-})
-
-const contentSchema = z.object({
-  advisory: z.object({
-    id: z.string(),
-    url: z.string().optional(),
-    aliases: z.array(z.string()),
-    summary: z.string().optional(),
-  }),
-  package: z.string(),
-  ecosystem: z.string(),
-  severity: z.enum(['critical', 'high', 'medium', 'low', 'unknown']),
-  fixedIn: z.array(z.string()),
-  category: z.enum(triageCategories),
-  reason: z.string(),
-  repos: z.array(repoSchema),
-  resolvedAt: z.string().optional(),
-  moreUrl: z.string().optional(),
-})
-
-const alertSchema = z.object({
-  advisory: z.string(),
-  package: z.string(),
-  ecosystem: z.string(),
-  firstSeenAt: z.string(),
-  lastSeenAt: z.string(),
-  verdict: z
-    .object({
-      urgent: z.boolean(),
-      category: z.enum(triageCategories),
-      reason: z.string(),
-      by: z.enum(['rule', 'ai']),
-      at: z.string(),
-    })
-    .optional(),
-  triageAttempts: z.number().int().default(0),
-  triageRetryAt: z.string().optional(),
-  /** `waiting`: not posted yet (untriaged or urgent); `quiet`: triaged as not urgent. */
-  status: z.enum(['waiting', 'posted', 'quiet']),
-  postAttempts: z.number().int().default(0),
-  postRetryAt: z.string().optional(),
-  posts: z.array(z.object({ channel: z.string(), ts: z.string() })).default([]),
-  /** Repositories (`forge:path`) the posted message names. */
-  repos: z.array(z.string()).default([]),
-  /** What the posted message shows, to rewrite it once resolved. */
-  shown: contentSchema.optional(),
-  resolvedAt: z.string().optional(),
-})
-
-const stateSchema = z.object({ alerts: z.record(z.string(), alertSchema) })
-
-/** One advisory and package the alerts follow, and how far reporting it got. */
-type SecurityAlert = z.infer<typeof alertSchema>
-/** What the store keeps: every followed advisory and package by `advisory|ecosystem|package`. */
-type SecurityAlertsState = z.infer<typeof stateSchema>
-
 /** A finding group the settings make a candidate: its repositories without allowlisted ones. */
 interface Candidate {
   group: FindingGroup
@@ -113,8 +56,7 @@ interface Candidate {
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-const keyOf = (group: Pick<FindingGroup, 'advisory' | 'ecosystem' | 'package'>) =>
-  `${group.advisory}|${group.ecosystem}|${group.package}`
+const keyOf = alertKeyOf
 
 const refOf = (key: string): RepoRef => {
   const at = key.indexOf(':')
@@ -129,7 +71,7 @@ const postDelayMs = (attempts: number) => Math.min(2 ** Math.max(attempts - 1, 0
 
 const malwareVerdict = (group: FindingGroup): Omit<TriageVerdict, 'urgent'> => ({
   category: 'malware',
-  reason: `${group.advisory} reports ${group.package} as a malicious package. Remove it, then rotate the credentials and check the machines that installed it.`,
+  reason: malwareReason(group.advisory, group.package),
 })
 
 /** Posts an alert to every channel; answers the messages Slack accepted and the errors. */
@@ -138,14 +80,18 @@ const postAll = async (
   channels: readonly string[],
   content: SecurityAlertContent,
 ) => {
-  const posts: { channel: string; ts: string }[] = []
+  const posts: SecurityAlert['posts'] = []
   const errors: string[] = []
   const message = securityAlertMessage(content)
   for (const channel of channels) {
     // oxlint-disable-next-line no-await-in-loop -- channels in order, within Slack's rate limits
     const result = await poster.post({ channel, ...message })
-    if (result.ok && result.ts) posts.push({ channel: result.channel ?? channel, ts: result.ts })
-    else errors.push(result.error ?? 'unknown_error')
+    if (result.ok && result.ts) {
+      const posted = { channel: result.channel ?? channel, ts: result.ts }
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const url = await poster.permalink?.(posted)
+      posts.push({ ...posted, ...(url && { url }) })
+    } else errors.push(result.error ?? 'unknown_error')
   }
   return { posts, errors }
 }
@@ -190,10 +136,9 @@ export function createSecurityAlerts(
 
   const nowIso = () => deps.now().toISOString()
 
-  const read = async (): Promise<SecurityAlertsState> =>
-    stateSchema.safeParse(await kv?.get(SECURITY_ALERTS_KEY)).data ?? { alerts: {} }
+  const read = async (): Promise<SecurityAlertsState> => readAlertsState(kv)
 
-  const save = async (state: SecurityAlertsState) => kv?.set(SECURITY_ALERTS_KEY, state)
+  const save = async (state: SecurityAlertsState) => saveAlertsState(kv, state)
 
   const settingsOf = async (): Promise<SecurityAlertsSettings> => {
     const entry = (await store.settings.list(securityAlertsSettingKey)).find(
@@ -432,7 +377,7 @@ export function createSecurityAlerts(
       const alert = state.alerts[key]!
       sent += 1
       const content = contentOf(candidate, alert)
-      let result: { posts: { channel: string; ts: string }[]; errors: string[] }
+      let result: { posts: SecurityAlert['posts']; errors: string[] }
       try {
         // oxlint-disable-next-line no-await-in-loop -- one alert at a time, within Slack's limits
         result = await postAll(poster, settings.channels, content)
@@ -455,6 +400,22 @@ export function createSecurityAlerts(
       }
       // oxlint-disable-next-line no-await-in-loop -- a posted alert is recorded before the next
       await save(state)
+    }
+
+    // Messages posted before permalinks were kept get theirs once.
+    if (poster.permalink) {
+      let filled = false
+      for (const alert of posted)
+        for (const post of alert.posts) {
+          if (post.url) continue
+          // oxlint-disable-next-line no-await-in-loop -- once per message, rare
+          const url = await poster.permalink({ channel: post.channel, ts: post.ts })
+          if (url) {
+            post.url = url
+            filled = true
+          }
+        }
+      if (filled) await save(state)
     }
 
     // Posted alerts follow the fleet.

@@ -61,6 +61,7 @@ import {
   readHealthSources,
   repoHealth,
 } from './repo-health.ts'
+import { findingUrgencies } from './security-alert-state.ts'
 import { repoDependencies, stackTeamViews } from './stack.ts'
 import { tasksWriteSettings } from './write-tasks.ts'
 
@@ -407,6 +408,8 @@ interface CardInputs {
   may: (action: Action) => boolean
   /** Whether the last freshness sweep found the analyzer `kind` does not apply to the repository. */
   notApplicable: (kind: string) => boolean
+  /** Packages of the newest audit's active findings judged urgent; none when absent. */
+  urgent?: readonly string[]
 }
 
 const notAnalysed = (
@@ -449,7 +452,7 @@ const card = (
 const fromCell = (cell: RepoHealthCell | undefined) =>
   cell && cell.tone !== 'none' ? { tone: cell.tone, status: cell.value } : undefined
 
-function securityCard({ heads, audit, cells, now }: CardInputs): RepoOverviewCard {
+function securityCard({ heads, audit, cells, now, urgent = [] }: CardInputs): RepoOverviewCard {
   const head = heads.get('audit')
   const fromRun = audit && (!head || audit.finishedAt > head.createdAt)
   const metrics = head ? metricsOf(auditAnalysis, head) : undefined
@@ -460,7 +463,9 @@ function securityCard({ heads, audit, cells, now }: CardInputs): RepoOverviewCar
   const { critical, high, medium, low, unknown } = counts.severities
   const active = critical + high + medium + low + unknown
   const at = fromRun ? audit.finishedAt : (head?.createdAt ?? '')
-  const status = fromCell(cells.security) ?? { tone: 'ok' as const, status: 'None' }
+  const status = urgent.length
+    ? { tone: 'bad' as const, status: `${urgent.length} urgent` }
+    : (fromCell(cells.security) ?? { tone: 'ok' as const, status: 'None' })
   return card('security', 'supply', {
     ...status,
     value: String(active),
@@ -471,7 +476,9 @@ function securityCard({ heads, audit, cells, now }: CardInputs): RepoOverviewCar
       ['info', low + unknown],
     ]),
     lines: [
-      `${critical + high} high or critical · ${medium} medium · ${low + unknown} low`,
+      urgent.length
+        ? `Urgent: ${urgent.join(', ')}`
+        : `${critical + high} high or critical · ${medium} medium · ${low + unknown} low`,
       [
         `Audited ${ago(at, now)}`,
         counts.ignored ? `${counts.ignored} allowlisted` : '',
@@ -482,6 +489,31 @@ function securityCard({ heads, audit, cells, now }: CardInputs): RepoOverviewCar
     ],
     analysisId: head?.id,
   })
+}
+
+/** Packages of the audit head's active findings (not allowlisted, or expired) judged urgent. */
+function urgentPackages(
+  head: AnalysisHead | undefined,
+  urgencyOf: Awaited<ReturnType<typeof findingUrgencies>>,
+  now: Date,
+): string[] {
+  const metrics = head ? metricsOf(auditAnalysis, head) : undefined
+  const today = now.toISOString().slice(0, 10)
+  const packages = new Set<string>()
+  for (const finding of metrics?.advisories ?? []) {
+    const until = finding.allowlisted?.until
+    if (finding.allowlisted && (until === undefined || until >= today)) continue
+    const urgency = urgencyOf({
+      advisory: finding.id,
+      aliases: finding.aliases,
+      summary: finding.summary,
+      ecosystem: finding.ecosystem,
+      package: finding.package,
+      firstSeenAt: head?.createdAt ?? now.toISOString(),
+    })
+    if (urgency?.urgent) packages.add(finding.package)
+  }
+  return [...packages].toSorted()
 }
 
 function librariesCard({
@@ -881,33 +913,47 @@ export async function repoOverview(
     return allowed.get(action) === true
   }
   const now = deps.now()
-  const [latest, head, sources, dependencies, toolchain, reviews30d, work, knowledge, access] =
-    await Promise.all([
-      store.analyses.latest({ repo: ref }),
-      store.kv ? readHead(store.kv, ref) : undefined,
-      readHealthSources(deps, {
-        repo: ref,
-        jobRepos: [ref],
-        ...(may('releases:read') && options.releases && { releases: options.releases }),
-        audits: may('audits:read'),
-        ...(labels.size && { known: (kind: string) => labels.has(kind) }),
-      }),
-      repoDependencies(store.analyses, ref),
-      repoStack(store.analyses, ref, options.teamsOf),
-      reviewTotals(store, ref, now),
-      workSummary(store, ref, now, {
-        tasks: may('repos:read'),
-        spend: may('ai:read') || may('ai:admin'),
-      }),
-      may('knowledge:read')
-        ? knowledgeSummary(store, repo, options.teamTitle ?? ((team) => team))
-        : undefined,
-      accessSummary(store, repo, now),
-    ])
+  const [
+    latest,
+    head,
+    sources,
+    dependencies,
+    toolchain,
+    reviews30d,
+    work,
+    knowledge,
+    access,
+    urgencyOf,
+  ] = await Promise.all([
+    store.analyses.latest({ repo: ref }),
+    store.kv ? readHead(store.kv, ref) : undefined,
+    readHealthSources(deps, {
+      repo: ref,
+      jobRepos: [ref],
+      ...(may('releases:read') && options.releases && { releases: options.releases }),
+      audits: may('audits:read'),
+      ...(labels.size && { known: (kind: string) => labels.has(kind) }),
+    }),
+    repoDependencies(store.analyses, ref),
+    repoStack(store.analyses, ref, options.teamsOf),
+    reviewTotals(store, ref, now),
+    workSummary(store, ref, now, {
+      tasks: may('repos:read'),
+      spend: may('ai:read') || may('ai:admin'),
+    }),
+    may('knowledge:read')
+      ? knowledgeSummary(store, repo, options.teamTitle ?? ((team) => team))
+      : undefined,
+    accessSummary(store, repo, now),
+    may('audits:read') ? findingUrgencies(store.kv) : undefined,
+  ])
   const indexed = indexSources(sources)
   const { health, cells } = repoHealth(indexed, repo, may)
   const key = repoKey(repo)
   const audit = may('audits:read') ? indexed.audits.get(key) : undefined
+  const urgent = urgencyOf
+    ? urgentPackages(indexed.heads.get(key)?.get('audit'), urgencyOf, now)
+    : []
   const summaries = latest
     .filter((record) => record.kind !== 'review' && (record.kind !== 'audit' || may('audits:read')))
     .map((record) => summarizeAnalysis(kinds, record))
@@ -931,6 +977,7 @@ export async function repoOverview(
       judged: judgedBy(sources.settings, repo),
       may,
       notApplicable: (kind) => sources.sweep?.get(`${key}\0${kind}`)?.applies === false,
+      urgent,
     }),
     ...(head ? { head: { sha: head.sha, at: head.at } } : {}),
     ...(defaultBranch ? { defaultBranch } : {}),

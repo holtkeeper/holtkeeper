@@ -20,6 +20,7 @@ import {
   fixTargets,
   installedVersions,
   repoStatusCounts,
+  urgencyCategoryLabel,
 } from '../../lib/security.ts'
 import { severityLabel, severityTone } from '../../lib/severity.ts'
 import { taskGroupCap } from '../../lib/tasks.ts'
@@ -50,6 +51,47 @@ const tabs = [
 ] as const
 
 const repoSet = (group: FindingGroup) => new Set(group.repos.map((entry) => entry.repo))
+
+/**
+ * The urgency verdict of a group: urgent or not, what it lets an attacker do, why, who judged it
+ * and the Slack alert once posted. Nothing renders while nothing judged the advisory.
+ */
+function UrgencyNote({ group }: { group: FindingGroup }) {
+  const urgency = group.urgency
+  if (!urgency) return null
+  const slack = urgency.slackUrl ? httpUrl(urgency.slackUrl) : undefined
+  return (
+    <section
+      aria-label="Urgency"
+      className={
+        urgency.urgent
+          ? 'rounded-md border border-danger bg-danger-soft p-3 text-sm'
+          : 'rounded-md border border-border p-3 text-sm'
+      }
+    >
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <Tag tone={urgency.urgent ? 'danger' : 'default'} dot>
+          {urgency.urgent ? 'Urgent' : 'Not urgent'}
+        </Tag>
+        <span className="text-xs text-muted">
+          {urgencyCategoryLabel[urgency.category]} ·{' '}
+          {urgency.by === 'rule' ? 'by rule' : 'judged by AI'} {formatRelative(urgency.at)}
+        </span>
+        {slack ? (
+          <a
+            href={slack}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto inline-flex items-center gap-1 text-xs hover:underline"
+          >
+            Slack alert <ExternalLink aria-hidden className="size-3" />
+          </a>
+        ) : null}
+      </div>
+      <p className="whitespace-pre-line">{urgency.reason}</p>
+    </section>
+  )
+}
 
 function RunHistory({ group }: { group: FindingGroup }) {
   const runs = useAuditRuns()
@@ -442,6 +484,9 @@ function GroupSheet({
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          {group.urgency?.urgent ? (
+            <Tag tone="danger">{group.urgency.category === 'malware' ? 'Malware' : 'Urgent'}</Tag>
+          ) : null}
           <Tag tone={severityTone(group.severity)} dot>
             {severityLabel[group.severity]}
           </Tag>
@@ -451,6 +496,7 @@ function GroupSheet({
             {installedVersions(group)[0] ?? '—'} → {group.fixedIn[0] ?? 'no fix'}
           </span>
         </div>
+        <UrgencyNote group={group} />
         {fix.reason ? <p className="text-xs text-muted">{fix.reason}</p> : null}
         {current === 'repos' ? (
           <Repositories group={group} />

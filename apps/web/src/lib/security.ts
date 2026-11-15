@@ -9,6 +9,7 @@ import type {
   SettingView,
   Severity,
   SeverityCounts,
+  UrgencyCategory,
 } from '@holtkeeper/api'
 import { patternMatches } from '@holtkeeper/api'
 
@@ -44,6 +45,8 @@ export interface SecuritySearch {
   ecosystem?: string[]
   sort?: Exclude<FindingsSort, 'severity'>
   q?: string
+  /** `only` keeps the findings judged urgent. */
+  urgent?: 'only'
   /** The finding group open in the sheet: `<advisory>:<package>`. */
   finding?: string
   /** Tab of the open finding's sheet. */
@@ -65,6 +68,7 @@ export function parseSecuritySearch(search: Record<string, unknown>): SecuritySe
     ...searchEntry('ecosystem', searchList(search.ecosystem)),
     ...searchEntry('sort', sort === 'severity' ? undefined : sort),
     ...searchEntry('q', searchText(search.q)),
+    ...searchEntry('urgent', searchEnum(search.urgent, ['only'] as const)),
     ...searchEntry('finding', searchText(search.finding)),
     ...searchEntry('tab', searchText(search.tab)),
   }
@@ -85,6 +89,19 @@ export const findingStatusLabel: Record<FindingStatus, string> = {
   fixing: 'Fixing',
   allowlisted: 'Allowlisted',
 }
+
+/** Words for what an urgent advisory lets an attacker do. */
+export const urgencyCategoryLabel: Record<UrgencyCategory, string> = {
+  malware: 'Malicious package',
+  'code-execution': 'Code execution',
+  'code-or-secret-theft': 'Code or secret theft',
+  'auth-bypass': 'Authentication bypass',
+  'data-exposure': 'Data exposure',
+  other: 'Other',
+}
+
+/** Whether a group was judged urgent. */
+export const isUrgent = (group: FindingGroup): boolean => group.urgency?.urgent === true
 
 /** Tag tone of a finding status. */
 export const findingStatusTone = (status: FindingStatus): 'danger' | 'info' | 'default' =>
@@ -121,13 +138,14 @@ const matchesText = (group: FindingGroup, q: string): boolean => {
   ].some((value) => value.toLowerCase().includes(needle))
 }
 
-/** Groups matching the search's severity, status, ecosystem, repository and text filters. */
+/** Groups matching the search's urgency, severity, status, ecosystem, repository and text filters. */
 export function filterFindings(
   groups: readonly FindingGroup[],
-  search: Pick<SecuritySearch, 'severity' | 'status' | 'ecosystem' | 'repo' | 'q'>,
+  search: Pick<SecuritySearch, 'urgent' | 'severity' | 'status' | 'ecosystem' | 'repo' | 'q'>,
 ): FindingGroup[] {
   return groups.filter(
     (group) =>
+      (!search.urgent || isUrgent(group)) &&
       (!search.severity?.length || search.severity.includes(group.severity)) &&
       (!search.status?.length || search.status.includes(group.status)) &&
       (!search.ecosystem?.length || search.ecosystem.includes(group.ecosystem)) &&
@@ -137,14 +155,16 @@ export function filterFindings(
 }
 
 /**
- * Groups in `sort` order: `severity` worst first, then most repositories; `repos` most
+ * Groups in `sort` order: `severity` urgent first, then worst, then most repositories; `repos` most
  * repositories first; `seen` newest first sighting first; `package` by name. Ties keep the
  * server's order.
  */
 export function sortFindings(groups: readonly FindingGroup[], sort: FindingsSort): FindingGroup[] {
   const compare: Record<FindingsSort, (a: FindingGroup, b: FindingGroup) => number> = {
     severity: (a, b) =>
-      severityRank(a.severity) - severityRank(b.severity) || b.repos.length - a.repos.length,
+      Number(isUrgent(b)) - Number(isUrgent(a)) ||
+      severityRank(a.severity) - severityRank(b.severity) ||
+      b.repos.length - a.repos.length,
     repos: (a, b) => b.repos.length - a.repos.length,
     seen: (a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt),
     package: (a, b) => a.package.localeCompare(b.package, 'en', { sensitivity: 'base' }),
@@ -163,6 +183,8 @@ export interface FindingCounts {
   severities: SeverityCounts
   /** Groups per overall status. */
   status: Record<FindingStatus, number>
+  /** Urgent groups that are not allowlisted everywhere. */
+  urgent: number
 }
 
 /** Counts groups per severity and status and the repositories they touch. */
@@ -172,10 +194,12 @@ export function findingCounts(groups: readonly FindingGroup[]): FindingCounts {
     repos: new Set(groups.flatMap((group) => group.repos.map((repo) => repo.repo))).size,
     severities: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
     status: { open: 0, fixing: 0, allowlisted: 0 },
+    urgent: 0,
   }
   for (const group of groups) {
     counts.severities[group.severity]++
     counts.status[group.status]++
+    if (isUrgent(group) && group.status !== 'allowlisted') counts.urgent++
   }
   return counts
 }

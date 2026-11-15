@@ -14,6 +14,7 @@ import type { AuditReport, Finding } from '@holtkeeper/vuln'
 import { builtinAnalyses } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
 import { readFindings } from '../src/findings.ts'
+import { saveAlertsState } from '../src/security-alert-state.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
@@ -163,6 +164,67 @@ test('groups findings by advisory and package across the newest audits', async (
       status: 'open',
     },
   ])
+})
+
+const verdict = (urgent: boolean, reason: string) => ({
+  urgent,
+  category: urgent ? ('code-execution' as const) : ('other' as const),
+  reason,
+  by: 'ai' as const,
+  at: '2026-11-07T00:00:00.000Z',
+})
+
+test('urgency verdicts ride on the groups, malware is urgent by rule, urgent groups come first', async () => {
+  const alert = { firstSeenAt: '2026-11-07T00:00:00.000Z', lastSeenAt: '2026-11-07T00:00:00.000Z' }
+  await saveAlertsState(store.kv, {
+    alerts: {
+      'GHSA-1|npm|some-lib': {
+        ...alert,
+        advisory: 'GHSA-1',
+        ecosystem: 'npm',
+        package: 'some-lib',
+        verdict: verdict(true, 'Runs code from untrusted widgets.'),
+        triageAttempts: 0,
+        status: 'posted',
+        postAttempts: 0,
+        posts: [{ channel: 'C0123ABCD', ts: '1.2', url: 'https://widgets.slack.com/p1' }],
+        repos: [],
+      },
+      'GHSA-2|npm|other-lib': {
+        ...alert,
+        advisory: 'GHSA-2',
+        ecosystem: 'npm',
+        package: 'other-lib',
+        verdict: verdict(false, 'Only a build tool.'),
+        triageAttempts: 0,
+        status: 'quiet',
+        postAttempts: 0,
+        posts: [],
+        repos: [],
+      },
+    },
+  })
+  await ingest(
+    'acme/pay-core',
+    '2026-11-08T00:00:00.000Z',
+    report([
+      finding('GHSA-3', 'foo-util', '3.0.0', { severity: 'low' }),
+      finding('MAL-2026-1', 'bad-widget', '0.0.1', { severity: 'unknown', aliases: [] }),
+    ]),
+  )
+  const body = await findings('admin')
+  expect(body.groups.map((group) => [group.advisory, group.urgency?.urgent])).toEqual([
+    ['GHSA-1', true],
+    ['MAL-2026-1', true],
+    ['GHSA-2', false],
+    ['GHSA-3', undefined],
+  ])
+  expect(body.urgent).toBe(2)
+  expect(body.groups[0]?.urgency).toEqual({
+    ...verdict(true, 'Runs code from untrusted widgets.'),
+    slackUrl: 'https://widgets.slack.com/p1',
+  })
+  expect(body.groups[1]?.urgency).toMatchObject({ category: 'malware', by: 'rule' })
 })
 
 test('repositories whose audit is turned off leave the findings', async () => {

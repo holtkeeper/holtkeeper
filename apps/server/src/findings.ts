@@ -17,16 +17,20 @@ import { type Severity, compareSeverity } from '@holtkeeper/vuln'
 import { latestHeadsWithMetrics } from './analyses.ts'
 import { repoKey, repoTarget } from './context.ts'
 import type { FleetCache } from './fleet-cache.ts'
+import { findingUrgencies } from './security-alert-state.ts'
 import { canSee } from './visibility.ts'
 
 const FIXING: readonly AgentTaskStatus[] = ['approved', 'queued', 'running', 'mr-open']
+
+const urgent = (group: FindingGroup) => group.urgency?.urgent === true
 
 const severityOrder: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown']
 
 /** What `readFindings` reads. */
 export interface FindingsDeps {
   config: HoltkeeperConfig
-  store: Pick<Store, 'analyses' | 'tasks' | 'settings'>
+  /** With `kv`, groups carry the urgency verdicts of the security alerts. */
+  store: Pick<Store, 'analyses' | 'tasks' | 'settings' | 'kv'>
   /** Analysis kinds by name, to fill in metrics of records stored without them. */
   // oxlint-disable-next-line typescript/no-explicit-any -- kinds differ in their data type
   kinds: ReadonlyMap<string, AnalysisKind<any, any>>
@@ -149,7 +153,8 @@ const settle = (stored: StoredGroup, tasks: readonly AgentTask[], today: string)
  * stored without any). A group or repository is `fixing` while an approved or running agent task
  * upgrades that package in that repository, and `allowlisted` while every finding there was hidden
  * by an allowlist entry that has not expired since. `firstSeenAt` is the record time where no
- * first-seen time was stored.
+ * first-seen time was stored. Groups carry their urgency verdict (`findingUrgencies`) and urgent
+ * ones come first.
  */
 export async function readFindings(
   deps: FindingsDeps,
@@ -172,7 +177,7 @@ export async function readFindings(
   })
   const repos = heads.map((head) => repoKey(head.repo))
   const load = async () => groupStored(config, heads)
-  const [stored, tasks] = await Promise.all([
+  const [stored, tasks, urgencyOf] = await Promise.all([
     deps.cache
       ? deps.cache.read(
           { endpoint: 'audits/findings', analysisIds: heads.map((head) => head.id), repos },
@@ -180,11 +185,17 @@ export async function readFindings(
         )
       : load(),
     repos.length ? store.tasks.list({ repos, status: FIXING }) : [],
+    findingUrgencies(store.kv),
   ])
   const groups = stored
-    .map((group) => settle(group, tasks, deps.today))
+    .map((group) => {
+      const settled = settle(group, tasks, deps.today)
+      const urgency = urgencyOf(settled)
+      return urgency ? { ...settled, urgency } : settled
+    })
     .toSorted(
       (a, b) =>
+        Number(urgent(b)) - Number(urgent(a)) ||
         severityOrder.indexOf(a.severity) - severityOrder.indexOf(b.severity) ||
         b.repos.length - a.repos.length ||
         a.advisory.localeCompare(b.advisory) ||
@@ -192,5 +203,9 @@ export async function readFindings(
     )
   const severities: SeverityCounts = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 }
   for (const group of groups) severities[group.severity] += 1
-  return { groups, severities }
+  return {
+    groups,
+    severities,
+    urgent: groups.filter((group) => urgent(group) && group.status !== 'allowlisted').length,
+  }
 }

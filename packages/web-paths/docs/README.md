@@ -28,7 +28,7 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 | `repos()`                                                                     | `/repos`                                                                 |
 | `repo(repo, { tab?, section?, file?, ref? })`                                 | `/repos/<forge>/<path>?tab=&section=&file=&ref=` (hub)                   |
 | `teams()`                                                                     | `/repos/teams`                                                           |
-| `security()`                                                                  | `/supply/security`                                                       |
+| `security({ urgent?, finding? })`                                             | `/supply/security?urgent=only&finding=<advisory>:<package>`              |
 | `securityRun(runId)`                                                          | `/supply/security/runs/<runId>`                                          |
 | `releaseTimeline(repo)`                                                       | `/releases/timeline?repo=`                                               |
 | `knowledge(tab, { space?, section?, note? })`                                 | `/knowledge/guide\|notes\|learnings?space=&section=&note=`               |

@@ -61,6 +61,7 @@ export const attentionRows = (items: readonly HomeAttentionItem[]): HomeAttentio
 export const attentionKindLabel: Record<HomeAttentionKind, string> = {
   'job-failures': 'Job failure',
   'budget-blocked': 'AI budget',
+  'urgent-vulnerability': 'Urgent vulnerability',
   vulnerabilities: 'Vulnerability',
   allowlist: 'Allowlist',
   'allowlist-expiring': 'Allowlist',

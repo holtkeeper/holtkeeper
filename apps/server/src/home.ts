@@ -1,5 +1,6 @@
 import type { RepoTarget } from '@holtkeeper/access'
 import type {
+  FindingGroup,
   AuditRunSummary,
   HomeAttentionAction,
   HomeAttentionItem,
@@ -57,6 +58,8 @@ export interface HomeSources {
   /** Budget-blocked jobs, newest first. */
   blockedJobs: readonly Job[]
   audits: readonly RepoAudits[]
+  /** Finding groups judged urgent that some repository has not allowlisted; none when absent. */
+  urgentFindings?: readonly FindingGroup[]
   releases: readonly ReleaseCard[]
   /** Proposed learned rules the caller may decide. */
   learnings: readonly LearningCandidate[]
@@ -183,6 +186,35 @@ function blockedItems(sources: HomeSources): HomeAttentionItem[] {
 }
 
 const urgent = (summary: AuditRunSummary) => summary.severities.critical + summary.severities.high
+
+/**
+ * One item per urgent finding group (`FindingGroup.urgency`), above every other critical item:
+ * the package and advisory, the verdict's reason and the repositories that have not allowlisted it.
+ */
+export function urgentFindingItems(sources: HomeSources): HomeAttentionItem[] {
+  return (sources.urgentFindings ?? []).flatMap((group): HomeAttentionItem[] => {
+    const repos = group.repos.filter((repo) => repo.status !== 'allowlisted')
+    if (!repos.length || !group.urgency?.urgent) return []
+    const href = webPaths.security({
+      urgent: 'only',
+      finding: `${group.advisory}:${group.package}`,
+    })
+    return [
+      {
+        id: `urgent-vulnerability:${group.advisory}|${group.ecosystem}|${group.package}`,
+        kind: 'urgent-vulnerability',
+        severity: 'critical',
+        title: `Urgent: ${group.package} (${group.advisory})`,
+        detail: firstLine(group.urgency.reason),
+        repos: repos.map((repo) => repoRef(sources, repo.repo)),
+        count: repos.length,
+        at: group.urgency.at,
+        href,
+        action: open('Open finding', href),
+      },
+    ]
+  })
+}
 
 /** Critical and high vulnerabilities of each repository's latest audit. */
 export function auditItems(sources: HomeSources): HomeAttentionItem[] {
@@ -399,13 +431,15 @@ export function notAnalysedItems(sources: HomeSources): HomeAttentionItem[] {
 }
 
 /**
- * Every Needs-attention item, most urgent first, then newest first; not-analysed repositories have
+ * Every Needs-attention item, most urgent first (urgent vulnerabilities before other critical
+ * items), then newest first; not-analysed repositories have
  * no meaningful time and come after the other low items.
  */
 export function attentionItems(sources: HomeSources): HomeAttentionItem[] {
   return [
     ...failureItems(sources),
     ...blockedItems(sources),
+    ...urgentFindingItems(sources),
     ...auditItems(sources),
     ...allowlistItems(sources),
     ...releaseItems(sources),
@@ -415,6 +449,7 @@ export function attentionItems(sources: HomeSources): HomeAttentionItem[] {
   ].toSorted(
     (a, b) =>
       severityRank[a.severity] - severityRank[b.severity] ||
+      Number(b.kind === 'urgent-vulnerability') - Number(a.kind === 'urgent-vulnerability') ||
       Number(a.kind === 'not-analysed') - Number(b.kind === 'not-analysed') ||
       b.at.localeCompare(a.at) ||
       a.id.localeCompare(b.id),
