@@ -28,13 +28,22 @@ import {
 } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
 import { egressEnvironment, miseCacheStorage } from '@holtkeeper/exec-container'
-import { resolveSecret } from '@holtkeeper/forge'
+import { type RepoRef, resolveSecret } from '@holtkeeper/forge'
 import { gitlabTokenRotator } from '@holtkeeper/forge-gitlab'
-import { createGuideResolver, testIdOverridesFor, testIdsSettingKey } from '@holtkeeper/guide'
+import {
+  createGuideResolver,
+  digestedDocs,
+  testIdOverridesFor,
+  testIdsSettingKey,
+} from '@holtkeeper/guide'
 import { createGuideAnalyzer } from '@holtkeeper/guide-generator'
 import { validateJiraCredentialOptions } from '@holtkeeper/issues-jira'
 import { knowledgeAccess } from '@holtkeeper/knowledge'
-import { createKnowledgeBootstrapAnalyzer } from '@holtkeeper/knowledge-bootstrap'
+import {
+  createKnowledgeBootstrapAnalyzer,
+  createKnowledgeHarvestAnalyzer,
+  createKnowledgeVerifyAnalyzer,
+} from '@holtkeeper/knowledge-bootstrap'
 import { createLimiter, limitsCredentialsSetting } from '@holtkeeper/limits'
 import {
   type DefaultTrigger,
@@ -361,7 +370,13 @@ export async function startServer(
       const resolved = await resolveGuide({
         repo: target,
         task: 'review',
-        repoDocs: docs,
+        repoDocs: await digestedDocs({
+          kv: store.kv,
+          forgeId: target.forge,
+          repo: target.path,
+          task: 'review',
+          docs,
+        }),
         ...(query && { query }),
         ...(files && { files }),
         ...(semantic && { semantic }),
@@ -390,13 +405,16 @@ export async function startServer(
       return parsed.success ? parsed.data : []
     },
   })
-  const knowledgeBootstrap = createKnowledgeBootstrapAnalyzer({
+  const lessonDeps = {
     store,
-    teamsOf: (repo) => repoTarget(config, repo).teams,
-    botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
+    teamsOf: (repo: RepoRef) => repoTarget(config, repo).teams,
+    botUsername: (repo: RepoRef) => config.jobs.botUsernames?.[repo.forge],
     fleetPackages: async () =>
       fleetPackagesOf(await createApiCatalog({ analyses: store.analyses }).packages(() => true)),
-  })
+  }
+  const knowledgeBootstrap = createKnowledgeBootstrapAnalyzer(lessonDeps)
+  const knowledgeHarvest = createKnowledgeHarvestAnalyzer(lessonDeps)
+  const knowledgeVerify = createKnowledgeVerifyAnalyzer({ store, teamsOf: lessonDeps.teamsOf })
   const conventionsOf = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),
     settings: store.settings,
@@ -442,6 +460,8 @@ export async function startServer(
     tracker,
     guide,
     'knowledge-bootstrap': knowledgeBootstrap,
+    'knowledge-harvest': knowledgeHarvest,
+    'knowledge-verify': knowledgeVerify,
     browserslist,
     'write-task': writeTask,
   }

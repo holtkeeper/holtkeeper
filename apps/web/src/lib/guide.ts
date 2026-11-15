@@ -68,13 +68,14 @@ export const guideTasks: readonly { id: GuideTask; label: string }[] = [
 ]
 
 /** The tabs of a Knowledge space in display order; each is a path, `/knowledge/<tab>`. */
-const knowledgeTabs = ['guide', 'notes', 'learnings'] as const
+const knowledgeTabs = ['handbook', 'guide', 'notes', 'learnings'] as const
 
 export type KnowledgeTab = (typeof knowledgeTabs)[number]
 
-/** The Knowledge tab a pathname shows; `guide` when the path names none. */
+/** The Knowledge tab a pathname shows; `handbook` when the path names none. */
 export const knowledgeTabOf = (pathname: string): KnowledgeTab =>
-  knowledgeTabs.find((tab) => pathname.replace(/\/+$/, '').endsWith(`/knowledge/${tab}`)) ?? 'guide'
+  knowledgeTabs.find((tab) => pathname.replace(/\/+$/, '').endsWith(`/knowledge/${tab}`)) ??
+  'handbook'
 
 /** What a Knowledge link opens: a space, a Guide section of it and a note by id. */
 export interface KnowledgeSearch {

@@ -69,6 +69,8 @@ export const GENERATED_HEADER =
 export interface RepoDoc {
   file: string
   text: string
+  /** Git blob sha of the file, when known; a digest of another version of the file is ignored. */
+  sha?: string
 }
 
 /** A policy of a section (commit conventions, ...) rendered as plain facts. */
@@ -456,6 +458,7 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
             ...(input.notes.query && { query: input.notes.query }),
           },
           budgetTokens: Math.floor((notesRoom - 2) / 4),
+          related: true,
           ...(input.notes.semantic && { semantic: input.notes.semantic }),
         })
       : undefined

@@ -29,6 +29,7 @@ test('every decision refreshes Inbox, Home and its own area', () => {
 test('phase-19 queries live under the prefixes their mutations refresh', () => {
   const repo = { forge: 'gl', path: 'acme/widget-kit' }
   expect(keys.knowledgeCounts[0]).toBe(keys.knowledge[0])
+  expect(keys.knowledge).toEqual(['knowledge'])
   for (const key of [
     keys.guideChain(repo, 'testing'),
     keys.guideChain(repo),

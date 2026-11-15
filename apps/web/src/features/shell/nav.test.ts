@@ -73,7 +73,10 @@ test('the rail holds the eight workspaces in order, with Settings at the bottom'
       ],
     ],
     ['releases', ['/releases', '/releases/timeline', '/releases/setup']],
-    ['knowledge', ['/knowledge/guide', '/knowledge/notes', '/knowledge/learnings']],
+    [
+      'knowledge',
+      ['/knowledge/handbook', '/knowledge/guide', '/knowledge/notes', '/knowledge/learnings'],
+    ],
     ['ops', ['/ops/runs', '/ops/tasks', '/ops/automation', '/ops/spend']],
     [
       'settings',

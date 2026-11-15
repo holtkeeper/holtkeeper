@@ -2,6 +2,7 @@ import { patternWithin, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/ac
 import type { KnowledgeEntry, KnowledgeMatch } from '@holtkeeper/store'
 
 import { fusedRelevance } from './embeddings.ts'
+import { knowledgeLinks, linkIndex } from './graph.ts'
 import type { KnowledgeTask } from './model.ts'
 import { describePackage, packagesOverlap } from './semver.ts'
 import { estimateTokens, relevance } from './text.ts'
@@ -111,6 +112,32 @@ export interface SelectForTaskInput {
    * still have to match the task, and entries without a vector are not left out.
    */
   semantic?: ReadonlyMap<string, number>
+  /**
+   * Pull entries linked to the best ones forward (`pullRelated`): under a tight budget the
+   * knowledge that belongs with what is read goes in before unrelated entries. Only reorders
+   * entries that already match the task.
+   */
+  related?: boolean
+}
+
+/** How many of the best entries (in rank order) pull the entries linked to them forward. */
+export const RELATED_ANCHORS = 3
+
+/**
+ * Moves each entry linked (`knowledgeLinks`) to one of the first `RELATED_ANCHORS` entries of
+ * `ranked` to just behind the last anchor, keeping the order among them and among the rest. The
+ * anchors themselves never move.
+ */
+export function pullRelated<T extends { entry: KnowledgeEntry }>(ranked: readonly T[]): T[] {
+  const anchors = ranked.slice(0, RELATED_ANCHORS)
+  const links = linkIndex(knowledgeLinks(ranked.map((item) => item.entry)))
+  const pulled = new Set(anchors.flatMap(({ entry }) => links.get(entry.id) ?? []))
+  const rest = ranked.slice(RELATED_ANCHORS)
+  return [
+    ...anchors,
+    ...rest.filter(({ entry }) => pulled.has(entry.id)),
+    ...rest.filter(({ entry }) => !pulled.has(entry.id)),
+  ]
 }
 
 export interface SelectedKnowledge {
@@ -152,6 +179,7 @@ export function selectForTask({
   task,
   budgetTokens,
   semantic,
+  related,
 }: SelectForTaskInput): KnowledgeSelection {
   const query = [task.query ?? '', ...(task.packages ?? []).map((pkg) => pkg.name)].join(' ')
   const matching = withoutSuperseded(
@@ -173,7 +201,7 @@ export function selectForTask({
     )
     for (const item of matching) item.score = fused.get(item.entry.id) ?? 0
   }
-  const ranked = matching.toSorted(
+  const sorted = matching.toSorted(
     (a, b) =>
       b.specificity - a.specificity ||
       Number(isNarrowed(b.entry)) - Number(isNarrowed(a.entry)) ||
@@ -181,6 +209,7 @@ export function selectForTask({
       b.entry.updatedAt.localeCompare(a.entry.updatedAt),
   )
 
+  const ranked = related ? pullRelated(sorted) : sorted
   const selected: SelectedKnowledge[] = []
   const omitted: SelectedKnowledge[] = []
   let markdown = header

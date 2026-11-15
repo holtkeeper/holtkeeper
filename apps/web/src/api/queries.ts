@@ -753,6 +753,15 @@ export const useKnowledge = (
     enabled,
   })
 
+/** The handbook: accepted knowledge as chapters with links; refreshed with every knowledge list. */
+export const useHandbook = (query: { repo?: string; team?: string }, enabled = true) =>
+  useQuery({
+    queryKey: [...keys.knowledge, 'handbook', query.repo ?? '*', query.team ?? '*'],
+    queryFn: () => api.handbook(query),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+
 /** Guide, Notes and Learnings totals per Knowledge space the caller may read, for the sidebar. */
 export const useKnowledgeCounts = (enabled = true) =>
   useQuery({ queryKey: keys.knowledgeCounts, queryFn: api.knowledgeCounts, enabled })

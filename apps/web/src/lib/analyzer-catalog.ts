@@ -36,6 +36,8 @@ const areas: Readonly<Record<string, AnalyzerArea>> = {
   release: 'releases',
   guide: 'releases',
   'knowledge-bootstrap': 'releases',
+  'knowledge-harvest': 'releases',
+  'knowledge-verify': 'releases',
   tracker: 'releases',
   propagate: 'releases',
   'write-task': 'releases',

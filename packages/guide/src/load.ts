@@ -3,6 +3,7 @@ import type { KnowledgeNeighbour } from '@holtkeeper/knowledge'
 import { resolveRepoTests } from '@holtkeeper/settings'
 import type { GuideSectionName, KnowledgeEntry, Store } from '@holtkeeper/store'
 
+import { digestedDocs } from './digest.ts'
 import { familyOf } from './families.ts'
 import { type GuideTask, guideSections, repoKey, scopesFor, sectionsForTask } from './model.ts'
 import { policiesFor } from './policies.ts'
@@ -64,7 +65,7 @@ export type GuideResolver = (request: GuideRequest) => Promise<ResolvedGuide>
  * `testing` sections are left out. `teamTitle` names team keys in block titles.
  */
 export function createGuideResolver(deps: {
-  store: Pick<Store, 'guides' | 'families' | 'knowledge' | 'settings'>
+  store: Pick<Store, 'guides' | 'families' | 'knowledge' | 'settings'> & Partial<Pick<Store, 'kv'>>
   teamTitle?: (key: string) => string
 }): GuideResolver {
   const { store } = deps
@@ -82,6 +83,15 @@ export function createGuideResolver(deps: {
       store.settings.list(),
       notesChars === 0 ? [] : store.knowledge.list({ status: 'accepted' }),
     ])
+    const repoDocs =
+      request.repoDocs &&
+      (await digestedDocs({
+        kv: store.kv,
+        forgeId: request.repo.forge,
+        repo: request.repo.path,
+        task: request.task,
+        docs: request.repoDocs,
+      }))
     const tests = resolveRepoTests(settings, request.repo).expected
     const sections = tests ? stored : stored.filter((row) => row.section !== 'testing')
     return resolveGuide({
@@ -91,7 +101,7 @@ export function createGuideResolver(deps: {
       ...(request.focus && { focus: request.focus }),
       ...(family && { family: { id: family.id, name: family.name } }),
       sections,
-      ...(request.repoDocs && { repoDocs: request.repoDocs }),
+      ...(repoDocs && { repoDocs }),
       policies: policiesFor(settings, request.repo),
       ...(notesChars !== 0 && {
         notes: {

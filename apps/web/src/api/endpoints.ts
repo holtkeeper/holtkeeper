@@ -153,6 +153,7 @@ import type {
   InboxCount,
   InboxFeed,
   KnowledgeCounts,
+  Handbook,
   KnowledgeCitations,
   KnowledgeDetail,
   ReleaseDismissInput,
@@ -520,6 +521,10 @@ export const api = {
   reviewKnowledge: (entryId: string, action: 'accept' | 'reject' | 'archive') =>
     request<KnowledgeEntry>('POST', `/api/knowledge/${id(entryId)}/${action}`),
   deleteKnowledge: (entryId: string) => request<void>('DELETE', `/api/knowledge/${id(entryId)}`),
+  handbook: (query: { repo?: string; team?: string }) =>
+    request<Handbook>('GET', '/api/knowledge/handbook', {
+      query: { repo: query.repo || undefined, team: query.team || undefined },
+    }),
   knowledgeCounts: () => request<KnowledgeCounts>('GET', '/api/knowledge/counts'),
 
   guide: (scope: GuideScopeKey) =>

@@ -167,7 +167,8 @@ describe('spaces', () => {
     expect(knowledgeTabOf('/knowledge/notes')).toBe('notes')
     expect(knowledgeTabOf('/knowledge/learnings/')).toBe('learnings')
     expect(knowledgeTabOf('/knowledge/guide')).toBe('guide')
-    expect(knowledgeTabOf('/knowledge')).toBe('guide')
+    expect(knowledgeTabOf('/knowledge')).toBe('handbook')
+    expect(knowledgeTabOf('/knowledge/handbook')).toBe('handbook')
   })
 
   test('labels name the team, the folder, the family and the repository path', () => {

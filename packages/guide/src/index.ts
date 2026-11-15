@@ -1,4 +1,5 @@
 export * from './chain.ts'
+export * from './digest.ts'
 export * from './families.ts'
 export * from './learnings.ts'
 export * from './load.ts'

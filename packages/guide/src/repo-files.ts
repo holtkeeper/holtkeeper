@@ -63,4 +63,4 @@ export async function readRepoRuleFiles(input: {
 
 /** Rules files as the resolver takes them. */
 export const repoDocsOf = (files: readonly RepoRuleFile[]): RepoDoc[] =>
-  files.map((file) => ({ file: file.path, text: file.text }))
+  files.map((file) => ({ file: file.path, text: file.text, sha: file.sha }))

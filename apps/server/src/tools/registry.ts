@@ -61,6 +61,7 @@ const TASK_TOOLSETS: Record<string, readonly string[]> = {
   'release-notes': [],
   'library-digest': [],
   'knowledge-bootstrap': [],
+  'knowledge-verify': [],
 }
 
 /** Names of the toolsets an internal task of `taskKind` mounts, in mount order. */

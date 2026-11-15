@@ -1,6 +1,7 @@
 import type { Action, CrossTeamLevel, Principal } from '@holtkeeper/api'
 import type { LinkProps } from '@tanstack/react-router'
 import {
+  BookMarked,
   BookOpen,
   Bot,
   Boxes,
@@ -103,6 +104,7 @@ export interface NavItem {
     | '/releases'
     | '/releases/timeline'
     | '/releases/setup'
+    | '/knowledge/handbook'
     | '/knowledge/guide'
     | '/knowledge/notes'
     | '/knowledge/learnings'
@@ -266,6 +268,13 @@ const navItems: readonly NavItem[] = [
     label: 'Flow setup',
     icon: Waypoints,
     requires: 'releases:read',
+  },
+  {
+    workspace: 'knowledge',
+    to: '/knowledge/handbook',
+    label: 'Handbook',
+    icon: BookMarked,
+    requires: 'knowledge:read',
   },
   {
     workspace: 'knowledge',

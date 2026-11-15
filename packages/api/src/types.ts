@@ -2981,6 +2981,71 @@ export interface KnowledgeEntryView extends KnowledgeEntry {
   citations?: KnowledgeCitationSummary
 }
 
+/** Result of the last freshness check of a knowledge entry (`knowledge-verify`). */
+export interface KnowledgeFreshnessView {
+  status: 'fresh' | 'suspect' | 'stale'
+  /** When it was checked. */
+  checkedAt: string
+  /** `signals`: nothing it rests on changed; `model`: a model judged it. */
+  method: 'signals' | 'model'
+  /** The repository whose code was read, `forge:path`. */
+  repo: string
+  reason?: string
+  /** Why it was looked at again, e.g. `changed-file: src/loader.ts`. */
+  signals: string[]
+  /** Id of the entry proposed to replace it. */
+  proposal?: string
+}
+
+/** A derived link between two knowledge entries. */
+export interface HandbookLink {
+  from: string
+  to: string
+  kind: 'supersedes' | 'cites' | 'subject' | 'topics' | 'similar'
+  /** 0–1; stronger links are drawn closer. */
+  weight: number
+}
+
+/** One accepted entry of the handbook. */
+export interface HandbookEntry {
+  id: string
+  title: string
+  body: string
+  kind: KnowledgeKind
+  topics: string[]
+  subject?: string
+  /** Scope in words: `team widgets`, `folder work:acme/round/**`, `repo work:acme/web`, ... */
+  scope: string
+  /** Repositories the scope names exactly (`forge:path`); empty for team, folder and global scopes. */
+  repos: string[]
+  /** Teams the entry belongs to (see `KnowledgeEntryView.owner`). */
+  owner: string[]
+  updatedAt: string
+  version: number
+  /** Evidence links, as `{ label, url }`. */
+  evidence: KnowledgeLink[]
+  freshness?: KnowledgeFreshnessView
+}
+
+/** A chapter of the handbook: entries about one subject, topic or kind, grouped automatically. */
+export interface HandbookChapter {
+  /** Stable key: `subject:…`, `topic:…` or `kind:…`. */
+  key: string
+  title: string
+  entries: HandbookEntry[]
+}
+
+/**
+ * `GET /api/knowledge/handbook`: the accepted knowledge the caller may read as one article of
+ * chapters, with the links between entries. `repo` (`forge:path`) shows what applies to one
+ * repository, `team` the entries of one team.
+ */
+export interface Handbook {
+  chapters: HandbookChapter[]
+  links: HandbookLink[]
+  counts: { entries: number; chapters: number; suspect: number; stale: number }
+}
+
 /**
  * What became of the review comments citing a knowledge entry (`[kb:<id>]`), over the stored
  * reviews of the last year. `fixed`: merged and the commented lines changed; `resolved`: merged

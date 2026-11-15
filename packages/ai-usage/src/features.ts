@@ -19,7 +19,14 @@ export const featureTaskKinds: Readonly<Record<FilterableFeature, readonly strin
   reviews: ['review', 'triage'],
   tasks: ['write-task', 'fix', 'port', 'propagate', 'upgrade', 'propagate-fix', 'tests'],
   chat: ['chat', 'chat-summary'],
-  knowledge: ['guide', 'learning', 'library-digest', 'knowledge-bootstrap', 'embedding'],
+  knowledge: [
+    'guide',
+    'learning',
+    'library-digest',
+    'knowledge-bootstrap',
+    'knowledge-verify',
+    'embedding',
+  ],
   releases: ['release-notes'],
 }
 

@@ -44,8 +44,8 @@ describe('readRepoRuleFiles', () => {
     expect(await readRepoRuleFiles(input)).toEqual(first)
     expect(reads).toHaveLength(3)
     expect(repoDocsOf(first.files)).toEqual([
-      { file: 'REVIEW.md', text: 'Flag raw widgets.' },
-      { file: 'AGENTS.md', text: 'Run bun test.' },
+      { file: 'REVIEW.md', text: 'Flag raw widgets.', sha: blobSha('Flag raw widgets.') },
+      { file: 'AGENTS.md', text: 'Run bun test.', sha: blobSha('Run bun test.\n') },
     ])
   })
 

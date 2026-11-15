@@ -15,6 +15,7 @@ import {
   DAILY_RUNS,
   type KnowledgeBootstrapOptions,
   createKnowledgeBootstrapAnalyzer,
+  createKnowledgeHarvestAnalyzer,
   knowledgeBootstrapAnalysis,
 } from './analyzer.ts'
 import type { BootstrapOutput } from './prompt.ts'
@@ -572,5 +573,101 @@ describe('knowledge-bootstrap analyzer', () => {
     expect(data.lessons[0]?.why).toContain('evidence')
     expect(lines.some((line) => line.startsWith('dropped "Squash before merge"'))).toBeTrue()
     expect(await store.knowledge.list()).toEqual([])
+  })
+})
+
+const harvest = () =>
+  createKnowledgeHarvestAnalyzer({
+    store,
+    teamsOf,
+    now: () => new Date('2026-11-13T10:00:00.000Z'),
+  })
+const mark = (at: string, extra: object = {}) =>
+  store.kv?.set(bootstrapMarker(repo), {
+    at,
+    proposed: 2,
+    promoted: 0,
+    reason: 'bootstrapped',
+    ...extra,
+  })
+const runHarvest = (agent: Agent | undefined, mergeRequests?: MergeRequestRecord[]) =>
+  harvest().run({
+    repo,
+    dir,
+    runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
+    ...(agent && { agent }),
+    forge: (mergeRequests
+      ? { ...forge, listMergeRequests: async () => mergeRequests }
+      : forge) as never,
+    jobId: 'job-2',
+    options: {
+      months: 6,
+      maxEntries: 10,
+      promote: true,
+      maxMergeRequests: 60,
+      discussionMergeRequests: 25,
+      tier: 'main',
+      force: false,
+    },
+  })
+
+test('only applies to a repository that was bootstrapped', async () => {
+  expect(await harvest().appliesTo?.({ repo, forge })).toBe(false)
+  await mark('2026-09-01T00:00:00.000Z')
+  expect(await harvest().appliesTo?.({ repo, forge })).toBe(true)
+  await store.kv?.set(bootstrapMarker(repo), {
+    at: '2026-09-01T00:00:00.000Z',
+    proposed: 0,
+    promoted: 0,
+    reason: 'has-entries',
+  })
+  expect(await harvest().appliesTo?.({ repo, forge })).toBe(false)
+})
+
+describe('knowledge-harvest analyzer', () => {
+  test('a repository that was not bootstrapped is skipped without a call', async () => {
+    const { agent, tasks } = fakeAgent()
+    const { data, sha } = await runHarvest(agent)
+    expect(data).toMatchObject({ outcome: 'skipped' })
+    expect(tasks).toHaveLength(0)
+    expect(sha).toBe('abc123')
+  })
+
+  test('without merge requests since the last run it calls no model but reports the commit', async () => {
+    await mark('2026-11-01T00:00:00.000Z')
+    const { agent, tasks } = fakeAgent()
+    const { data, sha } = await runHarvest(agent)
+    expect(data.outcome).toBe('skipped')
+    expect(data.reason).toContain('no merge requests merged since 2026-11-01')
+    expect(tasks).toHaveLength(0)
+    expect(sha).toBe('abc123')
+  })
+
+  test('waits for enough new merge requests before calling a model', async () => {
+    await mark('2026-09-01T00:00:00.000Z')
+    const { agent, tasks } = fakeAgent()
+    const { data } = await runHarvest(agent)
+    expect(data.reason).toContain('1 merge requests merged since 2026-09-01; waiting for 3')
+    expect(tasks).toHaveLength(0)
+  })
+
+  test('reads only new merge requests, proposes at most five, and advances the mark', async () => {
+    await mark('2026-09-01T00:00:00.000Z')
+    const { agent, tasks } = fakeAgent()
+    const { data } = await runHarvest(agent, [merged(7), merged(8), merged(9)])
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]?.prompt).toContain('only merge requests merged since the last run')
+    expect(tasks[0]?.prompt).toContain('[mr:7]')
+    expect(tasks[0]?.prompt).not.toContain('[manifests]')
+    expect(data.window?.since.slice(0, 10)).toBe('2026-09-01')
+    expect(data.lessons.some((lesson) => lesson.outcome === 'created')).toBe(true)
+    const marked = (await store.kv?.get(bootstrapMarker(repo))) as {
+      at: string
+      harvestedAt: string
+      proposed: number
+    }
+    expect(marked.at).toBe('2026-09-01T00:00:00.000Z')
+    expect(marked.harvestedAt).toBe('2026-11-13T10:00:00.000Z')
+    expect(marked.proposed).toBeGreaterThan(2)
   })
 })

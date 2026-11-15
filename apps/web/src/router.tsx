@@ -372,6 +372,7 @@ const routeTree = rootRoute.addChildren([
     page('releases', ReleasesPage),
     releasesPage('releases/timeline', ReleaseTimelinePage),
     releasesPage('releases/setup', SetupPage),
+    knowledgePage('knowledge/handbook'),
     knowledgePage('knowledge/guide'),
     knowledgePage('knowledge/notes'),
     knowledgePage('knowledge/learnings'),

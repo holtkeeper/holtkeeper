@@ -18,6 +18,7 @@ import {
 import { type TestIdsData, testIdsDataSchema } from '@holtkeeper/testids'
 import { z } from 'zod'
 
+import { DIGEST_FILES, digestRepoFiles } from './digest.ts'
 import { collectGeneral, collectTestIds, collectTesting, commitsText } from './evidence.ts'
 import {
   type SectionInput,
@@ -38,6 +39,8 @@ export interface GuideRunData {
     evidence: { id: string; label: string }[]
   }[]
   call?: { tier: string; model: string; costUsd: number; sections: string[] }
+  /** What happened to the repository's long rules files (see `digestRepoFiles`). */
+  digests?: { file: string; outcome: string; costUsd: number }[]
   /** The one-off extra prompt of the run. */
   prompt?: string
 }
@@ -61,6 +64,9 @@ const guideRunDataSchema: z.ZodType<GuideRunData> = z.object({
       costUsd: z.number(),
       sections: z.array(z.string()),
     })
+    .optional(),
+  digests: z
+    .array(z.object({ file: z.string(), outcome: z.string(), costUsd: z.number() }))
     .optional(),
   prompt: z.string().optional(),
 })
@@ -193,7 +199,7 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
     kind: 'guide',
     analysis: guideAnalysis,
     scope: 'repo',
-    refresh: { on: 'change', minInterval: '7d' },
+    refresh: { on: 'change', minInterval: '1d' },
     needs: { checkout: true, forge: 'optional', agent: 'optional', history: 'optional' },
     after: ['coverage', 'testids'],
     defaultBranchOnly: true,
@@ -336,6 +342,27 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
         context.log?.(`${section.section}: ${auto ? 'auto-accepted' : placed.outcome}`)
       }
 
+      // Condensed copies of long rules files (CONTRIBUTING.md, ...) per kind of work. Gated by the
+      // file's blob sha, so a run that changed none of them calls no model.
+      const { agent } = context
+      const { kv } = store
+      const digests =
+        agent && kv
+          ? await step('digest rules files', () =>
+              digestRepoFiles({
+                agent,
+                kv,
+                forgeId: repo.forge,
+                repo: repo.path,
+                dir,
+                files: DIGEST_FILES,
+                ...(options.force && { force: true }),
+                ...(context.signal && { signal: context.signal }),
+                ...(context.log && { log: context.log }),
+              }),
+            )
+          : []
+
       const sections: GuideRunData['sections'] = [
         ...result.sections.map((section) => ({
           section: section.section,
@@ -360,6 +387,11 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
           (a, b) => requested.indexOf(a.section) - requested.indexOf(b.section),
         ),
         ...(result.call && { call: result.call }),
+        ...(digests.some((d) => d.outcome !== 'missing' && d.outcome !== 'short') && {
+          digests: digests
+            .filter((d) => d.outcome !== 'missing' && d.outcome !== 'short')
+            .map(({ file, outcome, costUsd }) => ({ file, outcome, costUsd })),
+        }),
         ...(options.prompt && { prompt: options.prompt }),
       }
       return { data, ...(sha && { sha }) }

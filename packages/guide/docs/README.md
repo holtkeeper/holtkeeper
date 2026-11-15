@@ -65,6 +65,10 @@ Accepted learnings sit in the resolver after team rules and before policies and 
 
 Generated layers carry a `version` the store assigns per section (1 for the first run that stored text, then up by one) and the `jobId` of the run; every stored version stays in the generated history (`Store.guides.generatedHistory`).
 
+## Digests of rules files
+
+`digest.ts` holds the read side of the condensed rules files that [@holtkeeper/guide-generator](../../guide-generator/docs/README.md#rules-file-digests) writes into `Store.kv`. A `RepoDigest` has lines in three groups (`digestGroups`): `general`, `review` and `code`, each with the heading it came from. `digestedDocs({ kv, forgeId, repo, task, docs })` swaps the text of every rules file of at least `DIGEST_MIN_CHARS` (3 000) characters for its digest when one is stored (`applyDigests`): a `review` reads `general` and `review` lines, `agent` and `chat` work `general` and `code`, release notes `general`. Each line ends with `(CONTRIBUTING.md § Heading)`, and the block says the file has the rest. Shorter files, files without a digest, digests of another version or (when `RepoDoc.sha` is known) of another version of the file, and digests with nothing for the task leave the original in place. `createGuideResolver` applies it to `GuideRequest.repoDocs` when the store has `kv`; the server's review path does the same.
+
 ## Not here yet
 
 The generator lives in [@holtkeeper/guide-generator](../../guide-generator/docs/README.md); the MCP tools `repo_rules` and `propose_rule_change` live in the server's `rules` toolset and use `createGuideResolver`, `chainLayers` and `proposeRule`.

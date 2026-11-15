@@ -121,63 +121,69 @@ const summarize = (data: KnowledgeBootstrapData): Metric[] => [
   }),
 ]
 
+const analysisOf = (kind: 'knowledge-bootstrap' | 'knowledge-harvest', label: string) =>
+  defineAnalysis<KnowledgeBootstrapData>({
+    kind,
+    label,
+    schema: dataSchema,
+    summarize,
+    toReport(current): Report {
+      const data = current.data
+      return {
+        kind,
+        title: label,
+        subtitle:
+          data.outcome === 'skipped'
+            ? `Skipped: ${data.reason ?? 'nothing to do'}`
+            : data.call
+              ? `${data.call.model}, $${data.call.costUsd.toFixed(4)} (estimated $${data.call.estimateUsd.toFixed(2)})`
+              : 'Proposed',
+        subject: { repo: current.repo, ...(current.ref ? { ref: current.ref } : {}) },
+        generatedAt: current.createdAt,
+        metrics: summarize(data),
+        sections: [
+          {
+            id: 'lessons',
+            title: 'Lessons',
+            description: [
+              data.window
+                ? `Merge requests merged since ${data.window.since.slice(0, 10)}: ${data.window.mergeRequests}, discussions read: ${data.window.discussions}.`
+                : '',
+              'Every entry is a proposal in the Knowledge Inbox; promotions above the repository follow the scope agreement.',
+              data.prompt ? `Extra prompt: ${data.prompt}` : '',
+            ]
+              .filter(Boolean)
+              .join(' '),
+            blocks: [
+              {
+                type: 'table',
+                columns: [
+                  { key: 'title', label: 'Lesson' },
+                  { key: 'level', label: 'Level' },
+                  { key: 'scope', label: 'Scope', format: 'code' },
+                  { key: 'outcome', label: 'Outcome' },
+                  { key: 'why', label: 'Why' },
+                ],
+                rows: data.lessons.map((lesson) => ({
+                  title: lesson.title,
+                  level: lesson.level ?? null,
+                  scope: lesson.scope ?? null,
+                  outcome: lesson.outcome,
+                  why: lesson.why,
+                })),
+              },
+            ],
+          },
+        ],
+      }
+    },
+  })
+
 /** The `knowledge-bootstrap` analysis kind: one record per starter knowledge run. */
-export const knowledgeBootstrapAnalysis = defineAnalysis<KnowledgeBootstrapData>({
-  kind: 'knowledge-bootstrap',
-  label: 'Starter knowledge',
-  schema: dataSchema,
-  summarize,
-  toReport(current): Report {
-    const data = current.data
-    return {
-      kind: 'knowledge-bootstrap',
-      title: 'Starter knowledge',
-      subtitle:
-        data.outcome === 'skipped'
-          ? `Skipped: ${data.reason ?? 'nothing to do'}`
-          : data.call
-            ? `${data.call.model}, $${data.call.costUsd.toFixed(4)} (estimated $${data.call.estimateUsd.toFixed(2)})`
-            : 'Proposed',
-      subject: { repo: current.repo, ...(current.ref ? { ref: current.ref } : {}) },
-      generatedAt: current.createdAt,
-      metrics: summarize(data),
-      sections: [
-        {
-          id: 'lessons',
-          title: 'Lessons',
-          description: [
-            data.window
-              ? `Merge requests merged since ${data.window.since.slice(0, 10)}: ${data.window.mergeRequests}, discussions read: ${data.window.discussions}.`
-              : '',
-            'Every entry is a proposal in the Knowledge Inbox; promotions above the repository follow the scope agreement.',
-            data.prompt ? `Extra prompt: ${data.prompt}` : '',
-          ]
-            .filter(Boolean)
-            .join(' '),
-          blocks: [
-            {
-              type: 'table',
-              columns: [
-                { key: 'title', label: 'Lesson' },
-                { key: 'level', label: 'Level' },
-                { key: 'scope', label: 'Scope', format: 'code' },
-                { key: 'outcome', label: 'Outcome' },
-                { key: 'why', label: 'Why' },
-              ],
-              rows: data.lessons.map((lesson) => ({
-                title: lesson.title,
-                level: lesson.level ?? null,
-                scope: lesson.scope ?? null,
-                outcome: lesson.outcome,
-                why: lesson.why,
-              })),
-            },
-          ],
-        },
-      ],
-    }
-  },
-})
+export const knowledgeBootstrapAnalysis = analysisOf('knowledge-bootstrap', 'Starter knowledge')
+
+/** The `knowledge-harvest` analysis kind: one record per run over new merge requests. */
+export const knowledgeHarvestAnalysis = analysisOf('knowledge-harvest', 'Knowledge harvest')
 
 const optionsSchema = z.object({
   /** How many months of merged merge requests to read. */
@@ -214,6 +220,8 @@ export interface BootstrapMark {
   promoted: number
   /** `bootstrapped` after a run, `has-entries` when the repository already had entries. */
   reason: 'bootstrapped' | 'has-entries'
+  /** When `knowledge-harvest` last read the merge requests merged until then. */
+  harvestedAt?: string
 }
 
 /** What the `knowledge-bootstrap` analyzer needs from the server. */
@@ -240,6 +248,7 @@ const markSchema = z.object({
   proposed: z.number().default(0),
   promoted: z.number().default(0),
   reason: z.enum(['bootstrapped', 'has-entries']).default('bootstrapped'),
+  harvestedAt: z.string().optional(),
 })
 
 /**
@@ -358,42 +367,87 @@ async function repositoryLinks(
  * to later days.
  */
 export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = {}) {
+  return lessonAnalyzer(deps, false)
+}
+
+/** Most lessons a harvest proposes: it reads only what is new. */
+export const HARVEST_ENTRIES = 5
+
+/**
+ * New merge requests a harvest waits for before it calls a model; fewer are left for a later run
+ * (the window does not advance), so a quiet repository costs one call per few merges, not per day.
+ */
+export const HARVEST_MIN_MERGE_REQUESTS = 3
+
+/** Added to the prompt of a harvest run. */
+const HARVEST_PROMPT =
+  'This is an update: the evidence holds only merge requests merged since the last run. Propose only lessons that are new or that change what the existing entries say; skip anything they already cover.'
+
+/**
+ * The `knowledge-harvest` analyzer: the starter-knowledge pipeline in its incremental form, for a
+ * repository that was bootstrapped. It reads only the merge requests merged since its last run
+ * (`BootstrapMark.harvestedAt`, else the bootstrap; at most `months` back), without code evidence,
+ * and proposes at most `HARVEST_ENTRIES` lessons through the same scope agreement, so a new
+ * pattern shows up as a proposal or as evidence merged into the entry that already covers it. A
+ * run with fewer than `HARVEST_MIN_MERGE_REQUESTS` new merge requests calls no model (`force`
+ * overrides it); like the starter run, at most `DAILY_RUNS` automatic runs start per UTC day. Refreshes daily when the
+ * default branch moved; never on a repository that has not been bootstrapped.
+ */
+export function createKnowledgeHarvestAnalyzer(deps: KnowledgeBootstrapDeps = {}) {
+  return lessonAnalyzer(deps, true)
+}
+
+function lessonAnalyzer(deps: KnowledgeBootstrapDeps, harvest: boolean) {
   const now = deps.now ?? (() => new Date())
+  const name = harvest ? 'knowledge-harvest' : 'knowledge-bootstrap'
   return defineAnalyzer<KnowledgeBootstrapData, KnowledgeBootstrapOptions>({
-    kind: 'knowledge-bootstrap',
-    analysis: knowledgeBootstrapAnalysis,
+    kind: name,
+    analysis: harvest ? knowledgeHarvestAnalysis : knowledgeBootstrapAnalysis,
     scope: 'repo',
     needs: { checkout: true, forge: 'optional', agent: 'optional' },
     defaultBranchOnly: true,
     keepRecords: 10,
     dailyLimit: DAILY_RUNS,
+    ...(harvest && { refresh: { on: 'change' as const, minInterval: '1d' } }),
     options: optionsSchema,
     async appliesTo({ repo }) {
       if (!deps.store) return true
-      return (await bootstrapBlocker(deps.store, repo)) === undefined
+      const blocker = await bootstrapBlocker(deps.store, repo)
+      return harvest
+        ? blocker?.reason === 'marked' && blocker.mark.reason === 'bootstrapped'
+        : blocker === undefined
     },
     async run(context) {
       const { repo, dir, options, log } = context
       const store = deps.store
-      if (!store)
-        throw new Error('the knowledge-bootstrap analyzer needs the server knowledge store')
-      if (!dir) throw new Error('the knowledge-bootstrap analyzer needs a checkout')
+      if (!store) throw new Error(`the ${name} analyzer needs the server knowledge store`)
+      if (!dir) throw new Error(`the ${name} analyzer needs a checkout`)
       if (context.ref !== undefined)
         throw new Error(
-          'the knowledge-bootstrap analyzer reads only the default branch; queue it without a ref',
+          `the ${name} analyzer reads only the default branch; queue it without a ref`,
         )
       const step = context.step ?? (<T>(_: string, run: () => Promise<T>) => run())
       const teamsOf = deps.teamsOf ?? (() => [])
       const target: RepoTarget = { ...repo, teams: teamsOf(repo) }
       const marker = bootstrapMarker(repo)
       const mark = (value: BootstrapMark) => store.kv?.set(marker, value)
-      const skipped = (reason: string): { data: KnowledgeBootstrapData } => {
+      // A harvest reports the commit even when skipped, so the freshness sweeper waits for the next one.
+      const headFirst = await context.runner.run(['git', 'rev-parse', 'HEAD'], { cwd: dir })
+      const headSha = headFirst.exitCode === 0 ? headFirst.stdout.trim() || undefined : undefined
+      const skipped = (reason: string): { data: KnowledgeBootstrapData; sha?: string } => {
         log?.(`skipped: ${reason}`)
-        return { data: { outcome: 'skipped', reason, evidence: [], lessons: [] } }
+        return {
+          data: { outcome: 'skipped', reason, evidence: [], lessons: [] },
+          ...(harvest && headSha && { sha: headSha }),
+        }
       }
 
       const blocker = await step('check', () => bootstrapBlocker(store, repo))
-      if (blocker && !options.force) {
+      const bootstrapped = blocker?.reason === 'marked' ? blocker.mark : undefined
+      if (harvest) {
+        if (bootstrapped?.reason !== 'bootstrapped')
+          return skipped('the repository has not been bootstrapped yet')
+      } else if (blocker && !options.force) {
         if (blocker.reason === 'marked')
           return skipped(
             `already bootstrapped ${blocker.mark.at}${blocker.mark.jobId ? ` (job ${blocker.mark.jobId})` : ''}; run with force to repeat`,
@@ -410,12 +464,17 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
       if (!context.agent) return skipped('no AI agent is configured')
       const agent = context.agent
 
-      const head = await context.runner.run(['git', 'rev-parse', 'HEAD'], { cwd: dir })
-      const sha = head.exitCode === 0 ? head.stdout.trim() || undefined : undefined
+      const sha = headSha
       const files = await listFiles(dir)
-      const code = await step('collect code evidence', () => collectCodeEvidence(dir, files))
+      const code = harvest
+        ? []
+        : await step('collect code evidence', () => collectCodeEvidence(dir, files))
       const since = new Date(now())
       since.setUTCMonth(since.getUTCMonth() - options.months)
+      if (harvest) {
+        const last = new Date(bootstrapped?.harvestedAt ?? bootstrapped?.at ?? 0)
+        if (last > since) since.setTime(last.getTime())
+      }
       const bot = deps.botUsername?.(repo)
       const mrs = await step('collect merge request evidence', async () => {
         if (!context.forge) {
@@ -436,7 +495,19 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
       log?.(
         `evidence: ${code.length} code items, ${mrs.mergeRequests.length} merged merge requests since ${since.toISOString().slice(0, 10)}, ${mrs.discussions} discussions read`,
       )
+      if (harvest && mrs.mergeRequests.length < HARVEST_MIN_MERGE_REQUESTS && !options.force)
+        return skipped(
+          mrs.mergeRequests.length
+            ? `${mrs.mergeRequests.length} merge requests merged since ${since.toISOString().slice(0, 10)}; waiting for ${HARVEST_MIN_MERGE_REQUESTS}`
+            : `no merge requests merged since ${since.toISOString().slice(0, 10)}`,
+        )
       const evidence: BootstrapEvidence[] = [...code, ...mrs.evidence]
+      const maxEntries = harvest
+        ? Math.min(options.maxEntries, HARVEST_ENTRIES)
+        : options.maxEntries
+      const extraPrompt = [harvest ? HARVEST_PROMPT : '', options.prompt ?? '']
+        .filter(Boolean)
+        .join('\n')
 
       const { existing, libraries, dependencies, homes, around, family } = await step(
         'read context',
@@ -494,12 +565,12 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
             teams: target.teams,
             ...(family !== undefined && { family }),
             since: since.toISOString().slice(0, 10),
-            maxEntries: options.maxEntries,
+            maxEntries,
             evidence,
             existing,
             libraries,
             dependencies,
-            ...(options.prompt && { extra: options.prompt }),
+            ...(extraPrompt && { extra: extraPrompt }),
           },
           ...(context.signal && { signal: context.signal }),
           ...(log && { log }),
@@ -605,15 +676,26 @@ export function createKnowledgeBootstrapAnalyzer(deps: KnowledgeBootstrapDeps = 
       const promoted = lessons.filter(
         (lesson) => lesson.outcome === 'created' && promotedLevel(lesson.level),
       ).length
-      await mark({
-        at: now().toISOString(),
-        ...(context.jobId && { jobId: context.jobId }),
-        proposed: proposedCount,
-        promoted,
-        reason: 'bootstrapped',
-      })
+      await mark(
+        harvest && bootstrapped
+          ? {
+              ...bootstrapped,
+              proposed: bootstrapped.proposed + proposedCount,
+              promoted: bootstrapped.promoted + promoted,
+              harvestedAt: now().toISOString(),
+            }
+          : {
+              at: now().toISOString(),
+              ...(context.jobId && { jobId: context.jobId }),
+              proposed: proposedCount,
+              promoted,
+              reason: 'bootstrapped',
+            },
+      )
       log?.(
-        `proposed ${proposedCount} entries, ${promoted} above the repository; marked as bootstrapped`,
+        harvest
+          ? `proposed ${proposedCount} entries, ${promoted} above the repository`
+          : `proposed ${proposedCount} entries, ${promoted} above the repository; marked as bootstrapped`,
       )
 
       const data: KnowledgeBootstrapData = {

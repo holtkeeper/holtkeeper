@@ -3,7 +3,13 @@ import { useLocation, useNavigate, useSearch } from '@tanstack/react-router'
 import { Plus, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 
-import { useFamilies, useTeamTitles, useKnowledgeCounts, useRepos } from '../../api/queries.ts'
+import {
+  useFamilies,
+  useTeamTitles,
+  useKnowledgeCounts,
+  useRepos,
+  useHandbook,
+} from '../../api/queries.ts'
 import {
   type KnowledgeTab,
   type Space,
@@ -15,17 +21,20 @@ import {
   spaceKey,
   spaceTrail,
 } from '../../lib/guide.ts'
+import { handbookQuery } from '../../lib/handbook.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { knowledgeSettingsLink } from '../../lib/settings-sections.ts'
 import { Button, Count, Page } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
 import { EffectivePromptPanel } from './EffectivePrompt.tsx'
 import { GuideTab } from './GuideTab.tsx'
+import { HandbookTab } from './HandbookTab.tsx'
 import { LearningsTable } from './LearningsTable.tsx'
 import { NotesTable } from './NotesTable.tsx'
 import { SpacesSidebar } from './SpacesSidebar.tsx'
 
 const tabPaths = {
+  handbook: '/knowledge/handbook',
   guide: '/knowledge/guide',
   notes: '/knowledge/notes',
   learnings: '/knowledge/learnings',
@@ -63,6 +72,8 @@ export function KnowledgePage() {
   const covered = reposOfSpace(space, repoList, familyList)
   const coveredRepos = repoKeys.filter((key) => !covered || covered.has(key))
   const totals = spaceCounts(counts.data, space)
+  const handbook = useHandbook(handbookQuery(space))
+  const attention = handbook.data ? handbook.data.counts.suspect + handbook.data.counts.stale : 0
 
   const pick = (next: Space) =>
     void navigate({ to: tabPaths[tab], search: { space: spaceKey(next) }, replace: true })
@@ -81,6 +92,19 @@ export function KnowledgePage() {
       }))}
       title="Knowledge"
       tabs={[
+        {
+          to: '/knowledge/handbook',
+          label: (
+            <>
+              Handbook{' '}
+              {attention > 0 ? (
+                <Count tone="warning" label={`${attention} need attention`}>
+                  {attention}
+                </Count>
+              ) : null}
+            </>
+          ),
+        },
         { to: '/knowledge/guide', label: 'Guide' },
         {
           to: '/knowledge/notes',
@@ -101,7 +125,11 @@ export function KnowledgePage() {
         },
       ]}
       tabsLabel="Knowledge sections"
-      configure={can('settings:read') ? { link: knowledgeSettingsLink(tab) } : undefined}
+      configure={
+        can('settings:read') && tab !== 'handbook'
+          ? { link: knowledgeSettingsLink(tab) }
+          : undefined
+      }
       {...(tab === 'guide' && {
         actions: (
           <Button
@@ -147,6 +175,7 @@ export function KnowledgePage() {
               onClose={() => setPrompt(false)}
             />
           ) : null}
+          {tab === 'handbook' ? <HandbookTab space={space} families={familyList} /> : null}
           {tab === 'guide' ? (
             <GuideTab
               space={space}

@@ -3,12 +3,18 @@ import type {
   KnowledgeCitationSummary,
   KnowledgeCitations,
   KnowledgeDetail,
+  Handbook,
+  HandbookEntry,
   KnowledgeEntryView,
   KnowledgeList,
 } from '@holtkeeper/api'
 import { familyOf } from '@holtkeeper/guide'
 import {
+  describeScope,
+  knowledgeChapters,
   knowledgeKinds,
+  knowledgeLinks,
+  readFreshness,
   knowledgeStatuses,
   matchHolds,
   sharingDefaults,
@@ -194,6 +200,84 @@ export function knowledgeRoutes(deps: ServerDeps) {
         deps,
         entries.flatMap((entry) => [entry.author, ...(entry.updatedBy ? [entry.updatedBy] : [])]),
       ),
+    })
+  })
+
+  app.get('/knowledge/handbook', async (c) => {
+    const principal = principalOf(c)
+    const accepted = await store.knowledge.list({ status: 'accepted' })
+    const repo = parseRepo(c.req.query('repo'))
+    const team = c.req.query('team')?.trim()
+    let visible: KnowledgeEntry[]
+    if (repo) {
+      const target = repoTarget(config, repo)
+      authorize(c, 'knowledge:read', { kind: 'repo', repo: target })
+      const family = familyOf(await store.families.list(), repoKey(target))?.id
+      visible = accepted.filter(
+        (entry) =>
+          scopeCoversRepo(entry.scope, target) &&
+          matchHolds(entry.match, family === undefined ? {} : { family }),
+      )
+    } else {
+      const policy = await crossTeamPolicy(store.settings)
+      visible = accepted.filter(
+        (entry) =>
+          can(principal, 'knowledge:read', scopeTarget(entry.scope)) ||
+          (isSharedEntry(entry) && canReadShared(principal, entry.scope, policy)),
+      )
+      if (team) visible = visible.filter((entry) => ownerOf(entry).includes(team))
+    }
+    const freshness = await readFreshness(
+      store.kv,
+      visible.map((entry) => entry.id),
+    )
+    const byId = new Map(visible.map((entry) => [entry.id, entry]))
+    const view = (entry: KnowledgeEntry): HandbookEntry => {
+      const fresh = freshness.get(entry.id)
+      return {
+        id: entry.id,
+        title: entry.title,
+        body: entry.body,
+        kind: entry.kind,
+        topics: entry.topics,
+        ...(entry.subject && { subject: entry.subject }),
+        scope: describeScope(entry.scope, entry.match),
+        repos: (entry.scope.repos ?? []).filter((pattern) => !/[*?[{]/.test(pattern)),
+        owner: ownerOf(entry),
+        updatedAt: entry.updatedAt,
+        version: entry.version,
+        evidence: entry.evidence,
+        ...(fresh && {
+          freshness: {
+            status: fresh.status,
+            checkedAt: fresh.checkedAt,
+            method: fresh.method,
+            repo: fresh.repo,
+            ...(fresh.reason && { reason: fresh.reason }),
+            signals: fresh.signals.map((signal) => `${signal.kind}: ${signal.detail}`),
+            ...(fresh.proposal && { proposal: fresh.proposal }),
+          },
+        }),
+      }
+    }
+    const chapters = knowledgeChapters(visible).map((chapter) => ({
+      key: chapter.key,
+      title: chapter.title,
+      entries: chapter.ids.flatMap((id) => {
+        const entry = byId.get(id)
+        return entry ? [view(entry)] : []
+      }),
+    }))
+    const states = [...freshness.values()]
+    return c.json<Handbook>({
+      chapters,
+      links: knowledgeLinks(visible),
+      counts: {
+        entries: visible.length,
+        chapters: chapters.length,
+        suspect: states.filter((state) => state.status === 'suspect').length,
+        stale: states.filter((state) => state.status === 'stale').length,
+      },
     })
   })
 

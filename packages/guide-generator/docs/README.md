@@ -52,3 +52,14 @@ These options are set per run only: `guide` has no `analyzers.guide` setting and
 `autoAccept(repo)` (the server resolves the scoped `guide.autoAccept` setting) lists sections whose new non-empty text is stored `accepted` by `AUTO_ACCEPT_ACTOR` instead of as a proposal; with an audit log on the store each is audited as `guide.accept` (actor `auto-accept`, `via: 'job'`, `details.auto`, the job id). The server's reject endpoint takes such text back: the newest earlier text a person accepted returns, else a waiting proposal, else the generated layer goes, and the inputs are remembered as rejected.
 
 Without an agent the LLM sections are skipped; without a forge `commits` is. When `testsExpected(repo)` (the server reads `repo.tests`) says the repository has no tests by design, `testing` is recorded as `skipped` with the reason `no tests by design` and no evidence, and no model call covers it. Each run is stored as a `guide` analysis record (`GuideRunData`: per section the outcome, hash, evidence ids and skip reason; the call's tier, model and cost; the extra prompt). Freshness reruns it at most weekly once the default branch moved (`refresh: { on: 'change', minInterval: '7d' }`), only when its latest record names a commit and the weekly budget for automatic work allows; it is still hash-gated.
+
+## Rules file digests
+
+Long rules files of the repository (`REVIEW.md`, `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `DIGEST_FILES`; at least `DIGEST_MIN_CHARS` = 3 000 characters) would otherwise be cut by the Guide budget. The `guide` analyzer therefore also condenses them (`digestRepoFiles`) before it generates sections, and it now refreshes daily (`on: 'change'`, `minInterval: 1d`); every call is gated, so a day without changes to these files costs nothing.
+
+- **Gate.** The file's git blob sha is compared with the stored digest's (`@holtkeeper/guide` `readRepoDigests`: another sha or another `DIGEST_VERSION` means stale). `force` repeats it.
+- **One call per changed file** on tier `fast`, no tools, its own `DIGEST_CONTEXT`, capped at `DIGEST_CALL_CAP_USD` ($0.03), task kind `guide`. The model sorts what the document states into `general`, `review` and `code` (`DIGEST_SYSTEM`: nothing from its own knowledge, English lines of at most 240 characters, at most 12 per group).
+- **Deterministic check** (`acceptDigest`): lines are cleaned and deduplicated across groups; a `source` that is not a heading of the document is dropped (the line stays without a pointer).
+- **Storage**: `Store.kv`, key `guide:digest:<forge>:<repo>:<file>`, one per file. A failed call is reported (`failed`) and the other files go on; a budget refusal ends the run like any agent call. The analysis data lists the outcomes (`digests`).
+
+The resolver reads them (see [@holtkeeper/guide](../../guide/docs/README.md#digests-of-rules-files)); nothing needs accepting, since a digest only condenses text people wrote.

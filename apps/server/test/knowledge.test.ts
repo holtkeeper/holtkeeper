@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { KnowledgeDetail, KnowledgeList } from '@holtkeeper/api'
+import type { Handbook, KnowledgeDetail, KnowledgeList } from '@holtkeeper/api'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -256,5 +256,57 @@ describe('knowledge routes', () => {
     expect(
       (await send(app, 'DELETE', `/api/knowledge/${games.id}`, undefined, curator)).status,
     ).toBe(204)
+  })
+})
+
+const handbook = async (app: ReturnType<typeof setup>, query = '', headers = {}) => {
+  const response = await app.request(`/api/knowledge/handbook${query}`, { headers })
+  expect(response.status).toBe(200)
+  return (await response.json()) as Handbook
+}
+
+describe('handbook', () => {
+  test('groups accepted entries into chapters, links them and carries freshness', async () => {
+    const app = setup()
+    const a = await create(app, { title: 'Load widgets lazily', subject: 'npm:widget' })
+    const b = await create(app, { title: 'Pin widget 2', subject: 'npm:widget', topics: [] })
+    await create(app, { title: 'Prefer Vitest', topics: ['testing', 'ci'] })
+    await create(app, { title: 'Run CI on merge', topics: ['testing', 'ci'] })
+    await send(
+      app,
+      'POST',
+      '/api/knowledge',
+      draft({ title: 'Draft', scope: { teams: ['games'] } }),
+    )
+    await store.kv?.set(`knowledge:fresh:${a.id}`, {
+      status: 'stale',
+      checkedAt: '2026-10-30T00:00:00.000Z',
+      method: 'model',
+      repo: 'work:games/web',
+      reason: 'the loader was removed',
+      signals: [{ kind: 'missing-file', detail: 'src/loader.ts' }],
+    })
+    const result = await handbook(app)
+    expect(result.counts).toMatchObject({ entries: 5, stale: 1, suspect: 0 })
+    const widget = result.chapters.find((chapter) => chapter.key === 'subject:npm:widget')
+    expect(widget?.title).toBe('widget (npm)')
+    expect(widget?.entries.map((entry) => entry.id).toSorted()).toEqual([a.id, b.id].toSorted())
+    const first = widget?.entries.find((entry) => entry.id === a.id)
+    expect(first?.freshness).toMatchObject({
+      status: 'stale',
+      signals: ['missing-file: src/loader.ts'],
+    })
+    expect(first?.scope).toBe('team games')
+    expect(result.links.some((link) => link.kind === 'subject')).toBe(true)
+    expect(result.links.some((link) => link.kind === 'topics')).toBe(true)
+  })
+
+  test('only shows what the caller may read and can narrow to a team', async () => {
+    const app = setup(teams)
+    await create(app, {}, as('games-curators'))
+    expect((await handbook(app, '', as('games-readers'))).counts.entries).toBe(1)
+    expect((await handbook(app, '', as('outsiders'))).counts.entries).toBe(0)
+    expect((await handbook(app, '?team=games', as('games-readers'))).counts.entries).toBe(1)
+    expect((await handbook(app, '?team=tools', as('games-readers'))).counts.entries).toBe(0)
   })
 })
