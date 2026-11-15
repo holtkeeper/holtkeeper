@@ -79,3 +79,4 @@ Without any catalog the report says no translation catalogs were found: a single
 - Untranslated detection by identity is heuristic; use `ignoreKeys` for brand names it misses.
 - Usage matching is lenient about namespaces when calls do not name one (`useTranslation('ns')` defaults are not tracked); i18next context suffixes are not modeled.
 - Checkouts are keyed by repository, not by ref.
+- **Not refreshed automatically (needs work).** The analyzer declares no `refresh`, so the freshness sweeper never queues it: nothing reads its records yet besides the generic analysis page (no Translations page, fleet view or agent tool). It runs on demand and from Automation rules. Before turning freshness back on, give the records a consumer, and add `refresh.paths` (sources and catalogs) plus a way to rerun when a layer in another repository changes, which the analyzed repository's head does not show.

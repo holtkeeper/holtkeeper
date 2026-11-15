@@ -2423,15 +2423,16 @@ export interface JobAnalyzerView {
   /** The run changes repositories (branches, commits, merge requests). */
   exclusive?: boolean
   /**
-   * How freshness keeps its records current: after the default branch moved (at most once per
-   * `minInterval`), or every `cadence`; `heavy` ones wait for the night window. Absent: never
-   * on its own.
+   * How freshness keeps its records current: after the default branch moved and stayed put for
+   * `debounce` (at most once per `minInterval`), or every `cadence`; `heavy` ones wait for the
+   * night window. Absent: never on its own.
    */
   refresh?:
     | {
         on: 'change'
         minInterval: string
         paths?: readonly string[]
+        debounce?: string
         heavy?: boolean
       }
     | { on: 'time'; cadence: string; heavy?: boolean }

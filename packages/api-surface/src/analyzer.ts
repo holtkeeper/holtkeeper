@@ -1,4 +1,4 @@
-import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { defineAnalyzer, goSourcePaths, jsSourcePaths } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
 import { apiSurfaceApplies } from './applies.ts'
@@ -42,7 +42,18 @@ export const apiSurfaceAnalyzer = defineAnalyzer<ApiSurfaceData, ApiSurfaceOptio
   kind: 'api-surface',
   analysis: apiSurfaceAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '30m' },
+  refresh: {
+    on: 'change',
+    minInterval: '1m',
+    debounce: '2m',
+    paths: [
+      ...jsSourcePaths,
+      ...goSourcePaths,
+      '**/package.json',
+      '**/pnpm-workspace.yaml',
+      '**/go.mod',
+    ],
+  },
   needs: { checkout: true },
   appliesTo: apiSurfaceApplies,
   options: apiSurfaceOptionsSchema,

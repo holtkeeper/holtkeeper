@@ -24,7 +24,7 @@ The metrics functions wrap `AnalysisKind.metrics` (see [`@holtkeeper/report`](..
 
 `refresh?: AnalyzerRefresh` says when the server's freshness sweeper queues the analyzer on its own:
 
-- `{ on: 'change', minInterval, paths?, heavy? }`: the default branch moved past the commit (`sha`) of the latest record, at most once per `minInterval` (`30m`, `6h`, `7d`, ...). With `paths` (globs from the repository root, e.g. `dependencyPaths`: every JavaScript and Go manifest and lockfile) only changes to matching files count.
+- `{ on: 'change', minInterval, paths?, debounce?, heavy? }`: the default branch moved past the commit (`sha`) of the latest record and stayed there for `debounce` (default 30 minutes, so a burst of merges costs one run), at most once per `minInterval` (`1m`, `6h`, `7d`, ...). With `paths` (globs from the repository root) only changes to matching files count: `dependencyPaths` (every JavaScript and Go manifest and lockfile), `jsSourcePaths` (JavaScript and TypeScript sources, declarations included) and `goSourcePaths` are ready to combine. Cheap analyzers that should follow code closely pair a short `minInterval` and `debounce` with `paths`, so commits that touch nothing they read cost no run.
 - `{ on: 'time', cadence, heavy? }`: the data changes without commits (advisories, registries, end-of-life dates, CI history), so it reruns once `cadence` passed since the latest record. Group analyzers use this, having no commit of their own.
 - `heavy: true` holds runs to the night window.
 

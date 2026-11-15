@@ -3,8 +3,14 @@ import type { Job } from '@holtkeeper/store'
 
 import { everyMs, isAllowedAt, nextRuns } from './smart.ts'
 
-/** How long a default-branch head must stay put before change-class analyzers rerun on it. */
+/**
+ * How long a default-branch head must stay put before change-class analyzers rerun on it, unless
+ * their `refresh.debounce` says otherwise.
+ */
 export const FRESHNESS_DEBOUNCE_MS = 30 * 60_000
+
+/** The shortest hold after a freshness job that ended without success, whatever the interval. */
+export const FRESHNESS_RETRY_MS = 30 * 60_000
 
 /** A team's freshness override: `off` stops it, `slower` stretches every interval by `factor`. */
 export interface FreshnessMode {
@@ -44,7 +50,7 @@ export interface FreshnessContext {
   nightWindow: NightWindow
   /** IANA zone of the night window. */
   timezone: string
-  /** Default `FRESHNESS_DEBOUNCE_MS`. */
+  /** Debounce of change analyzers without `refresh.debounce`; default `FRESHNESS_DEBOUNCE_MS`. */
   debounceMs?: number
 }
 
@@ -95,10 +101,12 @@ const intervalText = (refresh: AnalyzerRefresh, mode: FreshnessMode) => {
  * Decides one analyzer on one target, in this order: a team that turned freshness off, a job
  * already queued or running, then staleness. `change` analyzers are stale when the head differs
  * from the record's `sha` (a record without one counts as stale, except for `ai` analyzers, which
- * then wait for an event or a person), the head has stayed put for the debounce and `minInterval`
- * has passed since the record. `time` analyzers are due once `cadence` passed. A freshness job
- * that ended without success holds the next try back by the same interval, so a failing analyzer
- * does not come back on every sweep. Heavy analyzers then wait for the night window.
+ * then wait for an event or a person), the head has stayed put for the debounce
+ * (`refresh.debounce`, else `debounceMs`) and `minInterval` has passed since the record. `time`
+ * analyzers are due once `cadence` passed. A freshness job that ended without success holds the
+ * next try back by the same interval, at least `FRESHNESS_RETRY_MS`, so a failing analyzer does
+ * not come back on every sweep; for `change` analyzers a head first seen after that job ends the
+ * hold, so a fix is picked up. Heavy analyzers then wait for the night window.
  */
 export function decideFreshness(
   input: FreshnessInput,
@@ -128,7 +136,9 @@ export function decideFreshness(
         action: 'fresh',
         reason: `no file it reads changed between ${short(latest.sha)} and ${short(head.sha)}`,
       }
-    const debounce = context.debounceMs ?? FRESHNESS_DEBOUNCE_MS
+    const debounce = refresh.debounce
+      ? everyMs(refresh.debounce)
+      : (context.debounceMs ?? FRESHNESS_DEBOUNCE_MS)
     const settled = Date.parse(head.at) + debounce
     if (now < settled)
       return {
@@ -160,8 +170,13 @@ export function decideFreshness(
   }
 
   const last = input.lastJob
-  if (last && last.status !== 'succeeded') {
-    const retry = Date.parse(last.createdAt) + interval
+  const movedSince =
+    refresh.on === 'change' &&
+    last !== undefined &&
+    head !== undefined &&
+    Date.parse(head.at) > Date.parse(last.createdAt)
+  if (last && last.status !== 'succeeded' && !movedSince) {
+    const retry = Date.parse(last.createdAt) + Math.max(interval, FRESHNESS_RETRY_MS)
     if (now < retry)
       return {
         action: 'wait',

@@ -33,6 +33,7 @@ export { type JobEngine, type JobEngineOptions, createJobEngine } from './engine
 export { type EnqueueOptions, type JobRequest, dailyLimitsOf, enqueueUnique } from './enqueue.ts'
 export {
   FRESHNESS_DEBOUNCE_MS,
+  FRESHNESS_RETRY_MS,
   type FreshnessContext,
   type FreshnessDecision,
   type FreshnessInput,

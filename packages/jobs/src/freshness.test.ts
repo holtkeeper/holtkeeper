@@ -110,7 +110,10 @@ describe('decideFreshness: change', () => {
 
   test('a failed freshness job holds the next try back by the interval', () => {
     const decision = decideFreshness(
-      change({ lastJob: { id: 'j1', status: 'failed', createdAt: '2026-11-11T08:00:00.000Z' } }),
+      change({
+        head: { sha: sha('b'), at: '2026-11-11T07:30:00.000Z' },
+        lastJob: { id: 'j1', status: 'failed', createdAt: '2026-11-11T08:00:00.000Z' },
+      }),
       context('10:00'),
     )
     expect(decision).toEqual({
@@ -118,6 +121,42 @@ describe('decideFreshness: change', () => {
       reason: 'the last freshness job j1 ended failed',
       nextAt: '2026-11-11T14:00:00.000Z',
     })
+  })
+
+  test('refresh.debounce replaces the default debounce', () => {
+    const quick = change({
+      refresh: { on: 'change', minInterval: '1m', debounce: '2m' },
+      head: { sha: sha('b'), at: '2026-11-11T09:00:00.000Z' },
+    })
+    expect(decideFreshness(quick, context('09:01'))).toEqual({
+      action: 'wait',
+      reason: 'the head moved less than 2 minutes ago',
+      nextAt: '2026-11-11T09:02:00.000Z',
+    })
+    expect(decideFreshness(quick, context('09:02')).action).toBe('run')
+  })
+
+  test('a failed job holds a short interval back for at least the retry floor', () => {
+    const decision = decideFreshness(
+      change({
+        refresh: { on: 'change', minInterval: '1m', debounce: '2m' },
+        head: { sha: sha('b'), at: '2026-11-11T09:00:00.000Z' },
+        lastJob: { id: 'j1', status: 'failed', createdAt: '2026-11-11T09:05:00.000Z' },
+      }),
+      context('09:20'),
+    )
+    expect(decision).toMatchObject({ action: 'wait', nextAt: '2026-11-11T09:35:00.000Z' })
+  })
+
+  test('a head first seen after the failed job ends the hold', () => {
+    const decision = decideFreshness(
+      change({
+        head: { sha: sha('c'), at: '2026-11-11T08:30:00.000Z' },
+        lastJob: { id: 'j1', status: 'failed', createdAt: '2026-11-11T08:00:00.000Z' },
+      }),
+      context('10:00'),
+    )
+    expect(decision).toEqual({ action: 'run', reason: 'sha aaaaaaa != head ccccccc' })
   })
 })
 

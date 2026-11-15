@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { defineAnalyzer, dependencyPaths, goSourcePaths, jsSourcePaths } from '@holtkeeper/analyzer'
 import { installDependencies } from '@holtkeeper/coverage'
 import { z } from 'zod'
 
@@ -49,7 +49,13 @@ export const usagesAnalyzer = defineAnalyzer<UsagesData, UsagesOptions>({
   kind: 'usages',
   analysis: usagesAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '30m' },
+  // Lockfiles count too: dependencies are installed from them for the type checker.
+  refresh: {
+    on: 'change',
+    minInterval: '1m',
+    debounce: '2m',
+    paths: [...jsSourcePaths, ...goSourcePaths, '**/tsconfig*.json', ...dependencyPaths],
+  },
   needs: { checkout: true },
   appliesTo: usagesApplies,
   options: usagesOptionsSchema,

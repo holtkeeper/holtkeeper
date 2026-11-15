@@ -44,7 +44,7 @@ export const depgraphAnalyzer = defineAnalyzer({
   kind: 'depgraph',
   analysis: depgraphAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '30m', paths: dependencyPaths },
+  refresh: { on: 'change', minInterval: '1m', debounce: '2m', paths: dependencyPaths },
   needs: { checkout: true },
   options: z.object({}),
   async run({ dir, ref, runner, log }) {

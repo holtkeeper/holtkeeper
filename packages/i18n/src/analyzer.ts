@@ -218,12 +218,14 @@ export type I18nOptions = z.infer<typeof i18nOptions>
  * (a shared translations repository with common and per-project folders): runners check out every
  * repository `requiredCheckouts(options, repo)` (from `layers.ts`) lists and pass the directories in `__checkouts`.
  * Source code is always scanned in the analyzed checkout.
+ *
+ * Freshness does not run it (no `refresh`) until its records have a consumer beyond the generic
+ * analysis page; it runs on demand and from Automation rules.
  */
 export const i18nAnalyzer = defineAnalyzer<I18nData, I18nOptions>({
   kind: 'i18n',
   analysis: i18nAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '30m' },
   appliesTo: hasTreeFile(isSourceFile),
   needs: { checkout: true },
   options: i18nOptions,

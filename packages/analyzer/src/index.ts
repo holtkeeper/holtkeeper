@@ -155,13 +155,20 @@ export type RefreshInterval = `${number}${'m' | 'h' | 'd'}`
 
 /**
  * When the freshness sweeper queues an analyzer on its own. `change`: the default branch moved
- * past the commit the latest record describes, at most once per `minInterval`; with `paths`, only
- * changes to matching files (globs from the repository root) count. `time`: the data changes
- * without commits (registries, advisories, end-of-life dates, CI history), so it reruns once
- * `cadence` has passed since the latest record. `heavy` holds the run to the night window.
+ * past the commit the latest record describes and stayed there for `debounce` (default 30
+ * minutes), at most once per `minInterval`; with `paths`, only changes to matching files (globs
+ * from the repository root) count. `time`: the data changes without commits (registries,
+ * advisories, end-of-life dates, CI history), so it reruns once `cadence` has passed since the
+ * latest record. `heavy` holds the run to the night window.
  */
 export type AnalyzerRefresh =
-  | { on: 'change'; minInterval: RefreshInterval; paths?: readonly string[]; heavy?: boolean }
+  | {
+      on: 'change'
+      minInterval: RefreshInterval
+      paths?: readonly string[]
+      debounce?: RefreshInterval
+      heavy?: boolean
+    }
   | { on: 'time'; cadence: RefreshInterval; heavy?: boolean }
 
 /**

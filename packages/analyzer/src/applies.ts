@@ -118,3 +118,9 @@ export const dependencyPaths: readonly string[] = [
   '**/go.sum',
   '**/go.work',
 ]
+
+/** Globs of JavaScript and TypeScript sources at any depth, declaration files included. */
+export const jsSourcePaths: readonly string[] = ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}']
+
+/** Globs of Go sources at any depth. */
+export const goSourcePaths: readonly string[] = ['**/*.go']

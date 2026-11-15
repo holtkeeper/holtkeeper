@@ -95,10 +95,10 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 `decideFreshness(input, { now, nightWindow, timezone, debounceMs? })` decides one analyzer on one target from its `refresh` (see [@holtkeeper/analyzer](../../analyzer/docs/README.md#freshness)), the latest record (`sha`, `createdAt`), the default-branch head and when it was first seen, whether a job is queued or running, the last freshness job and the team's mode. It returns `run` with a reason (`sha 1a2b3c4 != head 5d6e7f8`, `record has no sha, head …`, `no record yet`, `cadence 7d elapsed`), `wait` (stale or due, but held back; `nextAt` when known), `fresh` (`nextAt` for time-class analyzers) or `skip`. In order:
 
 - `off` mode skips; an active job waits;
-- `change`: an unknown head waits; the record of the head is fresh; an analyzer that may call an LLM (`ai`) skips without a record naming a commit; `pathsChanged: false` is fresh; a head younger than the debounce (`FRESHNESS_DEBOUNCE_MS`, 30 minutes) waits; `minInterval` counts from the record;
+- `change`: an unknown head waits; the record of the head is fresh; an analyzer that may call an LLM (`ai`) skips without a record naming a commit; `pathsChanged: false` is fresh; a head younger than the debounce (`refresh.debounce`, else `debounceMs`, default `FRESHNESS_DEBOUNCE_MS`, 30 minutes) waits; `minInterval` counts from the record;
 - `time`: due once `cadence` passed since the record, or without one;
 - `slower` multiplies interval and cadence by `factor` (`refreshIntervalMs`);
-- a freshness job that ended without success holds the next try back by the interval;
+- a freshness job that ended without success holds the next try back by the interval, at least `FRESHNESS_RETRY_MS` (30 minutes); for `change` analyzers a head first seen after that job ends the hold;
 - `heavy` waits for the night window (`inNightWindow`, `from > to` crosses midnight).
 
 `matchesAnyPath(files, globs)` checks changed files against `refresh.paths`. The server's sweeper supplies heads, caps and budgets (see the [server docs](../../../apps/server/docs/README.md#freshness)).
