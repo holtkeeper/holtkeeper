@@ -32,6 +32,8 @@ import type {
   DatabaseQuerySort,
   DeleteEgressCacheInput,
   CreateMcpTokenInput,
+  UpdateMcpTokenInput,
+  UpdateSecretReportInput,
   CreateJobInput,
   ForgeWebhookInput,
   LinkAccountInput,
@@ -2097,6 +2099,39 @@ export function useRevokeMcpToken() {
     onSuccess: () => client.invalidateQueries({ queryKey: ['mcp', 'tokens'] }),
   })
 }
+
+/** Changes how one of the caller's tokens reports exposed secrets; never audited. */
+export function useUpdateMcpToken() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tokenId, input }: { tokenId: string; input: UpdateMcpTokenInput }) =>
+      api.updateMcpToken(tokenId, input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['mcp', 'tokens'] }),
+  })
+}
+
+/** Secret reports agents sent (`credentials:read` on everything); 404 while the feature is off. */
+export const useSecretReports = () =>
+  useQuery({ queryKey: ['secret-reports', 'list'], queryFn: api.secretReports, retry: false })
+
+/** Changes a secret report's status or note (`credentials:write` on everything). */
+export function useUpdateSecretReport() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ reportId, input }: { reportId: string; input: UpdateSecretReportInput }) =>
+      api.updateSecretReport(reportId, input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['secret-reports', 'list'] }),
+  })
+}
+
+/** The Secret Reports License text; fetched only when `enabled` (the dialog is open). */
+export const useSecretReportsLicense = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['secret-reports', 'license'],
+    queryFn: api.secretReportsLicense,
+    enabled,
+    staleTime: Infinity,
+  })
 
 /** The tools the MCP endpoint offers the caller, with their arguments. */
 export const useMcpTools = () =>

@@ -1,11 +1,11 @@
 ---
 title: CLI
-description: The holtkeeper command — serve starts the server and its workers, users manages passkey accounts — with every option.
+description: The holtkeeper command — serve starts the server and its workers, users manages passkey accounts, secrets matches reported secrets — with every option.
 sidebar:
   order: 3
 ---
 
-The `holtkeeper` command is the server's entrypoint: it starts the server (`serve`, the command of the container image and the Helm chart) and handles operator account tasks (`users`). Everything else happens in the web panel, or over MCP for agents. It runs from source with Bun.
+The `holtkeeper` command is the server's entrypoint: it starts the server (`serve`, the command of the container image and the Helm chart) handles operator account tasks (`users`) and helps match [secret reports](/guide/supply-chain/secret-reports/) to stored secrets (`secrets`). Everything else happens in the web panel, or over MCP for agents. It runs from source with Bun.
 
 ```sh
 holtkeeper <command> [options]
@@ -69,6 +69,24 @@ kubectl exec deploy/holtkeeper-web -- \
 ```text
 https://holtkeeper.example.com/auth/users/link/Xk3…q9/login
 ```
+
+## secrets
+
+Helps administrators find which stored secret a [secret report](/guide/supply-chain/secret-reports/) is about, from its fingerprint, without anyone sending the value.
+
+| Action                         | Options                                                                     | Does                                                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secrets fingerprint`          | none                                                                        | Reads a value from stdin and prints its fingerprint: the first 16 hex characters of its SHA-256.                                                |
+| `secrets match <fingerprint…>` | `--address <url>`, `--mount <mount>`, `--prefix <path>`, `--namespace <ns>` | Walks the latest version of every secret of an OpenBao or Vault KV v2 engine and prints the path, field and version of each value that matches. |
+
+`secrets match` reads its token from `BAO_TOKEN` or `VAULT_TOKEN`. `--address` and `--mount` are required; `--prefix` limits the walk to one path, `--namespace` picks a Vault or OpenBao namespace. Values are hashed in memory and never leave the process; paths the token may not list or read are skipped.
+
+```sh
+printf %s "$WIDGET_API_KEY" | holtkeeper secrets fingerprint
+BAO_TOKEN=… holtkeeper secrets match 3f9a0c1d2e4b5a67 --address https://bao.example.com --mount kv --prefix widgets/
+```
+
+Pipe the value from where it lives, as above; do not type it into the command line, where shell history keeps it.
 
 ## Exit codes
 

@@ -59,6 +59,7 @@
     "@holtkeeper/renovate": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",
+    "@holtkeeper/secret-reports": "workspace:*",
     "@holtkeeper/settings": "workspace:*",
     "@holtkeeper/ssh-keys": "workspace:*",
     "@holtkeeper/stack": "workspace:*",

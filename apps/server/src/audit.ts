@@ -237,13 +237,21 @@ const userFields = (user: User | undefined) =>
   }
 
 /**
+ * Changes of an MCP token's secret reporting choice. The Holtkeeper Secret Reports License
+ * promises that nobody learns who reports how, and the audit log is read by administrators.
+ */
+const reportingChoice = /^\/api\/api-surface\/mcp\/tokens\/[^/]+$/
+
+/**
  * Whether a request is audited: mutating methods under `/api` and `/auth/<provider>/admin`,
- * except Slack event deliveries, which arrive for every message in the app's channels.
+ * except Slack event deliveries, which arrive for every message in the app's channels, and
+ * changes of a token's secret reporting choice.
  */
 function isAudited(method: string, path: string, provider: string) {
   return (
     mutating.has(method) &&
     path !== '/api/slack/events' &&
+    !(method === 'PATCH' && reportingChoice.test(path)) &&
     (path.startsWith('/api/') || path.startsWith(`/auth/${provider}/admin/`))
   )
 }

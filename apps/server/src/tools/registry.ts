@@ -10,6 +10,11 @@ import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type GuideResolver, familyOf } from '@holtkeeper/guide'
 import { latestVersions, libraryApi } from '@holtkeeper/libraries'
+import {
+  REPORT_TOOL,
+  type SecretReportsAccess,
+  secretReportsToolset,
+} from '@holtkeeper/secret-reports'
 import type { CrossTeamCatalog } from '@holtkeeper/settings'
 import type { Family, Store } from '@holtkeeper/store'
 
@@ -23,12 +28,10 @@ import { type AssetToolsAccess, assetsToolset } from './assets.ts'
 import { type CatalogToolsContext, catalogToolset } from './catalog.ts'
 import { knowledgeToolset } from './knowledge.ts'
 import { type LibraryIndex, libraryToolset } from './libraries.ts'
-import { type OpsToolsAccess, opsToolset } from './ops.ts'
-import { type ReleaseToolsAccess, releasesToolset } from './releases.ts'
 import type { SupplyToolsAccess } from './repos.ts'
+import { type ReviewToolsAccess, reviewsToolset } from './reviews.ts'
 import { type RulesAccess, type TestIdsSnapshot, rulesToolset } from './rules.ts'
 import { type StackToolsContext, stackToolset } from './stack.ts'
-import { type TaskToolsAccess, tasksToolset } from './tasks.ts'
 
 /** Toolsets the MCP endpoint serves, in the order clients list them. */
 const MCP_TOOLSETS = [
@@ -38,10 +41,21 @@ const MCP_TOOLSETS = [
   'rules',
   'assets',
   'libraries',
-  'releases',
-  'ops',
-  'tasks',
+  'reviews',
+  'security',
 ]
+
+/**
+ * The only tools that write which the MCP endpoint offers: two proposals people review before
+ * agents rely on them, and secret reports administrators act on. Every other tool with
+ * `readOnly: false` stays off MCP, so a new write tool is never exposed to people's clients by
+ * accident.
+ */
+const MCP_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'propose_knowledge',
+  'propose_rule_change',
+  REPORT_TOOL,
+])
 
 /** Toolsets every internal task mounts. */
 const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
@@ -72,41 +86,51 @@ export function taskToolsets(taskKind: string): readonly string[] {
 }
 
 /** What the MCP toolsets read for one caller. */
-export interface McpToolsetsContext extends Omit<CatalogToolsContext, 'library'>, RulesAccess {
+export interface McpToolsetsContext
+  extends Omit<CatalogToolsContext, 'library' | 'supply'>, RulesAccess {
   /** The third-party library index; without it the `libraries` toolset is not offered. */
   library?: LibraryIndex
-  /** Release state and steps; without it the `releases` toolset is not offered. */
-  releases?: ReleaseToolsAccess
-  /** Jobs, logs and budgets; without it the `ops` toolset is not offered. */
-  ops?: OpsToolsAccess
   /** Asset policies and assets records; without it the `assets` toolset is not offered. */
   assets?: AssetToolsAccess
-  /** Agent tasks; without it the `tasks` toolset is not offered. */
-  tasks?: TaskToolsAccess
+  /** Merge request review state; without it the `reviews` toolset is not offered. */
+  reviews?: ReviewToolsAccess
+  /**
+   * Secret reports of the caller; without it (feature off, or the caller chose `off`) the
+   * `security` toolset is not offered.
+   */
+  secretReports?: SecretReportsAccess
 }
 
 /**
- * The toolsets the MCP endpoint serves to one caller: `catalog`, `stack` (with `stack`), `knowledge`, `rules` (with any
- * of `guide`, `proposals`, `commits`, `testIds`), `assets` (with `assets`), `libraries` (with `library`), `releases`
- * (with `releases`), `ops` (with `ops`) and `tasks` (with `tasks`), every one limited by the caller's grants.
+ * The toolsets the MCP endpoint serves to one caller, picked for developers at work in one
+ * repository: `catalog`, `stack` (with `stack`, `repo_stack` only), `knowledge`, `rules` (with any
+ * of `guide`, `proposals`, `commits`, `testIds`, `releases`), `assets` (with `assets`), `libraries`
+ * (with `library`), `reviews` (with `reviews`) and `security` (with `secretReports`), every one limited by the caller's grants. Fleet,
+ * operations and release tools stay with the web panel and chat. Tools that write are left out
+ * unless `MCP_WRITE_TOOLS` names them; a toolset left without tools is not offered.
  */
 export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
-  const { library, releases, ops, assets, tasks } = context
+  const { library, assets, reviews, secretReports } = context
   const rules = rulesToolset(context)
-  return mountToolsets(
+  const mounted = mountToolsets(
     [
       catalogToolset(context),
-      ...(context.stack ? [stackToolset(context.stack)] : []),
+      ...(context.stack ? [stackToolset(context.stack, { fleet: false })] : []),
       knowledgeToolset(context.knowledge),
       ...(rules ? [rules] : []),
       ...(assets ? [assetsToolset(assets)] : []),
       ...(library ? [libraryToolset(library, context.canRead)] : []),
-      ...(releases ? [releasesToolset(releases)] : []),
-      ...(ops ? [opsToolset(ops)] : []),
-      ...(tasks ? [tasksToolset(tasks)] : []),
+      ...(reviews ? [reviewsToolset(reviews)] : []),
+      ...(secretReports ? [secretReportsToolset(secretReports)] : []),
     ],
     MCP_TOOLSETS,
   )
+  return mounted.flatMap((toolset) => {
+    const tools = toolset.tools.filter(
+      (tool) => tool.readOnly !== false || MCP_WRITE_TOOLS.has(tool.name),
+    )
+    return tools.length ? [{ ...toolset, tools }] : []
+  })
 }
 
 /**

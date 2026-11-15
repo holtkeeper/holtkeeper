@@ -56,6 +56,7 @@ test('the rail holds the eight workspaces in order, with Settings at the bottom'
       [
         '/supply/libraries',
         '/supply/security',
+        '/supply/secret-reports',
         '/supply/licenses',
         '/supply/stack',
         '/supply/public-api',

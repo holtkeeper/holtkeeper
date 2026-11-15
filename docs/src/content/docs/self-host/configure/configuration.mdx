@@ -63,18 +63,23 @@ export default defineConfig({
 
 ## `server`
 
-| Field                     | Default                         | Meaning                                                                                                      |
-| ------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `auth`                    | required                        | `usersAuth()`, `passwordAuth()`, `headerAuth()` or `noAuth()`; see [Sign-in](/self-host/configure/sign-in/). |
-| `store`                   | required                        | Where everything but artifacts lives; see below.                                                             |
-| `vaultKey`                | required                        | At least 32 characters. Seals credentials and secret settings.                                               |
-| `hostname`, `port`        | `127.0.0.1`, `7420`             | Listen on `0.0.0.0` in containers.                                                                           |
-| `publicUrl`               | none                            | The address people and GitLab use: webhook URLs, sign-in links, the Settings footer.                         |
-| `artifacts`               | `.holtkeeper/artifacts` on disk | `fs` or `s3`; see below.                                                                                     |
-| `retention`               | none (keep forever)             | `{ days?, maxBytes? }` sweeps artifacts hourly.                                                              |
-| `databasePath`            | none                            | The SQLite file, so Settings › System can report its size.                                                   |
-| `rotationIntervalMinutes` | `60`                            | Background credential rotation; `0` turns it off.                                                            |
-| `egress`                  | none                            | `{ secret, proxy? }` for the egress proxy; see [Egress](/self-host/configure/egress/).                       |
+| Field                     | Default                         | Meaning                                                                                                                                                           |
+| ------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`                    | required                        | `usersAuth()`, `passwordAuth()`, `headerAuth()` or `noAuth()`; see [Sign-in](/self-host/configure/sign-in/).                                                      |
+| `store`                   | required                        | Where everything but artifacts lives; see below.                                                                                                                  |
+| `vaultKey`                | required                        | At least 32 characters. Seals credentials and secret settings.                                                                                                    |
+| `hostname`, `port`        | `127.0.0.1`, `7420`             | Listen on `0.0.0.0` in containers.                                                                                                                                |
+| `publicUrl`               | none                            | The address people and GitLab use: webhook URLs, sign-in links, the Settings footer.                                                                              |
+| `artifacts`               | `.holtkeeper/artifacts` on disk | `fs` or `s3`; see below.                                                                                                                                          |
+| `retention`               | none (keep forever)             | `{ days?, maxBytes? }` sweeps artifacts hourly.                                                                                                                   |
+| `databasePath`            | none                            | The SQLite file, so Settings › System can report its size.                                                                                                        |
+| `rotationIntervalMinutes` | `60`                            | Background credential rotation; `0` turns it off.                                                                                                                 |
+| `egress`                  | none                            | `{ secret, proxy? }` for the egress proxy; see [Egress](/self-host/configure/egress/).                                                                            |
+| `secretReports`           | `true`                          | Agents may report exposed secrets over MCP; see [Secret reports](/guide/supply-chain/secret-reports/). Keeping it on means accepting the license's Use Condition. |
+
+:::note[Secret reports and their license]
+`secretReports` is on by default. It turns on the `report_secret_exposure` MCP tool and **Supply chain › Secret reports**, which are under the Holtkeeper Secret Reports License: MIT plus a Use Condition. Keep it on only while reporting stays voluntary, reports are never grounds for sanctions and nobody tries to unmask anonymous reporters; otherwise set `secretReports: false`. See [License and Use Condition](/guide/supply-chain/secret-reports/#license-and-use-condition).
+:::
 
 :::caution
 Never change `vaultKey` once credentials are stored, and use the same key in every process. Without it, stored tokens and every database backup become unreadable.

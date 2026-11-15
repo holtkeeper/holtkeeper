@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-The MCP endpoint (`POST /mcp`) serves the tools below, in this order. Every tool reads stored data only, unless marked **writes**. Arguments marked `?` are optional; repositories are always `forge:path` (`gitlab:acme/checkout-web`). Which tools a client sees depends on its owner's access and the token's scopes; **Account › Connect agents › Tool reference** shows the live list with every argument's description.
+The MCP endpoint (`POST /mcp`) serves the tools below, in this order. Every tool reads stored data only, unless marked **writes**. Arguments marked `?` are optional; repositories are always `forge:path` (`gitlab:acme/checkout-web`). Only `propose_knowledge` and `propose_rule_change` write, and both leave a proposal for people to review, plus `report_secret_exposure`, which files a [secret report](/guide/supply-chain/secret-reports/); no tool starts tasks, runs release steps or approves anything. Fleet-wide tools (security findings, licenses, stack usage), release state and job tools are not served over MCP; people find them in the panel and in [Chat](/guide/chat/threads/). Which tools a client sees depends on its owner's access; **Account › Connect agents › Tool reference** shows the live list with every argument's description.
 
 For a walkthrough with example calls, see [What agents can ask](/agents/tools/).
 
@@ -27,17 +27,14 @@ The public API of the organization's packages and how every repository uses its 
 | `repo_packages`       | The packages one repository imports, with versions, ranges and uses; without `repo`, the repositories with a record.     | `repo?`                                                                                  |
 | `evaluate_dependency` | Everything known about a dependency before adding or upgrading it: users, advisories, licenses, bundle share, knowledge. | `package`, `ecosystem?`, `version?`, `repo?`                                             |
 | `who_uses`            | Which teams and repositories use a library, internal package or stack tool, at which versions and how far behind.        | `subject` (`npm:date-fns`, `Go:example.com/kit`, `tool:node` or a bare name)             |
-| `security_findings`   | Vulnerability findings from the newest audits: severity, fixed versions, affected repositories, fixing or allowlisted.   | `repo?`, `severity?`, `status?`, `limit?` (1–200, default 50)                            |
-| `license_overview`    | License compliance: totals, the license policy, denied or review packages, a row per repository and the license mix.     | `repo?`                                                                                  |
 
-Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type`, `variable`, `enum`, `namespace` or `reexport`. `find_usages` `kind` is `call`, `new`, `jsx`, `member`, `type`, `extends`, `reexport`, `reference` or `import`. `security_findings` `severity` is `critical`, `high`, `medium`, `low` or `unknown`; `status` is `open`, `fixing` or `allowlisted`. Go packages of the organization's repositories are named by their full import path (`example.com/kit/log`); the catalog answers for them first, then the library index. `package_usage` takes a Go module path (all its packages) or a package import path, and `upgrade_impact` covers Go too, from syntactic uses and, when the usages job has the `go` toolchain, the methods and fields reached through values (`typed: true` sites).
+Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type`, `variable`, `enum`, `namespace` or `reexport`. `find_usages` `kind` is `call`, `new`, `jsx`, `member`, `type`, `extends`, `reexport`, `reference` or `import`. Go packages of the organization's repositories are named by their full import path (`example.com/kit/log`); the catalog answers for them first, then the library index. `package_usage` takes a Go module path (all its packages) or a package import path, and `upgrade_impact` covers Go too, from syntactic uses and, when the usages job has the `go` toolchain, the methods and fields reached through values (`typed: true` sites).
 
 ## Stack
 
-| Tool          | Description                                                                                                                  | Arguments                                                                          |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `stack_usage` | Which repositories use a runtime, package manager, base image or chart, at which versions, by team, with end-of-life status. | `tool` (`node`, `go`, `pnpm`, an image name), `version?` (version or release line) |
-| `repo_stack`  | One repository's runtimes, tools and images with support status, its conventions status and key direct dependencies.         | `repo`                                                                             |
+| Tool         | Description                                                                                                          | Arguments |
+| ------------ | -------------------------------------------------------------------------------------------------------------------- | --------- |
+| `repo_stack` | One repository's runtimes, tools and images with support status, its conventions status and key direct dependencies. | `repo`    |
 
 ## Knowledge
 
@@ -51,16 +48,17 @@ Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type
 
 ## Rules
 
-| Tool                   | Description                                                                                                         | Arguments                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `repo_rules`           | The repository's Guide: team rules from every scope, learned rules, policies, generated text, then knowledge notes. | `repo`, `task?`, `section?`, `only?`                                    |
-| `propose_rule_change`  | **Writes.** Proposes one imperative rule for a Guide section; people review it under Knowledge › Learnings.         | `repo`, `section`, `rule`, `reason`, `scope?`                           |
-| `test_ids`             | The test id convention and existing test ids per component.                                                         | `repo`, `path?` (file, folder or component name), `limit?` (default 20) |
-| `suggest_test_ids`     | Interactive elements of one component file without a test id, each with a suggested id. Deterministic.              | `repo`, `file`, `content` (the file's current text)                     |
-| `commit_conventions`   | How commit messages and branch names should look: template, rules with their source, real examples, team notes.     | `repo`, `commits?` (history to learn from, default 100)                 |
-| `check_commit_message` | Checks a commit message or merge request title and a branch name; errors break enforced rules, warnings history.    | `repo`, `message?`, `branch?`                                           |
+| Tool                   | Description                                                                                                            | Arguments                                                               |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `repo_rules`           | The repository's Guide: team rules from every scope, learned rules, policies, generated text, then knowledge notes.    | `repo`, `task?`, `section?`, `only?`                                    |
+| `propose_rule_change`  | **Writes.** Proposes one imperative rule for a Guide section; people review it under Knowledge › Learnings.            | `repo`, `section`, `rule`, `reason`, `scope?`                           |
+| `test_ids`             | The test id convention and existing test ids per component.                                                            | `repo`, `path?` (file, folder or component name), `limit?` (default 20) |
+| `suggest_test_ids`     | Interactive elements of one component file without a test id, each with a suggested id. Deterministic.                 | `repo`, `file`, `content` (the file's current text)                     |
+| `commit_conventions`   | How commit messages and branch names should look: template, rules with their source, real examples, team notes.        | `repo`, `commits?` (history to learn from, default 100)                 |
+| `check_commit_message` | Checks a commit message or merge request title and a branch name; errors break enforced rules, warnings history.       | `repo`, `message?`, `branch?`                                           |
+| `release_rules`        | How a repository releases, in plain language: branches, flow, tag format, bump rules, acceptance, gates, environments. | `repo`                                                                  |
 
-`task` is `agent` (default), `review`, `chat` or `release-notes`. `section` and `only` are `general`, `review`, `testing`, `testids`, `assets`, `commits` or `releases`. `propose_rule_change` `scope` is `repo` (default), `family`, `path` (the repository's folder), `team` (its first owner team), or an exact scope such as `path:<forge>:<folder>`, `team:<key>`, `family:<id>` or `repo:<forge:path>`.
+`release_rules` needs `releases:read` on the repository. `task` is `agent` (default), `review`, `chat` or `release-notes`. `section` and `only` are `general`, `review`, `testing`, `testids`, `assets`, `commits` or `releases`. `propose_rule_change` `scope` is `repo` (default), `family`, `path` (the repository's folder), `team` (its first owner team), or an exact scope such as `path:<forge>:<folder>`, `team:<key>`, `family:<id>` or `repo:<forge:path>`.
 
 ## Assets
 
@@ -82,40 +80,25 @@ Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type
 | `search_library_issues` | Known issues and answered discussions matching an error message or symptom, with state, fix version and link.        | `package`, `ecosystem?`, `query`, `version?`, `limit?` (1–20, default 5), `repo?`   |
 | `library_source`        | A file listing or one file with line numbers; the snapshot is made on first request.                                 | `package`, `ecosystem?`, `version?`, `path?`, `start?`, `end?`, `repo?`             |
 
-## Releases
+## Reviews
 
-| Tool              | Description                                                                                                                           | Arguments                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `release_rules`   | How a repository releases, in plain language: branches, flow, tag format, bump rules, acceptance, gates, environments.                | `repo`                                                                                    |
-| `release_status`  | Stage, latest and suggested next version, unreleased commits, candidate merge request, blockers, environments, next steps.            | `repo`                                                                                    |
-| `release_changes` | Tasks and the grouped changelog between two versions; default the latest version → the target branch.                                 | `repo`, `from?`, `to?`                                                                    |
-| `release_step`    | **Writes.** Runs `propose`, `accept`, `version` or `deploy`. The first call previews and returns a confirm token; the second runs it. | `repo`, `action`, `environment?`, `tag?`, `override?`, `writeNotes?`, `note?`, `confirm?` |
+| Tool            | Description                                                                                                                                                 | Arguments                                                   |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `review_status` | Holtkeeper's review of a merge request: verdict and summary of the newest run, findings with file and line, open threads, earlier runs and what to do next. | `repo`, `branch?` (source branch), `mergeRequest?` (number) |
 
-`release_step` is offered only to tokens with the **Release steps** scope and needs `releases:run`. The confirm token is valid once, for 10 minutes. Never pass `override` unless the user asked.
+Pass `branch` or `mergeRequest`; one of them is required. With `branch`, the tool takes the branch's open merge request, else its newest one. The answer ends with a **Next** section: what to fix, whether a review is queued or running, why none will start by itself, or "Nothing left to fix." It needs `analyses:read` on the repository. See [Follow a review from your agent](/agents/review-agent/#follow-a-review-from-your-agent).
 
-## Jobs and health (ops)
+## Security
 
-| Tool              | Description                                                                                                             | Arguments                                                                              |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `jobs`            | Background jobs, newest first: status, analyzer, repository, ref, trigger, duration, attempts, failure signature.       | `repo?`, `analyzer?`, `status?`, `trigger?`, `signature?`, `limit?` (1–30, default 15) |
-| `job_log`         | The tail of a job attempt's log with its steps and how each ended.                                                      | `job`, `attempt?`, `tail?` (1–300, default 120), `grep?`                               |
-| `queue_stats`     | Queued and running jobs, failures and budget stops of the last 24 hours, claim latency, what the oldest jobs wait for.  | none                                                                                   |
-| `why_job`         | Why a job ran or would run, how it ended, and what keeps a queued job from starting.                                    | `job`                                                                                  |
-| `analysis_status` | Health cells and the freshness of every analysis of a repository or team: last run, commit, stale or fresh and why.     | `repo` (`forge:path` or `forge:<team key>`)                                            |
-| `budget_status`   | This week's AI budgets: limit, reserve, spend, forecast, and spend by task kind, analyzer and provider.                 | none                                                                                   |
-| `fleet_health`    | Every repository you may see, worst first, with the health the Repos page shows; `team` keeps the repositories it owns. | `team?`, `health?`, `query?`, `limit?` (default 50)                                    |
+Offered unless the token's owner set **Report exposed secrets** to **Off** or the instance runs with `server.secretReports: false`. Its description asks agents to call it on their own as soon as a secret shows up, masked and without naming anyone, and then to tell the user the secret needs rotating.
 
-`status` is `queued`, `running`, `succeeded`, `failed`, `blocked` or `canceled`. `trigger` is `schedule`, `manual`, `command`, `webhook`, `tag`, `push`, `poll`, `new-repo` or `freshness`. `health` is `failing`, `warnings`, `not-analysed` or `healthy`. `budget_status` is offered only to people who may read AI spend.
+| Tool                     | Description                                                                                                                                  | Arguments                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `report_secret_exposure` | **Writes.** Reports a secret of the organization that got exposed in the session, under the owner's name or anonymously as the token is set. | `kind`, `identifier`, `masked`, `channel`, `service?`, `repo?`, `fingerprint?`, `circumstances?` |
 
-## Tasks
+`kind` is `api-key`, `token`, `password`, `private-key`, `certificate`, `connection-string`, `webhook-url` or `other`; `channel` (where it showed up) is `chat`, `command-output`, `file-read`, `commit`, `log`, `issue-or-merge-request` or `other`. `identifier` is the variable, key or setting that holds the secret (`WIDGET_API_KEY`, `unknown` when it has none), never the value. `masked` is at most the first 4 characters, `…` and the length (`wk_l…(40)`), never more than a quarter of the value and nothing of a password (`…(12)`). `fingerprint` is the first 16 hex characters of the SHA-256 of the exact value, not for passwords. `service` is the host or name the secret opens; `repo` is `forge:path`; one of them is required. `circumstances` describes how it happened in up to three sentences without people's names.
 
-| Tool             | Description                                                                                                                           | Arguments                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `start_task`     | **Writes.** Asks Holtkeeper to change code in one or more repositories through draft merge requests on a shared branch. Never merges. | `repos` (1–20), `title`, `prompt`, `kind?` (default `fix`), `run?` (default true) |
-| `task_status`    | A task group with each repository's merge request, CI and spend.                                                                      | `id` (group `g…` or task `t…`)                                                    |
-| `request_review` | **Writes.** Asks Holtkeeper to review a merge request one of its tasks opened.                                                        | `id`, `repo?` (needed with a group id)                                            |
-
-`kind` is `fix`, `port`, `upgrade`, `propagate-fix`, `chat` or `tests`. Without a **Run tasks** token, `start_task` only proposes; `request_review` needs that scope.
+The tool refuses, and stores nothing for, text fields that look like a secret value, masks that show too much and malformed fingerprints, without repeating what was sent. The server refuses reports that are not about the organization: `repo` must be a fleet repository the token may read, or `service` must match `security.secretReports › services` or a forge host. A repeat of an open report is counted on it instead of filed again. Anonymous calls are not recorded in usage statistics.
 
 ## Errors
 
@@ -126,3 +109,4 @@ A tool that needs a permission you lack answers with an error result whose text 
 - [What agents can ask](/agents/tools/) — the tools by question, with examples.
 - [Tokens and scopes](/agents/tokens/) — what a token can see.
 - [Permissions](/reference/permissions/) — the actions tools check.
+- [Secret reports](/guide/supply-chain/secret-reports/) — what happens to a report.

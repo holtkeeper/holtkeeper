@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util'
 import { ConfigError, loadConfig } from '@holtkeeper/core'
 
 import { reviewEvalCommand } from './review-eval.ts'
+import { secretsCommand } from './secrets.ts'
 import { type StartServer, UsageError, serve, serveOptions } from './serve.ts'
 import { usersCommand } from './users.ts'
 
@@ -13,6 +14,8 @@ Commands:
   users <action>            Manage accounts of \`users\` sign-in in the config's store:
                             list, add <name>, login-link <user>, enroll-link <user>,
                             recover-link <user> (user is an id, email or name)
+  secrets <action>          Secret reports: fingerprint (of the value on stdin),
+                            match <fingerprint...> (find it in an OpenBao/Vault KV v2 engine)
   review-eval               Measure Code Review: precision and recall on the golden set (needs
                             ANTHROPIC_API_KEY) and acceptance of real review comments
 
@@ -35,6 +38,14 @@ Users options:
   --admin                   users add: every action on everything (default: no grants)
   --email <address>         users add: the account's email
   --ttl <time>              Link lifetime, e.g. 15m or 2h (login 15m, others 72h)
+  --json                    Print JSON
+
+Secrets options:
+  --address <url>           secrets match: OpenBao/Vault address (default BAO_ADDR, VAULT_ADDR);
+                            the token comes from BAO_TOKEN or VAULT_TOKEN
+  --mount <mount>           secrets match: KV v2 mount, e.g. secret
+  --prefix <path>           secrets match: only secrets under this folder
+  --namespace <ns>          secrets match: namespace (X-Vault-Namespace)
   --json                    Print JSON
 
 Review-eval options:
@@ -94,6 +105,10 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
       days: { type: 'string' },
       'no-golden': { type: 'boolean', default: false },
       'no-acceptance': { type: 'boolean', default: false },
+      address: { type: 'string' },
+      mount: { type: 'string' },
+      prefix: { type: 'string' },
+      namespace: { type: 'string' },
     },
   })
   const [command, ...args] = positionals
@@ -121,6 +136,8 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
         return await usersCommand(await loadConfig(values.config), args, values, (line) =>
           io.out(line),
         )
+      case 'secrets':
+        return await secretsCommand(args, values, (line) => io.out(line))
       case 'review-eval':
         return await reviewEvalCommand(values.config, values, (line) => io.out(line))
       default:

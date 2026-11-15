@@ -27,6 +27,7 @@ import { parsePublicApiSearch } from './lib/public-api.ts'
 import { parseRepoHubSearch } from './lib/repo.ts'
 import { parseReposSearch } from './lib/repos.ts'
 import { parseReviewsSearch } from './lib/reviews.ts'
+import { parseSecretReportsSearch } from './lib/secret-reports.ts'
 import { parseSecuritySearch } from './lib/security.ts'
 import { parseSettingsSearch } from './lib/settings-sections.ts'
 import { type StackTab, parseStackSearch, parseStackTab } from './lib/stack.ts'
@@ -156,6 +157,18 @@ const securityRoute = createRoute({
   path: 'supply/security',
   component: SecurityPage,
   validateSearch: parseSecuritySearch,
+})
+
+const SecretReportsPage = lazyRouteComponent(
+  () => import('./features/secret-reports/SecretReportsPage.tsx'),
+  'SecretReportsPage',
+)
+
+const secretReportsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'supply/secret-reports',
+  component: SecretReportsPage,
+  validateSearch: parseSecretReportsSearch,
 })
 
 const licensesRoute = createRoute({
@@ -360,6 +373,7 @@ const routeTree = rootRoute.addChildren([
     libraryRoute,
     securityRoute,
     page('supply/security/runs/$runId', AuditRunPage),
+    secretReportsRoute,
     licensesRoute,
     stackRoute,
     publicApiRoute,

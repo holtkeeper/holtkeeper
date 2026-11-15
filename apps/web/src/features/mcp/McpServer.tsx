@@ -1,5 +1,5 @@
-import type { McpTokenView } from '@holtkeeper/api'
-import { KeyRound, Trash2, Wrench } from 'lucide-react'
+import type { McpTokenView, SecretReportingMode } from '@holtkeeper/api'
+import { KeyRound, ShieldAlert, Trash2, Wrench } from 'lucide-react'
 import { type ReactNode, useDeferredValue, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -9,6 +9,7 @@ import {
   useMcpTools,
   useMcpUsage,
   useRevokeMcpToken,
+  useUpdateMcpToken,
 } from '../../api/queries.ts'
 import { formatCount, formatDate, formatRelative } from '../../lib/format.ts'
 import {
@@ -27,6 +28,7 @@ import {
   tokenLifetimes,
   toolParams,
 } from '../../lib/mcp.ts'
+import { reportingModeShort } from '../../lib/secret-reports.ts'
 import {
   Button,
   Chip,
@@ -42,7 +44,6 @@ import {
   Segmented,
   SegmentedTabs,
   Strip,
-  Switch,
   Table,
   Td,
   Tag,
@@ -51,6 +52,7 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { MyUsage } from './MyUsage.tsx'
+import { SecretReportsChoice } from './SecretReportsChoice.tsx'
 
 /** Where the endpoint lives as the server sees it, falling back to this origin. */
 const useEndpoint = () => useMcpUsage(7).data?.endpoint ?? `${window.location.origin}/mcp`
@@ -207,7 +209,8 @@ function ToolReference() {
           <>
             <p className="text-xs text-muted">
               They answer only about repositories you can read and only read, except that agents can
-              propose knowledge entries for review. Agents pick them on their own; name a package,
+              propose knowledge entries for review and, as each token's choice allows, report
+              exposed secrets to administrators. Agents pick them on their own; name a package,
               symbol or error and they call the right ones.
             </p>
             {groups.length ? (
@@ -292,18 +295,19 @@ function TokensPanel({
   const revoke = useRevokeMcpToken()
   const [name, setName] = useState('')
   const [lifetime, setLifetime] = useState<(typeof tokenLifetimes)[number]['id']>('90')
-  const [release, setRelease] = useState(false)
-  const [runTasks, setRunTasks] = useState(false)
+  const [reporting, setReporting] = useState<SecretReportingMode | undefined>(undefined)
   const [secret, setSecret] = useState<string | undefined>(undefined)
   const [revoking, setRevoking] = useState<string | undefined>(undefined)
+  const [changing, setChanging] = useState<McpTokenView | undefined>(undefined)
+  const reports = tokens.data?.secretReports
+  const mode = reporting ?? reports?.defaultMode ?? 'named'
 
   const close = (next: boolean) => {
     setOpen(next)
     if (!next) {
       setSecret(undefined)
       setName('')
-      setRelease(false)
-      setRunTasks(false)
+      setReporting(undefined)
     }
   }
   const submit = () =>
@@ -311,14 +315,7 @@ function TokensPanel({
       {
         name: name.trim() || 'MCP client',
         expiresInDays: Number(lifetime),
-        ...(release || runTasks
-          ? {
-              scopes: [
-                ...(release ? (['release'] as const) : []),
-                ...(runTasks ? (['tasks'] as const) : []),
-              ],
-            }
-          : {}),
+        ...(reports ? { secretReports: mode } : {}),
       },
       {
         onSuccess: (result) => setSecret(result.secret),
@@ -341,7 +338,11 @@ function TokensPanel({
           </Notice>
         </div>
       ) : tokens.data.tokens.length ? (
-        <TokenTable tokens={tokens.data.tokens} onRevoke={setRevoking} />
+        <TokenTable
+          tokens={tokens.data.tokens}
+          onRevoke={setRevoking}
+          {...(reports ? { onReports: setChanging } : {})}
+        />
       ) : (
         <EmptyState
           icon={<KeyRound />}
@@ -399,21 +400,13 @@ function TokensPanel({
                 options={tokenLifetimes}
               />
             </div>
-            <Switch
-              label="Release steps"
-              isSelected={release}
-              onChange={setRelease}
-              description="Lets agents run release_step where you may run releases; each step still needs a preview and a confirm token."
-            />
-            <Switch
-              label="Run tasks"
-              isSelected={runTasks}
-              onChange={setRunTasks}
-              description="Lets start_task queue code changes and request_review ask for reviews where you may run tasks; without it start_task only proposes them for approval."
-            />
+            {reports ? <SecretReportsChoice value={mode} onChange={setReporting} /> : null}
           </div>
         )}
       </Dialog>
+      {changing && reports ? (
+        <TokenReportsDialog token={changing} onClose={() => setChanging(undefined)} />
+      ) : null}
       <ConfirmDialog
         isOpen={revoking !== undefined}
         onOpenChange={(next) => {
@@ -438,12 +431,62 @@ function TokensPanel({
 
 const statusOrder: readonly TokenStatus[] = ['active', 'expiring', 'expired', 'unused']
 
+/** Changes how one token reports exposed secrets (`PATCH`, never audited). */
+function TokenReportsDialog({ token, onClose }: { token: McpTokenView; onClose: () => void }) {
+  const update = useUpdateMcpToken()
+  const [mode, setMode] = useState<SecretReportingMode>(token.secretReports)
+  const save = () =>
+    update.mutate(
+      { tokenId: token.id, input: { secretReports: mode } },
+      {
+        onSuccess: () => {
+          notify.success(
+            'Secret reports updated',
+            `${token.name} reports ${reportingModeShort[mode]}.`,
+          )
+          onClose()
+        },
+        onError: (error) => notify.error('Not updated', messageOf(error)),
+      },
+    )
+  return (
+    <Dialog
+      isOpen
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      title={`Secret reports of ${token.name}`}
+      description="Applies to the agents using this token from their next call."
+      footer={
+        <>
+          <Button variant="tertiary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onPress={save}
+            isPending={update.isPending}
+            isDisabled={mode === token.secretReports}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <SecretReportsChoice value={mode} onChange={setMode} />
+    </Dialog>
+  )
+}
+
 function TokenTable({
   tokens,
   onRevoke,
+  onReports,
 }: {
   tokens: readonly McpTokenView[]
   onRevoke: (id: string) => void
+  /** Opens the secret reports choice of a token; absent while the feature is off. */
+  onReports?: (token: McpTokenView) => void
 }) {
   const [query, setQuery] = useState('')
   const calls = callsByToken(useMcpUsage(7).data?.tokens)
@@ -485,6 +528,7 @@ function TokenTable({
             <Th>Name</Th>
             <Th>Status</Th>
             <Th>Allows</Th>
+            {onReports ? <Th>Secret reports</Th> : null}
             <Th>Token</Th>
             <Th>Expires</Th>
             <Th>Last used</Th>
@@ -506,14 +550,15 @@ function TokenTable({
                   </Tag>
                 </Td>
                 <Td>
-                  <span className="flex flex-wrap gap-1">
-                    <Tag>Read</Tag>
-                    {token.scopes?.includes('release') ? (
-                      <Tag tone="warning">Release steps</Tag>
-                    ) : null}
-                    {token.scopes?.includes('tasks') ? <Tag tone="warning">Run tasks</Tag> : null}
-                  </span>
+                  <Tag>Read</Tag>
                 </Td>
+                {onReports ? (
+                  <Td>
+                    <Tag tone={token.secretReports === 'off' ? 'default' : 'info'}>
+                      Reports: {reportingModeShort[token.secretReports]}
+                    </Tag>
+                  </Td>
+                ) : null}
                 <Td className="mono text-xs text-muted">{token.prefix}…</Td>
                 <Td className="text-muted">
                   {token.expiresAt ? formatDate(token.expiresAt) : 'never'}
@@ -524,7 +569,18 @@ function TokenTable({
                 <Td align="right" className="mono">
                   {formatCount(calls.get(token.id) ?? 0)}
                 </Td>
-                <Td align="right">
+                <Td align="right" className="whitespace-nowrap">
+                  {onReports ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      isIconOnly
+                      aria-label={`Secret reports of ${token.name}`}
+                      onPress={() => onReports(token)}
+                    >
+                      <ShieldAlert className="size-3.5" />
+                    </Button>
+                  ) : null}
                   <Button
                     size="sm"
                     variant="ghost"

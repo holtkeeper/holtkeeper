@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   Library,
   Inbox,
+  KeyRound,
   Lightbulb,
   ListChecks,
   ListTree,
@@ -92,6 +93,7 @@ export interface NavItem {
     | '/chat'
     | '/supply/libraries'
     | '/supply/security'
+    | '/supply/secret-reports'
     | '/supply/licenses'
     | '/supply/stack'
     | '/supply/public-api'
@@ -184,6 +186,14 @@ const navItems: readonly NavItem[] = [
     label: 'Security',
     icon: FileSearch,
     requires: 'audits:read',
+  },
+  {
+    workspace: 'supply',
+    to: '/supply/secret-reports',
+    global: true,
+    label: 'Secret reports',
+    icon: KeyRound,
+    requires: 'credentials:read',
   },
   {
     workspace: 'supply',

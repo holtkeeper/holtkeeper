@@ -49,6 +49,7 @@ import { repoPageRoutes } from './routes/repo-page.ts'
 import { reachableTeams, repoRoutes } from './routes/repos.ts'
 import { reviewRoutes } from './routes/reviews.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+import { secretReportRoutes } from './routes/secret-reports.ts'
 import { settingRoutes } from './routes/settings.ts'
 import { slackEventRoutes } from './routes/slack-events.ts'
 import { slackSettingsRoutes } from './routes/slack-settings.ts'
@@ -70,7 +71,7 @@ import { crossTeamPolicy } from './visibility.ts'
 export function createApp(deps: ServerDeps) {
   const app = new Hono<Env>()
   const supply = deps.supply ?? supplyToolsAccess(deps)
-  const apiSurface = createApiSurface(deps, supply)
+  const apiSurface = createApiSurface(deps)
 
   app.onError((error, c) => {
     if (error instanceof ForbiddenException) return c.json<ForbiddenError>(error.body(), 403)
@@ -172,6 +173,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', embeddingRoutes(deps))
   api.route('/', knowledgeRoutes(deps))
   api.route('/', learningRoutes(deps))
+  api.route('/', secretReportRoutes(apiSurface.secretReports))
   const dispatch = createEventDispatcher(deps)
   const hooks = deps.store.kv ? repoHooks(deps.store.kv, deps.vault) : undefined
   const poller = serverPoller(deps, dispatch)

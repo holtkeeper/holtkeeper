@@ -4690,6 +4690,11 @@ export interface McpTokenView {
   lastUsedAt?: Timestamp
   /** Extra powers beyond reading; absent for read-only tokens. */
   scopes?: McpTokenScope[]
+  /**
+   * How the token's agents report exposed secrets. Only the owner ever sees it: no administrator
+   * view, audit event or statistic carries it.
+   */
+  secretReports: SecretReportingMode
 }
 
 /**
@@ -4705,6 +4710,27 @@ export interface McpTokenList {
   tokens: McpTokenView[]
   /** False when the store has no key-value state, so tokens cannot be issued. */
   available: boolean
+  /** Secret reports of this deployment; absent when `server.secretReports` is `false`. */
+  secretReports?: SecretReportsInfo
+}
+
+/**
+ * How agents report secrets exposed in their sessions: `named` under the token owner's name,
+ * `anonymous` with nothing that points to them (not in usage statistics either), `off` not at all.
+ */
+export type SecretReportingMode = 'named' | 'anonymous' | 'off'
+
+/** What people need to choose how they report exposed secrets. */
+export interface SecretReportsInfo {
+  /** What new tokens report with unless their owner picks something else. */
+  defaultMode: SecretReportingMode
+  /** Name of the license whose use condition protects people who report. */
+  licenseName: string
+}
+
+/** `PATCH /api/api-surface/mcp/tokens/:id`; never audited, so nobody sees who changed what. */
+export interface UpdateMcpTokenInput {
+  secretReports: SecretReportingMode
 }
 
 /** `POST /api/api-surface/mcp/tokens`. */
@@ -4714,6 +4740,8 @@ export interface CreateMcpTokenInput {
   expiresInDays?: number
   /** Default none: the token only reads. */
   scopes?: McpTokenScope[]
+  /** Default `SecretReportsInfo.defaultMode`. */
+  secretReports?: SecretReportingMode
 }
 
 /** Answer to `POST /api/api-surface/mcp/tokens`. */
@@ -5403,4 +5431,76 @@ export interface LimitUsageList {
   shared: boolean
   /** ISO 8601 time the counters were read; the answer may be cached for a few seconds. */
   readAt: string
+}
+
+/** What kind of secret a report is about. */
+export type SecretReportKind =
+  | 'api-key'
+  | 'token'
+  | 'password'
+  | 'private-key'
+  | 'certificate'
+  | 'connection-string'
+  | 'webhook-url'
+  | 'other'
+
+/** Where an exposed secret showed up. */
+export type SecretExposureChannel =
+  | 'chat'
+  | 'command-output'
+  | 'file-read'
+  | 'commit'
+  | 'log'
+  | 'issue-or-merge-request'
+  | 'other'
+
+/** Where a secret report stands; `new` and `acknowledged` are open. */
+export type SecretReportStatus = 'new' | 'acknowledged' | 'rotated' | 'false-positive'
+
+/**
+ * A report of an exposed secret, as administrators see it. It never holds the value: only the
+ * variable name, a mask such as `wk_l…(40)` and optionally a fingerprint (first 16 hex characters
+ * of its SHA-256) to match against a secret store.
+ */
+export interface SecretReportView {
+  id: string
+  kind: SecretReportKind
+  identifier: string
+  service?: string
+  masked: string
+  fingerprint?: string
+  channel: SecretExposureChannel
+  /** `forge:path`. */
+  repo?: string
+  circumstances?: string
+  status: SecretReportStatus
+  /** Exact for named reports; the start of the UTC day for anonymous ones. */
+  reportedAt: Timestamp
+  /** Who sent it; absent on anonymous reports. */
+  reporter?: { id: string; name: string }
+  /** How many more times the same exposure was reported while open. */
+  repeats: number
+  note?: string
+  updatedAt?: Timestamp
+  updatedBy?: string
+}
+
+/** `GET /api/secret-reports` (`credentials:read` on everything). */
+export interface SecretReportList {
+  reports: SecretReportView[]
+  /** Whether the caller may change status and notes (`credentials:write` on everything). */
+  canWrite: boolean
+}
+
+/** `PATCH /api/secret-reports/:id`. */
+export interface UpdateSecretReportInput {
+  status?: SecretReportStatus
+  /** Empty clears it. */
+  note?: string
+}
+
+/** `GET /api/secret-reports/license`: the license with the use condition, for anyone signed in. */
+export interface SecretReportsLicense {
+  name: string
+  text: string
 }

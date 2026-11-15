@@ -11,11 +11,19 @@ import type {
   PublicApiPackageList,
   PublicApiSearchResult,
   PublicApiSymbol,
+  SecretReportingMode,
+  UpdateMcpTokenInput,
 } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
 import type { RepoRef } from '@holtkeeper/forge'
 import { createGuideResolver, familyOf, proposeRule, scopesFor } from '@holtkeeper/guide'
 import { latestVersions, libraryApi } from '@holtkeeper/libraries'
+import {
+  DEFAULT_REPORTING_MODE,
+  LICENSE_NAME,
+  REPORT_TOOL,
+  reportingModes,
+} from '@holtkeeper/secret-reports'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -50,16 +58,14 @@ import {
   serverLibraryDocs,
   visibleLibraries,
 } from '../libraries.ts'
-import { principalOpsAccess } from '../ops-tools.ts'
 import { releaseToolsAccess } from '../release-steps.ts'
-import { releaseServiceFor } from '../releases.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
-import { taskToolsAccess } from '../tasks.ts'
+import { reviewToolsAccess } from '../review-status.ts'
+import { secretReportsFor } from '../secret-reports.ts'
 import { storedAssetTools } from '../tools/assets.ts'
 import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
 import type { LibraryIndex } from '../tools/libraries.ts'
 import { storedStackTools } from '../tools/registry.ts'
-import type { SupplyToolsAccess } from '../tools/repos.ts'
 import {
   type CommitConventionsAccess,
   type RulesAccess,
@@ -86,7 +92,10 @@ const createTokenSchema = z.object({
     .array(z.enum(['release', 'tasks']))
     .max(2)
     .optional(),
+  secretReports: z.enum(reportingModes).optional(),
 })
+
+const updateTokenSchema = z.object({ secretReports: z.enum(reportingModes) })
 
 const bearerToken = (request: Request) =>
   /^Bearer\s+hk_mcp_/i.test(request.headers.get('authorization') ?? '')
@@ -151,10 +160,7 @@ const resolveQuery = (c: AppContext) => {
  * records: routes under `/api/api-surface` for the web UI, the MCP endpoint for agents, personal
  * access tokens for both and MCP call statistics.
  */
-export function createApiSurface(
-  deps: ServerDeps,
-  supplyFor: (principal: Principal) => SupplyToolsAccess,
-) {
+export function createApiSurface(deps: ServerDeps) {
   const { store, config } = deps
   const catalog = createApiCatalog({ analyses: store.analyses })
   const usages = createUsageIndex({ analyses: store.analyses })
@@ -176,6 +182,10 @@ export function createApiSurface(
     return tokens
   }
   const endpointOf = (c: AppContext) => `${publicUrlOf(deps, c)}/mcp`
+  const secretReports = secretReportsFor(deps)
+  const secretReportsInfo = secretReports
+    ? { defaultMode: DEFAULT_REPORTING_MODE, licenseName: LICENSE_NAME }
+    : undefined
 
   const conventions = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),
@@ -431,8 +441,9 @@ export function createApiSurface(
 
   routes.get('/api-surface/mcp/tokens', async (c) => {
     const principal = principalOf(c)
-    if (!tokens) return c.json<McpTokenList>({ tokens: [], available: false })
-    return c.json<McpTokenList>({ tokens: await tokens.list(principal), available: true })
+    const info = secretReportsInfo ? { secretReports: secretReportsInfo } : {}
+    if (!tokens) return c.json<McpTokenList>({ tokens: [], available: false, ...info })
+    return c.json<McpTokenList>({ tokens: await tokens.list(principal), available: true, ...info })
   })
 
   routes.post('/api-surface/mcp/tokens', async (c) => {
@@ -444,7 +455,10 @@ export function createApiSurface(
       name: input.name,
       expiresInDays: input.expiresInDays ?? 90,
       ...(input.scopes?.length ? { scopes: input.scopes } : {}),
+      ...(input.secretReports && { secretReports: input.secretReports }),
     })
+    // The audit event leaves out the reporting choice: administrators read the audit log, and
+    // nobody may learn who reports anonymously or not at all.
     c.set('audit', {
       action: 'mcp_token.create',
       target: { type: 'mcp_token', id: result.token.id },
@@ -455,6 +469,18 @@ export function createApiSurface(
       },
     })
     return c.json<CreateMcpTokenResult>(result, 201)
+  })
+
+  // Not audited at all (see `isAudited`): even the fact that someone changed their reporting
+  // choice is theirs alone.
+  routes.patch('/api-surface/mcp/tokens/:id', async (c) => {
+    const principal = principalOf(c)
+    if (bearerToken(c.req.raw))
+      throw new HTTPException(401, { message: 'tokens cannot change tokens; sign in instead' })
+    const input: UpdateMcpTokenInput = await readBody(c, updateTokenSchema)
+    if (!(await tokensOf().setReporting(principal, c.req.param('id'), input.secretReports)))
+      throw new HTTPException(404, { message: 'no such token' })
+    return c.body(null, 204)
   })
 
   routes.delete('/api-surface/mcp/tokens/:id', async (c) => {
@@ -509,6 +535,8 @@ export function createApiSurface(
   })
 
   const fromToken = new WeakMap<Principal, string>()
+  const reportingOf = new WeakMap<Principal, SecretReportingMode>()
+  const anonymousReports: ReadonlySet<string> = new Set([REPORT_TOOL])
 
   /** Serves `/mcp`; mount at the application root. */
   const mcp = async (c: AppContext) => {
@@ -535,7 +563,12 @@ export function createApiSurface(
     const scope = await reach(principal)
     const library = libraryContext(principal, scope.catalog)
     const knowledge = knowledgeContext(principal, scope)
+    // Signed-in browsers (the tool reference) have no token and see the default choice.
+    const reporting = reportingOf.get(principal) ?? DEFAULT_REPORTING_MODE
+    const reports = secretReports?.accessFor(principal, reporting)
     return handleMcpRequest(c.req.raw, {
+      ...(reports && { secretReports: reports }),
+      ...(reports?.mode === 'anonymous' && { unrecorded: anonymousReports }),
       ...(library ? { library } : {}),
       catalog,
       usages,
@@ -547,20 +580,9 @@ export function createApiSurface(
       releases: releaseToolsAccess(deps, {
         principal,
         canRead: (target) => canSee(principal, 'releases:read', target),
-        steps:
-          fromToken.has(principal) &&
-          principal.grants.some((grant) => grant.actions.includes('releases:run')),
         channel: 'mcp',
       }),
-      ops: principalOpsAccess(deps, principal, () => releaseServiceFor(deps).snapshot(principal)),
-      tasks: taskToolsAccess(
-        { ...deps, readOnly: deps.readOnly ?? (async () => false) },
-        principal,
-        {
-          mayRun: fromToken.has(principal),
-          ...(client ? { client } : {}),
-        },
-      ),
+      reviews: reviewToolsAccess(deps, (target) => canSee(principal, 'analyses:read', target)),
       assets: storedAssetTools(store, {
         targetOf: (repo) => repoTarget(config, repo),
         canRead: (target) => canSee(principal, 'analyses:read', target),
@@ -568,7 +590,6 @@ export function createApiSurface(
           can(principal, 'settings:read', { kind: 'scope', scope: entryScope }),
         teamLabel,
       }),
-      supply: supplyFor(principal),
       principal,
       canRead: scope.catalog,
       canReadSnippets: scope.snippets,
@@ -608,8 +629,9 @@ export function createApiSurface(
     // for the token is the very object handlers see.
     const principal = withTeams(deps.config, found.principal)
     fromToken.set(principal, found.token)
+    reportingOf.set(principal, found.secretReports)
     return principal
   }
 
-  return { routes, mcp, tokenPrincipal, flush: usage.flush }
+  return { routes, mcp, tokenPrincipal, secretReports, flush: usage.flush }
 }

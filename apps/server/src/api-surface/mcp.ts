@@ -27,6 +27,11 @@ export interface McpCaller {
   /** First word of the client's User-Agent. */
   client?: string
   usage: Pick<McpUsage, 'record'>
+  /**
+   * Tools whose calls leave no trace: not counted in usage statistics, not even as a total, so
+   * nothing ties them to the caller (anonymous secret reports).
+   */
+  unrecorded?: ReadonlySet<string>
   now: () => Date
 }
 
@@ -35,7 +40,8 @@ export interface McpCaller {
  * read-only unless it writes, with server instructions joined from the toolsets. A `ToolError`
  * reaches the client as it is, other failures as `Failed: <message>`; a missing permission
  * (`ForbiddenToolError`, `ForbiddenException`) also carries the `ForbiddenError` body as
- * `structuredContent`. Every call is recorded in `caller.usage`.
+ * `structuredContent`. Every call is recorded in `caller.usage` except calls of
+ * `caller.unrecorded` tools.
  */
 export function registryServer(toolsets: readonly RegistryToolset[], caller: McpCaller): McpServer {
   const server = new McpServer(
@@ -73,6 +79,20 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
       async (args) => {
         const started = performance.now()
         let ok = true
+        const record = () => {
+          const subject = tool.subject?.(args)
+          caller.usage.record({
+            at: caller.now().toISOString(),
+            tool: tool.name,
+            principal: caller.principal.id,
+            name: caller.principal.name,
+            ...(caller.client ? { client: caller.client } : {}),
+            ...(caller.token ? { token: caller.token } : {}),
+            ...(subject ? { subject } : {}),
+            ok,
+            durationMs: Math.round(performance.now() - started),
+          })
+        }
         try {
           return text(
             await tool.run(args, { dir: process.cwd(), signal: new AbortController().signal }),
@@ -90,18 +110,7 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
             isError: true,
           }
         } finally {
-          const subject = tool.subject?.(args)
-          caller.usage.record({
-            at: caller.now().toISOString(),
-            tool: tool.name,
-            principal: caller.principal.id,
-            name: caller.principal.name,
-            ...(caller.client ? { client: caller.client } : {}),
-            ...(caller.token ? { token: caller.token } : {}),
-            ...(subject ? { subject } : {}),
-            ok,
-            durationMs: Math.round(performance.now() - started),
-          })
+          if (!caller.unrecorded?.has(tool.name)) record()
         }
       },
     )

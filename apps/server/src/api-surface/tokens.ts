@@ -1,6 +1,7 @@
 import type { Action, Grant, Principal } from '@holtkeeper/access'
 import { grantSchema } from '@holtkeeper/access'
-import type { McpTokenScope, McpTokenView } from '@holtkeeper/api'
+import type { McpTokenScope, McpTokenView, SecretReportingMode } from '@holtkeeper/api'
+import { DEFAULT_REPORTING_MODE, reportingModes } from '@holtkeeper/secret-reports'
 import type { KvStore, UserStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
@@ -37,6 +38,8 @@ const ownedTokenSchema = z.object({
   expiresAt: z.string().optional(),
   lastUsedAt: z.string().optional(),
   scopes: z.array(z.enum(['release', 'tasks'])).optional(),
+  /** Absent on tokens issued before the choice existed: `DEFAULT_REPORTING_MODE`. */
+  secretReports: z.enum(reportingModes).optional(),
   hash: z.string(),
 })
 
@@ -87,7 +90,8 @@ const view = ({
   expiresAt,
   lastUsedAt,
   scopes,
-}: McpTokenView) => ({
+  secretReports,
+}: Omit<McpTokenView, 'secretReports'> & { secretReports?: SecretReportingMode | undefined }) => ({
   id,
   name,
   prefix: shown,
@@ -95,6 +99,7 @@ const view = ({
   ...(expiresAt ? { expiresAt } : {}),
   ...(lastUsedAt ? { lastUsedAt } : {}),
   ...(scopes?.length ? { scopes } : {}),
+  secretReports: secretReports ?? DEFAULT_REPORTING_MODE,
 })
 
 /** Options of `mcpTokens`. */
@@ -142,7 +147,12 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
     /** Issues a token; `expiresInDays` 0 never expires. Returns the secret once. */
     async create(
       principal: Principal,
-      input: { name: string; expiresInDays: number; scopes?: readonly McpTokenScope[] },
+      input: {
+        name: string
+        expiresInDays: number
+        scopes?: readonly McpTokenScope[]
+        secretReports?: SecretReportingMode
+      },
     ) {
       const scopes = [...new Set(input.scopes ?? [])]
       const secret = randomSecret()
@@ -159,6 +169,7 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         createdAt: createdAt.toISOString(),
         ...(expiresAt ? { expiresAt } : {}),
         ...(scopes.length ? { scopes } : {}),
+        secretReports: input.secretReports ?? DEFAULT_REPORTING_MODE,
         hash,
         principal: { ...principal, grants: tokenGrants(principal.grants, scopes) },
         ...(user ? { sessionVersion: user.sessionVersion } : {}),
@@ -175,6 +186,27 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
       return { token: view(token), secret }
     },
 
+    /**
+     * Sets how one of the caller's tokens reports exposed secrets; `false` when it has none with
+     * that id. Takes effect with the token's next request.
+     */
+    async setReporting(principal: Principal, id: string, mode: SecretReportingMode) {
+      const tokens = await live(principal.id)
+      const token = tokens.find((item) => item.id === id)
+      if (!token) return false
+      const parsed = storedTokenSchema.safeParse(await kv.get(tokenKey(token.hash)))
+      if (!parsed.success) return false
+      const ttl = parsed.data.expiresAt
+        ? Math.max(1, Math.ceil((Date.parse(parsed.data.expiresAt) - now().getTime()) / 1000))
+        : undefined
+      await kv.set(tokenKey(token.hash), { ...parsed.data, secretReports: mode }, ttl)
+      await kv.set(
+        ownerKey(principal.id),
+        tokens.map((item) => (item.id === id ? { ...item, secretReports: mode } : item)),
+      )
+      return true
+    },
+
     /** Revokes one of the caller's tokens; `false` when it has none with that id. */
     async revoke(principal: Principal, id: string) {
       const tokens = await live(principal.id)
@@ -189,12 +221,14 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
     },
 
     /**
-     * The principal behind `Authorization: Bearer hk_mcp_…` with the token's grants and the
-     * token's id, or `undefined` when the request carries no valid token.
+     * The principal behind `Authorization: Bearer hk_mcp_…` with the token's grants, the token's
+     * id and how it reports exposed secrets, or `undefined` when the request carries no valid token.
      */
     async authenticate(
       request: Request,
-    ): Promise<{ principal: Principal; token: string } | undefined> {
+    ): Promise<
+      { principal: Principal; token: string; secretReports: SecretReportingMode } | undefined
+    > {
       const header = request.headers.get('authorization') ?? ''
       const secret = /^Bearer\s+(hk_mcp_[\w-]+)$/i.exec(header.trim())?.[1]
       if (!secret) return undefined
@@ -230,7 +264,11 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
           tokens.map((token) => (token.id === stored.id ? { ...token, lastUsedAt } : token)),
         )
       }
-      return { principal, token: stored.id }
+      return {
+        principal,
+        token: stored.id,
+        secretReports: stored.secretReports ?? DEFAULT_REPORTING_MODE,
+      }
     },
   }
 }

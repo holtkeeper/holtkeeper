@@ -61,6 +61,7 @@ import {
 } from '@holtkeeper/release'
 import type { AnalysisKind } from '@holtkeeper/report'
 import { createReviewAnalyzer } from '@holtkeeper/review'
+import { secretReportsDefinition } from '@holtkeeper/secret-reports'
 import {
   type DefaultSetting,
   type SettingDefinition,
@@ -126,6 +127,7 @@ import { releaseServiceFor } from './releases.ts'
 import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
 import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
+import { secretReportsEnabled } from './secret-reports.ts'
 import { createSecurityAlerts } from './security-alerts.ts'
 import { createSlackReviews } from './slack/service.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
@@ -534,6 +536,7 @@ export async function startServer(
       releaseNotifyDefinition,
       releaseAnnounceDefinition,
       securityAlertsDefinition,
+      ...(secretReportsEnabled(config) ? [secretReportsDefinition] : []),
       commitConventionsSetting,
       assetsPolicySetting,
       librariesSetting,

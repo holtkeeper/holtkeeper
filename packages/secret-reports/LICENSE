@@ -1,0 +1,51 @@
+Holtkeeper Secret Reports License
+
+Copyright (c) 2026 Holtkeeper contributors
+
+This license covers the files of the `@holtkeeper/secret-reports` package (the directory that
+holds this file) and the parts of Holtkeeper that serve its reports: the
+`report_secret_exposure` MCP tool, the secret report routes of the server and the pages of the
+panel that show reports or let people choose how they report (together, "the Feature"). The
+rest of Holtkeeper stays under the MIT License in the repository root.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+1. The above copyright notice, this permission notice and the Use Condition below shall be
+   included in all copies or substantial portions of the Software.
+
+2. Use Condition. An organization may run the Feature (keep it enabled in a deployment that
+   people other than the organization's own administrators use) only if all of the following
+   hold for as long as it runs:
+
+   a. Voluntary use. Every person decides for themselves whether their agents report exposed
+      secrets and whether reports carry their name. No one is required, asked as a condition of
+      employment, contract or access, or pressured to enable the Feature or to report under
+      their name, and no one is disadvantaged for turning it off or reporting anonymously.
+
+   b. No sanctions. Reports, their content, their absence, and the reporting choice a person
+      made are never used, alone or together with other information, as grounds for dismissal,
+      disciplinary action, performance or compensation decisions, or any other adverse action
+      against the person who reported, the person whose mistake led to the exposure, or anyone
+      else. Reports serve one purpose: finding and rotating exposed secrets.
+
+   c. No identification. No one tries to find out who sent an anonymous report or who caused an
+      exposure, whether by correlating logs, access records, timestamps or other data, or by
+      asking people.
+
+   d. Notice. The people who use the deployment can read this Use Condition. The Software shows
+      it next to the reporting choice; removing or hiding that notice is not permitted.
+
+3. An organization that does not meet the Use Condition must turn the Feature off (for example
+   with `server.secretReports: false`) or stop using the Software. Running the Feature while
+   breaking the Use Condition is not licensed, and the permissions above end for that
+   organization until it meets the condition again.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

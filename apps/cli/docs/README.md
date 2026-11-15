@@ -1,6 +1,6 @@
 # @holtkeeper/cli
 
-The `holtkeeper` command: the server's entrypoint. It starts the server (`serve`, the command of the container image and the Helm chart), handles operator account tasks (`users`) and measures Code Review (`review-eval`). Everything else happens in the web panel, or over MCP for AI agents. It runs from source with Bun.
+The `holtkeeper` command: the server's entrypoint. It starts the server (`serve`, the command of the container image and the Helm chart), handles operator account tasks (`users`), checks reported secrets against OpenBao or Vault (`secrets`) and measures Code Review (`review-eval`). Everything else happens in the web panel, or over MCP for AI agents. It runs from source with Bun.
 
 ```sh
 bunx holtkeeper <command> [options]
@@ -25,6 +25,13 @@ Manages accounts of `users` sign-in (see [@holtkeeper/auth-users](../../../packa
 - `enroll-link <user>` / `recover-link <user>` (`--ttl`, default `72h`) — the web UI's passkey registration link, as an admin would issue it.
 
 Links need `server.publicUrl`. In Kubernetes run it in a web pod: `kubectl exec deploy/<release>-web -- holtkeeper users login-link Claude -c /app/config/holtkeeper.config.ts`.
+
+### `secrets <action>`
+
+Helpers for [secret reports](../../../packages/secret-reports/docs/README.md). Values never leave the process.
+
+- `fingerprint` — prints the fingerprint of the value on standard input (one trailing newline dropped): the first 16 hex characters of its SHA-256, as reports carry it. `printf %s "$WIDGET_API_KEY" | holtkeeper secrets fingerprint`.
+- `match <fingerprint...> --address <url> --mount <mount> [--prefix <path>] [--namespace <ns>] [--json]` — walks the latest version of every secret of an OpenBao or Vault KV v2 engine (`matchKvSecrets`) and prints one tab-separated line per field whose value has one of the fingerprints: fingerprint, `<mount>/<path>`, field, version. The token comes from `BAO_TOKEN` or `VAULT_TOKEN`; `--address` defaults to `BAO_ADDR` or `VAULT_ADDR`. Folders the token may not list or read are skipped. Exit code 0 when something matched, 1 when nothing did.
 
 ### `review-eval`
 

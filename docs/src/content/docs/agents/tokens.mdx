@@ -1,6 +1,6 @@
 ---
 title: Tokens and scopes
-description: What an MCP token may read, the Release steps and Run tasks scopes, how tokens expire and are revoked, and where their usage shows.
+description: What an MCP token may read and propose, how tokens expire and are revoked, and where their usage shows.
 panel: Account › Connect agents
 route: /account/agents
 sidebar:
@@ -9,7 +9,7 @@ sidebar:
 
 import { Button, Screen, Scroll, Tag, Toolbar, Ui } from '@ui'
 
-An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner, and two optional scopes let it do the two things agents may do on their own: run release steps and start tasks.
+An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner. Besides reading, it can only make proposals that people review (knowledge entries and Guide rules) and report exposed secrets. It cannot start tasks, run release steps or approve anything.
 
 ## What a token can see
 
@@ -31,20 +31,37 @@ Whatever your grants, a token never gets `settings:write`, `credentials:*`, `use
 With passkey sign-in (`users` accounts) a token follows your **current** grants: when an admin narrows your access, your agents see less at once. Disabling your account or signing out everywhere revokes all your tokens. With other sign-in providers a token keeps the grants you had when you created it.
 :::
 
+## What a token can propose
+
+Two tools write, and both only leave a proposal for people to review:
+
+| Tool                  | What it leaves                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `propose_knowledge`   | A knowledge entry for one repository, waiting in **Knowledge › Notes**.                               |
+| `propose_rule_change` | One rule for a Guide section, waiting in **Knowledge › Learnings** unless the team auto-accepts them. |
+
+See [Rules and knowledge](/agents/rules-and-knowledge/).
+
+Everything else that changes something stays with people:
+
+- **Tasks** start from Chat task cards, <Ui>Roll out</Ui> in **Supply chain › Libraries**, **Ops › Tasks** and `POST /api/task-groups`. An agent can follow a task's merge request with the read-only `review_status` on the task's branch; see [Changing code through tasks](/agents/tasks/).
+- **Release steps** run from the [Releases](/guide/releases/overview/) screen and from confirmations in Chat.
+
+## Report exposed secrets
+
+Each token also has a **Report exposed secrets** choice, set on its row under **Account › Connect agents**:
+
+| Choice                  | The agent                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| Under my name (default) | Gets `report_secret_exposure`; reports carry your name.                                    |
+| Anonymously             | Gets `report_secret_exposure`; reports store nothing about you, only the day they arrived. |
+| Off                     | Does not get the tool.                                                                     |
+
+Agents call the tool on their own when a secret of the organization shows up in a session, masked, so administrators rotate it. Only you see the choice, administrators can neither read nor set it, and changing it is not audited. Anonymous calls are left out of the usage below. The choice links to the license's Use Condition: reporting is voluntary and never grounds for sanctions. See [Secret reports](/guide/supply-chain/secret-reports/).
+
 ## Scopes
 
-Both switches are off by default. Turn one on only for a token whose agent should act, not just read.
-
-| Switch in the dialog | Scope     | Adds           | What it unlocks                                                                                                     |
-| -------------------- | --------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Release steps**    | `release` | `releases:run` | The `release_step` tool, where you may run releases. Every step still needs a preview and a one-time confirm token. |
-| **Run tasks**        | `tasks`   | `tasks:run`    | `start_task` starts the tasks it proposes, and `request_review` asks for a review, where you may run tasks.         |
-
-A scope never adds what you lack. A Run tasks token of a viewer still only proposes tasks, because its owner may not run them.
-
-Without **Run tasks**, `start_task` still works: the task group waits as a proposal until a person approves it in the Inbox or in **Ops › Tasks**. See [Changing code through tasks](/agents/tasks/).
-
-`release_step` is offered only to requests that authenticate with a token carrying the `release` scope, never to a signed-in browser session, and each call needs `releases:run` on a repository Holtkeeper may write to. A refused call is written to the audit log.
+The **New token** dialog has no switches: every new token reads and proposes. Tokens created earlier with the **Release steps** (`release`) or **Run tasks** (`tasks`) scope keep working, as read tokens: no MCP tool uses those scopes anymore, and the token list shows them as **Read**.
 
 ## Expiry and status
 
@@ -77,7 +94,7 @@ A revoked token stops working at once. Revoke a token when a machine is lost, a 
 
 ## Usage
 
-Every tool call is recorded with the tool, what it was about (a package or a repository), the client and the token.
+Every tool call except anonymous secret reports is recorded with the tool, what it was about (a package or a repository), the client and the token.
 
 - **Account › Connect agents** shows **Calls, 7 days** per token and, under **My usage**, your own calls over 7, 30 or 90 days with your most used tools, packages and clients.
 - **Ops › AI spend** shows everyone's MCP usage to people who may see people (`users:read`); see [AI spend](/guide/ops/ai-spend/).
@@ -102,7 +119,7 @@ Every tool call is recorded with the tool, what it was about (a package or a rep
 - One token per machine or agent, named after it. A leak then costs one revocation.
 - Keep tokens out of repositories: no `.mcp.json` with a secret in version control.
 - Give CI agents short-lived tokens and rotate them; give people's laptops 90 days.
-- Switch on **Run tasks** or **Release steps** only for the agent that needs it, and keep a read-only token for everything else.
+- Revoke tokens nobody uses anymore instead of waiting for them to expire.
 
 ## Related
 
@@ -110,3 +127,4 @@ Every tool call is recorded with the tool, what it was about (a package or a rep
 - [Permissions](/reference/permissions/) — every permission and role.
 - [Permissions and scopes](/start/concepts/permissions/) — how grants and scopes work.
 - [Settings › People](/guide/settings/people/) — where admins change grants.
+- [Secret reports](/guide/supply-chain/secret-reports/) — what reporting exposed secrets means.

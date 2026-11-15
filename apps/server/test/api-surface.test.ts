@@ -589,9 +589,6 @@ describe('MCP endpoint', () => {
       'repo_packages',
       'evaluate_dependency',
       'who_uses',
-      'security_findings',
-      'license_overview',
-      'stack_usage',
       'repo_stack',
       'search_knowledge',
       'get_knowledge',
@@ -602,20 +599,11 @@ describe('MCP endpoint', () => {
       'check_commit_message',
       'test_ids',
       'suggest_test_ids',
+      'release_rules',
       'asset_policy',
       'repo_assets',
-      'release_rules',
-      'release_status',
-      'release_changes',
-      'jobs',
-      'job_log',
-      'queue_stats',
-      'why_job',
-      'analysis_status',
-      'fleet_health',
-      'start_task',
-      'task_status',
-      'request_review',
+      'review_status',
+      'report_secret_exposure',
     ])
 
     const reached = await callTool('list_packages', {}, bearer)
@@ -659,38 +647,17 @@ describe('MCP endpoint', () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, bearer)).status).toBe(401)
   })
 
-  // src bug: app.ts wraps every principal with withTeams, so the MCP token WeakMap in
-  // routes/api-surface.ts (fromToken) no longer recognises token principals.
-  test('offers release_step only to tokens with the release scope', async () => {
-    const issue = async (body: Record<string, unknown>) =>
-      (await (
-        await app.request('/api/api-surface/mcp/tokens', {
-          method: 'POST',
-          headers: { ...asAdmin, 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-      ).json()) as CreateMcpTokenResult
-    const reader = await issue({ name: 'reader' })
-    expect(reader.token.scopes).toBeUndefined()
+  test('never offers release_step, even to tokens with the release scope', async () => {
+    const created = await app.request('/api/api-surface/mcp/tokens', {
+      method: 'POST',
+      headers: { ...asAdmin, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'releaser', scopes: ['release'] }),
+    })
+    const releaser = (await created.json()) as CreateMcpTokenResult
     expect(
-      (await releaseToolsOf({ authorization: `Bearer ${reader.secret}` })).map((t) => t.name),
-    ).toEqual(['release_rules', 'release_status', 'release_changes'])
-
-    const releaser = await issue({ name: 'releaser', scopes: ['release'] })
-    expect(releaser.token.scopes).toEqual(['release'])
-    const tools = await releaseToolsOf({ authorization: `Bearer ${releaser.secret}` })
-    expect(tools.map((t) => [t.name, t.annotations?.readOnlyHint])).toEqual([
-      ['release_rules', true],
-      ['release_status', true],
-      ['release_changes', true],
-      ['release_step', false],
-    ])
+      (await releaseToolsOf({ authorization: `Bearer ${releaser.secret}` })).map((t) => t.name),
+    ).toEqual(['release_rules'])
     expect((await releaseToolsOf(asAdmin)).map((t) => t.name)).not.toContain('release_step')
-    expect(
-      (await releaseToolsOf({ ...asAdmin, authorization: 'Bearer hk_mcp_unknown' })).map(
-        (t) => t.name,
-      ),
-    ).not.toContain('release_step')
   })
 
   test('tools render APIs, versions and diffs, and usage is counted', async () => {

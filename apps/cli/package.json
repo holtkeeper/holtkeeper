@@ -15,6 +15,7 @@
     "@holtkeeper/core": "workspace:*",
     "@holtkeeper/exec": "workspace:*",
     "@holtkeeper/review": "workspace:*",
+    "@holtkeeper/secret-reports": "workspace:*",
     "@holtkeeper/server": "workspace:*",
     "@holtkeeper/store": "workspace:*"
   },

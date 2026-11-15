@@ -26,6 +26,7 @@
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/review": "workspace:*",
+        "@holtkeeper/secret-reports": "workspace:*",
         "@holtkeeper/server": "workspace:*",
         "@holtkeeper/store": "workspace:*",
       },
@@ -89,6 +90,7 @@
         "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
+        "@holtkeeper/secret-reports": "workspace:*",
         "@holtkeeper/settings": "workspace:*",
         "@holtkeeper/ssh-keys": "workspace:*",
         "@holtkeeper/stack": "workspace:*",
@@ -890,6 +892,15 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/secret-reports": {
+      "name": "@holtkeeper/secret-reports",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent-tools": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/settings": {
       "name": "@holtkeeper/settings",
       "version": "0.0.0",
@@ -1419,6 +1430,8 @@
     "@holtkeeper/report": ["@holtkeeper/report@workspace:packages/report"],
 
     "@holtkeeper/review": ["@holtkeeper/review@workspace:packages/review"],
+
+    "@holtkeeper/secret-reports": ["@holtkeeper/secret-reports@workspace:packages/secret-reports"],
 
     "@holtkeeper/server": ["@holtkeeper/server@workspace:apps/server"],
 

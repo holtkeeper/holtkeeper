@@ -52,12 +52,13 @@ This page follows the current definitions in the code, which are still moving. T
 
 ## Audit
 
-| Key                     | Section | Value                                                                  | Default                              | Edited in         |
-| ----------------------- | ------- | ---------------------------------------------------------------------- | ------------------------------------ | ----------------- |
-| `audit.fix`             | Audit   | Whether audits change dependencies and open merge requests with fixes. | `false`                              | Supply › Security |
-| `audit.upgrade`         | Audit   | Largest version jump a fix may make: `major`, `minor` or `patch`.      | `major` (`minor` on a fresh install) | Supply › Security |
-| `audit.allowlist`       | Audit   | Advisories to ignore, each with a reason and an optional expiry.       | none                                 | Supply › Security |
-| `audit.allowlistPolicy` | Audit   | `{ maxDays?, requireReason }`: limits on allowlist entries.            | `{ requireReason: true }`            | Supply › Security |
+| Key                      | Section        | Value                                                                                                                                                                                                              | Default                              | Edited in               |
+| ------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ | ----------------------- |
+| `audit.fix`              | Audit          | Whether audits change dependencies and open merge requests with fixes.                                                                                                                                             | `false`                              | Supply › Security       |
+| `audit.upgrade`          | Audit          | Largest version jump a fix may make: `major`, `minor` or `patch`.                                                                                                                                                  | `major` (`minor` on a fresh install) | Supply › Security       |
+| `audit.allowlist`        | Audit          | Advisories to ignore, each with a reason and an optional expiry.                                                                                                                                                   | none                                 | Supply › Security       |
+| `audit.allowlistPolicy`  | Audit          | `{ maxDays?, requireReason }`: limits on allowlist entries.                                                                                                                                                        | `{ requireReason: true }`            | Supply › Security       |
+| `security.secretReports` | Audit · global | `{ services, channels }`: the organization's services besides forge hosts, so reports about anything else are refused, and Slack channel ids told about new [secret reports](/guide/supply-chain/secret-reports/). | `{ services: [], channels: [] }`     | Settings › Integrations |
 
 ## Releases and tracking
 

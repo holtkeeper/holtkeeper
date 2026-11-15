@@ -80,6 +80,11 @@ import type {
   CreateMcpTokenResult,
   McpTokenList,
   McpUsageOverview,
+  SecretReportList,
+  SecretReportView,
+  SecretReportsLicense,
+  UpdateMcpTokenInput,
+  UpdateSecretReportInput,
   PublicApiDiff,
   PublicApiPackageDetail,
   PublicApiPackageList,
@@ -441,6 +446,12 @@ export const api = {
     request<CreateMcpTokenResult>('POST', '/api/api-surface/mcp/tokens', { body: input }),
   revokeMcpToken: (tokenId: string) =>
     request<void>('DELETE', `/api/api-surface/mcp/tokens/${id(tokenId)}`),
+  updateMcpToken: (tokenId: string, input: UpdateMcpTokenInput) =>
+    request<void>('PATCH', `/api/api-surface/mcp/tokens/${id(tokenId)}`, { body: input }),
+  secretReports: () => request<SecretReportList>('GET', '/api/secret-reports'),
+  updateSecretReport: (reportId: string, input: UpdateSecretReportInput) =>
+    request<SecretReportView>('PATCH', `/api/secret-reports/${id(reportId)}`, { body: input }),
+  secretReportsLicense: () => request<SecretReportsLicense>('GET', '/api/secret-reports/license'),
   mcpUsage: (days: number) =>
     request<McpUsageOverview>('GET', '/api/api-surface/mcp/usage', { query: { days } }),
   mcpTools: () => mcpRequest<{ tools: McpTool[] }>('tools/list').then((result) => result.tools),

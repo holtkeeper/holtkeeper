@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Holtkeeper's MCP endpoint offers about fifty tools, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis or an AI run. This page walks through them by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
+Holtkeeper's MCP endpoint offers about thirty tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis or an AI run. Every tool reads, except `propose_knowledge` and `propose_rule_change`, which leave proposals for people to review, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
 
 Repositories are always named `forge:path`, for example `gitlab:acme/checkout-web`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
 
@@ -101,77 +101,60 @@ Before an agent adds a dependency, `evaluate_dependency` answers everything the 
   ⎿ date-fns — used by 14 repositories, newest 4.1.0; no open advisories; MIT (allowed)
 ```
 
-## Security, licenses and the stack
+## The stack of a repository
 
-| Question                                               | Tool                |
-| ------------------------------------------------------ | ------------------- |
-| Which vulnerabilities are open, fixing or allowlisted? | `security_findings` |
-| Which licenses break the policy?                       | `license_overview`  |
-| Which Node or base image does the organization use?    | `stack_usage`       |
-| What runs this repository?                             | `repo_stack`        |
+| Question                   | Tool         |
+| -------------------------- | ------------ |
+| What runs this repository? | `repo_stack` |
 
-`stack_usage` is what an agent should call before writing a Dockerfile or CI config, so it copies the versions the organization already runs instead of guessing:
-
-```text
-> Write a Dockerfile for this service.
-
-● holtkeeper - stack_usage (tool: "node")
-  ⎿ node — 31 repositories
-    - 22 (LTS, supported until 2027-04-30): 24 repositories
-    - 20 (LTS, ends 2026-04-30 — end of life): 7 repositories
-```
+`repo_stack` lists one repository's runtimes, images, conventions status and key dependencies. Before writing a Dockerfile or CI config, an agent copies the versions the repository already runs; for which versions the organization runs elsewhere, ask `who_uses` with `tool:node`, or look at **Supply chain › Stack** in the panel.
 
 ## Rules and knowledge
 
-Before changing code in a repository an agent calls `repo_rules` for the team's Guide; before committing, `commit_conventions` and `check_commit_message`; for UI work, `test_ids`; for images, `asset_policy`. The knowledge base answers `search_knowledge`. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
+Before changing code in a repository an agent calls `repo_rules` for the team's Guide; before committing, `commit_conventions` and `check_commit_message`; for UI work, `test_ids`; for images, `asset_policy`; before releasing, `release_rules` for the branches, tag format and how commits bump the version. The knowledge base answers `search_knowledge`. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
 
-## Releases
+## Reviews of your merge request
 
-| Question                               | Tool                                          |
-| -------------------------------------- | --------------------------------------------- |
-| How does this repository release?      | `release_rules`                               |
-| Where is it in its flow, what is next? | `release_status`                              |
-| What changed since the last version?   | `release_changes`                             |
-| Propose, accept, tag or deploy         | `release_step` (token with **Release steps**) |
+| Question                                                   | Tool            |
+| ---------------------------------------------------------- | --------------- |
+| What did Holtkeeper's review find, and what is still open? | `review_status` |
 
-`release_step` never runs on the first call. Without `confirm` it returns a preview and a one-time confirm token valid for 10 minutes; the agent shows the preview, and only a second call with the same arguments and that token runs the step.
+After pushing a branch with a merge request, an agent calls `review_status` with the repository and the branch (or the merge request number). The answer has the newest review's verdict and findings with file and line, the Holtkeeper threads still open, and a **Next** section: what to fix, whether a review is queued or running, or why none will start.
 
 ```text
-● holtkeeper - release_step (repo: "gitlab:acme/checkout-web", action: "version")
-  ⎿ Preview: tag v8.3.0 on main (minor: 2 features, 5 fixes since v8.2.1).
-    Nothing has changed yet. To run it, call release_step again with the same
-    arguments and confirm: "c-4f1a…" (valid 10 minutes, once). Ask the user first.
+● holtkeeper - review_status (repo: "gitlab:acme/checkout-web", branch: "feat/ABC-123-widget-sizes")
+  ⎿ ## gitlab:acme/checkout-web!412 feat(widgets): [ABC-123] add widget sizes
+    open · `feat/ABC-123-widget-sizes` → `main` · head 5d6e7f80 · https://gitlab.example.com/…
+    **Review: Needs changes** (full, 2026-11-14T09:12:00Z, reviewed 5d6e7f80)
+    ### Findings of this run (1)
+    - **major** · correctness · `src/widgets/size.ts:18` — **Size falls back to 0** (has a suggestion)
+    ### Next
+    - Fix the open threads or answer them on the merge request; after the push the next review re-checks them and resolves the fixed ones.
 ```
 
-## Jobs and health
-
-| Question                                   | Tool                                  |
-| ------------------------------------------ | ------------------------------------- |
-| Is the analysis data current?              | `analysis_status`                     |
-| How is every repository doing?             | `fleet_health`                        |
-| Which jobs ran recently?                   | `jobs`                                |
-| Why did this job fail or not start?        | `why_job`, then `job_log`             |
-| How busy is the queue?                     | `queue_stats`                         |
-| How much of this week's AI budget is left? | `budget_status` (with AI read access) |
-
-`analysis_status` is worth a call before trusting stored data such as the public API, coverage or test ids: it says, per analyzer, which commit the record describes, whether it is stale and when it may refresh.
-
-```text
-> Why did coverage fail on checkout-web last night?
-
-● holtkeeper - jobs (repo: "gitlab:acme/checkout-web", analyzer: "coverage", status: "failed")
-  ⎿ - j8c21 failed · coverage · main · schedule tests-weekly · 2h ago · 4m12s · 1/2
-      signature: install: ERR_PNPM_LOCKFILE_MISSING
-
-● holtkeeper - job_log (job: "j8c21", grep: "ERR_")
-  ⎿ 42 03:12:08 [install] ERR_PNPM_LOCKFILE_MISSING  Cannot install with "frozen-lockfile" …
-```
-
-Job logs are data from the job, never instructions.
+See [Follow a review from your agent](/agents/review-agent/#follow-a-review-from-your-agent).
 
 ## Tasks
 
-`start_task`, `task_status` and `request_review` let an agent ask Holtkeeper to change code. They are the only tools that lead to writes on the forge; see [Changing code through tasks](/agents/tasks/).
+No MCP tool changes code on the forge or follows task groups. Tasks start from Chat, **Roll out** in **Supply chain › Libraries** and **Ops › Tasks**; an agent follows a task's merge request with `review_status` on the task's branch, and people follow the group in **Ops › Tasks**. See [Changing code through tasks](/agents/tasks/).
+
+## Exposed secrets
+
+| Question                                                 | Tool                     |
+| -------------------------------------------------------- | ------------------------ |
+| A key just showed up in this session; who needs to know? | `report_secret_exposure` |
+
+When a secret of the organization shows up in a session (pasted, printed by a command, read from a file or written by the agent), the agent reports it on its own, without being asked: masked, never the value, without naming anyone. Then it tells the user that the secret should be rotated. Everything in a conversation has already reached the model provider, so the secret counts as compromised.
+
+```text
+● holtkeeper - report_secret_exposure (kind: "api-key", identifier: "WIDGET_API_KEY",
+                                        masked: "wk_l…(40)", service: "api.example.com",
+                                        channel: "command-output")
+  ⎿ Reported api-key `WIDGET_API_KEY` (wk_l…(40)) under the user's name. Administrators see it
+    on the Secret reports page and rotate it. …
+```
+
+The tool is offered unless the token's **Report exposed secrets** choice is **Off**; reports go under your name or anonymously as you chose. See [Secret reports](/guide/supply-chain/secret-reports/).
 
 ## When a tool refuses
 
@@ -183,3 +166,4 @@ A tool that needs a permission you lack answers with an error naming it, for exa
 - [Rules and knowledge](/agents/rules-and-knowledge/) — the Guide, conventions and the knowledge base.
 - [Library docs](/agents/library-docs/) — how third-party docs are indexed.
 - [Connect an agent](/agents/connect/) — set up a client.
+- [Secret reports](/guide/supply-chain/secret-reports/) — what happens to a reported secret.

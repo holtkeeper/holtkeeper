@@ -110,6 +110,7 @@ export const webPaths = {
   teams: () => '/repos/teams',
   security: (search: SecuritySearch = {}) => withSearch('/supply/security', { ...search }),
   securityRun: (runId: string) => `/supply/security/runs/${segment(runId)}`,
+  secretReports: (report?: string) => withSearch('/supply/secret-reports', { report }),
   releaseTimeline: (repo: string) => withSearch('/releases/timeline', { repo }),
   knowledge: (tab: KnowledgeSection, search: KnowledgeSearch = {}) =>
     withSearch(`/knowledge/${tab}`, { ...search }),

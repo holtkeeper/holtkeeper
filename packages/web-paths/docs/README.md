@@ -30,6 +30,7 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 | `teams()`                                                                     | `/repos/teams`                                                           |
 | `security({ urgent?, finding? })`                                             | `/supply/security?urgent=only&finding=<advisory>:<package>`              |
 | `securityRun(runId)`                                                          | `/supply/security/runs/<runId>`                                          |
+| `secretReports(report?)`                                                      | `/supply/secret-reports[?report=<id>]`                                   |
 | `releaseTimeline(repo)`                                                       | `/releases/timeline?repo=`                                               |
 | `knowledge(tab, { space?, section?, note? })`                                 | `/knowledge/guide\|notes\|learnings?space=&section=&note=`               |
 | `chat(thread?)`                                                               | `/chat?thread=`                                                          |

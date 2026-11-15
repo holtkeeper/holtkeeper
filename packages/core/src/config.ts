@@ -102,6 +102,14 @@ const serverSchema = z.object({
    */
   publicUrl: z.url().optional(),
   /**
+   * Secret reports: the `report_secret_exposure` MCP tool, through which people's agents report
+   * secrets exposed in their sessions, and the panel page that lists the reports. Covered by the
+   * Holtkeeper Secret Reports License (`packages/secret-reports/LICENSE`): keeping it on means the
+   * organization accepts its use condition (reporting is voluntary, reports are never grounds for
+   * sanctions). Default on; `false` removes the tool, the page and the per-token choice.
+   */
+  secretReports: z.boolean().default(true),
+  /**
    * Serves `GET /api/egress/rules` to an egress proxy that sends this secret as a bearer token:
    * the rules that add forge tokens to package registry requests of jobs. With `proxy`, also shows
    * that proxy's download cache.

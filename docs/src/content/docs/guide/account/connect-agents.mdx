@@ -25,7 +25,7 @@ import {
   Ui,
 } from '@ui'
 
-Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP client, watch your own usage and browse the tools your agents get. Every signed-in person can connect agents; a token reads by default and acts as you.
+Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP client, watch your own usage and browse the tools your agents get. Every signed-in person can connect agents; a token acts as you, reads, and can propose knowledge and rules for review.
 
 <Screen title="Account › Connect agents" caption="Create a token, add the server to your client, ask about your code.">
   <Toolbar title="Connect agents" crumbs={['Account']}>
@@ -48,11 +48,11 @@ Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP clie
   />
   <Scroll>
 
-| Name            | Status                              | Allows               | Token          | Expires    | Last used | Calls, 7 days |                               |
-| --------------- | ----------------------------------- | -------------------- | -------------- | ---------- | --------- | ------------- | ----------------------------- |
-| **laptop**      | <Tag tone="ok">Active</Tag>         | Read                 | `hk_mcp_3f9a…` | in 71 days | 2 h       | 412           | <Button ghost>Revoke</Button> |
-| **release-bot** | <Tag tone="warn">Expires soon</Tag> | Read · Release steps | `hk_mcp_c21d…` | in 9 days  | 1 d       | 38            | <Button ghost>Revoke</Button> |
-| **ci-agent**    | <Tag>Never used</Tag>               | Read · Run tasks     | `hk_mcp_77e0…` | in 1 year  | —         | 0             | <Button ghost>Revoke</Button> |
+| Name            | Status                              | Allows | Token          | Expires    | Last used | Calls, 7 days |                               |
+| --------------- | ----------------------------------- | ------ | -------------- | ---------- | --------- | ------------- | ----------------------------- |
+| **laptop**      | <Tag tone="ok">Active</Tag>         | Read   | `hk_mcp_3f9a…` | in 71 days | 2 h       | 412           | <Button ghost>Revoke</Button> |
+| **release-bot** | <Tag tone="warn">Expires soon</Tag> | Read   | `hk_mcp_c21d…` | in 9 days  | 1 d       | 38            | <Button ghost>Revoke</Button> |
+| **ci-agent**    | <Tag>Never used</Tag>               | Read   | `hk_mcp_77e0…` | in 1 year  | —         | 0             | <Button ghost>Revoke</Button> |
 
   </Scroll>
 </Screen>
@@ -64,10 +64,7 @@ Use one token per machine or agent, so you can revoke one without breaking the o
 1. Click <Ui>New token</Ui> in the header.
 2. Name it after the machine or agent, for example `laptop`.
 3. Pick when it expires: 30 days, 90 days, 1 year or never.
-4. Leave both switches off for a read-only token, or turn on what the agent needs:
-   - **Release steps** lets it propose, accept, version and deploy releases.
-   - **Run tasks** lets it start code-changing tasks and request reviews without waiting for a person to approve.
-5. Create it and copy the secret now; it is not shown again. The dialog also shows the ready Claude Code command.
+4. Create it and copy the secret now; it is not shown again. The dialog also shows the ready Claude Code command.
 
 <Screen title="Account › Connect agents › New MCP token">
   <Sheet title="New MCP token">
@@ -77,13 +74,11 @@ Use one token per machine or agent, so you can revoke one without breaking the o
     <Fields>
       <Field label="Name" value="laptop" hint="One per machine or agent." />
       <Field label="Expires after" value="90 days" />
-      <Field label="Release steps" toggle hint="Propose, accept, version and deploy releases." />
-      <Field label="Run tasks" toggle hint="Start tasks and request reviews without approval." />
     </Fields>
   </Sheet>
 </Screen>
 
-A token acts as you with read access to repositories, analyses, audits, knowledge and releases, plus releasing or running tasks when you turned those on. It never gets more than your own grants. With Holtkeeper's own accounts it follows your current grants, and disabling your account or signing out everywhere revokes it.
+A token acts as you with read access to repositories, analyses, audits, knowledge and releases, and can propose knowledge entries and Guide rules that people review. It cannot start tasks or run release steps: those start in Chat, **Ops › Tasks**, **Roll out** in Supply chain › Libraries and the Releases screen. It never gets more than your own grants. The **Allows** column shows **Read** for every token, including older ones issued with the former release or task scopes, which now work as read tokens. With Holtkeeper's own accounts it follows your current grants, and disabling your account or signing out everywhere revokes it.
 
 :::caution
 A token authenticates only the MCP endpoint and the read-only catalog API. It cannot issue or revoke tokens. Revoke a token you no longer use from its row.
@@ -99,6 +94,26 @@ A token authenticates only the MCP endpoint and the read-only catalog API. It ca
 | Never used   | No call has used it yet.           |
 
 The name filter above the table narrows long lists. **Calls, 7 days** counts each token's calls.
+
+## Report exposed secrets
+
+Each token has a <Ui>Report exposed secrets</Ui> choice. It decides whether your agent gets `report_secret_exposure`, the tool through which it reports keys, tokens and passwords that showed up in a session, masked, so administrators rotate them.
+
+<Screen title="Account › Connect agents › Report exposed secrets">
+  <Stack>
+    <Segmented items={['Under my name', 'Anonymously', 'Off']} />
+  </Stack>
+</Screen>
+
+| Choice                  | Means                                                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Under my name (default) | Reports show your name and time and are audited as `secret_report.create`.                                                              |
+| Anonymously             | Reports store nothing about you and only the day; the call is left out of usage statistics, and the Slack post is delayed 5–30 minutes. |
+| Off                     | The tool is not offered to this token.                                                                                                  |
+
+Only you see the choice; administrators can neither read nor set it, and changing it is not audited. Anonymity cannot hide the token's **Last used** time (hourly), access logs of proxies in front of Holtkeeper, or that only one person may have known a secret in a small team. Next to the choice is a link to the license's Use Condition: reporting is voluntary, reports are never grounds for sanctions, and nobody may try to unmask anonymous reporters. See [Secret reports](/guide/supply-chain/secret-reports/).
+
+With `server.secretReports: false` in the instance's config, no token gets the tool, whatever its choice.
 
 ## Add the server to your client
 
@@ -199,13 +214,14 @@ A daily chart shows answered over failed calls. Tool calls do not call a model, 
 </Screen>
 
 :::note
-Agents can propose knowledge and rule changes, but people review them in Knowledge. No MCP tool approves tasks or makes other [Inbox](/guide/home/inbox/) decisions.
+Agents can propose knowledge and rule changes, but people review them in Knowledge. No MCP tool starts or approves tasks, runs release steps or makes other [Inbox](/guide/home/inbox/) decisions. Agents can read Holtkeeper's review of a merge request, a task's included, with `review_status`.
 :::
 
 ## Related
 
 - [Agents › Connect](/agents/connect/) — client setup in more depth.
 - [MCP tools](/reference/mcp-tools/) — every tool and its arguments.
-- [Agent tasks](/agents/tasks/) — what **Run tasks** lets an agent do.
+- [Agent tasks](/agents/tasks/) — where tasks start and how agents follow them.
 - [Profile and access](/guide/account/profile/) — your grants, which tokens never exceed.
 - [AI spend](/guide/ops/ai-spend/) — everyone's MCP usage.
+- [Secret reports](/guide/supply-chain/secret-reports/) — what reporting exposed secrets means.

@@ -44,6 +44,8 @@ describe('webPaths', () => {
 
   test('path parameters are encoded as single segments', () => {
     expect(webPaths.securityRun('run 1')).toBe('/supply/security/runs/run%201')
+    expect(webPaths.secretReports()).toBe('/supply/secret-reports')
+    expect(webPaths.secretReports('r 1')).toBe('/supply/secret-reports?report=r+1')
   })
 
   test('the repository hub carries the repository in its path', () => {

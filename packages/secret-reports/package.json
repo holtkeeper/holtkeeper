@@ -1,0 +1,14 @@
+{
+  "name": "@holtkeeper/secret-reports",
+  "version": "0.0.0",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/agent-tools": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}
