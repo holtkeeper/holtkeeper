@@ -61,7 +61,11 @@ export interface SecretReportStoreOptions {
   now?: () => Date
   /** Most reports kept; the oldest closed ones go first. Default 1000. */
   limit?: number
+  /** How far back the time of an anonymous report is moved, in ms. Default up to 10 minutes. */
+  anonymousShiftMs?: () => number
 }
+
+const MINUTE = 60_000
 
 const sameExposure = (a: SecretReportInput, b: SecretReportInput) =>
   a.kind === b.kind &&
@@ -70,12 +74,12 @@ const sameExposure = (a: SecretReportInput, b: SecretReportInput) =>
   a.masked === b.masked &&
   (a.fingerprint ?? '') === (b.fingerprint ?? '')
 
-// The stored order follows from the content alone, never from arrival, so the position of an
-// anonymous report among others of its day says nothing about when it came.
+// The order follows from the content alone, never from arrival, so the position of an anonymous
+// report says nothing more than its shifted time.
 const newestFirst = (a: SecretReport, b: SecretReport) =>
   b.reportedAt.localeCompare(a.reportedAt) || a.id.localeCompare(b.id)
 
-const startOfDay = (at: Date) => `${at.toISOString().slice(0, 10)}T00:00:00.000Z`
+const toMinute = (ms: number) => new Date(Math.floor(ms / MINUTE) * MINUTE).toISOString()
 
 const clean = (input: SecretReportInput): SecretReportInput => ({
   kind: input.kind,
@@ -96,6 +100,7 @@ export function secretReportStore({
   kv,
   now = () => new Date(),
   limit = 1000,
+  anonymousShiftMs = () => Math.random() * 10 * MINUTE,
 }: SecretReportStoreOptions): SecretReportStore {
   const read = async (): Promise<SecretReport[]> => {
     const parsed = z.array(reportSchema).safeParse(await kv.get(reportsKey))
@@ -155,7 +160,10 @@ export function secretReportStore({
           ...clean(input),
           id: crypto.randomUUID(),
           status: 'new',
-          reportedAt: reporter ? at.toISOString() : startOfDay(at),
+          // Never ahead of now, so an anonymous report is not dated after it showed up.
+          reportedAt: reporter
+            ? at.toISOString()
+            : toMinute(at.getTime() - Math.abs(anonymousShiftMs())),
           ...(reporter && { reporter: { id: reporter.id, name: reporter.name } }),
           repeats: 0,
         }

@@ -71,12 +71,12 @@ export interface SecretReportInput {
 
 /**
  * A stored report. It holds no secret value and, unless `reporter` is set, nothing about who sent
- * it: anonymous reports keep only the day they arrived.
+ * it: anonymous reports keep a time moved back by up to 10 minutes.
  */
 export interface SecretReport extends SecretReportInput {
   id: string
   status: SecretReportStatus
-  /** Exact for named reports; the start of the UTC day for anonymous ones. */
+  /** Exact for named reports; moved back by up to 10 minutes, to the minute, for anonymous ones. */
   reportedAt: string
   /** Only on named reports. */
   reporter?: SecretReporter

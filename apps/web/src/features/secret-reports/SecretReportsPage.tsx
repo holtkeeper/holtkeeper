@@ -307,7 +307,9 @@ function ReportSheet({
             { label: 'Channel', value: exposureChannelLabels[report.channel] },
             {
               label: 'Reported',
-              value: anonymous ? `${reportedLabel(report)} (day only)` : reportedLabel(report),
+              value: anonymous
+                ? `${reportedLabel(report)} (moved back up to 10 minutes)`
+                : reportedLabel(report),
             },
             { label: 'Reporter', value: report.reporter?.name ?? 'Anonymous' },
             {
@@ -346,7 +348,12 @@ function ReportSheet({
             </p>
             <CopyField label="Match command" value={secretsMatchCommand(report.fingerprint)} />
           </section>
-        ) : null}
+        ) : (
+          <p className="text-xs text-muted">
+            No fingerprint: the agent could not run a command to hash the value. Find the secret by
+            its name, service and repository; the mask shows its first characters and length.
+          </p>
+        )}
         {canWrite ? (
           <section className="flex flex-col gap-2">
             <TextField

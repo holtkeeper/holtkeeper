@@ -105,11 +105,11 @@ Each token has a <Ui>Report exposed secrets</Ui> choice. It decides whether your
   </Stack>
 </Screen>
 
-| Choice                  | Means                                                                                                                                   |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Under my name (default) | Reports show your name and time and are audited as `secret_report.create`.                                                              |
-| Anonymously             | Reports store nothing about you and only the day; the call is left out of usage statistics, and the Slack post is delayed 5–30 minutes. |
-| Off                     | The tool is not offered to this token.                                                                                                  |
+| Choice                  | Means                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Under my name (default) | Reports show your name and time and are audited as `secret_report.create`.                                               |
+| Anonymously             | Reports store nothing about you and a time moved back by up to 10 minutes, and the call is left out of usage statistics. |
+| Off                     | The tool is not offered to this token.                                                                                   |
 
 Only you see the choice; administrators can neither read nor set it, and changing it is not audited. Anonymity cannot hide the token's **Last used** time (hourly), access logs of proxies in front of Holtkeeper, or that only one person may have known a secret in a small team. Next to the choice is a link to the license's Use Condition: reporting is voluntary, reports are never grounds for sanctions, and nobody may try to unmask anonymous reporters. See [Secret reports](/guide/supply-chain/secret-reports/).
 

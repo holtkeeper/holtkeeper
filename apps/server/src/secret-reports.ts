@@ -68,17 +68,12 @@ export interface SecretReports {
  * Secret reports over `store.kv`; `undefined` when the feature is off (`server.secretReports:
  * false`) or the store keeps no key-value state. Named reports are audited as
  * `secret_report.create` by their sender; anonymous ones leave no audit event, log line or usage
- * record, only the report itself with the day it arrived, and their Slack post (to the channels
- * of `security.secretReports`, never naming anyone) is held back a random while.
+ * record, only the report itself with its time moved back by up to 10 minutes. Every new report is
+ * posted at once to the channels of `security.secretReports`, never naming anyone.
  */
 export function secretReportsFor(
   deps: Pick<ServerDeps, 'config' | 'store' | 'vault' | 'now' | 'slackPoster'>,
-  options: {
-    /** How long the Slack post of an anonymous report waits. Default 5 to 30 minutes at random. */
-    anonymousDelayMs?: () => number
-  } = {},
 ): SecretReports | undefined {
-  const anonymousDelayMs = options.anonymousDelayMs ?? (() => (5 + Math.random() * 25) * 60_000)
   const { config, store } = deps
   if (!secretReportsEnabled(config) || !store.kv) return undefined
   const reports = secretReportStore({ kv: store.kv, now: deps.now })
@@ -152,12 +147,8 @@ export function secretReportsFor(
                 details: { kind: input.kind, identifier: input.identifier, through: 'mcp' },
               })
             // The agent's answer must not wait for Slack, and a failed post must not undo the
-            // report. The post of an anonymous report waits a random while: its timestamp would
-            // otherwise tell when the report came, which access logs could tie to a person.
-            const delay = reporter ? 0 : anonymousDelayMs()
-            const send = () => void notify(result.report).catch(() => {})
-            if (delay > 0) setTimeout(send, delay).unref?.()
-            else send()
+            // report.
+            void notify(result.report).catch(() => {})
           }
           return result
         },

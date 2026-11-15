@@ -14,7 +14,7 @@ Lets AI agents connected over MCP report secrets (keys, tokens, passwords) that 
 
 ### Anonymous reports
 
-An anonymous report stores nothing about its sender and only the **day** it arrived; the stored order does not follow arrival. Its call is not counted in MCP usage statistics (not even in totals), it writes no audit event, and its Slack post waits 5 to 30 minutes at random so the message time says nothing. What Holtkeeper cannot hide: the token's `lastUsedAt` (hourly), access logs of proxies in front of it, and small teams where only one person could have known the secret. The panel says so next to the choice.
+An anonymous report stores nothing about its sender, and its time (`reportedAt`) is moved back by up to 10 minutes at random and cut to the minute. The order follows `reportedAt`, not arrival. Its call is not counted in MCP usage statistics (not even in totals) and writes no audit event. What Holtkeeper cannot hide: the token's `lastUsedAt` (hourly), access logs of proxies in front of it, and small teams where only one person could have known the secret. The panel says so next to the choice.
 
 ## Public API
 
@@ -30,7 +30,7 @@ An anonymous report stores nothing about its sender and only the **day** it arri
 - `secretFingerprint(value)` — first 16 hex characters of the SHA-256 of the exact value (`printf %s "$VALUE" | shasum -a 256 | cut -c1-16`); `fingerprintPattern`.
 - `matchKvSecrets({ address, token, mount, prefix?, namespace?, fingerprints, fetch?, onRead? })` → `KvMatch[]` — walks the latest version of every secret of an OpenBao or Vault KV v2 engine over HTTP and returns the fields whose value has one of the fingerprints. Values are hashed in memory and never leave the process; paths the token may not list or read are skipped. The CLI's `holtkeeper secrets match` uses it.
 - `serviceName(service)`, `matchesService(service, patterns)` — `example.com` covers the host and its subdomains, `*.example.com` only subdomains, a name without dots exactly that name; case, scheme, port and path are ignored.
-- `secretReportStore({ kv, now?, limit? })` → `SecretReportStore` (`submit`, `list`, `get`, `update`) over one key-value entry (`compareAndSet` when the store has it). An open report of the same kind, identifier, service, mask and fingerprint gets `repeats` raised instead of a new report. Beyond `limit` (default 1000) the oldest closed reports go first.
+- `secretReportStore({ kv, now?, limit?, anonymousShiftMs? })` → `SecretReportStore` (`submit`, `list`, `get`, `update`) over one key-value entry (`compareAndSet` when the store has it). An open report of the same kind, identifier, service, mask and fingerprint gets `repeats` raised instead of a new report. Beyond `limit` (default 1000) the oldest closed reports go first.
 - Setting `security.secretReports` (`secretReportsDefinition`, `secretReportsSchema`, `secretReportsSettings(value)`, `secretReportsSettingKey`, global, section `Audit`): `services` (the organization's hosts and names besides forge hosts) and `channels` (Slack channel ids).
 - `LICENSE_NAME`, `licenseText()` — the license with its use condition, which the panel shows next to the choice.
 

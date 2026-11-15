@@ -67,7 +67,7 @@ const input = z.object({
     .max(16)
     .optional()
     .describe(
-      'Optional, not for passwords: first 16 hex characters of the SHA-256 of the exact value, so administrators can match it against their secret store. Compute it only locally from where the value lives, e.g. printf %s "$WIDGET_API_KEY" | shasum -a 256 | cut -c1-16, never by typing the value into a command',
+      'Not for passwords; add it whenever you can run a local command, it is how administrators find which secret it is in their secret store: first 16 hex characters of the SHA-256 of the exact value. Hash where the value lives, e.g. printf %s "$WIDGET_API_KEY" | shasum -a 256 | cut -c1-16; a value that is only in this chat may be hashed the same way with the value in single quotes, since nothing new leaves the machine. Never compute or guess it without running a command; leave it out instead',
     ),
   channel: z.enum(exposureChannels).describe('Where the secret showed up'),
   repo: z

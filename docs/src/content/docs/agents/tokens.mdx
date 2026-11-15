@@ -51,11 +51,11 @@ Everything else that changes something stays with people:
 
 Each token also has a **Report exposed secrets** choice, set on its row under **Account › Connect agents**:
 
-| Choice                  | The agent                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| Under my name (default) | Gets `report_secret_exposure`; reports carry your name.                                    |
-| Anonymously             | Gets `report_secret_exposure`; reports store nothing about you, only the day they arrived. |
-| Off                     | Does not get the tool.                                                                     |
+| Choice                  | The agent                                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Under my name (default) | Gets `report_secret_exposure`; reports carry your name.                                                           |
+| Anonymously             | Gets `report_secret_exposure`; reports store nothing about you, and their time is moved back by up to 10 minutes. |
+| Off                     | Does not get the tool.                                                                                            |
 
 Agents call the tool on their own when a secret of the organization shows up in a session, masked, so administrators rotate it. Only you see the choice, administrators can neither read nor set it, and changing it is not audited. Anonymous calls are left out of the usage below. The choice links to the license's Use Condition: reporting is voluntary and never grounds for sanctions. See [Secret reports](/guide/supply-chain/secret-reports/).
 

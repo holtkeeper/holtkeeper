@@ -42,7 +42,8 @@ const asDev = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'dev' }
 
 let store: Store
 let app: ReturnType<typeof createApp>
-const now = new Date('2026-11-16T09:41:00.000Z')
+const sent = new Date('2026-11-16T09:41:00.000Z')
+const now = sent
 
 const build = (secretReports?: boolean) => {
   store = memoryStore()
@@ -189,7 +190,10 @@ describe('report_secret_exposure', () => {
     expect(answer.content[0]?.text).toContain('anonymously')
     const [stored] = (await listReports()).reports
     expect(stored?.reporter).toBeUndefined()
-    expect(stored?.reportedAt).toBe('2026-11-16T00:00:00.000Z')
+    const shift = sent.getTime() - Date.parse(stored!.reportedAt)
+    expect(shift).toBeGreaterThanOrEqual(0)
+    expect(shift).toBeLessThanOrEqual(11 * 60_000)
+    expect(Date.parse(stored!.reportedAt) % 60_000).toBe(0)
 
     const usage = (await (
       await app.request('/api/api-surface/mcp/usage?days=7', { headers: asAdmin })

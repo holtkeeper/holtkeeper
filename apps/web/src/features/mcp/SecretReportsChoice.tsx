@@ -8,7 +8,7 @@ const modeNotes: Record<SecretReportingMode, string> = {
   named:
     'Administrators see that the report came from you, so they can ask what happened if they need to.',
   anonymous:
-    'The report keeps no name and only the day it arrived, and the call is left out of usage statistics. Holtkeeper cannot hide everything: proxies in front of it may log requests, and in a small team the context may give you away.',
+    'The report keeps no name and a time moved back by up to 10 minutes, and the call is left out of usage statistics. Holtkeeper cannot hide everything: proxies in front of it may log requests, and in a small team the context may give you away.',
   off: 'Your agents do not report exposed secrets. Rotate anything you leak yourself.',
 }
 

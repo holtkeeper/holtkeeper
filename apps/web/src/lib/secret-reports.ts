@@ -129,15 +129,13 @@ export function filterReports<
 export const isAnonymousReport = (report: Pick<SecretReportView, 'reporter'>): boolean =>
   report.reporter === undefined
 
-const utcDay = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' })
-
 /**
- * When a report arrived as the page may show it: date and time for named reports, only the UTC
- * date for anonymous ones, whose time is not kept (it is the start of the day).
+ * When a report arrived as the page may show it: date and time, marked approximate (`≈`) for
+ * anonymous reports, whose stored time is moved back by up to 10 minutes.
  */
 export const reportedLabel = (report: Pick<SecretReportView, 'reporter' | 'reportedAt'>): string =>
   isAnonymousReport(report)
-    ? utcDay.format(new Date(report.reportedAt))
+    ? `≈ ${formatDateTime(report.reportedAt)}`
     : formatDateTime(report.reportedAt)
 
 /** `×3` for a report repeated three more times; empty when it was not repeated. */

@@ -28,10 +28,15 @@ test('named reports keep the reporter and the exact time', async () => {
   })
 })
 
-test('anonymous reports keep only the day and nothing about the sender', async () => {
-  const reports = secretReportStore({ kv: memoryStore().kv!, now: () => at })
+test('anonymous reports keep a minute moved back and nothing about the sender', async () => {
+  const reports = secretReportStore({
+    kv: memoryStore().kv!,
+    now: () => at,
+    anonymousShiftMs: () => 7.5 * 60_000,
+  })
   const { report } = await reports.submit(input)
-  expect(report.reportedAt).toBe('2026-03-04T00:00:00.000Z')
+  expect(report.reportedAt).toBe('2026-03-04T15:08:00.000Z')
+  expect((await reports.list()).map((shown) => shown.id)).toEqual([report.id])
   expect(report.reporter).toBeUndefined()
   expect(Object.keys(report)).not.toContain('reporter')
 })

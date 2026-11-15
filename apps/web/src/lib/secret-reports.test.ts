@@ -77,8 +77,10 @@ describe('secret report filters', () => {
 })
 
 describe('secret report labels', () => {
-  test('anonymous reports show only their UTC day', () => {
-    expect(reportedLabel(report({ reportedAt: '2026-11-10T00:00:00Z' }))).toBe('Nov 10, 2026')
+  test('anonymous reports show their time as approximate', () => {
+    const label = reportedLabel(report({ reportedAt: '2026-11-10T12:34:00Z' }))
+    expect(label.startsWith('≈ ')).toBe(true)
+    expect(label).toContain('2026')
   })
 
   test('named reports show date and time', () => {
