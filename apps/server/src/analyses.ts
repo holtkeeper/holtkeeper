@@ -63,6 +63,31 @@ export function mainLineRecords<Item extends Pick<AnalysisHead, 'ref'>>(
   return records.filter((record) => record.ref === ref).slice(0, limit)
 }
 
+/**
+ * The newest record head per repository and kind on its main line (`mainLineRecords`), of `query`
+ * only: a newer run on a tag or another branch does not replace the default branch's. Heads carry
+ * what was stored, metrics included or not.
+ */
+export async function mainLineHeads(
+  analyses: Pick<AnalysisStore, 'latestHeads' | 'heads'>,
+  query: Pick<AnalysisQuery, 'repo' | 'kind'> = {},
+): Promise<AnalysisHead[]> {
+  return mainLineOf(analyses, await analyses.latestHeads(query))
+}
+
+async function mainLineOf(
+  analyses: Pick<AnalysisStore, 'heads'>,
+  newest: readonly AnalysisHead[],
+): Promise<AnalysisHead[]> {
+  return Promise.all(
+    newest.map(async (head) => {
+      if (head.ref === undefined) return head
+      const line = await analyses.heads({ repo: head.repo, kind: head.kind, limit: LINE_SCAN })
+      return mainLineRecords(line, 1)[0] ?? head
+    }),
+  )
+}
+
 /** Records kept per store in the cache of metrics computed at read time. */
 const COMPUTED_KEEP = 10_000
 
@@ -92,13 +117,7 @@ export async function latestHeadsWithMetrics(
   query: Pick<AnalysisQuery, 'repo' | 'kind'> = {},
 ): Promise<AnalysisHead[]> {
   const newest = await analyses.latestHeads(query)
-  const heads = await Promise.all(
-    newest.map(async (head) => {
-      if (head.ref === undefined) return head
-      const line = await analyses.heads({ repo: head.repo, kind: head.kind, limit: LINE_SCAN })
-      return mainLineRecords(line, 1)[0] ?? head
-    }),
-  )
+  const heads = await mainLineOf(analyses, newest)
   const computed = computedOf(analyses)
   const missing = heads.filter(
     (head) => !head.metrics && !!kinds.get(head.kind)?.metrics && !computed.has(head.id),

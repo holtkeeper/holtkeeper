@@ -125,6 +125,22 @@ describe('freshness sweeper', () => {
     expect(headReads).toHaveLength(4)
   })
 
+  test('a newer run on a release tag does not make the default branch look stale', async () => {
+    await record('games/a', 'shapes', '2026-11-10T00:00:00.000Z', sha('b'))
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'shapes',
+      ref: sha('e'),
+      createdAt: '2026-11-10T01:00:00.000Z',
+      sha: sha('e'),
+      data: {},
+    })
+    await sweep([analyzers[0] as JobAnalyzerInfo])
+    advance(31)
+    const { queued: jobs } = await sweep([analyzers[0] as JobAnalyzerInfo])
+    expect(jobs.filter((job) => job.repo.path === 'games/a')).toEqual([])
+  })
+
   test('a push marks the head and minInterval holds back recent records', async () => {
     const kv = store.kv
     if (!kv) throw new Error('no kv')

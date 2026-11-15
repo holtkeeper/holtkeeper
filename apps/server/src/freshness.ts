@@ -15,6 +15,7 @@ import { analyzerOff, defineSetting, repoAnalyzersKey, resolveSetting } from '@h
 import type { AnalysisHead, Job, KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
+import { mainLineHeads } from './analyses.ts'
 import { type JobAnalyzerInfo, type ServerDeps, repoKey } from './context.ts'
 import { automaticJobBlocker } from './jobs.ts'
 import { forgeLimitKey } from './limits.ts'
@@ -225,7 +226,9 @@ async function evaluate(
     ].filter((target) => target.repo.forge in config.forges)
 
   const latest = new Map<string, AnalysisHead>()
-  for (const head of await store.analyses.latestHeads())
+  // Runs on release tags (api-surface) or other branches must not count as the default branch's
+  // state, or each of them would make the default branch look stale and run again.
+  for (const head of await mainLineHeads(store.analyses))
     latest.set(`${repoKey(head.repo)}\0${head.kind}`, head)
   const active = new Set(
     (await store.jobs.list({ status: ['queued', 'running'], limit: 2000 })).map(
