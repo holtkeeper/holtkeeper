@@ -12,6 +12,7 @@ describe('featureOf', () => {
     expect(featureOf('knowledge-bootstrap')).toBe('knowledge')
     expect(featureOf('embedding')).toBe('knowledge')
     expect(featureOf('release-notes')).toBe('releases')
+    expect(featureOf('security-triage')).toBe('security')
     expect(featureOf('widget-digest')).toBe('other')
     expect(featureOf('')).toBe('other')
   })

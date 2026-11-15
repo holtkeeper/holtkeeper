@@ -1,5 +1,12 @@
 /** Product areas spend is reported and filtered by, derived from a run's task kind. */
-export type AiFeature = 'reviews' | 'tasks' | 'chat' | 'knowledge' | 'releases' | 'other'
+export type AiFeature =
+  | 'reviews'
+  | 'tasks'
+  | 'chat'
+  | 'knowledge'
+  | 'releases'
+  | 'security'
+  | 'other'
 
 /** Display name of each feature. */
 export const featureLabel: Record<AiFeature, string> = {
@@ -8,6 +15,7 @@ export const featureLabel: Record<AiFeature, string> = {
   chat: 'Chat',
   knowledge: 'Guide and learnings',
   releases: 'Release notes',
+  security: 'Vulnerability triage',
   other: 'Other',
 }
 
@@ -28,6 +36,7 @@ export const featureTaskKinds: Readonly<Record<FilterableFeature, readonly strin
     'embedding',
   ],
   releases: ['release-notes'],
+  security: ['security-triage'],
 }
 
 /** Features a filter can narrow to, in display order. */
@@ -37,6 +46,7 @@ export const filterableFeatures: readonly FilterableFeature[] = [
   'chat',
   'knowledge',
   'releases',
+  'security',
 ]
 
 /** Whether `value` names a feature a filter can narrow to. */
