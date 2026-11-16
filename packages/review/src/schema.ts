@@ -103,14 +103,17 @@ const reviewSizeSchema = z.object({
         limit: z.string().optional(),
         /** The advice to split. */
         split: z.string(),
-        /** Heading of the proposed parts. */
-        parts: z.string(),
+        /** Heading of the proposed parts; only in records from before `direction`. */
+        parts: z.string().optional(),
         /** The note for authors whose code an AI agent writes. */
         ai: z.string(),
       }),
       /** `false` when splitting would not make the review easier (`reason` says why). */
       splittable: z.boolean(),
       reason: z.string().optional(),
+      /** One to three sentences on how to split it by functionality, without file paths. */
+      direction: z.string().optional(),
+      /** Proposed parts with their files; only in records from before `direction`. */
       parts: z.array(sizePartSchema).optional(),
     })
     .optional(),

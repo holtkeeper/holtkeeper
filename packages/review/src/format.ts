@@ -88,11 +88,9 @@ export function countBySeverity(findings: readonly Pick<ReviewFinding, 'severity
   }))
 }
 
-const MAX_PART_FILES = 5
-
 /**
- * The advice to split a large merge request: the estimate, the advice, the proposed parts and the
- * note for code an AI agent writes; `''` without advice. When the agent found that splitting would
+ * The advice to split a large merge request: the estimate (with `extra` after it), the advice,
+ * the direction of the split and the note for code an AI agent writes; `''` without advice. When the agent found that splitting would
  * not help, only the estimate and its reason.
  */
 export function sizeAdviceBlock(size: ReviewSize | undefined, extra = ''): string {
@@ -103,18 +101,7 @@ export function sizeAdviceBlock(size: ReviewSize | undefined, extra = ''): strin
     .filter(Boolean)
     .join(' ')
   if (!advice.splittable) return [lead, advice.reason ?? ''].filter(Boolean).join('\n\n')
-  const parts = advice.parts?.map((part, index) => {
-    const shown = part.files.slice(0, MAX_PART_FILES).map((file) => `\`${file}\``)
-    const more = part.files.length - shown.length
-    return `${index + 1}. **${part.title}**: ${shown.join(', ')}${more > 0 ? ` (+${more})` : ''}`
-  })
-  return [
-    `${lead} ${texts.split}`,
-    parts?.length
-      ? [advice.reason ?? '', `${texts.parts}\n\n${parts.join('\n')}`].filter(Boolean).join('\n\n')
-      : '',
-    `_${texts.ai}_`,
-  ]
+  return [`${lead} ${texts.split}`, advice.direction ?? '', `_${texts.ai}_`]
     .filter(Boolean)
     .join('\n\n')
 }

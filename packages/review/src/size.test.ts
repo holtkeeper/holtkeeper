@@ -199,17 +199,13 @@ describe('planSplit', () => {
     texts,
   }
 
-  test('keeps known paths once each and takes the translated texts', async () => {
+  test('gives the direction of the split and takes the translated texts', async () => {
     const { agent, tasks } = fakeAgent({
       'review-split': [
         {
           splittable: true,
-          reason: 'Widgets and gadgets are independent.',
-          parts: [
-            { title: 'Widgets', files: ['src/widget.ts', 'docs/shapes.md', 'src/ghost.ts'] },
-            { title: 'Gadgets', files: ['src/gadget.ts', 'src/widget.ts'] },
-            { title: 'Nothing known', files: ['src/ghost.ts'] },
-          ],
+          reason: '',
+          direction: ' Ship the widget model first, then the gadget screens on top of it. ',
           texts: { ...texts, ai: 'Translated AI note.', split: ' ' },
         },
       ],
@@ -219,35 +215,27 @@ describe('planSplit', () => {
     expect(advice).toEqual({
       texts: { ...texts, ai: 'Translated AI note.' },
       splittable: true,
-      reason: 'Widgets and gadgets are independent.',
-      parts: [
-        { title: 'Widgets', files: ['src/widget.ts', 'docs/shapes.md'] },
-        { title: 'Gadgets', files: ['src/gadget.ts'] },
-      ],
+      direction: 'Ship the widget model first, then the gadget screens on top of it.',
     })
     expect(tasks[0]).toMatchObject({ tier: 'fast', taskKind: 'review-split', capabilities: [] })
     expect(tasks[0]?.system).toContain('in German')
+    expect(tasks[0]?.system).toContain('never by file paths')
     expect(tasks[0]?.prompt).toContain('- src/widget.ts (+400 -0)')
     expect(usage.turns).toBe(2)
   })
 
-  test('a single part is no plan; not splittable keeps the reason', async () => {
-    const one = fakeAgent({
-      'review-split': [
-        {
-          splittable: true,
-          reason: 'x',
-          parts: [{ title: 'All', files: ['src/widget.ts'] }],
-          texts,
-        },
-      ],
+  test('an empty direction gives none; not splittable keeps the reason', async () => {
+    const empty = fakeAgent({
+      'review-split': [{ splittable: true, reason: 'x', direction: ' ', texts }],
     })
-    expect(await planSplit({ ...base, agent: one.agent, usage: { turns: 0 } })).toEqual({
+    expect(await planSplit({ ...base, agent: empty.agent, usage: { turns: 0 } })).toEqual({
       texts,
       splittable: true,
     })
     const atomic = fakeAgent({
-      'review-split': [{ splittable: false, reason: 'A mechanical rename.', parts: [], texts }],
+      'review-split': [
+        { splittable: false, reason: 'A mechanical rename.', direction: 'ignored', texts },
+      ],
     })
     const advice = await planSplit({ ...base, agent: atomic.agent, usage: { turns: 0 } })
     expect(advice).toEqual({ texts, splittable: false, reason: 'A mechanical rename.' })

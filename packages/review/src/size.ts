@@ -234,7 +234,6 @@ export function adviceTexts(
       level === 'too-large'
         ? 'Split it into several merge requests by functionality.'
         : 'Consider splitting it into smaller merge requests by functionality, if the changes allow it.',
-    parts: 'A possible split:',
     ai: 'If this code is written by an AI agent, ask it to split this merge request now and, from now on, to split large changes into several merge requests by functionality.',
   }
 }
@@ -243,14 +242,13 @@ const textsSchema = z.object({
   estimate: z.string(),
   limit: z.string().optional(),
   split: z.string(),
-  parts: z.string(),
   ai: z.string(),
 })
 
 const splitSchema = z.object({
   splittable: z.boolean(),
   reason: z.string(),
-  parts: z.array(z.object({ title: z.string(), files: z.array(z.string()) })),
+  direction: z.string(),
   texts: textsSchema,
 })
 
@@ -287,11 +285,10 @@ export async function planSplit(options: {
       {
         dir: options.dir,
         system: [
-          'You plan how to split a merge request that is too large to review in one sitting into smaller merge requests, each reviewable on its own.',
-          '- Group files by functionality, not by directory or file type: each part is one coherent change that makes sense and builds on its own. Order parts so that each builds only on earlier ones. Tests go with the code they test.',
-          '- Aim for 2 to 6 parts. Use only paths from the list; put each path in at most one part.',
-          '- Set `splittable` to false when splitting would not make the review easier: a mechanical change (a rename, formatting, generated code, a dependency bump touching many files) or one atomic change whose pieces cannot work alone. `reason` says in one or two sentences why the split helps, or why it would not; leave `parts` empty then.',
-          `- \`texts\`: rewrite every given text ${language}, keeping its meaning, Markdown and numbers; return a text unchanged when it is already in that language. Write \`reason\` and part titles ${language} as well.`,
+          'You advise how to split a merge request that is too large to review in one sitting into smaller merge requests, each reviewable on its own.',
+          '- `direction`: one to three plain sentences on how to split it by functionality: which coherent pieces to cut out and in what order to merge them, each building only on earlier ones, tests going with the code they test. Name pieces by what they do, never by file paths; no lists, no Markdown headings.',
+          '- Set `splittable` to false when splitting would not make the review easier: a mechanical change (a rename, formatting, generated code, a dependency bump touching many files) or one atomic change whose pieces cannot work alone. `reason` then says in one or two sentences why; leave `direction` empty. When splittable, leave `reason` empty.',
+          `- \`texts\`: rewrite every given text ${language}, keeping its meaning, Markdown and numbers; return a text unchanged when it is already in that language. Write \`reason\` and \`direction\` ${language} as well.`,
           KEEP_ENGLISH,
         ].join('\n'),
         prompt: [
@@ -318,10 +315,7 @@ export async function planSplit(options: {
     )
     const answer = result.output
     if (!answer) return fallback
-    return {
-      texts: mergeTexts(options.texts, answer.texts),
-      ...splitParts(answer, new Set(options.files.map((file) => file.path))),
-    }
+    return { texts: mergeTexts(options.texts, answer.texts), ...splitAdvice(answer) }
   } catch {
     options.signal?.throwIfAborted()
     return fallback
@@ -337,25 +331,13 @@ function mergeTexts(
     estimate: pick('estimate') ?? given.estimate,
     ...(given.limit ? { limit: pick('limit') ?? given.limit } : {}),
     split: pick('split') ?? given.split,
-    parts: pick('parts') ?? given.parts,
     ai: pick('ai') ?? given.ai,
   }
 }
 
-function splitParts(
-  answer: z.infer<typeof splitSchema>,
-  known: ReadonlySet<string>,
-): Omit<ReviewSizeAdvice, 'texts'> {
+function splitAdvice(answer: z.infer<typeof splitSchema>): Omit<ReviewSizeAdvice, 'texts'> {
   const reason = answer.reason.trim()
-  const withReason = reason ? { reason } : {}
-  if (!answer.splittable) return { splittable: false, ...withReason }
-  const taken = new Set<string>()
-  const parts = answer.parts.flatMap((part) => {
-    const files = part.files.filter((path) => known.has(path) && !taken.has(path))
-    for (const path of files) taken.add(path)
-    const title = part.title.trim()
-    return files.length && title ? [{ title, files }] : []
-  })
-  // A one-part "split" is no plan; keep the advice but propose nothing.
-  return parts.length >= 2 ? { splittable: true, ...withReason, parts } : { splittable: true }
+  if (!answer.splittable) return { splittable: false, ...(reason ? { reason } : {}) }
+  const direction = answer.direction.trim()
+  return { splittable: true, ...(direction ? { direction } : {}) }
 }

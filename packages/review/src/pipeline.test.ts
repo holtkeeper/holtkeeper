@@ -951,11 +951,8 @@ describe('summary threads', () => {
 
 const splitAnswer = (texts: Record<string, string | undefined>) => ({
   splittable: true,
-  reason: 'Prices and gadgets are independent.',
-  parts: [
-    { title: 'Prices', files: ['src/price.ts'] },
-    { title: 'Gadgets', files: ['src/gadget.ts', 'bun.lock'] },
-  ],
+  reason: '',
+  direction: 'Merge prices first, then gadgets.',
   texts,
 })
 
@@ -1002,7 +999,6 @@ describe('review size', () => {
           estimate: 'Translated estimate.',
           limit: 'Translated limit.',
           split: 'Translated split.',
-          parts: 'Translated parts:',
           ai: 'Translated AI note.',
         }),
       ],
@@ -1015,10 +1011,8 @@ describe('review size', () => {
       }),
     )
     expect(data.size?.level).toBe('too-large')
-    expect(data.size?.advice?.parts).toEqual([
-      { title: 'Prices', files: ['src/price.ts'] },
-      { title: 'Gadgets', files: ['src/gadget.ts'] },
-    ])
+    expect(data.size?.advice?.direction).toBe('Merge prices first, then gadgets.')
+    expect(data.size?.advice?.parts).toBeUndefined()
     const split = tasks.find((task) => task.taskKind === 'review-split')
     expect(split?.prompt).toContain('Adds prices.')
     expect(split?.prompt).not.toContain('bun.lock')
@@ -1027,7 +1021,8 @@ describe('review size', () => {
     expect(summary).toContain(
       '> 🛑 **Translated estimate. Translated limit.** Review effort: 3/5. Translated split.',
     )
-    expect(summary).toContain('> Translated parts:\n>\n> 1. **Prices**: `src/price.ts`')
+    expect(summary).toContain('Translated split.\n>\n> Merge prices first, then gadgets.\n>\n')
+    expect(summary).not.toContain('src/price.ts`:')
     expect(summary).toContain('> _Translated AI note._')
     expect(summary).not.toContain('Estimated review time')
     expect(data.usage?.turns).toBe(4)

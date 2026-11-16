@@ -53,6 +53,15 @@ export interface ReviewPromptInput {
    * parts, and every file in scope of the merge request.
    */
   part?: { index: number; count: number; files: readonly string[] }
+  /**
+   * Set for the cross-part pass after a split review: what the parts already reported (`path`,
+   * `line`, `title`) and their walkthrough, so this pass looks only for problems that span parts.
+   */
+  crossPart?: {
+    parts: number
+    findings: readonly { path: string; line: number; title: string }[]
+    walkthrough: readonly string[]
+  }
   language?: string
   /**
    * `false` for a repository with no tests by design: the prompt does not ask about tests, and the
@@ -196,6 +205,7 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     input.part
       ? `The diff is split for review; this is part ${input.part.index} of ${input.part.count}. Comment only on lines of the diff below, and read the other files of the merge request when the change depends on them. Every file in scope:\n${input.part.files.map((path) => `- ${path}`).join('\n')}`
       : '',
+    input.crossPart ? crossPartBlock(input.crossPart) : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
     input.dependencies?.trim() ?? '',
     input.goGuidelines?.trim() ?? '',
@@ -213,9 +223,38 @@ export interface AgentReviewOptions {
   /** Run on the `deep` model tier instead of `main`. */
   deep?: boolean
   toolsets?: readonly Toolset[]
-  /** Turn limit of each agent pass. Default 40. */
+  /** Turn limit of each agent pass. Default: `reviewTurns` of the pass's files. */
   maxTurns?: number
   signal?: AbortSignal
+}
+
+/** The prompt block of the cross-part pass: its task and what the parts already found. */
+function crossPartBlock(cross: NonNullable<ReviewPromptInput['crossPart']>): string {
+  const findings = cross.findings.map(
+    (f) => `- ${f.path}:${f.line} ${f.title.replace(/\s+/g, ' ').slice(0, 160)}`,
+  )
+  return [
+    `This merge request was too large for one pass: ${cross.parts} separate passes reviewed it in parts, each seeing only its slice of the diff. This is the final pass over the whole diff. Look for what the parts could not see: contracts between changed modules and their callers in other parts, the same change applied differently in parallel code, state and lifecycle that cross files, and anything a part only skimmed. Read the code with the tools. Do not repeat a problem already reported; report only new ones.`,
+    cross.walkthrough.length
+      ? `What the parts found the change does:\n${cross.walkthrough.map((line) => `- ${line}`).join('\n')}`
+      : '',
+    findings.length ? `Already reported (do not repeat):\n${findings.join('\n')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/** Turn limit of a review pass by default: 40, one more per file and per 15 changed lines. */
+export const REVIEW_MIN_TURNS = 40
+/** Upper bound of the default turn limit of a review pass. */
+export const REVIEW_MAX_TURNS = 90
+/** Turn limit of the cross-part pass of a split review. */
+export const CROSS_PART_TURNS = 60
+
+/** The default turn limit of a pass over `files`: larger slices of a diff get more turns. */
+export function reviewTurns(files: readonly FileScope[], mode: ReviewPromptInput['mode']): number {
+  const lines = sizeOf(files, mode)
+  return Math.min(REVIEW_MAX_TURNS, REVIEW_MIN_TURNS + files.length + Math.ceil(lines / 15))
 }
 
 /** Changed lines above which an answer given without reading any code is followed up once. */
@@ -375,6 +414,11 @@ export function reviewPromptVersion(): string {
         },
       ],
       part: { index: 1, count: 2, files: ['src/a.ts', 'src/b.ts'] },
+      crossPart: {
+        parts: 2,
+        findings: [{ path: 'src/a.ts', line: 1, title: 'T' }],
+        walkthrough: ['W'],
+      },
       goGuidelines: 'Go guidelines',
       dependencies: 'Dependencies',
     })
@@ -393,6 +437,9 @@ export function reviewPromptVersion(): string {
         INVESTIGATE_MIN_FILES,
         SPLIT_MAX_LINES,
         SPLIT_MAX_FILES,
+        REVIEW_MIN_TURNS,
+        REVIEW_MAX_TURNS,
+        CROSS_PART_TURNS,
       ]),
     ])
       hasher.update(`${text}\u0000`)
@@ -411,7 +458,11 @@ const withLockfileTools = (toolsets: readonly Toolset[] = []): Toolset[] =>
     ? [...toolsets]
     : [...toolsets, lockfileTools()]
 
-async function reviewPass(options: AgentReviewOptions, input: ReviewPromptInput) {
+async function reviewPass(
+  options: AgentReviewOptions,
+  input: ReviewPromptInput,
+  maxTurns = options.maxTurns ?? reviewTurns(input.files, input.mode),
+) {
   const context = reviewContext(input)
   const investigate =
     input.files.length > INVESTIGATE_MIN_FILES ||
@@ -428,7 +479,7 @@ async function reviewPass(options: AgentReviewOptions, input: ReviewPromptInput)
       taskKind: 'review',
       tier: options.deep ? 'deep' : 'main',
       toolsets: withLockfileTools(options.toolsets),
-      maxTurns: options.maxTurns ?? 40,
+      maxTurns,
       ...(investigate ? { followUpWithoutTools: INVESTIGATE_FOLLOW_UP } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     },
@@ -477,11 +528,53 @@ async function settledInParallel<Item, Result>(
 }
 
 /**
+ * The final pass of a split review over the whole diff, looking for problems across parts.
+ * `undefined` when it fails for another reason than a spend limit or an abort: the parts stand.
+ */
+async function crossPartPass(
+  options: AgentReviewOptions,
+  parts: number,
+  passes: readonly ReviewPass[],
+  walkthrough: NonNullable<ReviewPass['walkthrough']>,
+): Promise<ReviewPass | undefined> {
+  const { part: _part, ...input } = options.input
+  try {
+    const pass = await reviewPass(
+      options,
+      {
+        ...input,
+        crossPart: {
+          parts,
+          findings: passes.flatMap((done) =>
+            done.candidates.map((c) => ({ path: c.path, line: c.line, title: c.title })),
+          ),
+          walkthrough: walkthrough.map((step) => step.change),
+        },
+      },
+      options.maxTurns ?? CROSS_PART_TURNS,
+    )
+    // Its summary and walkthrough would repeat the parts'; only new findings count.
+    return {
+      candidates: pass.candidates,
+      summary: pass.candidates.length ? pass.summary : '',
+      verdict: pass.verdict,
+    }
+  } catch (error) {
+    options.signal?.throwIfAborted()
+    if (isBudgetStop(error)) throw error
+    return undefined
+  }
+}
+
+/**
  * Asks the agent for a structured review on the `main` tier (`deep` with `options.deep`); comments
  * come back as unvalidated candidates. A diff over `SPLIT_MAX_LINES` or `SPLIT_MAX_FILES` is
  * split with `splitReviewFiles` and each part reviewed by its own pass (`SPLIT_CONCURRENCY` at
  * once, each with `maxTurns`); their candidates are concatenated, summaries joined, walkthroughs
- * concatenated, `effort` is the highest and the verdict the worst. A failed part does not lose
+ * concatenated, `effort` is the highest and the verdict the worst. After the parts, one cross-part
+ * pass (`CROSS_PART_TURNS`) reviews the whole diff for problems spanning parts, told what the
+ * parts found; it adds only findings (and its summary when it has some), and its failure is
+ * ignored unless a spend limit stopped it. A failed part does not lose
  * the others: its files are listed as not reviewed in the summary and the verdict becomes
  * `needs-changes`. The review fails when every part fails, a spend limit stops a part, or the run
  * is aborted. A pass over more than `INVESTIGATE_MIN_FILES` files or `INVESTIGATE_MIN_LINES`
@@ -503,6 +596,8 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
   if (stop || !passes.length) throw stop ?? errors[0]
   const failed = parts.filter((_, index) => settled[index]?.status !== 'fulfilled')
   const walkthrough = passes.flatMap((pass) => pass.walkthrough ?? [])
+  const cross = await crossPartPass(options, parts.length, passes, walkthrough)
+  if (cross) passes.push(cross)
   const effort = Math.max(0, ...passes.map((pass) => pass.effort ?? 0))
   const notReviewed = failed.flat().map((file) => `\`${file.path}\``)
   return {

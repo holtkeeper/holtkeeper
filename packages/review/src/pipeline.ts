@@ -696,7 +696,7 @@ async function reviewSize(
         })
       : { texts, splittable: true }
   run.log?.(
-    `review time ~${minutes} min (${level}): ${advice.parts ? `${advice.parts.length} parts proposed` : advice.splittable ? 'no split plan' : 'not splittable'}`,
+    `review time ~${minutes} min (${level}): ${advice.direction ? 'split direction given' : advice.splittable ? 'no split direction' : 'not splittable'}`,
   )
   return { ...size, advice }
 }

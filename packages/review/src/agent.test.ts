@@ -11,6 +11,9 @@ import {
   localizeFindings,
   reviewPrompt,
   reviewSystemPrompt,
+  CROSS_PART_TURNS,
+  REVIEW_MAX_TURNS,
+  reviewTurns,
   runAgentReview,
   splitReviewFiles,
 } from './agent.ts'
@@ -75,6 +78,16 @@ const failingAgent = (error: Error): Agent => ({
   name: 'fake',
   async run<Output>(task: AgentTask<Output>) {
     if (task.prompt.includes('part 2 of')) throw error
+    if (task.prompt.includes('final pass over the whole diff'))
+      return { text: '', output: { ...answer('x.ts'), comments: [] } as Output, turns: 1 }
+    return { text: '', output: answer('api/routes.ts') as Output, turns: 1 }
+  },
+})
+
+const crossFails = (error: Error): Agent => ({
+  name: 'fake',
+  async run<Output>(task: AgentTask<Output>) {
+    if (task.prompt.includes('final pass over the whole diff')) throw error
     return { text: '', output: answer('api/routes.ts') as Output, turns: 1 }
   },
 })
@@ -227,6 +240,7 @@ describe('runAgentReview', () => {
           effort: 4,
           walkthrough: [{ files: ['ui/form.ts'], change: 'B' }],
         }),
+        answer('lib/math.ts', { walkthrough: [{ files: ['lib/math.ts'], change: 'C' }] }),
       ],
     })
     const total = usage()
@@ -248,8 +262,9 @@ describe('runAgentReview', () => {
       }),
       usage: total,
     })
-    expect(tasks).toHaveLength(2)
+    expect(tasks).toHaveLength(3)
     expect(tasks[0]?.prompt).toContain('part 1 of 2')
+    expect(tasks[0]?.maxTurns).toBeGreaterThan(40)
     expect(tasks[0]?.prompt).toContain('- lib/math.ts')
     expect(tasks[0]?.prompt).toContain('# Add widget pricing')
     expect(tasks[0]?.prompt).toContain('api/store.ts:2 (tests)')
@@ -257,12 +272,26 @@ describe('runAgentReview', () => {
     expect(tasks[0]?.prompt).not.toContain('### ui/form.ts')
     expect(tasks[1]?.prompt).toContain('Old remark')
     expect(tasks[1]?.prompt).not.toContain('api/store.ts:2 (tests)')
-    expect(result.candidates.map((c) => c.path)).toEqual(['api/routes.ts', 'ui/form.ts'])
-    expect(result.summary).toBe('Reviewed api/routes.ts.\n\nReviewed ui/form.ts.')
+    const cross = tasks[2]
+    expect(cross?.prompt).toContain('final pass over the whole diff')
+    expect(cross?.prompt).not.toContain('part 1 of')
+    expect(cross?.prompt).toContain('### lib/math.ts')
+    expect(cross?.prompt).toContain('### ui/form.ts')
+    expect(cross?.prompt).toContain('- api/routes.ts:1 Problem in api/routes.ts')
+    expect(cross?.prompt).toContain('What the parts found the change does:\n- A\n- B')
+    expect(cross?.maxTurns).toBe(CROSS_PART_TURNS)
+    expect(result.candidates.map((c) => c.path)).toEqual([
+      'api/routes.ts',
+      'ui/form.ts',
+      'lib/math.ts',
+    ])
+    expect(result.summary).toBe(
+      'Reviewed api/routes.ts.\n\nReviewed ui/form.ts.\n\nReviewed lib/math.ts.',
+    )
     expect(result.verdict).toBe('needs-changes')
     expect(result.effort).toBe(4)
     expect(result.walkthrough?.map((entry) => entry.change)).toEqual(['A', 'B'])
-    expect(total.turns).toBe(4)
+    expect(total.turns).toBe(6)
   })
 
   test('a failed part keeps the findings of the others and names its files', async () => {
@@ -306,6 +335,24 @@ describe('runAgentReview', () => {
     const files = Array.from({ length: 8 }, (_, i) => fileOf(`dir${i}/file.ts`, 500))
     await runAgentReview({ agent, dir: '/checkout', input: inputOf(files), usage: usage() })
     expect(peak).toBe(SPLIT_CONCURRENCY)
+  })
+
+  test('the turn limit grows with the slice a pass reviews', () => {
+    expect(reviewTurns([fileOf('src/a.ts', 15)], 'full')).toBe(42)
+    expect(reviewTurns([fileOf('src/a.ts', 300), fileOf('src/b.ts', 300)], 'full')).toBe(82)
+    expect(reviewTurns([fileOf('src/a.ts', 3000)], 'full')).toBe(REVIEW_MAX_TURNS)
+  })
+
+  test('a failing cross-part pass keeps the parts, a spend limit on it fails the review', async () => {
+    const stop = new Error('cap reached')
+    stop.name = 'BudgetExceededError'
+    const options = { dir: '/checkout', input: inputOf(splitFiles()), usage: usage() }
+    const kept = await runAgentReview({ ...options, agent: crossFails(new Error('flaky')) })
+    expect(kept.candidates).toHaveLength(2)
+    const error = await runAgentReview({ ...options, agent: crossFails(stop) }).catch(
+      (caught: unknown) => caught,
+    )
+    expect(error).toBe(stop)
   })
 
   test('the prompt of a single pass names no parts', () => {
