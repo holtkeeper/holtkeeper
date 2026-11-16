@@ -978,10 +978,25 @@ describe('review size', () => {
       files: 1,
       lines: 4,
       groups: 0,
-      model: 'combined',
+      model: 'agent',
     })
     expect(submissions[0]?.summary).toContain('> ⏱️ **Estimated review time: ~11 min.**')
     expect(tasks.map((task) => task.taskKind)).not.toContain('review-split')
+  })
+
+  test("the agent's own estimate is used within the bounds and kept by incremental runs", async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent } = fakeAgent({ review: [{ ...review([], 'looks-good'), reviewMinutes: 15 }] })
+    const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
+    expect(data.size).toMatchObject({ minutes: 15, agentMinutes: 15, model: 'agent' })
+    const greedy = fakeAgent({ review: [{ ...review([], 'looks-good'), reviewMinutes: 600 }] })
+    const capped = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(fakeForge({ files, discussions: [] }).forge),
+        agent: greedy.agent,
+      }),
+    )
+    expect(capped.size).toMatchObject({ minutes: 22, agentMinutes: 600 })
   })
 
   test('a too-large merge request gets the split plan and the note for AI agents', async () => {
@@ -1067,7 +1082,7 @@ describe('review size', () => {
         )),
         head: previousHead,
       }
-      previous.size = { minutes: 5, level, files: 1, lines: 4, groups: 1 }
+      previous.size = { minutes: 5, level, files: 1, lines: 4, groups: 1, agentMinutes: 8 }
       await store.analyses.add({
         repo,
         kind: 'review',
@@ -1087,7 +1102,10 @@ describe('review size', () => {
           },
         ],
       })
-      const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')], 'review-split': [] })
+      const { agent, tasks } = fakeAgent({
+        review: [{ ...review([], 'looks-good'), reviewMinutes: 300 }],
+        'review-split': [],
+      })
       const data = await reviewMergeRequest(
         runOf({
           forge: requireReviewForge(forge),
@@ -1101,7 +1119,13 @@ describe('review size', () => {
     }
     const same = await reviewOnTopOf('too-large')
     expect(same.data.mode).toBe('incremental')
-    expect(same.data.size).toMatchObject({ level: 'too-large', lines: 4, groups: 1 })
+    expect(same.data.size).toMatchObject({
+      level: 'too-large',
+      lines: 4,
+      groups: 1,
+      agentMinutes: 8,
+      minutes: 8,
+    })
     expect(same.data.size?.advice).toBeUndefined()
     expect(same.tasks.map((task) => task.taskKind)).not.toContain('review-split')
 

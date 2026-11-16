@@ -124,6 +124,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       '- verdict is `needs-changes` when any major or critical problem remains, `looks-good` otherwise.',
       '- `walkthrough`: the changes in scope grouped by logical change, most important first; each entry lists its files and says in one or two sentences what changed and why. Group related files instead of listing each one.',
       '- `effort`: how hard this change is for a human to review, 1 (trivial) to 5 (large or subtle, needs a careful look).',
+      '- `reviewMinutes`: how many minutes an experienced developer of this team needs to review the diff in this prompt carefully (read it, check the logic, leave comments), not counting waiting or fixing. Judge by what the code is: declarative styles, constants, config, generated or repeated code are skimmed in minutes; new logic, state, concurrency and contracts take the time. For orientation: a trivial change takes about 5 minutes, a simple one about 10, a moderate one about 25.',
       language,
     ].join('\n'),
     [
@@ -448,7 +449,10 @@ export function reviewPromptVersion(): string {
   return cachedPromptVersion
 }
 
-type ReviewPass = Pick<AgentReview, 'summary' | 'verdict' | 'walkthrough' | 'effort'> & {
+type ReviewPass = Pick<
+  AgentReview,
+  'summary' | 'verdict' | 'walkthrough' | 'effort' | 'reviewMinutes'
+> & {
   candidates: Candidate[]
 }
 
@@ -496,6 +500,7 @@ async function reviewPass(
     verdict: review.verdict,
     ...(review.walkthrough?.length ? { walkthrough: review.walkthrough } : {}),
     ...(review.effort ? { effort: review.effort } : {}),
+    ...(review.reviewMinutes ? { reviewMinutes: review.reviewMinutes } : {}),
   } satisfies ReviewPass
 }
 
@@ -571,7 +576,8 @@ async function crossPartPass(
  * come back as unvalidated candidates. A diff over `SPLIT_MAX_LINES` or `SPLIT_MAX_FILES` is
  * split with `splitReviewFiles` and each part reviewed by its own pass (`SPLIT_CONCURRENCY` at
  * once, each with `maxTurns`); their candidates are concatenated, summaries joined, walkthroughs
- * concatenated, `effort` is the highest and the verdict the worst. After the parts, one cross-part
+ * concatenated, `effort` is the highest, `reviewMinutes` the sum of the parts' (absent when a part
+ * failed) and the verdict the worst. After the parts, one cross-part
  * pass (`CROSS_PART_TURNS`) reviews the whole diff for problems spanning parts, told what the
  * parts found; it adds only findings (and its summary when it has some), and its failure is
  * ignored unless a spend limit stopped it. A failed part does not lose
@@ -599,6 +605,10 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
   const cross = await crossPartPass(options, parts.length, passes, walkthrough)
   if (cross) passes.push(cross)
   const effort = Math.max(0, ...passes.map((pass) => pass.effort ?? 0))
+  // Each part estimated its own slice; the cross-part pass gives none.
+  const reviewMinutes = failed.length
+    ? 0
+    : passes.reduce((sum, pass) => sum + (pass.reviewMinutes ?? 0), 0)
   const notReviewed = failed.flat().map((file) => `\`${file.path}\``)
   return {
     candidates: passes.flatMap((pass) => pass.candidates),
@@ -616,6 +626,7 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
         : 'looks-good',
     ...(walkthrough.length ? { walkthrough } : {}),
     ...(effort ? { effort } : {}),
+    ...(reviewMinutes ? { reviewMinutes } : {}),
   }
 }
 

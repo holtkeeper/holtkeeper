@@ -18,24 +18,30 @@ export interface SizeThresholds {
 export const DEFAULT_SIZE_THRESHOLDS: SizeThresholds = { largeMinutes: 60, tooLargeMinutes: 120 }
 
 /** Ids of the review time models `sizeAdvice.model` picks from. */
-export const reviewTimeModels = ['combined', 'smartbear', 'psp', 'effort-tiers'] as const
+export const reviewTimeModels = ['agent', 'combined', 'smartbear', 'psp', 'effort-tiers'] as const
 
 /** A review time model: how `estimateReviewMinutes` turns a change into minutes. */
 export type ReviewTimeModel = (typeof reviewTimeModels)[number]
 
 /** The model used when `sizeAdvice.model` is not set. */
-export const DEFAULT_REVIEW_TIME_MODEL: ReviewTimeModel = 'combined'
+export const DEFAULT_REVIEW_TIME_MODEL: ReviewTimeModel = 'agent'
 
 /** What each model is based on and how it estimates, for editors choosing one. */
 export const reviewTimeModelInfo: Record<
   ReviewTimeModel,
   { label: string; source: string; summary: string }
 > = {
+  agent: {
+    label: 'Agent, bounded (default)',
+    source: 'CodeRabbit-style estimate by the reviewing model, bounded by the Combined model',
+    summary:
+      'The reviewing agent, having read the code, estimates the minutes itself (styles, config and repeated code count little, new logic counts a lot); the result is kept between a third and twice the Combined estimate, and is the Combined estimate when the agent gives none. Incremental runs keep the estimate of the last full review.',
+  },
   combined: {
-    label: 'Combined (default)',
+    label: 'Combined',
     source: 'Bacchelli & Bird, ICSE 2013; CodeRabbit effort tiers; SmartBear/Cisco reading rates',
     summary:
-      'Time to understand the change by review effort (2, 5, 10, 20 or 30 min for effort 1–5), plus reading at 400 weighted lines an hour scaled by effort, plus half a minute per file (at most 30 files).',
+      'Time to understand the change by review effort (2, 5, 10, 20 or 30 min for effort 1–5), plus reading at 400 weighted lines an hour scaled by effort (×0.3 to ×1.6), plus half a minute per file (at most 30 files). Styles, config and data files count 0.3.',
   },
   smartbear: {
     label: 'SmartBear / Cisco',
@@ -135,19 +141,29 @@ export function logicalChanges(walkthrough: readonly { files: readonly string[] 
 const TEST_FILE =
   /(^|\/)(__tests__|tests?|spec|e2e|testdata)\/|\.(test|spec|stories)\.[^/]+$|_test\.go$/
 const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i
+// Declarative files a reviewer skims: styles (CSS and CSS-in-JS modules), config and data.
+const LIGHT_FILE =
+  /\.(css|scss|sass|less|styl|json|ya?ml|toml|ini|properties)$|(^|\/)(styled|styles?)\.[jt]sx?$|\.(styled|styles?|css)\.[jt]sx?$|(^|\/)(locales?|i18n|translations)\//i
 
-// Removed lines, repeated lines, tests, stories and docs read faster than new code.
+// Removed lines, repeated lines, tests, stories, docs, styles and config read faster than new code.
 const REMOVED_WEIGHT = 0.3
 const REPEATED_WEIGHT = 0.3
 const TEST_WEIGHT = 0.5
 const DOC_WEIGHT = 0.3
-const effortFactor: Record<number, number> = { 1: 0.5, 2: 0.75, 3: 1, 4: 1.3, 5: 1.6 }
+const LIGHT_WEIGHT = 0.3
+const effortFactor: Record<number, number> = { 1: 0.3, 2: 0.5, 3: 1, 4: 1.3, 5: 1.6 }
 const understandMinutes: Record<number, number> = { 1: 2, 2: 5, 3: 10, 4: 20, 5: 30 }
 const tierMinutes: Record<number, number> = { 1: 5, 2: 10, 3: 25, 4: 50, 5: 90 }
 const MAX_COUNTED_FILES = 30
 
 const weightOf = (path: string) =>
-  TEST_FILE.test(path) ? TEST_WEIGHT : DOC_FILE.test(path) ? DOC_WEIGHT : 1
+  TEST_FILE.test(path)
+    ? TEST_WEIGHT
+    : DOC_FILE.test(path)
+      ? DOC_WEIGHT
+      : LIGHT_FILE.test(path)
+        ? LIGHT_WEIGHT
+        : 1
 
 const weightedLines = (file: SizedFile) => {
   const repeatedAdded = file.repeatedAdded ?? 0
@@ -163,13 +179,16 @@ const readingRate = (lines: number, perHour: number) => (lines / perHour) * 60
  * Estimated minutes a person needs to review the files carefully under `model` (default
  * `DEFAULT_REVIEW_TIME_MODEL`, see `reviewTimeModelInfo`), rounded to the minute and at least 1;
  * 0 without files. Line-based models weigh added lines 1, removed 0.3, lines repeated from
- * earlier files 0.3 of that, tests and stories 0.5, docs 0.3. `effort` is the agent's 1–5 (3 when
+ * earlier files 0.3 of that, tests and stories 0.5, docs, styles, config and data 0.3. The `agent`
+ * model takes `agentMinutes` kept between a third and twice the `combined` estimate. `effort` is the agent's 1–5 (3 when
  * absent). Deterministic: the same input gives the same estimate.
  */
 export function estimateReviewMinutes(input: {
   files: readonly SizedFile[]
   effort?: number
   model?: ReviewTimeModel
+  /** The agent's own estimate; only the `agent` model reads it. */
+  agentMinutes?: number
 }): number {
   if (!input.files.length) return 0
   const effort =
@@ -177,6 +196,10 @@ export function estimateReviewMinutes(input: {
   const lines = input.files.reduce((sum, file) => sum + weightedLines(file), 0)
   const files = input.files.length
   const model = input.model ?? DEFAULT_REVIEW_TIME_MODEL
+  const combined =
+    (understandMinutes[effort] ?? 10) +
+    readingRate(lines, 400) * (effortFactor[effort] ?? 1) +
+    Math.min(files, MAX_COUNTED_FILES) * 0.5
   const minutes =
     model === 'smartbear'
       ? 5 + readingRate(lines, 500) + files
@@ -184,9 +207,9 @@ export function estimateReviewMinutes(input: {
         ? 5 + readingRate(lines, 200) + files
         : model === 'effort-tiers'
           ? (tierMinutes[effort] ?? 25)
-          : (understandMinutes[effort] ?? 10) +
-            readingRate(lines, 400) * (effortFactor[effort] ?? 1) +
-            Math.min(files, MAX_COUNTED_FILES) * 0.5
+          : model === 'agent' && input.agentMinutes && input.agentMinutes > 0
+            ? Math.min(Math.max(input.agentMinutes, combined / 3), combined * 2)
+            : combined
   return Math.max(1, Math.round(minutes))
 }
 

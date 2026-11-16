@@ -40,7 +40,7 @@ describe('estimateReviewMinutes', () => {
   test('the combined model adds understanding by effort, reading and files, to the minute', () => {
     // 10 to understand + 300 lines at 400 an hour (45) + half a minute for the file
     expect(estimateReviewMinutes({ files: [code('src/widget.ts', 300)] })).toBe(56)
-    // effort 2: 5 + 6 lines × 0.75 at 400 an hour (0.7) + 3 files (1.5)
+    // effort 2: 5 + 6 lines × 0.5 at 400 an hour (0.45) + 3 files (1.5)
     expect(
       estimateReviewMinutes({
         files: [code('src/a.ts', 2), code('src/b.ts', 2), code('src/c.ts', 2)],
@@ -55,6 +55,33 @@ describe('estimateReviewMinutes', () => {
     expect(estimateReviewMinutes({ files, effort: 5 })).toBeGreaterThan(
       estimateReviewMinutes({ files }),
     )
+  })
+
+  test('the agent model takes the agent estimate within a third and twice the combined one', () => {
+    const files = [code('src/widget.ts', 300)]
+    const combined = estimateReviewMinutes({ files, model: 'combined' })
+    expect(combined).toBe(56)
+    expect(estimateReviewMinutes({ files })).toBe(combined)
+    expect(estimateReviewMinutes({ files, agentMinutes: 30 })).toBe(30)
+    expect(estimateReviewMinutes({ files, agentMinutes: 2 })).toBe(19)
+    expect(estimateReviewMinutes({ files, agentMinutes: 500 })).toBe(111)
+    expect(estimateReviewMinutes({ files, model: 'combined', agentMinutes: 30 })).toBe(combined)
+  })
+
+  test('styles, config and data read like docs', () => {
+    const model = 'psp' as const
+    const logic = estimateReviewMinutes({ files: [code('src/ui/Widget.tsx', 300)], model })
+    for (const path of [
+      'src/ui/Widget/styled.ts',
+      'src/ui/Widget/styles.ts',
+      'src/ui/Widget.styles.ts',
+      'src/ui/widget.css.ts',
+      'src/ui/widget.module.scss',
+      'config/app.yaml',
+      'src/locales/en/common.ts',
+      'package.json',
+    ])
+      expect(estimateReviewMinutes({ files: [code(path, 300)], model })).toBeLessThan(logic / 2)
   })
 
   test('files past thirty add nothing in the combined model', () => {

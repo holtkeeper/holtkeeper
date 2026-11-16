@@ -222,6 +222,8 @@ export interface AgentOutcome {
   verdict: 'looks-good' | 'needs-changes'
   walkthrough?: ReviewWalkthrough
   effort?: number
+  /** The agent's estimate of a careful human review of the diff it saw, in minutes. */
+  reviewMinutes?: number
   /** Guide scopes whose rules reached the agent, broad to narrow. */
   guideScopes?: string[]
   /** `reviewPromptVersion()` of the prompts that were sent. */
@@ -669,7 +671,15 @@ async function reviewSize(
     previous?.size?.groups ?? logicalChanges(previous?.walkthrough ?? []),
   )
   const model = settings?.model ?? DEFAULT_REVIEW_TIME_MODEL
-  const minutes = estimateReviewMinutes({ files, model, ...(effort ? { effort } : {}) })
+  // An incremental run's agent saw only the new commits; the full review's estimate stands.
+  const agentMinutes =
+    planned.mode === 'incremental' ? previous?.size?.agentMinutes : outcome?.reviewMinutes
+  const minutes = estimateReviewMinutes({
+    files,
+    model,
+    ...(effort ? { effort } : {}),
+    ...(agentMinutes ? { agentMinutes } : {}),
+  })
   const level = reviewSizeLevel(minutes, thresholds)
   const size: ReviewSize = {
     minutes,
@@ -678,6 +688,7 @@ async function reviewSize(
     lines: files.reduce((sum, file) => sum + file.added + file.removed, 0),
     groups,
     model,
+    ...(agentMinutes ? { agentMinutes } : {}),
   }
   if (level === 'ok' || (previous && !sizeEscalated(level, previous.size?.level))) return size
   const texts = adviceTexts(level, minutes)

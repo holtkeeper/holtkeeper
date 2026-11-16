@@ -100,6 +100,7 @@ describe('reviewSystemPrompt', () => {
     expect(prompt).toContain('retries and idempotency')
     expect(prompt).toContain('concurrency')
     expect(prompt).toContain('Report every distinct problem')
+    expect(prompt).toContain('`reviewMinutes`')
     expect(prompt).toContain('do not stop after the first one')
     expect(prompt).toContain('At most 15 comments')
     expect(prompt).toContain('Comment only on lines marked `+`')
@@ -233,14 +234,19 @@ describe('runAgentReview', () => {
       review: [
         answer('api/routes.ts', {
           effort: 2,
+          reviewMinutes: 20,
           walkthrough: [{ files: ['api/routes.ts'], change: 'A' }],
         }),
         answer('ui/form.ts', {
           verdict: 'needs-changes',
           effort: 4,
+          reviewMinutes: 35,
           walkthrough: [{ files: ['ui/form.ts'], change: 'B' }],
         }),
-        answer('lib/math.ts', { walkthrough: [{ files: ['lib/math.ts'], change: 'C' }] }),
+        answer('lib/math.ts', {
+          walkthrough: [{ files: ['lib/math.ts'], change: 'C' }],
+          reviewMinutes: 90,
+        }),
       ],
     })
     const total = usage()
@@ -290,6 +296,7 @@ describe('runAgentReview', () => {
     )
     expect(result.verdict).toBe('needs-changes')
     expect(result.effort).toBe(4)
+    expect(result.reviewMinutes).toBe(55)
     expect(result.walkthrough?.map((entry) => entry.change)).toEqual(['A', 'B'])
     expect(total.turns).toBe(6)
   })

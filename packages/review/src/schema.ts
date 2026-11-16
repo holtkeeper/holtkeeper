@@ -93,6 +93,11 @@ const reviewSizeSchema = z.object({
   groups: z.number().int().nonnegative(),
   /** The review time model that made `minutes` (`ReviewTimeModel`); absent in older records. */
   model: z.string().optional(),
+  /**
+   * The agent's own estimate for the whole merge request, before the `agent` model bounds it;
+   * absent when the agent gave none.
+   */
+  agentMinutes: z.number().int().positive().optional(),
   /** Present when this run's note advises splitting; texts are in the review language. */
   advice: z
     .object({
@@ -203,6 +208,8 @@ export const agentReviewSchema = z.object({
   summary: z.string(),
   walkthrough: walkthroughSchema.optional(),
   effort: effortSchema.optional(),
+  /** Minutes a careful human review of the diff in this pass takes, by the agent. */
+  reviewMinutes: z.number().int().min(1).max(1440).optional(),
   verdict: z.enum(['looks-good', 'needs-changes']),
 })
 
