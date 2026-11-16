@@ -13,6 +13,7 @@ import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { registryServer } from '../src/api-surface/mcp.ts'
 import type { McpCall } from '../src/api-surface/usage.ts'
 import { createUsageIndex } from '../src/api-surface/usages.ts'
+import { type QaToolsAccess, qaToolset } from '../src/tools/qa.ts'
 import { agentRulesAccess, mcpToolsets, taskToolsets } from '../src/tools/registry.ts'
 import { type RulesAccess, rulesToolset, testIdsReader } from '../src/tools/rules.ts'
 
@@ -231,6 +232,157 @@ describe('mcpToolsets', () => {
     expect(taskToolsets('chat-summary')).toEqual([])
     expect(taskToolsets('triage')).toEqual(['code', 'docs', 'knowledge', 'libraries'])
     expect(taskToolsets('agent')).not.toContain('catalog')
+  })
+})
+
+const shapes = { forge: 'work', path: 'shapes/app' }
+
+const qaAccess: QaToolsAccess = {
+  tasks: async () => ({
+    tasks: [
+      {
+        key: 'ABC-1',
+        title: 'Round the widget corners',
+        repos: [shapes],
+        teams: ['toys'],
+        lastAt: '2026-10-30T10:00:00.000Z',
+        counts: { merged: 1, open: 0, direct: 1 },
+        authors: ['Sam'],
+        summary: 'stale',
+      },
+      {
+        key: 'ABC-2',
+        title: 'Draft saving',
+        repos: [shapes],
+        teams: ['toys'],
+        lastAt: '2026-10-29T10:00:00.000Z',
+        counts: { merged: 0, open: 1, direct: 0 },
+        authors: ['Kim'],
+      },
+    ],
+    days: 30,
+    untracked: 3,
+    repos: { listed: 2, read: 1, pending: 1, failed: [] },
+  }),
+  task: async (key) => {
+    if (key !== 'ABC-1') throw new ToolError(`No change names ${key}.`)
+    return {
+      key,
+      title: 'Round the widget corners',
+      url: 'https://tracker.example/ABC-1',
+      repos: [shapes],
+      pending: 0,
+      can: { summarize: false },
+      changes: [
+        {
+          repo: shapes,
+          kind: 'commit',
+          id: 'abc12345',
+          branch: 'main',
+          title: 'ABC-1 fix corner radius',
+          at: '2026-10-30T10:00:00.000Z',
+          authors: ['Sam'],
+          keys: ['ABC-1'],
+          commits: ['abc12345'],
+          head: 'abc12345',
+          detail: {
+            files: [{ path: 'src/Widget.tsx', status: 'modified', additions: 3, deletions: 1 }],
+            testIds: [
+              {
+                file: 'src/Widget.tsx',
+                added: [{ attribute: 'data-testid', value: 'widget-panel' }],
+                removed: [],
+              },
+            ],
+          },
+        },
+      ],
+      summary: {
+        sections: {
+          overview: 'Widgets get round corners.',
+          changes: ['Corners are round.'],
+          verdict: 'should',
+          verdictReason: 'Visible change.',
+          testCases: [
+            {
+              title: 'Corners',
+              priority: 'medium',
+              steps: ['Open a widget'],
+              expected: 'Corners are round',
+            },
+          ],
+          testing: [{ kind: 'visual', ideas: ['Compare screenshots.'] }],
+          autotests: [{ level: 'e2e', idea: 'Check the panel.', testIds: ['widget-panel'] }],
+          risks: ['Shared styles.'],
+          questions: [],
+        },
+        at: '2026-10-30T11:00:00.000Z',
+        by: { id: 'header:kim', name: 'Kim' },
+        repos: ['work:shapes/app'],
+        changes: 1,
+        stale: { added: ['work:shapes/app@def67890'], removed: [], updated: [] },
+      },
+    }
+  },
+}
+
+const qaTool = (name: string) => qaToolset(qaAccess).tools.find((each) => each.name === name)!
+const run = (name: string, input: Record<string, unknown>) =>
+  qaTool(name).run(qaTool(name).input.parse(input), {
+    dir: '.',
+    signal: new AbortController().signal,
+  })
+
+describe('qa toolset', () => {
+  test('is offered to signed-in readers and to tokens that turned it on', () => {
+    const base = {
+      catalog: createApiCatalog({ analyses: memoryStore().analyses }),
+      usages: createUsageIndex({ analyses: memoryStore().analyses }),
+      store: memoryStore(),
+      knowledge: {
+        store: memoryStore(),
+        canReadScope: () => true,
+        repoOf: () => undefined,
+        actor: 'header:sam',
+        now,
+      },
+      canRead: () => true,
+      canReadAnalyses: () => true,
+      canReadAudits: () => true,
+      qa: qaAccess,
+    }
+    expect(mcpToolsets(base).map((toolset) => toolset.name)).toEqual(['catalog', 'knowledge', 'qa'])
+    expect(mcpToolsets({ ...base, toolsets: ['qa'] }).map((toolset) => toolset.name)).toEqual([
+      'qa',
+    ])
+    expect(mcpToolsets({ ...base, toolsets: ['catalog'] }).map((toolset) => toolset.name)).toEqual([
+      'catalog',
+    ])
+    expect(qaToolset(qaAccess).tools.every((each) => each.readOnly !== false)).toBe(true)
+  })
+
+  test('qa_tasks lists tasks with counts, notes state, pending reads and untracked changes', async () => {
+    const text = await run('qa_tasks', { query: 'widget' })
+    expect(text).toContain('## QA tasks of the last 30 days (1)')
+    expect(text).toContain('1 of 2 repositories are still being read')
+    expect(text).toContain(
+      '- **ABC-1** Round the widget corners — work:shapes/app · 1 merged, 1 direct · last 2026-10-30T10:00:00.000Z · test notes outdated',
+    )
+    expect(text).not.toContain('ABC-2')
+    expect(text).toContain('3 changes name no task')
+  })
+
+  test('qa_task shows changes per repository, test ids and the stored notes', async () => {
+    const text = await run('qa_task', { key: 'ABC-1' })
+    expect(text).toContain('### work:shapes/app')
+    expect(text).toContain('**abc12345** ABC-1 fix corner radius (direct commit, no review)')
+    expect(text).toContain('`src/Widget.tsx` +3/−1')
+    expect(text).toContain('+`data-testid=widget-panel`')
+    expect(text).toContain('**Outdated:** 1 new, 0 updated, 0 gone')
+    expect(text).toContain('e2e: Check the panel. (`widget-panel`)')
+    expect(Promise.resolve(run('qa_task', { key: 'ABC-9' }))).rejects.toThrow(
+      'No change names ABC-9.',
+    )
   })
 })
 

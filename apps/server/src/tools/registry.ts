@@ -6,6 +6,7 @@ import {
   scopeCoversRepo,
 } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, mountToolsets } from '@holtkeeper/agent-tools'
+import type { McpToolsetName } from '@holtkeeper/api'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type GuideResolver, familyOf } from '@holtkeeper/guide'
@@ -28,6 +29,7 @@ import { type AssetToolsAccess, assetsToolset } from './assets.ts'
 import { type CatalogToolsContext, catalogToolset } from './catalog.ts'
 import { knowledgeToolset } from './knowledge.ts'
 import { type LibraryIndex, libraryToolset } from './libraries.ts'
+import { type QaToolsAccess, qaToolset } from './qa.ts'
 import type { SupplyToolsAccess } from './repos.ts'
 import { type ReviewToolsAccess, reviewsToolset } from './reviews.ts'
 import { type RulesAccess, type TestIdsSnapshot, rulesToolset } from './rules.ts'
@@ -42,6 +44,7 @@ const MCP_TOOLSETS = [
   'assets',
   'libraries',
   'reviews',
+  'qa',
   'security',
 ]
 
@@ -100,18 +103,28 @@ export interface McpToolsetsContext
    * `security` toolset is not offered.
    */
   secretReports?: SecretReportsAccess
+  /** Releases › QA tasks; without it the `qa` toolset is not offered. */
+  qa?: QaToolsAccess
+  /**
+   * The toggleable toolsets the caller's token serves; the others are not offered. Without it
+   * (signed-in browsers reading the tool reference) every toolset is. Secret reports follow
+   * `secretReports` instead.
+   */
+  toolsets?: readonly McpToolsetName[]
 }
 
 /**
  * The toolsets the MCP endpoint serves to one caller, picked for developers at work in one
  * repository: `catalog`, `stack` (with `stack`, `repo_stack` only), `knowledge`, `rules` (with any
  * of `guide`, `proposals`, `commits`, `testIds`, `releases`), `assets` (with `assets`), `libraries`
- * (with `library`), `reviews` (with `reviews`) and `security` (with `secretReports`), every one limited by the caller's grants. Fleet,
- * operations and release tools stay with the web panel and chat. Tools that write are left out
- * unless `MCP_WRITE_TOOLS` names them; a toolset left without tools is not offered.
+ * (with `library`), `reviews` (with `reviews`), `qa` (with `qa`) and `security` (with
+ * `secretReports`), every one limited by the caller's grants and, but `security`, to the token's
+ * `toolsets`. Fleet, operations and release tools stay with the web panel and chat. Tools that
+ * write are left out unless `MCP_WRITE_TOOLS` names them; a toolset left without tools is not
+ * offered.
  */
 export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
-  const { library, assets, reviews, secretReports } = context
+  const { library, assets, reviews, secretReports, qa, toolsets } = context
   const rules = rulesToolset(context)
   const mounted = mountToolsets(
     [
@@ -122,9 +135,14 @@ export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
       ...(assets ? [assetsToolset(assets)] : []),
       ...(library ? [libraryToolset(library, context.canRead)] : []),
       ...(reviews ? [reviewsToolset(reviews)] : []),
+      ...(qa ? [qaToolset(qa)] : []),
       ...(secretReports ? [secretReportsToolset(secretReports)] : []),
     ],
-    MCP_TOOLSETS,
+    toolsets
+      ? MCP_TOOLSETS.filter(
+          (name) => name === 'security' || toolsets.some((chosen) => chosen === name),
+        )
+      : MCP_TOOLSETS,
   )
   return mounted.flatMap((toolset) => {
     const tools = toolset.tools.filter(

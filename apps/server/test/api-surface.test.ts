@@ -542,6 +542,13 @@ const releaseToolsOf = async (headers: Record<string, string>) =>
     }
   ).result.tools.filter((tool) => tool.name.startsWith('release_'))
 
+const toolNamesOf = async (headers: Record<string, string>) =>
+  (
+    (await (await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, headers)).json()) as {
+      result: { tools: { name: string }[] }
+    }
+  ).result.tools.map((tool) => tool.name)
+
 describe('MCP endpoint', () => {
   test('rejects anonymous requests and answers tools for token holders', async () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {})).status).toBe(401)
@@ -658,6 +665,77 @@ describe('MCP endpoint', () => {
       (await releaseToolsOf({ authorization: `Bearer ${releaser.secret}` })).map((t) => t.name),
     ).toEqual(['release_rules'])
     expect((await releaseToolsOf(asAdmin)).map((t) => t.name)).not.toContain('release_step')
+  })
+
+  test('tokens serve the toolsets their owner picks, QA tasks off unless turned on', async () => {
+    const listed = await get<McpTokenList>('/api/api-surface/mcp/tokens', asGames)
+    expect(listed.toolsets.map((toolset) => [toolset.name, toolset.defaultOn])).toContainEqual([
+      'qa',
+      false,
+    ])
+    const plain = (await (
+      await app.request('/api/api-surface/mcp/tokens', {
+        method: 'POST',
+        headers: { ...asGames, 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'plain' }),
+      })
+    ).json()) as CreateMcpTokenResult
+    expect(plain.token.toolsets).not.toContain('qa')
+    expect(plain.token.toolsets).toContain('catalog')
+    const plainTools = await toolNamesOf({ authorization: `Bearer ${plain.secret}` })
+    expect(plainTools.filter((name) => name.startsWith('qa_'))).toEqual([])
+    // Signed-in browsers read the whole reference.
+    expect(await toolNamesOf(asGames)).toContain('qa_tasks')
+
+    const created = await app.request('/api/api-surface/mcp/tokens', {
+      method: 'POST',
+      headers: { ...asGames, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'tester', toolsets: ['qa', 'reviews'] }),
+    })
+    expect(created.status).toBe(201)
+    const tester = (await created.json()) as CreateMcpTokenResult
+    expect(tester.token.toolsets).toEqual(['reviews', 'qa'])
+    const bearer = { authorization: `Bearer ${tester.secret}` }
+    expect(await toolNamesOf(bearer)).toEqual([
+      'review_status',
+      'qa_tasks',
+      'qa_task',
+      'report_secret_exposure',
+    ])
+
+    const path = `/api/api-surface/mcp/tokens/${tester.token.id}/toolsets`
+    const put = (headers: Record<string, string>, body: unknown, at = path) =>
+      app.request(at, {
+        method: 'PUT',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    expect((await put(bearer, { toolsets: [] })).status).toBe(401)
+    expect((await put(asGames, { toolsets: ['nope'] })).status).toBe(400)
+    expect(
+      (await put(asGames, { toolsets: [] }, '/api/api-surface/mcp/tokens/missing/toolsets')).status,
+    ).toBe(404)
+    expect((await put(asGames, { toolsets: ['catalog'] })).status).toBe(204)
+    expect((await toolNamesOf(bearer)).filter((name) => !name.startsWith('report_'))).toEqual([
+      'list_packages',
+      'get_package_api',
+      'search_symbols',
+      'get_symbol',
+      'list_versions',
+      'diff_versions',
+      'package_usage',
+      'find_usages',
+      'upgrade_impact',
+      'repo_packages',
+      'evaluate_dependency',
+      'who_uses',
+    ])
+    const tokens = await get<McpTokenList>('/api/api-surface/mcp/tokens', asGames)
+    expect(tokens.tokens.find((token) => token.id === tester.token.id)?.toolsets).toEqual([
+      'catalog',
+    ])
+    const events = await store.audit.list({ action: 'mcp_token.toolsets' })
+    expect(events.events.map((event) => event.details)).toEqual([{ toolsets: ['catalog'] }])
   })
 
   test('tools render APIs, versions and diffs, and usage is counted', async () => {

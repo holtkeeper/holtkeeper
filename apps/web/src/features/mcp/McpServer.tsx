@@ -1,4 +1,9 @@
-import type { McpTokenView, SecretReportingMode } from '@holtkeeper/api'
+import type {
+  McpTokenView,
+  McpToolsetInfo,
+  McpToolsetName,
+  SecretReportingMode,
+} from '@holtkeeper/api'
 import { KeyRound, ShieldAlert, Trash2, Wrench } from 'lucide-react'
 import { type ReactNode, useDeferredValue, useState } from 'react'
 
@@ -9,6 +14,7 @@ import {
   useMcpTools,
   useMcpUsage,
   useRevokeMcpToken,
+  useSetMcpTokenToolsets,
   useUpdateMcpToken,
 } from '../../api/queries.ts'
 import { formatCount, formatDate, formatRelative } from '../../lib/format.ts'
@@ -17,6 +23,7 @@ import {
   tokenStatus,
   tokenStatusCounts,
   tokenStatusLabels,
+  toolsetsLabel,
 } from '../../lib/mcp-tokens.ts'
 import { callsByToken } from '../../lib/mcp-usage.ts'
 import {
@@ -53,6 +60,7 @@ import {
 } from '../../ui/index.ts'
 import { MyUsage } from './MyUsage.tsx'
 import { SecretReportsChoice } from './SecretReportsChoice.tsx'
+import { ToolsetsChoice } from './ToolsetsChoice.tsx'
 
 /** Where the endpoint lives as the server sees it, falling back to this origin. */
 const useEndpoint = () => useMcpUsage(7).data?.endpoint ?? `${window.location.origin}/mcp`
@@ -60,7 +68,7 @@ const useEndpoint = () => useMcpUsage(7).data?.endpoint ?? `${window.location.or
 const steps = [
   [
     'Create a token',
-    'One per machine or agent. Read-only unless you allow release steps or tasks.',
+    'One per machine or agent, with the tools it needs. Read-only unless you allow release steps or tasks.',
   ],
   ['Add the server to your client', 'Claude Code, Cursor or any Streamable HTTP client.'],
   [
@@ -299,8 +307,13 @@ function TokensPanel({
   const [secret, setSecret] = useState<string | undefined>(undefined)
   const [revoking, setRevoking] = useState<string | undefined>(undefined)
   const [changing, setChanging] = useState<McpTokenView | undefined>(undefined)
+  const [tooling, setTooling] = useState<McpTokenView | undefined>(undefined)
+  const [picked, setPicked] = useState<McpToolsetName[] | undefined>(undefined)
   const reports = tokens.data?.secretReports
   const mode = reporting ?? reports?.defaultMode ?? 'named'
+  const catalog = tokens.data?.toolsets ?? []
+  const toolsets =
+    picked ?? catalog.filter((toolset) => toolset.defaultOn).map((toolset) => toolset.name)
 
   const close = (next: boolean) => {
     setOpen(next)
@@ -308,6 +321,7 @@ function TokensPanel({
       setSecret(undefined)
       setName('')
       setReporting(undefined)
+      setPicked(undefined)
     }
   }
   const submit = () =>
@@ -316,6 +330,7 @@ function TokensPanel({
         name: name.trim() || 'MCP client',
         expiresInDays: Number(lifetime),
         ...(reports ? { secretReports: mode } : {}),
+        ...(catalog.length ? { toolsets } : {}),
       },
       {
         onSuccess: (result) => setSecret(result.secret),
@@ -340,6 +355,8 @@ function TokensPanel({
       ) : tokens.data.tokens.length ? (
         <TokenTable
           tokens={tokens.data.tokens}
+          catalog={catalog}
+          onTools={setTooling}
           onRevoke={setRevoking}
           {...(reports ? { onReports: setChanging } : {})}
         />
@@ -357,7 +374,7 @@ function TokensPanel({
         description={
           secret
             ? 'Copy it now; it is not shown again.'
-            : 'Read-only access to the catalog and release state as you.'
+            : 'Read-only access as you, to the tools you pick.'
         }
         footer={
           secret ? (
@@ -400,10 +417,20 @@ function TokensPanel({
                 options={tokenLifetimes}
               />
             </div>
+            {catalog.length ? (
+              <ToolsetsChoice catalog={catalog} value={toolsets} onChange={setPicked} />
+            ) : null}
             {reports ? <SecretReportsChoice value={mode} onChange={setReporting} /> : null}
           </div>
         )}
       </Dialog>
+      {tooling ? (
+        <TokenToolsetsDialog
+          token={tooling}
+          catalog={catalog}
+          onClose={() => setTooling(undefined)}
+        />
+      ) : null}
       {changing && reports ? (
         <TokenReportsDialog token={changing} onClose={() => setChanging(undefined)} />
       ) : null}
@@ -430,6 +457,64 @@ function TokensPanel({
 }
 
 const statusOrder: readonly TokenStatus[] = ['active', 'expiring', 'expired', 'unused']
+
+/** Changes which toolsets one token serves (audited). */
+function TokenToolsetsDialog({
+  token,
+  catalog,
+  onClose,
+}: {
+  token: McpTokenView
+  catalog: readonly McpToolsetInfo[]
+  onClose: () => void
+}) {
+  const update = useSetMcpTokenToolsets()
+  const [toolsets, setToolsets] = useState<McpToolsetName[]>(token.toolsets)
+  const unchanged =
+    toolsets.length === token.toolsets.length &&
+    toolsets.every((name) => token.toolsets.includes(name))
+  const save = () =>
+    update.mutate(
+      { tokenId: token.id, input: { toolsets } },
+      {
+        onSuccess: () => {
+          notify.success(
+            'Tools updated',
+            `${token.name} serves ${toolsetsLabel(toolsets, catalog).toLowerCase()}.`,
+          )
+          onClose()
+        },
+        onError: (error) => notify.error('Not updated', messageOf(error)),
+      },
+    )
+  return (
+    <Dialog
+      isOpen
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      title={`Tools of ${token.name}`}
+      description="Applies to the agents using this token from their next call."
+      footer={
+        <>
+          <Button variant="tertiary" onPress={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onPress={save}
+            isPending={update.isPending}
+            isDisabled={unchanged}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <ToolsetsChoice catalog={catalog} value={toolsets} onChange={setToolsets} />
+    </Dialog>
+  )
+}
 
 /** Changes how one token reports exposed secrets (`PATCH`, never audited). */
 function TokenReportsDialog({ token, onClose }: { token: McpTokenView; onClose: () => void }) {
@@ -480,10 +565,15 @@ function TokenReportsDialog({ token, onClose }: { token: McpTokenView; onClose: 
 
 function TokenTable({
   tokens,
+  catalog,
+  onTools,
   onRevoke,
   onReports,
 }: {
   tokens: readonly McpTokenView[]
+  catalog: readonly McpToolsetInfo[]
+  /** Opens the tools choice of a token. */
+  onTools: (token: McpTokenView) => void
   onRevoke: (id: string) => void
   /** Opens the secret reports choice of a token; absent while the feature is off. */
   onReports?: (token: McpTokenView) => void
@@ -528,6 +618,7 @@ function TokenTable({
             <Th>Name</Th>
             <Th>Status</Th>
             <Th>Allows</Th>
+            <Th>Tools</Th>
             {onReports ? <Th>Secret reports</Th> : null}
             <Th>Token</Th>
             <Th>Expires</Th>
@@ -552,6 +643,14 @@ function TokenTable({
                 <Td>
                   <Tag>Read</Tag>
                 </Td>
+                <Td>
+                  <Tag tone={token.toolsets.includes('qa') ? 'info' : 'default'}>
+                    {toolsetsLabel(token.toolsets, catalog)}
+                    {token.toolsets.includes('qa') && token.toolsets.length < catalog.length
+                      ? ' · QA'
+                      : ''}
+                  </Tag>
+                </Td>
                 {onReports ? (
                   <Td>
                     <Tag tone={token.secretReports === 'off' ? 'default' : 'info'}>
@@ -570,6 +669,15 @@ function TokenTable({
                   {formatCount(calls.get(token.id) ?? 0)}
                 </Td>
                 <Td align="right" className="whitespace-nowrap">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    isIconOnly
+                    aria-label={`Tools of ${token.name}`}
+                    onPress={() => onTools(token)}
+                  >
+                    <Wrench className="size-3.5" />
+                  </Button>
                   {onReports ? (
                     <Button
                       size="sm"

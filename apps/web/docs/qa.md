@@ -20,3 +20,5 @@ A notice says how many repositories are read while some are pending, another nam
 - one panel per repository (`changesByRepo`) with its changes: the kind (_Merged_, _Open_, _Direct commit_, _Local merge_; `changeKinds`), a _No review_ mark for direct commits and local merges, _Draft_, the id linking to the forge, the title, target and source branch, authors, time, commit count, files with line counts and a collapsible file list.
 
 A key no readable change names shows an empty state.
+
+Agents read the same tasks over MCP with `qa_tasks` and `qa_task` once a token's owner turns on **QA tasks** in Account › Connect agents (off by default); summaries are written only here.

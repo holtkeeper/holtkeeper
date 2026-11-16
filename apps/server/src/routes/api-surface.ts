@@ -3,6 +3,8 @@ import type {
   CreateMcpTokenInput,
   CreateMcpTokenResult,
   McpTokenList,
+  McpTokenToolsetsInput,
+  McpToolsetName,
   McpPersonUsage,
   McpUsageOverview,
   PublicApiDiff,
@@ -14,6 +16,7 @@ import type {
   SecretReportingMode,
   UpdateMcpTokenInput,
 } from '@holtkeeper/api'
+import { mcpToolsetCatalog, mcpToolsetNames } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
 import type { RepoRef } from '@holtkeeper/forge'
 import { createGuideResolver, familyOf, proposeRule, scopesFor } from '@holtkeeper/guide'
@@ -58,6 +61,7 @@ import {
   serverLibraryDocs,
   visibleLibraries,
 } from '../libraries.ts'
+import { qaToolsAccess } from '../qa.ts'
 import { releaseToolsAccess } from '../release-steps.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { reviewToolsAccess } from '../review-status.ts'
@@ -93,6 +97,11 @@ const createTokenSchema = z.object({
     .max(2)
     .optional(),
   secretReports: z.enum(reportingModes).optional(),
+  toolsets: z.array(z.enum(mcpToolsetNames)).max(mcpToolsetNames.length).optional(),
+})
+
+const toolsetsSchema = z.object({
+  toolsets: z.array(z.enum(mcpToolsetNames)).max(mcpToolsetNames.length),
 })
 
 const updateTokenSchema = z.object({ secretReports: z.enum(reportingModes) })
@@ -441,7 +450,10 @@ export function createApiSurface(deps: ServerDeps) {
 
   routes.get('/api-surface/mcp/tokens', async (c) => {
     const principal = principalOf(c)
-    const info = secretReportsInfo ? { secretReports: secretReportsInfo } : {}
+    const info = {
+      ...(secretReportsInfo ? { secretReports: secretReportsInfo } : {}),
+      toolsets: [...mcpToolsetCatalog],
+    }
     if (!tokens) return c.json<McpTokenList>({ tokens: [], available: false, ...info })
     return c.json<McpTokenList>({ tokens: await tokens.list(principal), available: true, ...info })
   })
@@ -456,6 +468,7 @@ export function createApiSurface(deps: ServerDeps) {
       expiresInDays: input.expiresInDays ?? 90,
       ...(input.scopes?.length ? { scopes: input.scopes } : {}),
       ...(input.secretReports && { secretReports: input.secretReports }),
+      ...(input.toolsets && { toolsets: input.toolsets }),
     })
     // The audit event leaves out the reporting choice: administrators read the audit log, and
     // nobody may learn who reports anonymously or not at all.
@@ -466,9 +479,25 @@ export function createApiSurface(deps: ServerDeps) {
         name: result.token.name,
         ...(result.token.expiresAt ? { expiresAt: result.token.expiresAt } : {}),
         ...(result.token.scopes ? { scopes: result.token.scopes } : {}),
+        toolsets: result.token.toolsets,
       },
     })
     return c.json<CreateMcpTokenResult>(result, 201)
+  })
+
+  routes.put('/api-surface/mcp/tokens/:id/toolsets', async (c) => {
+    const principal = principalOf(c)
+    if (bearerToken(c.req.raw))
+      throw new HTTPException(401, { message: 'tokens cannot change tokens; sign in instead' })
+    const input: McpTokenToolsetsInput = await readBody(c, toolsetsSchema)
+    if (!(await tokensOf().setToolsets(principal, c.req.param('id'), input.toolsets)))
+      throw new HTTPException(404, { message: 'no such token' })
+    c.set('audit', {
+      action: 'mcp_token.toolsets',
+      target: { type: 'mcp_token', id: c.req.param('id') },
+      details: { toolsets: input.toolsets },
+    })
+    return c.body(null, 204)
   })
 
   // Not audited at all (see `isAudited`): even the fact that someone changed their reporting
@@ -536,6 +565,7 @@ export function createApiSurface(deps: ServerDeps) {
 
   const fromToken = new WeakMap<Principal, string>()
   const reportingOf = new WeakMap<Principal, SecretReportingMode>()
+  const toolsetsOf = new WeakMap<Principal, readonly McpToolsetName[]>()
   const anonymousReports: ReadonlySet<string> = new Set([REPORT_TOOL])
 
   /** Serves `/mcp`; mount at the application root. */
@@ -566,7 +596,11 @@ export function createApiSurface(deps: ServerDeps) {
     // Signed-in browsers (the tool reference) have no token and see the default choice.
     const reporting = reportingOf.get(principal) ?? DEFAULT_REPORTING_MODE
     const reports = secretReports?.accessFor(principal, reporting)
+    // Signed-in browsers (the tool reference) see every toolset.
+    const toolsets = toolsetsOf.get(principal)
     return handleMcpRequest(c.req.raw, {
+      ...(toolsets && { toolsets }),
+      ...(!toolsets || toolsets.includes('qa') ? { qa: qaToolsAccess(deps, principal) } : {}),
       ...(reports && { secretReports: reports }),
       ...(reports?.mode === 'anonymous' && { unrecorded: anonymousReports }),
       ...(library ? { library } : {}),
@@ -630,6 +664,7 @@ export function createApiSurface(deps: ServerDeps) {
     const principal = withTeams(deps.config, found.principal)
     fromToken.set(principal, found.token)
     reportingOf.set(principal, found.secretReports)
+    toolsetsOf.set(principal, found.toolsets)
     return principal
   }
 

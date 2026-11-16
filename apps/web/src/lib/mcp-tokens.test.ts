@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import { tokenStatus, tokenStatusCounts } from './mcp-tokens.ts'
+import { mcpToolsetCatalog } from '@holtkeeper/api'
+
+import { toggleToolset, toolsetsLabel, tokenStatus, tokenStatusCounts } from './mcp-tokens.ts'
 
 const now = new Date('2026-11-11T12:00:00Z')
 
@@ -29,5 +31,27 @@ describe('mcp token status', () => {
         now,
       ),
     ).toEqual({ active: 2, expiring: 0, expired: 1, unused: 1 })
+  })
+})
+
+describe('mcp token toolsets', () => {
+  const all = mcpToolsetCatalog.map((toolset) => toolset.name)
+  const defaults = all.filter((name) => name !== 'qa')
+
+  test('labels defaults, all, none and a count', () => {
+    expect(toolsetsLabel(defaults, mcpToolsetCatalog)).toBe('Default tools')
+    expect(toolsetsLabel(all, mcpToolsetCatalog)).toBe('All tools')
+    expect(toolsetsLabel([], mcpToolsetCatalog)).toBe('No tools')
+    expect(toolsetsLabel(['catalog', 'qa'], mcpToolsetCatalog)).toBe(`2 of ${all.length} tools`)
+  })
+
+  test('toggles keep catalog order', () => {
+    expect(toggleToolset(['reviews'], 'catalog', true, mcpToolsetCatalog)).toEqual([
+      'catalog',
+      'reviews',
+    ])
+    expect(toggleToolset(['catalog', 'reviews'], 'catalog', false, mcpToolsetCatalog)).toEqual([
+      'reviews',
+    ])
   })
 })

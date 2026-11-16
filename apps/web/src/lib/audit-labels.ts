@@ -31,6 +31,7 @@ const sentences: Record<string, string> = {
   'account.verify': 'Verified an account',
   'account.challenge': 'Asked to verify an account',
   'mcp_token.create': 'Created an agent token',
+  'mcp_token.toolsets': 'Changed the tools of an agent token',
   'mcp_token.delete': 'Revoked an agent token',
   'release.cut': 'Cut a release',
   'release.dismiss': 'Dismissed a release',

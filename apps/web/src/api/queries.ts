@@ -34,6 +34,7 @@ import type {
   DeleteEgressCacheInput,
   CreateMcpTokenInput,
   UpdateMcpTokenInput,
+  McpTokenToolsetsInput,
   UpdateSecretReportInput,
   CreateJobInput,
   ForgeWebhookInput,
@@ -2110,6 +2111,16 @@ export function useUpdateMcpToken() {
   return useMutation({
     mutationFn: ({ tokenId, input }: { tokenId: string; input: UpdateMcpTokenInput }) =>
       api.updateMcpToken(tokenId, input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['mcp', 'tokens'] }),
+  })
+}
+
+/** Sets which toolsets one of the viewer's MCP tokens serves (audited). */
+export function useSetMcpTokenToolsets() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ tokenId, input }: { tokenId: string; input: McpTokenToolsetsInput }) =>
+      api.setMcpTokenToolsets(tokenId, input),
     onSuccess: () => client.invalidateQueries({ queryKey: ['mcp', 'tokens'] }),
   })
 }

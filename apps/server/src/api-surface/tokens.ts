@@ -1,6 +1,12 @@
 import type { Action, Grant, Principal } from '@holtkeeper/access'
 import { grantSchema } from '@holtkeeper/access'
-import type { McpTokenScope, McpTokenView, SecretReportingMode } from '@holtkeeper/api'
+import {
+  type McpToolsetName,
+  type McpTokenScope,
+  type McpTokenView,
+  type SecretReportingMode,
+  mcpToolsetCatalog,
+} from '@holtkeeper/api'
 import { DEFAULT_REPORTING_MODE, reportingModes } from '@holtkeeper/secret-reports'
 import type { KvStore, UserStore } from '@holtkeeper/store'
 import { z } from 'zod'
@@ -40,6 +46,11 @@ const ownedTokenSchema = z.object({
   scopes: z.array(z.enum(['release', 'tasks'])).optional(),
   /** Absent on tokens issued before the choice existed: `DEFAULT_REPORTING_MODE`. */
   secretReports: z.enum(reportingModes).optional(),
+  /**
+   * Toolsets the owner turned on (`true`) or off (`false`) against their defaults; the rest
+   * follow `mcpToolsetCatalog`, so a toolset added later reaches the token when it is on by default.
+   */
+  toolsets: z.record(z.string(), z.boolean()).optional(),
   hash: z.string(),
 })
 
@@ -56,6 +67,23 @@ const storedTokenSchema = ownedTokenSchema.extend({
 })
 
 type StoredToken = z.infer<typeof storedTokenSchema>
+
+type ToolsetChoices = Record<string, boolean>
+
+/** The toolsets a token serves: its choices over the catalog defaults, in catalog order. */
+const toolsetsOf = (choices: ToolsetChoices = {}): McpToolsetName[] =>
+  mcpToolsetCatalog
+    .filter((toolset) => choices[toolset.name] ?? toolset.defaultOn)
+    .map((toolset) => toolset.name)
+
+/** The choices that make a token serve exactly `toolsets`: only differences from the defaults. */
+const choicesOf = (toolsets: readonly McpToolsetName[]): ToolsetChoices =>
+  Object.fromEntries(
+    mcpToolsetCatalog.flatMap((toolset) => {
+      const on = toolsets.includes(toolset.name)
+      return on === toolset.defaultOn ? [] : [[toolset.name, on]]
+    }),
+  )
 
 const toHex = (bytes: ArrayBuffer) =>
   [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -91,7 +119,11 @@ const view = ({
   lastUsedAt,
   scopes,
   secretReports,
-}: Omit<McpTokenView, 'secretReports'> & { secretReports?: SecretReportingMode | undefined }) => ({
+  toolsets,
+}: Omit<McpTokenView, 'secretReports' | 'toolsets'> & {
+  secretReports?: SecretReportingMode | undefined
+  toolsets?: ToolsetChoices | undefined
+}): McpTokenView => ({
   id,
   name,
   prefix: shown,
@@ -99,8 +131,12 @@ const view = ({
   ...(expiresAt ? { expiresAt } : {}),
   ...(lastUsedAt ? { lastUsedAt } : {}),
   ...(scopes?.length ? { scopes } : {}),
+  toolsets: toolsetsOf(toolsets),
   secretReports: secretReports ?? DEFAULT_REPORTING_MODE,
 })
+
+/** A stored token as its owner's list keeps it, without principal and session. */
+const listed = (token: StoredToken) => ownedTokenSchema.parse(token)
 
 /** Options of `mcpTokens`. */
 export interface McpTokensOptions {
@@ -130,6 +166,28 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
     return alive
   }
 
+  /** Changes one token in both its record and its owner's list; `false` when it is gone. */
+  const update = async (
+    principalId: string,
+    id: string,
+    patch: Pick<Partial<StoredToken>, 'secretReports' | 'toolsets'>,
+  ) => {
+    const tokens = await live(principalId)
+    const token = tokens.find((item) => item.id === id)
+    if (!token) return false
+    const parsed = storedTokenSchema.safeParse(await kv.get(tokenKey(token.hash)))
+    if (!parsed.success) return false
+    const ttl = parsed.data.expiresAt
+      ? Math.max(1, Math.ceil((Date.parse(parsed.data.expiresAt) - now().getTime()) / 1000))
+      : undefined
+    await kv.set(tokenKey(token.hash), { ...parsed.data, ...patch }, ttl)
+    await kv.set(
+      ownerKey(principalId),
+      tokens.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    )
+    return true
+  }
+
   return {
     /** The caller's tokens that have not expired, newest first. */
     list: async (principal: Principal): Promise<McpTokenView[]> =>
@@ -152,6 +210,8 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         expiresInDays: number
         scopes?: readonly McpTokenScope[]
         secretReports?: SecretReportingMode
+        /** Default the catalog defaults. */
+        toolsets?: readonly McpToolsetName[]
       },
     ) {
       const scopes = [...new Set(input.scopes ?? [])]
@@ -162,6 +222,7 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         ? new Date(createdAt.getTime() + input.expiresInDays * 86_400_000).toISOString()
         : undefined
       const user = principal.provider === 'users' ? await users?.getUser(principal.id) : undefined
+      const toolsets = input.toolsets ? choicesOf(input.toolsets) : {}
       const token: StoredToken = {
         id: hash.slice(0, 16),
         name: input.name,
@@ -170,6 +231,7 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         ...(expiresAt ? { expiresAt } : {}),
         ...(scopes.length ? { scopes } : {}),
         secretReports: input.secretReports ?? DEFAULT_REPORTING_MODE,
+        ...(Object.keys(toolsets).length ? { toolsets } : {}),
         hash,
         principal: { ...principal, grants: tokenGrants(principal.grants, scopes) },
         ...(user ? { sessionVersion: user.sessionVersion } : {}),
@@ -179,10 +241,7 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         token,
         input.expiresInDays ? input.expiresInDays * 86_400 : undefined,
       )
-      await kv.set(ownerKey(principal.id), [
-        ...(await live(principal.id)),
-        { ...view(token), hash },
-      ])
+      await kv.set(ownerKey(principal.id), [...(await live(principal.id)), listed(token)])
       return { token: view(token), secret }
     },
 
@@ -190,22 +249,15 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
      * Sets how one of the caller's tokens reports exposed secrets; `false` when it has none with
      * that id. Takes effect with the token's next request.
      */
-    async setReporting(principal: Principal, id: string, mode: SecretReportingMode) {
-      const tokens = await live(principal.id)
-      const token = tokens.find((item) => item.id === id)
-      if (!token) return false
-      const parsed = storedTokenSchema.safeParse(await kv.get(tokenKey(token.hash)))
-      if (!parsed.success) return false
-      const ttl = parsed.data.expiresAt
-        ? Math.max(1, Math.ceil((Date.parse(parsed.data.expiresAt) - now().getTime()) / 1000))
-        : undefined
-      await kv.set(tokenKey(token.hash), { ...parsed.data, secretReports: mode }, ttl)
-      await kv.set(
-        ownerKey(principal.id),
-        tokens.map((item) => (item.id === id ? { ...item, secretReports: mode } : item)),
-      )
-      return true
-    },
+    setReporting: (principal: Principal, id: string, mode: SecretReportingMode) =>
+      update(principal.id, id, { secretReports: mode }),
+
+    /**
+     * Sets which toolsets one of the caller's tokens serves; `false` when it has none with that
+     * id. Takes effect with the token's next request.
+     */
+    setToolsets: (principal: Principal, id: string, toolsets: readonly McpToolsetName[]) =>
+      update(principal.id, id, { toolsets: choicesOf(toolsets) }),
 
     /** Revokes one of the caller's tokens; `false` when it has none with that id. */
     async revoke(principal: Principal, id: string) {
@@ -222,12 +274,17 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
 
     /**
      * The principal behind `Authorization: Bearer hk_mcp_…` with the token's grants, the token's
-     * id and how it reports exposed secrets, or `undefined` when the request carries no valid token.
+     * id, how it reports exposed secrets and the toolsets it serves, or `undefined` when the
+     * request carries no valid token.
      */
-    async authenticate(
-      request: Request,
-    ): Promise<
-      { principal: Principal; token: string; secretReports: SecretReportingMode } | undefined
+    async authenticate(request: Request): Promise<
+      | {
+          principal: Principal
+          token: string
+          secretReports: SecretReportingMode
+          toolsets: McpToolsetName[]
+        }
+      | undefined
     > {
       const header = request.headers.get('authorization') ?? ''
       const secret = /^Bearer\s+(hk_mcp_[\w-]+)$/i.exec(header.trim())?.[1]
@@ -268,6 +325,7 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         principal,
         token: stored.id,
         secretReports: stored.secretReports ?? DEFAULT_REPORTING_MODE,
+        toolsets: toolsetsOf(stored.toolsets),
       }
     },
   }

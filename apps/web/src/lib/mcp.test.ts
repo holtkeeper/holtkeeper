@@ -60,11 +60,13 @@ test('groupTools splits package and library tools and drops empty groups', () =>
       tool('search_knowledge'),
       tool('evaluate_dependency'),
       tool('get_symbol'),
+      tool('qa_task'),
     ]).map((group) => [group.id, group.tools.map((t) => t.name)]),
   ).toEqual([
     ['packages', ['list_packages', 'get_symbol']],
     ['libraries', ['library_source', 'evaluate_dependency']],
     ['knowledge', ['search_knowledge']],
+    ['qa', ['qa_task']],
   ])
   expect(groupTools([tool('list_packages')]).map((group) => group.id)).toEqual(['packages'])
 })

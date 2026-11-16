@@ -82,6 +82,7 @@ import type {
   CreateMcpTokenInput,
   CreateMcpTokenResult,
   McpTokenList,
+  McpTokenToolsetsInput,
   McpUsageOverview,
   SecretReportList,
   SecretReportView,
@@ -451,6 +452,8 @@ export const api = {
     request<void>('DELETE', `/api/api-surface/mcp/tokens/${id(tokenId)}`),
   updateMcpToken: (tokenId: string, input: UpdateMcpTokenInput) =>
     request<void>('PATCH', `/api/api-surface/mcp/tokens/${id(tokenId)}`, { body: input }),
+  setMcpTokenToolsets: (tokenId: string, input: McpTokenToolsetsInput) =>
+    request<void>('PUT', `/api/api-surface/mcp/tokens/${id(tokenId)}/toolsets`, { body: input }),
   secretReports: () => request<SecretReportList>('GET', '/api/secret-reports'),
   updateSecretReport: (reportId: string, input: UpdateSecretReportInput) =>
     request<SecretReportView>('PATCH', `/api/secret-reports/${id(reportId)}`, { body: input }),

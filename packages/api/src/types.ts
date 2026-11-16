@@ -113,6 +113,8 @@ import type {
 } from '@holtkeeper/usages'
 import type { AllowlistEntry, Severity } from '@holtkeeper/vuln'
 
+import type { McpToolsetInfo, McpToolsetName } from './mcp.ts'
+
 /** Error body of every non-2xx JSON response. */
 export interface ApiError {
   error: string
@@ -4794,6 +4796,8 @@ export interface McpTokenView {
   lastUsedAt?: Timestamp
   /** Extra powers beyond reading; absent for read-only tokens. */
   scopes?: McpTokenScope[]
+  /** Toolsets the endpoint serves the token, in catalog order (`mcpToolsetCatalog`). */
+  toolsets: McpToolsetName[]
   /**
    * How the token's agents report exposed secrets. Only the owner ever sees it: no administrator
    * view, audit event or statistic carries it.
@@ -4816,6 +4820,8 @@ export interface McpTokenList {
   available: boolean
   /** Secret reports of this deployment; absent when `server.secretReports` is `false`. */
   secretReports?: SecretReportsInfo
+  /** The toolsets a token can turn on or off, with their defaults. */
+  toolsets: McpToolsetInfo[]
 }
 
 /**
@@ -4846,6 +4852,16 @@ export interface CreateMcpTokenInput {
   scopes?: McpTokenScope[]
   /** Default `SecretReportsInfo.defaultMode`. */
   secretReports?: SecretReportingMode
+  /** Toolsets to serve; default `defaultMcpToolsets` (QA tasks off). */
+  toolsets?: McpToolsetName[]
+}
+
+/**
+ * `PUT /api/api-surface/mcp/tokens/:id/toolsets`: the toolsets the token serves from its next
+ * call; audited.
+ */
+export interface McpTokenToolsetsInput {
+  toolsets: McpToolsetName[]
 }
 
 /** Answer to `POST /api/api-surface/mcp/tokens`. */

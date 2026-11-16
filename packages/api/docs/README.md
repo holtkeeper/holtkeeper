@@ -5,6 +5,7 @@ The HTTP contract between the server and its clients (web UI, CLI): request and 
 ## Helpers
 
 - `summarizeRun(run)` — the numbers lists and charts show: active findings by severity, fixed, allowlisted, expired allowlist entries, changed files, and the languages and package managers involved.
+- `mcpToolsetCatalog`, `mcpToolsetNames`, `defaultMcpToolsets`, `isMcpToolsetName` (`mcp.ts`) — the MCP toolsets a token can be given or denied (`McpToolsetName`), with labels, descriptions and whether new tokens get them (`McpToolsetInfo.defaultOn`; QA tasks are off). The server resolves tokens against it and the web app draws the choice from it.
 - `sourceInfo(source)` — which package manager and language a finding's file belongs to (`pnpm-lock.yaml` → pnpm / JavaScript, `go.mod` → Go modules / Go, `uv.lock` → uv / Python, ...). This is what makes reports look the same for every ecosystem.
 - Re-exported from [@holtkeeper/access](../../access/docs/README.md) so clients need no second import: the path helpers of `@holtkeeper/access/paths` (`splitPattern`, `hasWildcard`, `isExactPattern`, `globMatches`, `patternMatches`, `patternWithin`, `pathAncestors`, `parentFolder`, `commonFolder`, `folderPattern`, `sharedShape`; all pure JavaScript, so they run in the browser), `TEAM_KEY_PATTERN` with the `TeamMember` and `TeamRole` types of `@holtkeeper/access/teams`, and `roleOf` / `Role`. The old group helpers (`GROUP_KEY_PATTERN`, `groupLineage`, `isSubgroup`, `leafGroups`, `parentGroup`, `rootGroup`, `GroupMatch`) are gone: folders replace subgroups.
 

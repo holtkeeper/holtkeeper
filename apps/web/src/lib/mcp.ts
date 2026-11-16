@@ -114,10 +114,11 @@ const knowledgeTools = new Set(['search_knowledge', 'get_knowledge', 'propose_kn
 const isLibraryTool = (name: string) =>
   name === 'evaluate_dependency' || (libraryTools as readonly string[]).includes(name)
 const isKnowledgeTool = (name: string) => knowledgeTools.has(name)
+const isQaTool = (name: string) => name.startsWith('qa_')
 
 /**
- * `tools` split into the catalog of the organization's packages, third-party libraries and the
- * knowledge base; empty groups are left out.
+ * `tools` split into the catalog of the organization's packages, third-party libraries, the
+ * knowledge base and QA tasks; empty groups are left out.
  */
 export const groupTools = (tools: readonly McpTool[]) =>
   [
@@ -126,7 +127,9 @@ export const groupTools = (tools: readonly McpTool[]) =>
       label: 'Your packages',
       description:
         'Exports, versions, usages and upgrade impact of the packages your repositories publish.',
-      tools: tools.filter((tool) => !isLibraryTool(tool.name) && !isKnowledgeTool(tool.name)),
+      tools: tools.filter(
+        (tool) => !isLibraryTool(tool.name) && !isKnowledgeTool(tool.name) && !isQaTool(tool.name),
+      ),
     },
     {
       id: 'libraries',
@@ -141,5 +144,12 @@ export const groupTools = (tools: readonly McpTool[]) =>
       description:
         'Decisions, conventions and migration notes of the knowledge base; proposals from agents wait for review in Knowledge › Notes.',
       tools: tools.filter((tool) => isKnowledgeTool(tool.name)),
+    },
+    {
+      id: 'qa',
+      label: 'QA tasks',
+      description:
+        'Changes, test ids and stored test notes of the tasks in Releases › QA. Off for new tokens; turn it on in a token’s tools.',
+      tools: tools.filter((tool) => isQaTool(tool.name)),
     },
   ].filter((group) => group.tools.length)

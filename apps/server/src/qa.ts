@@ -1,4 +1,5 @@
 import type { Principal } from '@holtkeeper/access'
+import { ToolError } from '@holtkeeper/agent-tools'
 import type {
   QaChangeView,
   QaSummaryView,
@@ -40,6 +41,7 @@ import { z } from 'zod'
 
 import { type ServerDeps, repoKey, repoTarget } from './context.ts'
 import { issueTrackerFor } from './issues.ts'
+import type { QaToolsAccess } from './tools/qa.ts'
 import { listedRepos } from './updates.ts'
 import { canSee } from './visibility.ts'
 
@@ -563,4 +565,26 @@ export function qaServiceFor(deps: ServerDeps): QaService {
     services.set(deps, service)
   }
   return service
+}
+
+/**
+ * The `qa` MCP toolset's access for `principal`: the same lists and tasks the HTTP routes answer
+ * them, with unknown teams and keys as `ToolError`s. It never writes summaries.
+ */
+export function qaToolsAccess(deps: ServerDeps, principal: Principal): QaToolsAccess {
+  const qa = qaServiceFor(deps)
+  return {
+    tasks: ({ days, team }) => {
+      if (team && !deps.config.teams[team]) throw new ToolError(`Unknown team ${team}.`)
+      return qa.tasks(principal, { days, ...(team ? { team } : {}) })
+    },
+    task: (key) =>
+      qa.task(principal, key).catch((error: unknown) => {
+        if (error instanceof QaTaskNotFoundError)
+          throw new ToolError(
+            `No change in the last 90 days of repositories you can read names ${key}; check the key or call qa_tasks.`,
+          )
+        throw error
+      }),
+  }
 }
