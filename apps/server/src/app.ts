@@ -43,6 +43,7 @@ import { limitRoutes } from './routes/limits.ts'
 import { mediaRoutes } from './routes/media.ts'
 import { messageRoutes } from './routes/messages.ts'
 import { preferenceRoutes } from './routes/preferences.ts'
+import { qaRoutes } from './routes/qa.ts'
 import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { repoPageRoutes } from './routes/repo-page.ts'
@@ -162,6 +163,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', automationRoutes(deps))
   api.route('/', repoAvatarRoutes(deps))
   api.route('/', releaseRoutes(deps))
+  api.route('/', qaRoutes(deps))
   api.route('/', bundleRoutes(deps))
   api.route('/', assetsRoutes(deps))
   api.route('/', coverageRoutes(deps))

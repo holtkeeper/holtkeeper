@@ -55,6 +55,7 @@
     "@holtkeeper/mr-policies": "workspace:*",
     "@holtkeeper/notify": "workspace:*",
     "@holtkeeper/propagate": "workspace:*",
+    "@holtkeeper/qa": "workspace:*",
     "@holtkeeper/release": "workspace:*",
     "@holtkeeper/renovate": "workspace:*",
     "@holtkeeper/report": "workspace:*",

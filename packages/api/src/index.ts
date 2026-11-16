@@ -37,6 +37,16 @@ export {
 export type { FamilySuggestion, GuideBlock, GuideLayer, GuideTask } from '@holtkeeper/guide'
 export type { Issue, IssueCategory } from '@holtkeeper/issues'
 export type {
+  QaChange,
+  QaChangeDetail,
+  QaChangeKind,
+  QaFileChange,
+  QaStaleness,
+  QaSummarySections,
+  TestIdFileChange,
+  TestIdRef,
+} from '@holtkeeper/qa'
+export type {
   ApiChange,
   ApiEntry,
   ApiPackage,

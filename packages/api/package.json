@@ -21,6 +21,7 @@
     "@holtkeeper/guide": "workspace:*",
     "@holtkeeper/issues": "workspace:*",
     "@holtkeeper/jobs": "workspace:*",
+    "@holtkeeper/qa": "workspace:*",
     "@holtkeeper/release": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/store": "workspace:*",

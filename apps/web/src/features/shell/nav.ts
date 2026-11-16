@@ -6,6 +6,7 @@ import {
   Bot,
   Boxes,
   ChartColumn,
+  ClipboardCheck,
   CircleDollarSign,
   CodeXml,
   FileSearch,
@@ -105,6 +106,7 @@ export interface NavItem {
     | '/quality/reviews'
     | '/releases'
     | '/releases/timeline'
+    | '/releases/qa'
     | '/releases/setup'
     | '/knowledge/handbook'
     | '/knowledge/guide'
@@ -270,6 +272,13 @@ const navItems: readonly NavItem[] = [
     to: '/releases/timeline',
     label: 'Timeline',
     icon: ListTree,
+    requires: 'releases:read',
+  },
+  {
+    workspace: 'releases',
+    to: '/releases/qa',
+    label: 'QA',
+    icon: ClipboardCheck,
     requires: 'releases:read',
   },
   {

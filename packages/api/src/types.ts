@@ -25,6 +25,7 @@ import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
 import type { FamilySuggestion, GuideBlock, GuideCaps, GuideTask } from '@holtkeeper/guide'
 import type { Issue } from '@holtkeeper/issues'
 import type { JobLogLine, JobLogPage, JobStep, JobWait, WaitReason } from '@holtkeeper/jobs'
+import type { QaChange, QaChangeDetail, QaStaleness, QaSummarySections } from '@holtkeeper/qa'
 import type {
   DeployState,
   FlowDetection,
@@ -2250,6 +2251,109 @@ export interface ReleaseDetectView {
   repo: RepoRef
   detection: FlowDetection
   configured: boolean
+}
+
+/** How many changes of each kind a QA task has. */
+export interface QaChangeCounts {
+  /** Merged merge requests. */
+  merged: number
+  /** Open merge requests, not merged yet. */
+  open: number
+  /** Commits and merges pushed without a merge request. */
+  direct: number
+}
+
+/** One task of Releases › QA. */
+export interface QaTaskRow {
+  key: string
+  /** The tracker's title, else one taken from merge request and commit titles; may be empty. */
+  title: string
+  issue?: Issue
+  /** The tracker page: the issue's own, else `changelog.ticketUrl` of the release flow. */
+  url?: string
+  /** Repositories with changes of the task in the period, by newest change. */
+  repos: RepoRef[]
+  /** Owner teams of `repos`, for the scope switch. */
+  teams: string[]
+  /** Time of the newest change in the period. */
+  lastAt: string
+  counts: QaChangeCounts
+  authors: string[]
+  /** State of the newest summary the caller may read: `stale` when changes came or went since. */
+  summary?: 'fresh' | 'stale'
+}
+
+/**
+ * `GET /api/qa/tasks?days=&team=`: tasks with changes in the last `days` (7, 30 or 90) in the
+ * repositories the caller may read releases of, newest first. Repositories are read from the
+ * forges in the background and kept for a few minutes; `pending` counts those not read yet, so
+ * clients ask again while it is above zero.
+ */
+export interface QaTaskList {
+  tasks: QaTaskRow[]
+  days: number
+  /** Changes in the period without a ticket key or with placeholder keys only; not listed. */
+  untracked: number
+  repos: {
+    /** Repositories with the `qa` setting on that the caller may read. */
+    listed: number
+    /** Of them, read from the forge at least once. */
+    read: number
+    /** Of them, not read yet; reading has started. */
+    pending: number
+    /** Repositories whose last read failed, as `forge:path`. */
+    failed: string[]
+  }
+  /** When the least recently read repository was read. */
+  readAt?: string
+}
+
+/** One change of a QA task, with what its diff touches when the forge could tell. */
+export type QaChangeView = QaChange & {
+  detail?: QaChangeDetail
+  /** Why `detail` is missing. */
+  detailError?: string
+}
+
+/** A QA summary as the caller sees it. */
+export interface QaSummaryView {
+  sections: QaSummarySections
+  at: string
+  by: { id: string; name: string }
+  model?: string
+  costUsd?: number
+  /** Repositories it was written from, as `forge:path`. */
+  repos: string[]
+  /** How many changes it was written from. */
+  changes: number
+  /** What changed since it was written; absent while it is current. */
+  stale?: QaStaleness
+}
+
+/**
+ * `GET /api/qa/task?key=`: one task with every change of the last 90 days in the repositories the
+ * caller may read releases of, newest first, and the newest summary written from repositories
+ * the caller may all read.
+ */
+export interface QaTaskView {
+  key: string
+  title: string
+  issue?: Issue
+  url?: string
+  changes: QaChangeView[]
+  repos: RepoRef[]
+  summary?: QaSummaryView
+  /** Repositories not read yet; the task may have more changes. */
+  pending: number
+  /** `summarize`: `analyses:run` on the repository of the newest change and an AI agent for it. */
+  can: { summarize: boolean }
+  /** Why `can.summarize` is false, for the button's hint. */
+  summarizeHint?: string
+}
+
+/** `POST /api/qa/summary`: write a new summary of a task; answers its `QaSummaryView`. */
+export interface QaSummaryInput {
+  key: string
 }
 
 /** `GET /api/releases/repo?repo=`: everything the release page of one repository shows. */

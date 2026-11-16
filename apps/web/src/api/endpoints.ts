@@ -1,4 +1,7 @@
 import type {
+  QaSummaryView,
+  QaTaskList,
+  QaTaskView,
   AssetsOverview,
   AssetsQuery,
   BranchesOverview,
@@ -655,6 +658,10 @@ export const api = {
   freshnessOverview: () => request<FreshnessOverview>('GET', '/api/automation/freshness'),
   backfillAnalyses: (input: AnalysisBackfillInput) =>
     request<AnalysisBackfillStarted>('POST', '/api/analyses/backfill', { body: input }),
+  qaTasks: (days: number) => request<QaTaskList>('GET', '/api/qa/tasks', { query: { days } }),
+  qaTask: (key: string) => request<QaTaskView>('GET', '/api/qa/task', { query: { key } }),
+  summarizeQaTask: (key: string) =>
+    request<QaSummaryView>('POST', '/api/qa/summary', { body: { key } }),
   releaseOverview: (refresh = false) =>
     request<ReleaseOverview>('GET', '/api/releases/overview', {
       query: { refresh: refresh ? 1 : undefined },

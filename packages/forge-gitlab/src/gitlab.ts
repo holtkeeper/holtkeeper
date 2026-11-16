@@ -92,6 +92,8 @@ const mergeRequestRecordSchema = mergeRequestSchema.extend({
   merged_at: time,
   closed_at: time,
   sha: z.string().nullable().optional(),
+  merge_commit_sha: z.string().nullable().optional(),
+  squash_commit_sha: z.string().nullable().optional(),
 })
 
 const pipelineRunSchema = pipelineSchema.extend({
@@ -451,6 +453,8 @@ const toMergeRequestRecord = (
   mergedAt: mr.merged_at ?? undefined,
   closedAt: mr.state === 'closed' ? (mr.closed_at ?? undefined) : undefined,
   ...(mr.sha && { headSha: mr.sha }),
+  ...(mr.merge_commit_sha && { mergeCommitSha: mr.merge_commit_sha }),
+  ...(mr.squash_commit_sha && { squashCommitSha: mr.squash_commit_sha }),
 })
 
 const toPipelineRun = (pipeline: z.infer<typeof pipelineRunSchema>): PipelineRun => ({
@@ -1108,6 +1112,7 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     async listCommits(repo, query) {
       const list = client.paginate(`${project(repo)}/repository/commits`, commitRecordSchema, {
         ref_name: query.since ? `${query.since}..${query.ref}` : query.ref,
+        since: query.after,
         per_page: pageSize(query.limit),
       })
       return (await take(list, query.limit)).map((commit) => ({
@@ -1120,6 +1125,15 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         message: commit.message ?? commit.title,
         ...(commit.web_url ? { webUrl: commit.web_url } : {}),
       }))
+    },
+
+    async listMergeRequestCommits(repo, id) {
+      const list = client.paginate(
+        `${project(repo)}/merge_requests/${id}/commits`,
+        z.object({ id: z.string() }),
+        { per_page: 100 },
+      )
+      return (await take(list, undefined)).map((commit) => commit.id)
     },
 
     async headCommit(repo) {

@@ -67,6 +67,7 @@ describe('scopes', () => {
     expect(guideTaskOf('review')).toEqual({ task: 'review' })
     expect(guideTaskOf('release-notes')).toEqual({ task: 'release-notes' })
     expect(guideTaskOf('tests')).toEqual({ task: 'agent', section: 'testing' })
+    expect(guideTaskOf('qa-notes')).toEqual({ task: 'agent', section: 'testing' })
     expect(guideTaskOf('refactor')).toEqual({ task: 'agent' })
   })
 })

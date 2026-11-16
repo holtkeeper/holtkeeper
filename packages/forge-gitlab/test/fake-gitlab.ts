@@ -32,6 +32,10 @@ interface FakeMergeRequest {
   updated_at: string
   merged_at: string | null
   closed_at: string | null
+  merge_commit_sha?: string | null
+  squash_commit_sha?: string | null
+  /** Shas the commits endpoint lists, newest first. */
+  commits?: string[]
 }
 
 export interface FakeDiff {
@@ -333,6 +337,9 @@ export class FakeGitLab {
         | 'updated_at'
         | 'merged_at'
         | 'closed_at'
+        | 'merge_commit_sha'
+        | 'squash_commit_sha'
+        | 'commits'
       >
     > & { title: string },
   ): FakeMergeRequest {
@@ -532,6 +539,11 @@ export class FakeGitLab {
             author_name: 'Fake User',
             authored_date: EPOCH,
           },
+      )
+      .filter(
+        (commit) =>
+          !url.searchParams.has('since') ||
+          commit.authored_date >= (url.searchParams.get('since') ?? ''),
       )
       .toSorted((a, b) => b.authored_date.localeCompare(a.authored_date))
       .map((commit) => ({
@@ -933,6 +945,11 @@ export class FakeGitLab {
     const mr = project.mergeRequests.find((m) => m.iid === Number(rest[1]))
     if (!mr) return json(404, { message: '404 Not found' })
     if (rest.length === 2 && method === 'GET') return json(200, this.mrJson(project, mr))
+    if (rest[2] === 'commits' && method === 'GET')
+      return this.page(
+        url,
+        (mr.commits ?? []).map((sha) => ({ id: sha })),
+      )
     if (rest.length === 2 && method === 'PUT') {
       if (typeof body['title'] === 'string') mr.title = body['title']
       if (typeof body['description'] === 'string') mr.description = body['description']
@@ -1164,6 +1181,8 @@ export class FakeGitLab {
       updated_at: mr.updated_at,
       merged_at: mr.merged_at,
       closed_at: mr.closed_at,
+      merge_commit_sha: mr.merge_commit_sha ?? null,
+      squash_commit_sha: mr.squash_commit_sha ?? null,
       web_url: this.webUrl(`${project.path}/-/merge_requests/${mr.iid}`),
     }
   }

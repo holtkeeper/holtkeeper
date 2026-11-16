@@ -1,4 +1,5 @@
 import type {
+  QaTaskView,
   AcceptLearningInput,
   AcceptLearningsInput,
   AllowlistRenewInput,
@@ -140,6 +141,9 @@ export const keys = {
   users: ['users'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
+  qa: ['qa'] as const,
+  qaTasks: (days: number) => ['qa', 'tasks', days] as const,
+  qaTask: (key: string) => ['qa', 'task', key] as const,
   releases: ['releases'] as const,
   releaseOverview: ['releases', 'overview'] as const,
   releaseTimeline: (repo: RepoRef) => ['releases', 'timeline', repoKey(repo)] as const,
@@ -2212,6 +2216,40 @@ export const useReleaseDeploy = (repo: RepoRef, tag: string | undefined, initial
     ...(initial && initial.tag === tag ? { initialData: initial } : {}),
     refetchInterval: (query) => (deployActive(query.state.data) ? 5_000 : 30_000),
   })
+
+/**
+ * Releases › QA tasks of the last `days`; asks again every 3 s while the server still reads
+ * repositories, else every 2 minutes.
+ */
+export const useQaTasks = (days: number) =>
+  useQuery({
+    queryKey: keys.qaTasks(days),
+    queryFn: () => api.qaTasks(days),
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) => ((query.state.data?.repos.pending ?? 0) > 0 ? 3_000 : 120_000),
+  })
+
+/** One QA task with its changes and summary; asks again while repositories are still read. */
+export const useQaTask = (key: string) =>
+  useQuery({
+    queryKey: keys.qaTask(key),
+    queryFn: () => api.qaTask(key),
+    refetchInterval: (query) => ((query.state.data?.pending ?? 0) > 0 ? 3_000 : false),
+  })
+
+/** Writes a new AI summary of a QA task; puts it into the task and refreshes the lists. */
+export function useSummarizeQaTask(key: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.summarizeQaTask(key),
+    onSuccess: (summary) => {
+      client.setQueryData<QaTaskView>(keys.qaTask(key), (view) =>
+        view ? { ...view, summary } : view,
+      )
+      return client.invalidateQueries({ queryKey: keys.qa })
+    },
+  })
+}
 
 /** Every release action; each refreshes the release queries when it settles, accepting also Inbox and Home. */
 export function useReleaseActions() {

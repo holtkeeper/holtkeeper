@@ -86,6 +86,7 @@
         "@holtkeeper/mr-policies": "workspace:*",
         "@holtkeeper/notify": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",
+        "@holtkeeper/qa": "workspace:*",
         "@holtkeeper/release": "workspace:*",
         "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
@@ -325,6 +326,7 @@
         "@holtkeeper/guide": "workspace:*",
         "@holtkeeper/issues": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
+        "@holtkeeper/qa": "workspace:*",
         "@holtkeeper/release": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
@@ -812,6 +814,18 @@
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/vuln-js": "workspace:*",
         "@holtkeeper/web-paths": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/qa": {
+      "name": "@holtkeeper/qa",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/issues": "workspace:*",
+        "@holtkeeper/release": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -1416,6 +1430,8 @@
     "@holtkeeper/notify": ["@holtkeeper/notify@workspace:packages/notify"],
 
     "@holtkeeper/propagate": ["@holtkeeper/propagate@workspace:packages/propagate"],
+
+    "@holtkeeper/qa": ["@holtkeeper/qa@workspace:packages/qa"],
 
     "@holtkeeper/quality": ["@holtkeeper/quality@workspace:packages/quality"],
 

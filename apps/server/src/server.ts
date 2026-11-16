@@ -54,6 +54,7 @@ import {
 import { kvMessageStore } from '@holtkeeper/messages'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
 import { createHttpRegistry, createPropagateAnalyzer } from '@holtkeeper/propagate'
+import { qaSettingsDefinition } from '@holtkeeper/qa'
 import {
   releaseAnnounceDefinition,
   releaseNotifyDefinition,
@@ -533,6 +534,7 @@ export async function startServer(
       pollingSetting,
       trackersSetting,
       releaseSettingsDefinition,
+      qaSettingsDefinition,
       releaseNotifyDefinition,
       releaseAnnounceDefinition,
       securityAlertsDefinition,

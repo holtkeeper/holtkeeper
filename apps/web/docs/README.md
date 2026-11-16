@@ -270,11 +270,12 @@ Signed-out pages share `AuthCard` (`features/auth/AuthCard.tsx`): a top strip wi
 
 ## Releases
 
-**Releases** (`features/releases`, Releases workspace, shown with `releases:read`) has **Overview**, **Timeline** and **Flow setup**. Release-specific components stay in `features/releases`. Per page:
+**Releases** (`features/releases`, Releases workspace, shown with `releases:read`) has **Overview**, **Timeline**, **Flow setup** and **QA** (`features/qa`). Release-specific components stay in `features/releases`. Per page:
 
 - [Overview](releases.md): `/releases`, the strip, the queue of repositories that need a person and the fleet table (`lib/release-overview.ts`)
 - [Timeline](release-timeline.md): `/releases/timeline?repo=`, one repository's next version, environments and past versions
 - [Flow setup](release-setup.md): `/releases/setup?repo=`, the setup wizard and the flow editor of a configured repository
+- [QA](qa.md): `/releases/qa`, tasks with recent changes across repositories, and `/releases/qa/$key`, one task with its changes and an AI summary for testing
 
 ## Quality
 
@@ -343,7 +344,7 @@ The run record (`AuditRunPage`, `/supply/security/runs/$runId`, `GET /api/audit-
   | Chat      | `/chat?thread=`                                                                                                                                                                                                                                                            |
   | Supply    | `/supply/libraries?repo=&library=&tab=`, `/supply/libraries/$ecosystem/$`, `/supply/security?view=&repo=` (and `/supply/security/runs/$runId`), `/supply/secret-reports?report=`, `/supply/licenses?repo=`, `/supply/stack?tab=&line=`, `/supply/public-api?tab=&q=&repo=` |
   | Quality   | `/quality/coverage?repo=`, `/quality/bundles?repo=&open=&tab=&version=&analysis=`, `/quality/assets?repo=`, `/quality/ci?repo=`, `/quality/branches?repo=`, `/quality/reviews?repo=&review=`                                                                               |
-  | Releases  | `/releases`, `/releases/timeline?repo=`, `/releases/setup?repo=`                                                                                                                                                                                                           |
+  | Releases  | `/releases`, `/releases/timeline?repo=`, `/releases/setup?repo=`, `/releases/qa`, `/releases/qa/$key`                                                                                                                                                                      |
   | Knowledge | `/knowledge/guide`, `/knowledge/notes`, `/knowledge/learnings` (the space stays in `?space=`)                                                                                                                                                                              |
   | Ops       | `/ops/runs`, `/ops/runs/$jobId`, `/ops/tasks?group=&task=&tab=&view=`, `/ops/automation?job=`, `/ops/spend`                                                                                                                                                                |
   | Settings  | `/settings/$section` (`people`, `ai`, `integrations`, `system`, `audit`); `/settings` opens the first visible section                                                                                                                                                      |

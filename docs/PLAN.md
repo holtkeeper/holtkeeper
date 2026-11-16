@@ -142,6 +142,8 @@ Status: the release assistant ([packages/release](../packages/release/docs/READM
 - Deploy: running the pipeline's manual jobs for the tag, waiting, retries, status notifications.
 - Flows are fixed modes (merge request, trunk, external) set per repository in a few settings; a person confirms every step that writes to a forge, in the panel, in chat or over MCP with a confirm token. Repositories are released one at a time; there is no batch mode.
 
+**QA tasks.** Status: Releases › QA ([packages/qa](../packages/qa/docs/README.md)) lists tasks (ticket keys) with changes in the last 7, 30 or 90 days across repositories: merged merge requests, open ones (testing before the merge) and commits pushed without a merge request (marked as unreviewed). Histories are read from the forges on demand, incrementally, and cached; a task shows the files and test attribute changes of its changes, and an AI summary (test cases, ideas per kind of testing, autotest ideas, risks) is written only when a person asks and is marked outdated when new changes arrive. Placeholder keys (`ABC-000`) are ignored through the `qa` setting's `catchAllKeys`. Later: library changes linked to the products that pick them up, cut-offs by release (what a version or candidate brings), an MCP tool and `/holtkeeper qa` in chat, tracker statuses and write-back of test notes.
+
 ## Analyses
 
 Every analysis produces its own data and renders it into the universal report format of [`@holtkeeper/report`](../packages/report/docs/README.md), so one UI shows all of them and compares any two runs (by default the previous release):
@@ -211,6 +213,10 @@ After milestone 0 every next milestone is immediately useful at work: plug it in
 - Where the server is hosted and where tasks run: a dedicated machine/container or GitLab CI runners (then the CLI mode stays primary for a long time).
 - Authentication: a bot account with a PAT, a GitLab group access token or an OAuth app (GitHub App) — this determines permissions and API limits.
 - Web interface access: is SSO via GitLab OAuth enough?
+
+### Changes without a task
+
+Releases › QA lists only changes that name a real ticket key; changes without one, or with only placeholder keys such as `ABC-000`, are counted and left out. They still need testing. Open: show them as a stream by time windows (a day, a week) and by areas (repository, top-level folders, packages touched) instead of per task, how to keep a long-lived placeholder from growing without bound, and whether summaries of such a window are worth their tokens.
 
 ### MCP for developers
 

@@ -120,13 +120,14 @@ export const isGuideTask = (value: unknown): value is GuideTask =>
 /**
  * The task a run of `taskKind` (as agents report it) resolves the Guide for, with the section
  * its work is about: `review` for reviews and thread replies, `release-notes` for release
- * summaries, `tests` work reads `testing`; everything else is an agent task reading `general`.
+ * summaries, `tests` work and QA summaries (`qa-notes`) read `testing`; everything else is an
+ * agent task reading `general`.
  */
 export function guideTaskOf(taskKind: string): { task: GuideTask; section?: GuideSectionName } {
   if (taskKind === 'review') return { task: 'review' }
   if (taskKind === 'release-notes') return { task: 'release-notes' }
   if (taskKind === 'chat') return { task: 'chat' }
-  if (taskKind === 'tests') return { task: 'agent', section: 'testing' }
+  if (taskKind === 'tests' || taskKind === 'qa-notes') return { task: 'agent', section: 'testing' }
   return { task: 'agent' }
 }
 

@@ -14,7 +14,7 @@ export const featureLabel: Record<AiFeature, string> = {
   tasks: 'Agent tasks',
   chat: 'Chat',
   knowledge: 'Guide and learnings',
-  releases: 'Release notes',
+  releases: 'Releases and QA',
   security: 'Vulnerability triage',
   other: 'Other',
 }
@@ -35,7 +35,7 @@ export const featureTaskKinds: Readonly<Record<FilterableFeature, readonly strin
     'knowledge-verify',
     'embedding',
   ],
-  releases: ['release-notes'],
+  releases: ['release-notes', 'qa-notes'],
   security: ['security-triage'],
 }
 

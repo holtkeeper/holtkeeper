@@ -24,7 +24,7 @@ Part of the web app's [Ops](README.md#ai-spend) docs.
 | Agent tasks          | `write-task`, `fix`, `port`, `propagate`, `upgrade`, `propagate-fix`, `tests` |
 | Chat                 | `chat`, `chat-summary`                                                        |
 | Guide and learnings  | `guide`, `learning`, `library-digest`                                         |
-| Release notes        | `release-notes`                                                               |
+| Releases and QA      | `release-notes`, `qa-notes`                                                   |
 | Vulnerability triage | `security-triage`                                                             |
 | Other                | everything else, e.g. `agent`, and runs without a kind                        |
 

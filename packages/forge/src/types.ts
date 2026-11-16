@@ -127,6 +127,10 @@ export interface MergeRequestRecord extends MergeRequest {
   changesCount?: number
   /** The commit the merge request currently points at, when the list carries it. */
   headSha?: string
+  /** The merge commit merging it created on the target branch, when it was merged with one. */
+  mergeCommitSha?: string
+  /** The commit its changes were squashed into on the target branch, when it was squashed. */
+  squashCommitSha?: string
 }
 
 /** Filters for `listMergeRequests`; omitted fields do not filter. */
@@ -278,6 +282,8 @@ export interface CommitQuery {
   ref: string
   /** Leaves out commits reachable from this ref, like `git log since..ref`. */
   since?: string
+  /** Only commits committed at or after this ISO 8601 time, like `git log --since`. */
+  after?: string
   /** At most this many, newest first; all when omitted. */
   limit?: number
 }
@@ -507,6 +513,12 @@ export interface GitForge {
    * `ref` does not exist.
    */
   listCommits?(repo: string, query: CommitQuery): Promise<CommitRecord[]>
+  /**
+   * Shas of the commits a merge request brings, newest first, as the forge lists them for its
+   * latest version. For merges that leave no merge or squash commit (fast-forward), these are the
+   * commits that landed on the target branch.
+   */
+  listMergeRequestCommits?(repo: string, id: number): Promise<string[]>
   /**
    * The commit the default branch points at, in one cheap request; `undefined` for an empty
    * repository.

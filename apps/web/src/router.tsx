@@ -69,6 +69,8 @@ const ReleaseTimelinePage = lazyRouteComponent(
   () => import('./features/releases/ReleaseTimelinePage.tsx'),
   'ReleaseTimelinePage',
 )
+const QaTasksPage = lazyRouteComponent(() => import('./features/qa/QaTasksPage.tsx'), 'QaTasksPage')
+const QaTaskPage = lazyRouteComponent(() => import('./features/qa/QaTaskPage.tsx'), 'QaTaskPage')
 const SetupPage = lazyRouteComponent(() => import('./features/releases/SetupPage.tsx'), 'SetupPage')
 const HomePage = lazyRouteComponent(() => import('./features/home/HomePage.tsx'), 'HomePage')
 const InboxPage = lazyRouteComponent(() => import('./features/inbox/InboxPage.tsx'), 'InboxPage')
@@ -386,6 +388,8 @@ const routeTree = rootRoute.addChildren([
     page('releases', ReleasesPage),
     releasesPage('releases/timeline', ReleaseTimelinePage),
     releasesPage('releases/setup', SetupPage),
+    page('releases/qa', QaTasksPage),
+    page('releases/qa/$key', QaTaskPage),
     knowledgePage('knowledge/handbook'),
     knowledgePage('knowledge/guide'),
     knowledgePage('knowledge/notes'),

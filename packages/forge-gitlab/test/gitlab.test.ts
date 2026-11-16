@@ -522,6 +522,27 @@ describe('pipelines, jobs and tags', () => {
     ).toBe(404)
   })
 
+  test('lists commits after a time and the commits of a merge request', async () => {
+    const { server, forge } = setup()
+    const project = server.addProject('g/a')
+    server.addCommits(project, 'main', ['fix: old'], '2026-01-01T00:00:00Z')
+    const [recent] = server.addCommits(project, 'main', ['feat: recent'], '2026-03-01T00:00:00Z')
+    const commits = await forge.listCommits!('g/a', { ref: 'main', after: '2026-02-01T00:00:00Z' })
+    expect(commits.map((commit) => commit.title)).toEqual(['feat: recent'])
+    expect(server.calls.at(-1)?.url).toContain('since=2026-02-01T00%3A00%3A00Z')
+
+    server.addMergeRequest(project, {
+      title: 'Merged',
+      state: 'merged',
+      merge_commit_sha: 'aaa',
+      squash_commit_sha: 'bbb',
+      commits: [recent ?? ''],
+    })
+    const [merged] = (await forge.listMergeRequests!('g/a', { state: 'merged' })) ?? []
+    expect(merged).toMatchObject({ mergeCommitSha: 'aaa', squashCommitSha: 'bbb' })
+    expect(await forge.listMergeRequestCommits!('g/a', 1)).toEqual([recent ?? ''])
+  })
+
   test('reads push rules', async () => {
     const { server, forge } = setup()
     server.addProject('g/a')
