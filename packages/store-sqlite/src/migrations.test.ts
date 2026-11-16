@@ -336,4 +336,26 @@ describe('migrate', () => {
     await embeddings.put([{ subject: 'knowledge:k1', model: 'fake:m@2', hash: 'h', vector }])
     expect((await embeddings.list({ model: 'fake:m@2' }))[0]?.vector).toEqual(vector)
   })
+
+  test('v32 deletes slack.reviews entries and keeps other settings', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 31),
+    )
+    const insert = (id: string, key: string) =>
+      db.run(
+        `INSERT INTO settings (id, key, scope, value, secret, updated_at)
+         VALUES (?, ?, '{"all":true}', '{}', 0, '2026-10-01T00:00:00.000Z')`,
+        [id, key],
+      )
+    insert('s1', 'slack.reviews')
+    insert('s2', 'releases.announce')
+    migrate(db)
+    expect(versions(db)).toContain(32)
+    db.close()
+    const { settings } = sqliteStore({ path })
+    expect((await settings.list()).map((entry) => entry.key)).toEqual(['releases.announce'])
+  })
 })

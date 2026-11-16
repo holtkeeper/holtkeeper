@@ -754,6 +754,12 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX embeddings_model ON embeddings (model, subject COLLATE "C");
     `,
   },
+  {
+    version: 31,
+    sql: `
+      DELETE FROM settings WHERE key = 'slack.reviews';
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

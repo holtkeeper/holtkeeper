@@ -82,7 +82,7 @@ export interface StatusListEntry {
   /** Absent while no review is known. */
   status?: SlackReviewStatus
   url: string
-  /** Link text, e.g. `widget!7 Add widget`. */
+  /** Link text, e.g. `shapes/widget!7`. */
   label: string
 }
 

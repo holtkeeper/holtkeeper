@@ -16,6 +16,7 @@ export const retiredSettingKeys: ReadonlySet<string> = new Set([
   'analyzers.release-risk',
   'analyzers.warmup',
   'repo.readOnly',
+  'slack.reviews',
 ])
 
 /** Whether `key` is in `retiredSettingKeys`. */

@@ -26,14 +26,13 @@ const SECRET = 'shape-secret'
 const BOUND = 'C0123WIDGET'
 const OTHER = 'C0456OTHER'
 
-let titleLookups: string[]
-let titleFailing: boolean
+let forgeCalls: string[]
 
+/** The status reply never asks the forge for anything: it shows no titles. */
 const forge = {
   kind: 'gitlab',
   getMergeRequest: async (path: string, iid: number) => {
-    titleLookups.push(`${path}!${iid}`)
-    if (titleFailing) throw new Error('forge is down')
+    forgeCalls.push(`${path}!${iid}`)
     return structuredClone(mr)
   },
 } as unknown as GitForge
@@ -123,9 +122,6 @@ const settle = async () => {
 
 const setting = (id: string, key: string, scope: SettingEntry['scope'], value: unknown) =>
   store.settings.put({ id, key, scope, value, secret: false, updatedAt: '2026-10-01T00:00:00Z' })
-
-const bind = (channels: string[], scope: SettingEntry['scope'] = { teams: ['shapes'] }) =>
-  setting(`slack-${JSON.stringify(scope)}`, 'slack.reviews', scope, { channels })
 
 const connect = async (emoji?: Record<string, string>) => {
   await store.kv?.set('chat:slack:connection', {
@@ -233,10 +229,10 @@ const storeReview = (data: ReviewData, createdAt = NOW.toISOString()) =>
     metrics: reviewMetrics(data),
   })
 
-const queueReview = async (head = HEAD, iid = 7) => {
+const queueReview = async (head = HEAD, iid = 7, repo = widget) => {
   const job = await store.jobs.enqueue({
     analyzer: 'review',
-    repo: widget,
+    repo,
     ref: head,
     options: { mergeRequest: iid },
     trigger: 'webhook',
@@ -298,8 +294,7 @@ beforeEach(async () => {
   logs = []
   workspaceEmoji = new Set()
   attempts = []
-  titleLookups = []
-  titleFailing = false
+  forgeCalls = []
   mr = {
     id: 7,
     title: 'Add widget',
@@ -332,7 +327,6 @@ beforeEach(async () => {
   deps.mergeRequestStatus = slack
   app = createApp(deps)
   await connect()
-  await bind([BOUND])
 })
 
 describe('slack events endpoint', () => {
@@ -618,21 +612,22 @@ describe('slack review gates', () => {
     expect(await store.slackMessages?.ofMergeRequest('acme:shapes/widget', 7)).toEqual([])
   })
 
-  test('unbinding the channel later removes the emoji', async () => {
-    await storeReview(review())
-    await message(link())
-    await bind([OTHER])
-    await deps.mergeRequestStatus?.reviewChanged({ repo: widget, mergeRequest: 7 })
-    expect(shownOn()).toEqual({ [`${BOUND}/1700000000.000100`]: [] })
-  })
-
-  test('a channel not bound to the repository is ignored', async () => {
-    await bind([OTHER], { teams: ['tools'] })
+  test('every channel the app is in gets the status, whatever team owns the repository', async () => {
     await storeReview(review())
     await message(link(), { channel: OTHER })
-    expect(reactions).toEqual([])
-    await message(link('tools/gizmo', 3), { channel: BOUND })
-    expect(reactions).toEqual([])
+    await message(link('tools/gizmo', 3), { channel: BOUND, ts: '1700000000.000200' })
+    await queueReview(NEXT, 3, { forge: 'acme', path: 'tools/gizmo' })
+    expect(shownOn()).toEqual({
+      [`${OTHER}/1700000000.000100`]: ['large_green_circle'],
+      [`${BOUND}/1700000000.000200`]: ['eyes'],
+    })
+  })
+
+  test('the retired slack.reviews setting no longer limits the channels', async () => {
+    await setting('old', 'slack.reviews', { teams: ['shapes'] }, { channels: [OTHER] })
+    await storeReview(review())
+    await message(link())
+    expect(reactions).toEqual([`+large_green_circle ${BOUND}/1700000000.000100`])
   })
 
   test('unknown repositories and hosts are ignored', async () => {
@@ -662,12 +657,12 @@ describe('slack status reply', () => {
         threadTs: '1700000000.000100',
         ts: '1700000100.000001',
         text: [
-          `:large_green_circle: Clean — <${MR_URL}/7|widget!7 Add widget>`,
-          `:red_circle: Needs changes — <${MR_URL}/8|widget!8 Add gizmo>`,
+          `:large_green_circle: Clean — <${MR_URL}/7|shapes/widget!7>`,
+          `:red_circle: Needs changes — <${MR_URL}/8|shapes/widget!8>`,
         ].join('\n'),
       },
     ])
-    expect(titleLookups).toEqual([])
+    expect(forgeCalls).toEqual([])
     expect(await store.slackMessages?.replyOf(BOUND, '1700000000.000100')).toMatchObject({
       replyTs: '1700000100.000001',
     })
@@ -685,8 +680,8 @@ describe('slack status reply', () => {
         channel: BOUND,
         ts: reply?.ts ?? '',
         text: [
-          `:large_green_circle: Clean — <${MR_URL}/7|widget!7 Add widget>`,
-          `:eyes: Reviewing — <${MR_URL}/8|widget!8 Add gizmo>`,
+          `:large_green_circle: Clean — <${MR_URL}/7|shapes/widget!7>`,
+          `:eyes: Reviewing — <${MR_URL}/8|shapes/widget!8>`,
         ].join('\n'),
       },
     ])
@@ -731,40 +726,20 @@ describe('slack status reply', () => {
     expect(logs.filter((line) => line.includes('chat:write'))).toHaveLength(1)
   })
 
-  test('titles not in a review come from the forge once and are kept on the rows', async () => {
+  test('merge requests without a review read Not reviewed, with no title and no forge call', async () => {
     await message(`${link('shapes/widget', 7)} ${link('shapes/widget', 8)}`)
-    expect(titleLookups).toEqual(['shapes/widget!7', 'shapes/widget!8'])
     expect(posts[0]?.text).toBe(
       [
-        `Not reviewed — <${MR_URL}/7|widget!7 Add widget>`,
-        `Not reviewed — <${MR_URL}/8|widget!8 Add widget>`,
+        `Not reviewed — <${MR_URL}/7|shapes/widget!7>`,
+        `Not reviewed — <${MR_URL}/8|shapes/widget!8>`,
       ].join('\n'),
     )
     await queueReview(HEAD, 8)
-    expect(titleLookups).toHaveLength(2)
-    expect(
-      (await store.slackMessages?.ofMessage(BOUND, '1700000000.000100'))?.map((row) => row.title),
-    ).toEqual(['Add widget', 'Add widget'])
-  })
-
-  test('a title the forge cannot give is asked once and logged once', async () => {
-    titleFailing = true
-    await message(`${link('shapes/widget', 7)} ${link('shapes/widget', 8)}`)
-    await queueReview(HEAD, 8)
-    await queueReview(NEXT, 7)
-    expect(titleLookups).toEqual(['shapes/widget!7', 'shapes/widget!8'])
-    expect(logs.filter((line) => line.includes('forge is down'))).toHaveLength(2)
-    expect(updates.at(-1)?.text).toBe(
-      [
-        `:eyes: Reviewing — <${MR_URL}/7|widget!7>`,
-        `:eyes: Reviewing — <${MR_URL}/8|widget!8>`,
-      ].join('\n'),
-    )
+    expect(forgeCalls).toEqual([])
   })
 
   test('labels and links keep the path spelling of the repository', async () => {
     const spelled = 'https://git.acme.test/Labs/Gizmo/-/merge_requests'
-    await bind([BOUND], { teams: ['labs'] })
     const data = review()
     await store.analyses.add({
       repo: { forge: 'acme', path: 'Labs/Gizmo' },
@@ -777,15 +752,13 @@ describe('slack status reply', () => {
     await message(`${link('labs/gizmo', 7)} ${link('labs/gizmo', 8)}`)
     expect(posts[0]?.text).toBe(
       [
-        `:large_green_circle: Clean — <${spelled}/7|Gizmo!7 Add widget>`,
-        `Not reviewed — <${spelled}/8|Gizmo!8 Add widget>`,
+        `:large_green_circle: Clean — <${spelled}/7|Labs/Gizmo!7>`,
+        `Not reviewed — <${spelled}/8|Labs/Gizmo!8>`,
       ].join('\n'),
     )
-    expect(titleLookups).toEqual(['Labs/Gizmo!8'])
   })
 
   test('a gate closing for one merge request keeps the reply with the rest', async () => {
-    await bind([BOUND], { teams: ['tools'] })
     await storeReview(review())
     await message(`${link('shapes/widget', 7)} ${link('tools/gizmo', 3)}`)
     expect(posts).toHaveLength(1)
@@ -798,7 +771,7 @@ describe('slack status reply', () => {
       {
         channel: BOUND,
         ts: posts[0]?.ts ?? '',
-        text: `:large_green_circle: Clean — <${MR_URL}/7|widget!7 Add widget>`,
+        text: `:large_green_circle: Clean — <${MR_URL}/7|shapes/widget!7>`,
       },
     ])
     expect(shownOn()).toEqual({ [`${BOUND}/1700000000.000100`]: ['large_green_circle'] })
@@ -821,8 +794,8 @@ describe('slack status reply', () => {
     const final = updates.at(-1)?.text ?? posts[0]?.text
     expect(final).toBe(
       [
-        `:eyes: Reviewing — <${MR_URL}/7|widget!7 Add widget>`,
-        `:large_green_circle: Clean — <${MR_URL}/8|widget!8 Add gizmo>`,
+        `:eyes: Reviewing — <${MR_URL}/7|shapes/widget!7>`,
+        `:large_green_circle: Clean — <${MR_URL}/8|shapes/widget!8>`,
       ].join('\n'),
     )
   })
@@ -930,8 +903,8 @@ describe('slack custom emoji', () => {
     expect(reactions).toEqual([`+hk-changes ${BOUND}/${TS}`])
     expect(posts.map((post) => post.text)).toEqual([
       [
-        `:hk-clean: Clean — <${MR_URL}/7|widget!7 Add widget>`,
-        `:hk-changes: Needs changes — <${MR_URL}/8|widget!8 Add gizmo>`,
+        `:hk-clean: Clean — <${MR_URL}/7|shapes/widget!7>`,
+        `:hk-changes: Needs changes — <${MR_URL}/8|shapes/widget!8>`,
       ].join('\n'),
     ])
   })
@@ -942,8 +915,8 @@ describe('slack custom emoji', () => {
     await message(`${link('shapes/widget', 7)} and ${link('shapes/widget', 8)}`)
     expect(posts.map((post) => post.text)).toEqual([
       [
-        `:large_green_circle: Clean — <${MR_URL}/7|widget!7 Add widget>`,
-        `:red_circle: Needs changes — <${MR_URL}/8|widget!8 Add gizmo>`,
+        `:large_green_circle: Clean — <${MR_URL}/7|shapes/widget!7>`,
+        `:red_circle: Needs changes — <${MR_URL}/8|shapes/widget!8>`,
       ].join('\n'),
     ])
   })

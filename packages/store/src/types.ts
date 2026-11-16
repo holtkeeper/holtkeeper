@@ -1007,8 +1007,6 @@ export interface SlackMessageLink {
   head?: string
   /** Emoji name currently on the message, shared by every link of the message. */
   reaction?: string
-  /** The merge request's title, once something needed it. */
-  title?: string
   createdAt: Timestamp
   updatedAt: Timestamp
 }

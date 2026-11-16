@@ -44,11 +44,10 @@ This page follows the current definitions in the code, which are still moving. T
 
 ## Merge requests
 
-| Key                      | Section        | Value                                                                                                                        | Default             | Edited in               |
-| ------------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
-| `mergeRequests.comments` | Merge requests | `{ enabled, reason? }`: off means no AI review and nothing posted on merge requests.                                         | `{ enabled: true }` | Settings › Policies     |
-| `mergeRequests.policies` | Merge requests | Rules run on merge request events: approve, merge, label, comment or skip analyzers. Policies of every covering scope apply. | none                | Ops › Automation        |
-| `slack.reviews`          | Merge requests | `{ channels }`: Slack channel ids where merge request links get a review status emoji.                                       | `{ channels: [] }`  | Settings › Integrations |
+| Key                      | Section        | Value                                                                                                                        | Default             | Edited in           |
+| ------------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------- |
+| `mergeRequests.comments` | Merge requests | `{ enabled, reason? }`: off means no AI review and nothing posted on merge requests.                                         | `{ enabled: true }` | Settings › Policies |
+| `mergeRequests.policies` | Merge requests | Rules run on merge request events: approve, merge, label, comment or skip analyzers. Policies of every covering scope apply. | none                | Ops › Automation    |
 
 ## Audit
 
@@ -110,7 +109,7 @@ The defaults of each analyzer's options are in its module docs. The review optio
 
 ## Retired keys
 
-Holtkeeper no longer reads these keys; the panel hides stored entries and refuses new values: `llm.model`, `llm.models`, `review.instructions`, `agent.instructions` (team rules now live in the Guide), `repo.readOnly` (replaced by `repo.freeze`; set freezes again), and the options of removed analyzers `analyzers.changelog`, `analyzers.delivery`, `analyzers.fleet`, `analyzers.port`, `analyzers.quality`, `analyzers.release-risk`, `analyzers.warmup`.
+Holtkeeper no longer reads these keys; the panel hides stored entries and refuses new values: `llm.model`, `llm.models`, `review.instructions`, `agent.instructions` (team rules now live in the Guide), `repo.readOnly` (replaced by `repo.freeze`; set freezes again), `slack.reviews` (the Slack app now marks merge request links in every channel it is in; stored entries were deleted), and the options of removed analyzers `analyzers.changelog`, `analyzers.delivery`, `analyzers.fleet`, `analyzers.port`, `analyzers.quality`, `analyzers.release-risk`, `analyzers.warmup`.
 
 ## Related
 

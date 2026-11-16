@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
 import type { RepoRef } from '@holtkeeper/forge'
-import { resolveSlackReviewChannels, slackReviews } from '@holtkeeper/settings'
 import type { SlackMessageLink, SlackMessageStore, SlackReviewStatus } from '@holtkeeper/store'
 
 import { type ServerDeps, repoKey, repoTarget } from '../context.ts'
@@ -81,7 +80,6 @@ export function newMergeRequestLinks(
 interface MergeRequestState {
   status?: SlackReviewStatus
   head?: string
-  title?: string
 }
 
 const withState = (link: SlackMessageLink, state: MergeRequestState, at: string) => {
@@ -90,13 +88,9 @@ const withState = (link: SlackMessageLink, state: MergeRequestState, at: string)
     ...rest,
     ...(state.status && { status: state.status }),
     ...(state.head && { head: state.head }),
-    ...(state.title && { title: state.title }),
     updatedAt: at,
   } satisfies SlackMessageLink
 }
-
-const rowKey = (link: Pick<SlackMessageLink, 'repo' | 'mergeRequest'>) =>
-  `${link.repo}!${link.mergeRequest}`
 
 /** The `forge` and `path` of a stored `forge:path` key. */
 const repoOfKey = (key: string): RepoRef => {
@@ -118,12 +112,13 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 
 /**
  * The Slack review status over the server's store, settings and the stored Slack credential.
- * A message is followed only for merge requests of connected repositories (configured forge, in
- * in the fleet with an owner team) whose reviews are on (`mergeRequests.comments`) and whose `slack.reviews`
- * channels include the message's channel; everything else is ignored without a trace, and a
- * message whose gate closes later loses its emoji. The message carries one emoji, the worst
+ * A message in any channel the app receives is followed for merge requests of connected
+ * repositories (configured forge, in the fleet with an owner team) whose reviews are on
+ * (`mergeRequests.comments`); everything else is ignored without a trace, and a message whose
+ * gate closes later loses its emoji. The message carries one emoji, the worst
  * status of its merge requests. A message following several merge requests also gets one reply
- * in its thread listing each one's status, edited in place as they change and kept (listing
+ * in its thread listing each one's status and `path!iid` (never its title, so nothing beyond the
+ * link itself reaches the channel), edited in place as they change and kept (listing
  * what is left) when the set shrinks, and left as it was once none is; without `chat:write` only the reaction is set. Updates of
  * one message, reaction and reply together, are applied one at a time, across processes sharing
  * the store. Statuses without an override show Holtkeeper's custom emoji where the workspace
@@ -172,12 +167,11 @@ export function createSlackReviews(
     return heads.find((head) => slackRepoKey(head.repo) === key)?.repo ?? repo
   }
 
-  const channelsOf = async (repo: RepoRef): Promise<string[]> => {
-    if (!(repo.forge in config.forges)) return []
-    const target = repoTarget(config, repo)
-    if (target.teams.length === 0) return []
-    if (await commentsOffFor(store, config, repo)) return []
-    return resolveSlackReviewChannels(await store.settings.list(slackReviews.key), target)
+  /** Whether messages about `repo`'s merge requests get a status: Holtkeeper reviews them. */
+  const followed = async (repo: RepoRef): Promise<boolean> => {
+    if (!(repo.forge in config.forges)) return false
+    if (repoTarget(config, repo).teams.length === 0) return false
+    return !(await commentsOffFor(store, config, repo))
   }
 
   const stateOf = async (repo: RepoRef, mergeRequest: number): Promise<MergeRequestState> => {
@@ -187,29 +181,7 @@ export function createSlackReviews(
     )
     if (job) return { status: 'reviewing', ...(job.ref !== undefined && { head: job.ref }) }
     const review = await latestReview(store.analyses, repo, mergeRequest)
-    return review
-      ? {
-          status: reviewStatusOf(review),
-          head: review.head,
-          ...(review.mergeRequest.title && { title: review.mergeRequest.title }),
-        }
-      : {}
-  }
-
-  const titleMisses = new Set<string>()
-  const titleFromForge = async (link: SlackMessageLink): Promise<string | undefined> => {
-    const key = rowKey(link)
-    if (titleMisses.has(key)) return undefined
-    const repo = repoOfLink(link)
-    let title: string | undefined
-    try {
-      const forge = config.forges[repo.forge]?.create()
-      title = (await forge?.getMergeRequest?.(repo.path, link.mergeRequest))?.title || undefined
-    } catch (error) {
-      log(`slack reviews: title of ${link.repo}!${link.mergeRequest}: ${messageOf(error)}`)
-    }
-    if (!title) titleMisses.add(key)
-    return title
+    return review ? { status: reviewStatusOf(review), head: review.head } : {}
   }
 
   const mergeRequestUrl = (link: SlackMessageLink) => {
@@ -221,9 +193,7 @@ export function createSlackReviews(
   /**
    * Makes the message's status reply list `links`: posts it once two or more are followed and
    * edits it after that, also when fewer are left; with none left it stays as it was. A reply
-   * Slack no longer has is posted again. A title the forge could not give is not asked again
-   * in this process.
-   * Returns the titles it had to look up, keyed by `rowKey`.
+   * Slack no longer has is posted again.
    */
   const syncReply = async (
     messages: SlackMessageStore,
@@ -232,39 +202,28 @@ export function createSlackReviews(
     channel: string,
     ts: string,
     links: readonly SlackMessageLink[],
-  ): Promise<Map<string, string>> => {
-    const titles = new Map<string, string>()
+  ): Promise<void> => {
     const existing = await messages.replyOf(channel, ts)
-    if (links.length === 0 || (!existing && links.length < 2)) return titles
-    for (const link of links) {
-      if (link.title) continue
-      // oxlint-disable-next-line no-await-in-loop -- a message links few merge requests
-      const title = await titleFromForge(link)
-      if (title) titles.set(rowKey(link), title)
-    }
+    if (links.length === 0 || (!existing && links.length < 2)) return
     const text = statusListText(
-      links.map((link) => {
-        const title = link.title ?? titles.get(rowKey(link))
-        const label = `${repoOfLink(link).path.split('/').at(-1)}!${link.mergeRequest}`
-        return {
-          ...(link.status && { status: link.status }),
-          url: mergeRequestUrl(link),
-          label: title ? `${label} ${title}` : label,
-        }
-      }),
+      links.map((link) => ({
+        ...(link.status && { status: link.status }),
+        url: mergeRequestUrl(link),
+        label: `${repoOfLink(link).path}!${link.mergeRequest}`,
+      })),
       emoji,
     )
-    if (existing?.text === text) return titles
+    if (existing?.text === text) return
     const at = deps.now().toISOString()
     if (existing) {
       const updated = await poster.update({ channel, ts: existing.replyTs, text })
       if (updated.ok) {
         await messages.putReply({ ...existing, text, updatedAt: at })
-        return titles
+        return
       }
       if (updated.error !== 'message_not_found') {
         noteFailedPost(updated.error)
-        return titles
+        return
       }
     }
     const posted = await poster.post({ channel, threadTs: ts, text })
@@ -278,7 +237,6 @@ export function createSlackReviews(
         updatedAt: at,
       })
     else noteFailedPost(posted.error)
-    return titles
   }
 
   const chains = new Map<string, Promise<void>>()
@@ -393,18 +351,13 @@ export function createSlackReviews(
         }
       }
       const emoji = await catalog.textEmoji(connection)
-      const titles = await syncReply(messages, poster, emoji, channel, ts, links)
+      await syncReply(messages, poster, emoji, channel, ts, links)
       await Promise.all(
         links
-          .filter((link) => link.reaction !== shown || titles.has(rowKey(link)))
-          .map(({ reaction: _reaction, ...link }) => {
-            const title = titles.get(rowKey(link))
-            return messages.put({
-              ...link,
-              ...(shown && { reaction: shown }),
-              ...(title && { title }),
-            })
-          }),
+          .filter((link) => link.reaction !== shown)
+          .map(({ reaction: _reaction, ...link }) =>
+            messages.put({ ...link, ...(shown && { reaction: shown }) }),
+          ),
       )
     })
 
@@ -425,16 +378,14 @@ export function createSlackReviews(
         if (found.length === 0) return
         const connection = await slackConnection(deps)
         if (!connection) return
-        const followed: MergeRequestTarget[] = []
+        const targets: MergeRequestTarget[] = []
         for (const link of found) {
           // oxlint-disable-next-line no-await-in-loop -- a message links few merge requests
           const repo = await canonical(link.repo)
           // oxlint-disable-next-line no-await-in-loop -- see above
-          const channels = await channelsOf(repo)
-          if (channels.includes(message.channel))
-            followed.push({ repo, mergeRequest: link.mergeRequest })
+          if (await followed(repo)) targets.push({ repo, mergeRequest: link.mergeRequest })
         }
-        if (followed.length === 0) return
+        if (targets.length === 0) return
         await settle(
           clientsFor(connection),
           connection,
@@ -442,7 +393,7 @@ export function createSlackReviews(
           message.ts,
           async (existing) => {
             const at = deps.now().toISOString()
-            for (const { repo, mergeRequest } of followed) {
+            for (const { repo, mergeRequest } of targets) {
               // oxlint-disable-next-line no-await-in-loop -- see above
               const state = await stateOf(repo, mergeRequest)
               const key = slackRepoKey(repo)
@@ -459,7 +410,6 @@ export function createSlackReviews(
                     path: repo.path,
                     mergeRequest,
                     ...(before?.reaction && { reaction: before.reaction }),
-                    ...(before?.title && { title: before.title }),
                     createdAt: before?.createdAt ?? at,
                     updatedAt: at,
                   },
@@ -493,7 +443,7 @@ export function createSlackReviews(
         if (tracked.length === 0) return
         const connection = await slackConnection(deps)
         if (!connection) return
-        const channels = await channelsOf(target.repo)
+        const stillFollowed = await followed(target.repo)
         const clients = clientsFor(connection)
         for (const { channel, ts } of tracked) {
           // oxlint-disable-next-line no-await-in-loop -- one message at a time keeps reactions in order
@@ -502,7 +452,7 @@ export function createSlackReviews(
               (entry) => entry.repo === key && entry.mergeRequest === mergeRequest,
             )
             if (!link) return
-            if (!channels.includes(channel)) {
+            if (!stillFollowed) {
               await messages.delete(channel, ts, { repo: key, mergeRequest })
               return
             }

@@ -79,6 +79,8 @@ Migration 21 cleans up after retired features (no schema change): it deletes ana
 
 Migration 22 adds the `jsonb` column `analyses.metrics`. Existing records keep it `NULL` (no backfill): servers compute metrics of the newest records from their data when they read them, until the next run stores them.
 
+Migration 31 deletes the settings rows of the retired `slack.reviews` key (no schema change); other settings stay.
+
 ## Schema
 
 Columns that are filtered or sorted are real columns; nested data is `jsonb`. Timestamps are `timestamptz` and come back as `Date#toISOString()` strings (`2026-10-29T12:00:00.000Z`), whatever offset they were written with. Passkey and link token times are `text` and come back exactly as written. Every table has an identity `seq` (or a natural key) that keeps insertion order for ties.

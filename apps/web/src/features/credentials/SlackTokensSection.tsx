@@ -139,7 +139,7 @@ export function SlackTokensSection() {
   return (
     <Panel
       title="Slack"
-      description="Bot token and signing secret of the Slack app that marks merge request links in bound channels (slack.reviews) with a review status emoji."
+      description="Bot token and signing secret of the Slack app that marks merge request links with a review status emoji in every channel it is invited to."
       actions={
         view?.configured ? (
           <Chip tone="success">

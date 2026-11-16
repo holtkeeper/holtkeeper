@@ -748,6 +748,12 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX embeddings_model ON embeddings (model, subject);
     `,
   },
+  {
+    version: 32,
+    sql: `
+      DELETE FROM settings WHERE key = 'slack.reviews';
+    `,
+  },
 ]
 
 /**

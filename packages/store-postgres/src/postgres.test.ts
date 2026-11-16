@@ -406,6 +406,29 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     await store.close()
   })
 
+  test('migration 31 deletes slack.reviews entries and keeps other settings', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((step) => step.version <= 30),
+    )
+    for (const [id, key] of [
+      ['s1', 'slack.reviews'],
+      ['s2', 'releases.announce'],
+    ])
+      // oxlint-disable-next-line no-await-in-loop -- two rows
+      await admin!.unsafe(
+        `INSERT INTO ${schema}.settings (id, key, scope, value, secret, updated_at)
+         VALUES ($1, $2, '{"all":true}', '{}', false, now())`,
+        [id, key],
+      )
+    expect(await migrate(admin!, schema)).toContain(31)
+    const store = postgresStore({ url: url!, schema })
+    expect((await store.settings.list()).map((entry) => entry.key)).toEqual(['releases.announce'])
+    await store.close()
+  })
+
   test('foreign keys reject passkeys of unknown users', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema() })
     const outcome = await store.users

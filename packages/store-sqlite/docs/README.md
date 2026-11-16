@@ -93,6 +93,8 @@ Migration 30 renames `ai_usage.groups` to `ai_usage.teams` (the owner teams of `
 
 Migration 31 creates `embeddings`: one row per `(subject, model)` with the `contentHash` of the embedded text and the vector as a `BLOB` of little-endian float32 (`encodeVector` of [@holtkeeper/embed](../../embed/docs/README.md)). Nothing is backfilled; the server's indexer fills it when vectors are turned on.
 
+Migration 32 deletes the settings rows of the retired `slack.reviews` key (no schema change); other settings stay.
+
 ## Backup
 
 - Use a consistent snapshot, not a plain copy of a live file: `sqlite3 holtkeeper.db ".backup backup.db"` or `VACUUM INTO 'backup.db'`.

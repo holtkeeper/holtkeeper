@@ -44,7 +44,6 @@ export const settingsSections: Readonly<
       'analyzers.tracker',
       'releases.notify',
       'limits.credentials',
-      'slack.reviews',
       'releases.announce',
       'security.alerts',
       'security.secretReports',

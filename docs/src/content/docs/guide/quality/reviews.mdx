@@ -288,7 +288,7 @@ Badge size prop is ready: https://gitlab.acme.dev/acme/widget-kit/-/merge_reques
 
 The status follows the newest review run, so an incremental review that finds nothing new shows clean even while earlier findings are still open. A new push swaps the emoji back to reviewing until the next verdict.
 
-When one message links several merge requests, the emoji shows the worst status among them, and the app posts one reply in the message's thread with a line per merge request. It edits that reply whenever a status changes and never posts a second one.
+When one message links several merge requests, the emoji shows the worst status among them, and the app posts one reply in the message's thread with a line per merge request (`path!number`). It edits that reply whenever a status changes and never posts a second one.
 
 <Screen title="Slack · thread reply" kind="example">
   <SlackWindow channel="team-storefront">
@@ -304,11 +304,11 @@ Release prep, please review: https://gitlab.acme.dev/acme/admin-ui/-/merge_reque
 
 <SlackContext>Reply in thread</SlackContext>
 
-<Emoji name="hk-changes" /> Needs changes · admin-ui!1204 Move session store to some-lib
+<Emoji name="hk-changes" /> Needs changes · acme/admin-ui!1204
 <br />
-<Emoji name="hk-reviewing" /> Reviewing · checkout-web!320 Show unit price in cart
+<Emoji name="hk-reviewing" /> Reviewing · acme/checkout-web!320
 <br />
-<Emoji name="hk-clean" /> Clean · widget-kit!77 Add size prop to Badge
+<Emoji name="hk-clean" /> Clean · acme/widget-kit!77
 
     </SlackMessage>
 
@@ -318,14 +318,13 @@ Release prep, please review: https://gitlab.acme.dev/acme/admin-ui/-/merge_reque
 ### Set it up
 
 1. Create and install the Slack app, then paste its credential in **Settings › Integrations › Slack**. [Slack settings](/guide/settings/slack/) walks through it.
-2. Invite the app to each channel it should watch: `/invite @Holtkeeper`.
-3. Bind channels to repositories with the `slack.reviews` setting: channel ids such as `C0123ABCD`, per scope. A team or path entry with no channels keeps those repositories quiet; repositories no team owns never post.
+2. Invite the app to each channel it should watch: `/invite @Holtkeeper`. Every channel it is in gets the status on links to merge requests of repositories with a team and reviews on.
 
 :::tip
 These are Holtkeeper's own status emoji and the default. A workspace that has not uploaded them shows the standard fallback; [Slack app](/guide/settings/slack/#use-the-holtkeeper-emoji) explains how to add them.
 :::
 
-Nothing is posted when the repository has merge request reviews turned off, the channel is not bound to it, or no Slack credential is stored.
+Nothing is posted when the repository has merge request reviews turned off or no team owns it, or no Slack credential is stored. The thread reply names each merge request by repository path and number only, never by title, so a channel learns nothing beyond the links posted in it.
 
 ## Tune reviews
 

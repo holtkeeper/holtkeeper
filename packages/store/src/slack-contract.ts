@@ -34,14 +34,12 @@ export function slackMessageStoreTests(store: () => Store) {
     await messages.put(
       link({ channel: 'C0456SHAPES', ts: '1700000001.000200', createdAt: at(2), updatedAt: at(2) }),
     )
-    await messages.put(
-      link({ status: 'reviewing', reaction: 'eyes', head: 'b'.repeat(40), title: 'Add widget' }),
-    )
+    await messages.put(link({ status: 'reviewing', reaction: 'eyes', head: 'b'.repeat(40) }))
 
     const ofMessage = await messages.ofMessage('C0123WIDGET', '1700000000.000100')
     expect(ofMessage.map((entry) => entry.mergeRequest)).toEqual([3, 7])
     expect(ofMessage[1]).toEqual(
-      link({ status: 'reviewing', reaction: 'eyes', head: 'b'.repeat(40), title: 'Add widget' }),
+      link({ status: 'reviewing', reaction: 'eyes', head: 'b'.repeat(40) }),
     )
 
     const ofMergeRequest = await messages.ofMergeRequest('acme:shapes/widget', 7)

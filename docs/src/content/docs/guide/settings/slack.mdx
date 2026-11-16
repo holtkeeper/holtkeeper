@@ -78,11 +78,9 @@ Two more for the release: [!1830](#what-it-looks-like) and [!1831](#what-it-look
   <SlackMessage author="holtkeeper" time="12:10">
     <SlackContext>Reply in thread</SlackContext>
 
-<Emoji name="hk-clean" /> Clean · [widget-kit!1830 Show week numbers in
-DatePicker](#what-it-looks-like)
+<Emoji name="hk-clean" /> Clean · [acme/widget-kit!1830](#what-it-looks-like)
 <br />
-<Emoji name="hk-reviewing" /> Reviewing · [widget-kit!1831 Pager keeps focus on page
-change](#what-it-looks-like)
+<Emoji name="hk-reviewing" /> Reviewing · [acme/widget-kit!1831](#what-it-looks-like)
 
   </SlackMessage>
 </SlackWindow>
@@ -169,8 +167,7 @@ Slack checks the events URL the moment you save it, and Holtkeeper only answers 
        - message.groups
    ```
 
-6. **Invite the app** to each channel it should watch: `/invite @holtkeeper`.
-7. **Bind channels to repositories** (next section).
+6. **Invite the app** to each channel it should watch: `/invite @holtkeeper`. That is all: every channel the app is in gets the status on links to merge requests Holtkeeper reviews.
 
 | Scope              | For                                                                         |
 | ------------------ | --------------------------------------------------------------------------- |
@@ -182,32 +179,6 @@ Slack checks the events URL the moment you save it, and Holtkeeper only answers 
 :::caution[Behind a NetworkPolicy or egress proxy]
 Holtkeeper calls `https://slack.com/api` from both web and worker pods: a review that finishes on a worker updates the emoji from there. Allow `slack.com` for both roles.
 :::
-
-## Bind channels
-
-The `slack.reviews` setting maps a scope to Slack channel ids. The most specific entry wins as a whole: an entry for everything sets the default channels, a team, path or repository entry replaces them for its repositories, and an entry with no channels keeps a team quiet. A message about a repository is handled only in a channel bound to it, so teams can share channels or keep their own.
-
-<Screen title="Settings › Integrations › slack.reviews">
-  <Rows>
-    <Row title="Everything" sub="Default channels">
-      <Tag mono>C0123ABCD</Tag>
-      <Tag>default</Tag>
-    </Row>
-    <Row title="Team Widgets" sub="Replaces the default for its repositories">
-      <Tag mono>C04WIDGET</Tag>
-      <Tag mono>G07PRIVATE</Tag>
-      <Tag tone="ok">own channels</Tag>
-    </Row>
-    <Row title="Path acme/sandbox/**" sub="channels: []">
-      <Tag>quiet</Tag>
-    </Row>
-  </Rows>
-</Screen>
-
-<p class="hk-caption">
-  Use channel ids, not names: open the channel's details; the id is at the bottom of About. Private
-  channels may start with G.
-</p>
 
 ## Use the Holtkeeper emoji
 
@@ -285,10 +256,10 @@ The app stays silent, and stores nothing, when:
 
 - the link's host is not a configured forge, or no team owns the repository;
 - **Merge request reviews** are off for the repository;
-- the channel is not bound to the repository, or the app was not invited to it;
+- the app was not invited to the channel;
 - no Slack credential is saved.
 
-A merge request with no review yet gets no emoji until its first review is queued. When reviews are turned off or a channel is unbound after a message got its emoji, the emoji is removed at the merge request's next review change. Messages older than 30 days stop changing.
+A merge request with no review yet gets no emoji until its first review is queued. When reviews are turned off after a message got its emoji, the emoji is removed at the merge request's next review change. Messages older than 30 days stop changing.
 
 ## Related
 
