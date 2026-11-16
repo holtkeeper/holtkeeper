@@ -17,8 +17,45 @@ export interface SizeThresholds {
 /** Defaults of the `sizeAdvice` option. */
 export const DEFAULT_SIZE_THRESHOLDS: SizeThresholds = { largeMinutes: 60, tooLargeMinutes: 120 }
 
-/** Weighted lines a careful reviewer reads in an hour by default (`sizeAdvice.linesPerHour`). */
-export const DEFAULT_LINES_PER_HOUR = 400
+/** Ids of the review time models `sizeAdvice.model` picks from. */
+export const reviewTimeModels = ['combined', 'smartbear', 'psp', 'effort-tiers'] as const
+
+/** A review time model: how `estimateReviewMinutes` turns a change into minutes. */
+export type ReviewTimeModel = (typeof reviewTimeModels)[number]
+
+/** The model used when `sizeAdvice.model` is not set. */
+export const DEFAULT_REVIEW_TIME_MODEL: ReviewTimeModel = 'combined'
+
+/** What each model is based on and how it estimates, for editors choosing one. */
+export const reviewTimeModelInfo: Record<
+  ReviewTimeModel,
+  { label: string; source: string; summary: string }
+> = {
+  combined: {
+    label: 'Combined (default)',
+    source: 'Bacchelli & Bird, ICSE 2013; CodeRabbit effort tiers; SmartBear/Cisco reading rates',
+    summary:
+      'Time to understand the change by review effort (2, 5, 10, 20 or 30 min for effort 1–5), plus reading at 400 weighted lines an hour scaled by effort, plus half a minute per file (at most 30 files).',
+  },
+  smartbear: {
+    label: 'SmartBear / Cisco',
+    source: 'SmartBear, "Best Kept Secrets of Peer Code Review" (Cisco study, 2006)',
+    summary:
+      'Reading at 500 weighted lines an hour, the fastest rate that still finds most defects, plus 5 minutes to start and a minute per file. Ignores effort.',
+  },
+  psp: {
+    label: 'PSP inspection',
+    source: 'Kemerer & Paulk, IEEE TSE 2009 (PSP data)',
+    summary:
+      'Reading at 200 weighted lines an hour, the rate recommended for thorough inspections, plus 5 minutes to start and a minute per file. Ignores effort; the strictest model.',
+  },
+  'effort-tiers': {
+    label: 'Effort tiers',
+    source: 'CodeRabbit "Estimated code review effort" (tiers 1–3 observed; 4–5 extrapolated)',
+    summary:
+      'Fixed minutes per review effort: 5, 10, 25, 50 or 90 for effort 1–5. Ignores the size of the change.',
+  },
+}
 
 /** Added and removed lines of one file the estimate counts. */
 export interface SizedFile {
@@ -104,15 +141,10 @@ const REMOVED_WEIGHT = 0.3
 const REPEATED_WEIGHT = 0.3
 const TEST_WEIGHT = 0.5
 const DOC_WEIGHT = 0.3
-const START_MINUTES = 5
-const MINUTES_PER_FILE = 1
-// A file with a line or two changed is seen at a glance.
-const TINY_FILE_LINES = 3
-const MINUTES_PER_TINY_FILE = 0.25
-const MINUTES_PER_EXTRA_GROUP = 3
-// Past this many logical changes a merge request is too large anyway; more add only noise.
-const MAX_GROUPS = 10
 const effortFactor: Record<number, number> = { 1: 0.5, 2: 0.75, 3: 1, 4: 1.3, 5: 1.6 }
+const understandMinutes: Record<number, number> = { 1: 2, 2: 5, 3: 10, 4: 20, 5: 30 }
+const tierMinutes: Record<number, number> = { 1: 5, 2: 10, 3: 25, 4: 50, 5: 90 }
+const MAX_COUNTED_FILES = 30
 
 const weightOf = (path: string) =>
   TEST_FILE.test(path) ? TEST_WEIGHT : DOC_FILE.test(path) ? DOC_WEIGHT : 1
@@ -125,37 +157,37 @@ const weightedLines = (file: SizedFile) => {
   return (added + removed * REMOVED_WEIGHT) * weightOf(file.path)
 }
 
+const readingRate = (lines: number, perHour: number) => (lines / perHour) * 60
+
 /**
- * Estimated minutes a person needs to review the files carefully, at least 5: time to get into
- * the change, reading time per weighted line at `linesPerHour` (default
- * `DEFAULT_LINES_PER_HOUR`) scaled by the agent's `effort` (1–5; neutral when absent), time per
- * file and a few minutes per extra logical change (`groups`, at most 10 count). Rounded to 5
- * minutes, from two hours to 30. Deterministic: the same input gives the same estimate.
+ * Estimated minutes a person needs to review the files carefully under `model` (default
+ * `DEFAULT_REVIEW_TIME_MODEL`, see `reviewTimeModelInfo`), rounded to the minute and at least 1;
+ * 0 without files. Line-based models weigh added lines 1, removed 0.3, lines repeated from
+ * earlier files 0.3 of that, tests and stories 0.5, docs 0.3. `effort` is the agent's 1–5 (3 when
+ * absent). Deterministic: the same input gives the same estimate.
  */
 export function estimateReviewMinutes(input: {
   files: readonly SizedFile[]
   effort?: number
-  groups?: number
-  linesPerHour?: number
+  model?: ReviewTimeModel
 }): number {
   if (!input.files.length) return 0
+  const effort =
+    input.effort && input.effort >= 1 && input.effort <= 5 ? Math.round(input.effort) : 3
   const lines = input.files.reduce((sum, file) => sum + weightedLines(file), 0)
-  const factor = effortFactor[input.effort ?? 3] ?? 1
-  const perHour =
-    input.linesPerHour && input.linesPerHour > 0 ? input.linesPerHour : DEFAULT_LINES_PER_HOUR
-  const fileMinutes = input.files.reduce(
-    (sum, file) =>
-      sum +
-      (file.added + file.removed <= TINY_FILE_LINES ? MINUTES_PER_TINY_FILE : MINUTES_PER_FILE),
-    0,
-  )
+  const files = input.files.length
+  const model = input.model ?? DEFAULT_REVIEW_TIME_MODEL
   const minutes =
-    START_MINUTES +
-    (lines / perHour) * 60 * factor +
-    fileMinutes +
-    Math.max(0, Math.min(input.groups ?? 1, MAX_GROUPS) - 1) * MINUTES_PER_EXTRA_GROUP
-  const step = minutes >= 120 ? 30 : 5
-  return Math.max(5, Math.round(minutes / step) * step)
+    model === 'smartbear'
+      ? 5 + readingRate(lines, 500) + files
+      : model === 'psp'
+        ? 5 + readingRate(lines, 200) + files
+        : model === 'effort-tiers'
+          ? (tierMinutes[effort] ?? 25)
+          : (understandMinutes[effort] ?? 10) +
+            readingRate(lines, 400) * (effortFactor[effort] ?? 1) +
+            Math.min(files, MAX_COUNTED_FILES) * 0.5
+  return Math.max(1, Math.round(minutes))
 }
 
 /** The level of an estimate under the thresholds. */

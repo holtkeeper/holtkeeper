@@ -54,7 +54,9 @@ import {
 } from './schema.ts'
 import { type FileScope, type ReviewScope, matchesAny, scopeDiff } from './scope.ts'
 import {
+  DEFAULT_REVIEW_TIME_MODEL,
   DEFAULT_SIZE_THRESHOLDS,
+  type ReviewTimeModel,
   type SizeThresholds,
   adviceTexts,
   estimateReviewMinutes,
@@ -103,9 +105,9 @@ export interface ReviewOptions {
   /**
    * The estimated human review time in the summary and, from `largeMinutes`, the advice to split
    * the merge request; on unless `enabled` is `false`. Thresholds default to
-   * `DEFAULT_SIZE_THRESHOLDS`, the reading pace (`linesPerHour`) to `DEFAULT_LINES_PER_HOUR`.
+   * `DEFAULT_SIZE_THRESHOLDS`, the review time `model` to `DEFAULT_REVIEW_TIME_MODEL`.
    */
-  sizeAdvice?: { enabled: boolean; linesPerHour?: number } & Partial<SizeThresholds>
+  sizeAdvice?: { enabled: boolean; model?: ReviewTimeModel } & Partial<SizeThresholds>
 }
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
@@ -666,12 +668,8 @@ async function reviewSize(
     logicalChanges(outcome?.walkthrough ?? []),
     previous?.size?.groups ?? logicalChanges(previous?.walkthrough ?? []),
   )
-  const minutes = estimateReviewMinutes({
-    files,
-    ...(effort ? { effort } : {}),
-    ...(groups ? { groups } : {}),
-    ...(settings?.linesPerHour ? { linesPerHour: settings.linesPerHour } : {}),
-  })
+  const model = settings?.model ?? DEFAULT_REVIEW_TIME_MODEL
+  const minutes = estimateReviewMinutes({ files, model, ...(effort ? { effort } : {}) })
   const level = reviewSizeLevel(minutes, thresholds)
   const size: ReviewSize = {
     minutes,
@@ -679,6 +677,7 @@ async function reviewSize(
     files: files.length,
     lines: files.reduce((sum, file) => sum + file.added + file.removed, 0),
     groups,
+    model,
   }
   if (level === 'ok' || (previous && !sizeEscalated(level, previous.size?.level))) return size
   const texts = adviceTexts(level, minutes)

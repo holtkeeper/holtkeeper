@@ -91,6 +91,8 @@ const reviewSizeSchema = z.object({
   lines: z.number().int().nonnegative(),
   /** Logical changes (walkthrough entries) the estimate counted. */
   groups: z.number().int().nonnegative(),
+  /** The review time model that made `minutes` (`ReviewTimeModel`); absent in older records. */
+  model: z.string().optional(),
   /** Present when this run's note advises splitting; texts are in the review language. */
   advice: z
     .object({

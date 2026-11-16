@@ -12,10 +12,12 @@ import {
   planSplit,
   reviewSizeLevel,
   sizeEscalated,
+  type SizedFile,
   sizedFiles,
 } from './size.ts'
 
 const code = (path: string, added: number, removed = 0) => ({ path, added, removed })
+const many = (n: number) => Array.from({ length: n }, (_, i) => code(`src/shape${i}.ts`, 0))
 const lines = (kinds: ('add' | 'remove' | 'context')[]) => kinds.map((kind) => ({ kind, text: '' }))
 const scoped = (path: string, changed: { kind: 'add' | 'remove' | 'context'; text: string }[]) => ({
   path,
@@ -27,83 +29,67 @@ const scoped = (path: string, changed: { kind: 'add' | 'remove' | 'context'; tex
 })
 
 describe('estimateReviewMinutes', () => {
-  test('nothing to review takes no time, anything else at least 5 minutes', () => {
+  test('nothing to review takes no time, anything else at least a minute', () => {
     expect(estimateReviewMinutes({ files: [] })).toBe(0)
-    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 3)] })).toBe(5)
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 1)], effort: 1 })).toBe(3)
+    expect(
+      estimateReviewMinutes({ files: [code('src/widget.ts', 0)], effort: 1, model: 'combined' }),
+    ).toBeGreaterThanOrEqual(1)
   })
 
-  test('grows with lines, files and logical changes', () => {
-    const small = estimateReviewMinutes({ files: [code('src/widget.ts', 300)] })
-    const big = estimateReviewMinutes({ files: [code('src/widget.ts', 1200)] })
-    expect(small).toBe(50)
-    expect(big).toBeGreaterThan(small * 3)
-    const spread = estimateReviewMinutes({
-      files: Array.from({ length: 10 }, (_, i) => code(`src/part${i}.ts`, 30)),
-      groups: 4,
-    })
-    expect(spread).toBeGreaterThan(small)
-  })
-
-  test('removed lines, tests and docs read faster', () => {
-    const added = estimateReviewMinutes({ files: [code('src/widget.ts', 600)] })
-    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 0, 600)] })).toBeLessThan(added)
-    expect(estimateReviewMinutes({ files: [code('src/widget.test.ts', 600)] })).toBeLessThan(added)
-    expect(estimateReviewMinutes({ files: [code('pkg/shape_test.go', 600)] })).toBeLessThan(added)
-    expect(estimateReviewMinutes({ files: [code('docs/guide.md', 600)] })).toBeLessThan(added)
-  })
-
-  test('stories read like tests', () => {
-    const added = estimateReviewMinutes({ files: [code('src/Widget.tsx', 600)] })
-    expect(estimateReviewMinutes({ files: [code('src/Widget.stories.tsx', 600)] })).toBeLessThan(
-      added,
-    )
-  })
-
-  test('repeated lines read faster', () => {
-    const fresh = estimateReviewMinutes({ files: [code('src/widget.ts', 600)] })
-    const mirrored = estimateReviewMinutes({
-      files: [{ ...code('src/widget.ts', 600), repeatedAdded: 400 }],
-    })
-    expect(mirrored).toBeLessThan(fresh)
-  })
-
-  test('a file with a line or two changed costs less than a minute', () => {
-    const tiny = Array.from({ length: 40 }, (_, i) => code(`src/shape${i}.ts`, 1))
-    const small = Array.from({ length: 40 }, (_, i) => code(`src/shape${i}.ts`, 4))
-    expect(estimateReviewMinutes({ files: tiny })).toBe(20)
-    expect(estimateReviewMinutes({ files: small })).toBeGreaterThan(60)
-  })
-
-  test('logical changes past ten add nothing', () => {
-    const files = [code('src/widget.ts', 100)]
-    expect(estimateReviewMinutes({ files, groups: 30 })).toBe(
-      estimateReviewMinutes({ files, groups: 10 }),
-    )
-    expect(estimateReviewMinutes({ files, groups: 10 })).toBeGreaterThan(
-      estimateReviewMinutes({ files, groups: 2 }),
-    )
-  })
-
-  test('the reading pace is configurable', () => {
+  test('the combined model adds understanding by effort, reading and files, to the minute', () => {
+    // 10 to understand + 300 lines at 400 an hour (45) + half a minute for the file
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 300)] })).toBe(56)
+    // effort 2: 5 + 6 lines × 0.75 at 400 an hour (0.7) + 3 files (1.5)
+    expect(
+      estimateReviewMinutes({
+        files: [code('src/a.ts', 2), code('src/b.ts', 2), code('src/c.ts', 2)],
+        effort: 2,
+      }),
+    ).toBe(7)
     const files = [code('src/widget.ts', 600)]
-    expect(estimateReviewMinutes({ files })).toBe(
-      estimateReviewMinutes({ files, linesPerHour: 400 }),
+    expect(estimateReviewMinutes({ files, effort: 3 })).toBe(estimateReviewMinutes({ files }))
+    expect(estimateReviewMinutes({ files, effort: 1 })).toBeLessThan(
+      estimateReviewMinutes({ files }),
     )
-    expect(estimateReviewMinutes({ files, linesPerHour: 600 })).toBe(65)
-    expect(estimateReviewMinutes({ files, linesPerHour: 200 })).toBe(180)
+    expect(estimateReviewMinutes({ files, effort: 5 })).toBeGreaterThan(
+      estimateReviewMinutes({ files }),
+    )
   })
 
-  test('from two hours the estimate is rounded to half an hour', () => {
-    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 1000)] })).toBe(150)
-    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 3000)] }) % 30).toBe(0)
+  test('files past thirty add nothing in the combined model', () => {
+    expect(estimateReviewMinutes({ files: many(60) })).toBe(
+      estimateReviewMinutes({ files: many(30) }),
+    )
   })
 
-  test('effort scales the reading time, neutral without it', () => {
-    const files = [code('src/widget.ts', 600)]
-    const neutral = estimateReviewMinutes({ files })
-    expect(estimateReviewMinutes({ files, effort: 3 })).toBe(neutral)
-    expect(estimateReviewMinutes({ files, effort: 1 })).toBeLessThan(neutral)
-    expect(estimateReviewMinutes({ files, effort: 5 })).toBeGreaterThan(neutral)
+  test('line-based models read at their own pace and ignore effort', () => {
+    const files = [code('src/widget.ts', 500)]
+    expect(estimateReviewMinutes({ files, model: 'smartbear' })).toBe(66)
+    expect(estimateReviewMinutes({ files, model: 'psp' })).toBe(156)
+    expect(estimateReviewMinutes({ files, model: 'psp', effort: 1 })).toBe(156)
+  })
+
+  test('the effort tiers model ignores size', () => {
+    const model = 'effort-tiers' as const
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 5)], effort: 2, model })).toBe(10)
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 5000)], effort: 2, model })).toBe(
+      10,
+    )
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 5)], model })).toBe(25)
+  })
+
+  test('removed lines, repeated lines, tests, stories and docs read faster', () => {
+    const model = 'psp' as const
+    const added = estimateReviewMinutes({ files: [code('src/widget.ts', 600)], model })
+    const faster = (file: SizedFile) =>
+      expect(estimateReviewMinutes({ files: [file], model })).toBeLessThan(added)
+    faster(code('src/widget.ts', 0, 600))
+    faster({ ...code('src/widget.ts', 600), repeatedAdded: 400 })
+    faster(code('src/widget.test.ts', 600))
+    faster(code('src/Widget.stories.tsx', 600))
+    faster(code('pkg/shape_test.go', 600))
+    faster(code('docs/guide.md', 600))
   })
 })
 

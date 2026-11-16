@@ -126,6 +126,9 @@ test('summaryNote gives the review time in the review language, for the whole me
     },
     checks: [],
   }
+  expect(summaryNote({ ...data, effort: 2 })).toContain(
+    '> ⏱️ **Estimated review time: ~2 h 10 min.** Review effort: 2/5.\n\nThe gadget is fine.\n\nReviewed `bbbbbbbb`: 1 file(s), 3 changed line(s).\n\n',
+  )
   expect(summaryNote(data)).toStartWith(
     '### Holtkeeper review: Looks good\n\n> ⏱️ **Estimated review time: ~2 h 10 min.**\n\nThe gadget is fine.',
   )

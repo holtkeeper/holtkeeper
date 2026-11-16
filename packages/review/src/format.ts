@@ -95,11 +95,13 @@ const MAX_PART_FILES = 5
  * note for code an AI agent writes; `''` without advice. When the agent found that splitting would
  * not help, only the estimate and its reason.
  */
-export function sizeAdviceBlock(size: ReviewSize | undefined): string {
+export function sizeAdviceBlock(size: ReviewSize | undefined, extra = ''): string {
   const advice = size?.advice
   if (!advice) return ''
   const { texts } = advice
-  const lead = `**${[texts.estimate, texts.limit].filter(Boolean).join(' ')}**`
+  const lead = [`**${[texts.estimate, texts.limit].filter(Boolean).join(' ')}**`, extra]
+    .filter(Boolean)
+    .join(' ')
   if (!advice.splittable) return [lead, advice.reason ?? ''].filter(Boolean).join('\n\n')
   const parts = advice.parts?.map((part, index) => {
     const shown = part.files.slice(0, MAX_PART_FILES).map((file) => `\`${file}\``)
@@ -120,21 +122,29 @@ export function sizeAdviceBlock(size: ReviewSize | undefined): string {
 const sizeEmoji = { ok: '⏱️', large: '⚠️', 'too-large': '🛑' } as const
 
 /**
- * The estimated review time as a quoted block that leads with an emoji per level (⏱️ ok, ⚠️
- * large, 🛑 too large): the advice to split when the size carries one, else one bold line saying
- * the estimate (for the whole merge request when `mode` is incremental). `''` without an estimate.
+ * The estimated review time and the review effort as a quoted block that leads with an emoji per
+ * level (⏱️ ok, ⚠️ large, 🛑 too large): the advice to split when the size carries one, else one
+ * bold line saying the estimate (for the whole merge request when `mode` is incremental), the
+ * effort after the estimate when known. `''` without an estimate.
  */
 export function sizeCallout(
   size: ReviewSize | undefined,
   mode: ReviewData['mode'],
   messages: ReviewMessages = englishReviewMessages,
+  effort?: number,
 ): string {
   if (!size?.minutes) return ''
+  const effortText = effort ? messages.t('scope.effort', { effort }) : ''
   const body =
-    sizeAdviceBlock(size) ||
-    `**${messages.t(mode === 'incremental' ? 'scope.timeWhole' : 'scope.time', {
-      time: formatDuration(size.minutes, messages),
-    })}**`
+    sizeAdviceBlock(size, effortText) ||
+    [
+      `**${messages.t(mode === 'incremental' ? 'scope.timeWhole' : 'scope.time', {
+        time: formatDuration(size.minutes, messages),
+      })}**`,
+      effortText,
+    ]
+      .filter(Boolean)
+      .join(' ')
   return `${sizeEmoji[size.level]} ${body}`
     .split('\n')
     .map((line) => (line ? `> ${line}` : '>'))
@@ -181,13 +191,14 @@ export function summaryNote(
           to: data.head.slice(0, 8),
         })
       : t('scope.full', { head: data.head.slice(0, 8) })
+  const callout = sizeCallout(data.size, data.mode, messages, data.effort)
   const stats = [
     t('scope.stats', { scope, files: data.stats.files, lines: data.stats.changedLines }),
-    data.effort ? t('scope.effort', { effort: data.effort }) : '',
+    data.effort && !callout ? t('scope.effort', { effort: data.effort }) : '',
   ]
   const lines = [
     `${SUMMARY_HEADING} ${verdict}`,
-    sizeCallout(data.size, data.mode, messages),
+    callout,
     data.summary.trim(),
     stats.filter(Boolean).join(' '),
   ]
