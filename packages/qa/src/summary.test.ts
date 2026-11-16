@@ -84,10 +84,24 @@ describe('summarizeTask', () => {
     })
     expect(tasks).toHaveLength(1)
     expect(tasks[0]).toMatchObject({ capabilities: [], taskKind: 'qa-notes', tier: 'main' })
+    expect(tasks[0]?.system).toContain('Write every text in English.')
     expect(tasks[0]?.prompt).toContain('Task ABC-1: Widget panel')
     expect(tasks[0]?.prompt).toContain('added data-testid="panel-open"')
     expect(result.sections.autotests[0]?.testIds).toEqual(['panel-open'])
     expect(result).toMatchObject({ model: 'm', costUsd: 0.02 })
+  })
+
+  test('writes in the language it is given', async () => {
+    const systems: string[] = []
+    const agent: Agent = {
+      name: 'fake',
+      async run<Output>(task: AgentTask<Output>) {
+        systems.push(task.system ?? '')
+        return { text: '', turns: 1, output: sections as Output }
+      },
+    }
+    await summarizeTask(agent, { key: 'ABC-1', title: 'x', changes: [], language: 'Russian' })
+    expect(systems[0]).toContain('Write every text in Russian.')
   })
 
   test('rejects an answer without the structured result', async () => {

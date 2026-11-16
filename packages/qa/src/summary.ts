@@ -176,6 +176,8 @@ export interface QaSummaryInput {
   changes: readonly QaSummaryChange[]
   /** Characters of diff excerpts across all changes; default 60 000. */
   diffBudget?: number
+  /** Language of every text of the summary, e.g. `Russian`; default English. */
+  language?: string
   signal?: AbortSignal
 }
 
@@ -184,7 +186,8 @@ export interface QaSummaryInput {
  * no repository access): what changed, whether and how to test it, test cases, ideas per kind
  * of testing and for automated tests, risks and open questions. The agent reads only what it is
  * given (merge request texts, file lists, test attribute changes and diff excerpts within
- * `diffBudget`); the Guide's `testing` section reaches it as context of the task kind. Rejects
+ * `diffBudget`) and writes in `language` (English by default); the Guide's `testing` section
+ * reaches it as context of the task kind. Rejects
  * when the agent fails or answers without the structured result.
  */
 export async function summarizeTask(
@@ -208,7 +211,8 @@ export async function summarizeTask(
         'Be concise and concrete; base everything on the changes given and say so in questions when something is unclear instead of guessing.',
         'Changes pushed without a merge request were not reviewed: weigh them as riskier.',
         'Test attribute values in autotests must come from the ones listed; leave the list empty when none fits.',
-        'Follow the team rules in the context for language and testing conventions; they win over these defaults.',
+        `Write every text in ${input.language ?? 'English'}. Keep test attribute values, product names and established technical terms (API, e2e, regression, ...) as they are.`,
+        'Follow the team rules in the context for testing conventions; they win over these defaults.',
       ].join('\n'),
       prompt: [
         `Task ${input.key}: ${input.title}`,

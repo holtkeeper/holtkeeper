@@ -48,6 +48,13 @@ export const qaSettingsSchema = z.object({
     .describe(
       'Ticket keys used for changes without a real task, as regular expressions matched against the whole key (e.g. `ABC-000` or `[A-Z]+-0+`); changes with only such keys are left out',
     ),
+  language: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .optional()
+    .describe('Language of the AI test notes; default: the review language, else English'),
 })
 
 /** The `qa` setting of one repository with defaults applied. */
@@ -81,13 +88,15 @@ const help = `Releases › QA lists the tasks whose changes landed recently, rea
 
 - **Branches**: by default the branches of the release flow when releases are on (\`releases\` › flow: the source branch, then the target branch; the target alone in trunk mode), else the default branch. List branches here when a team works on others, the branch work lands on first.
 - **Placeholder keys**: changes are grouped by the ticket keys in commit messages, merge request titles and branch names. Keys matching one of \`catchAllKeys\` (whole key, case-sensitive) are ignored, so a key used for years as "no task" does not become one huge task. The default \`${DEFAULT_CATCH_ALL_KEY}\` covers \`ABC-0\`, \`ABC-000\`; a team value replaces the default, so keep it in the list.
-- Changes without any other key are left out of the list for now.`
+- Changes without any other key are left out of the list for now.
+- **Language**: AI test notes are written in \`language\`; by default in the review language (\`analyzers.review\` › \`language\`), else English. Test attribute values and established technical terms stay as they are.`
 
 /** The `qa` setting for the settings registry. */
 export const qaSettingsDefinition = {
   key: qaSettingKey,
   label: 'QA tasks',
-  description: 'Which branches the QA task list reads and which ticket keys are placeholders.',
+  description:
+    'Which branches the QA task list reads, which ticket keys are placeholders and the language of AI test notes.',
   section: 'Releases',
   default: qaSettingsSchema.parse({}),
   schema: qaSettingsSchema,

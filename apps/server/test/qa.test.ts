@@ -279,10 +279,20 @@ describe('QA tasks', () => {
 
   test('writes a summary on request and marks it stale when new changes arrive', async () => {
     const prompts: string[] = []
+    const systems: string[] = []
+    await store.settings.put({
+      id: 'review-language',
+      key: 'analyzers.review',
+      scope: { all: true },
+      value: { language: 'Russian' },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
     deps.agentFor = async () => ({
       name: 'fake',
       run: async (task) => {
         prompts.push(task.prompt)
+        systems.push(task.system ?? '')
         expect(task.taskKind).toBe('qa-notes')
         return {
           text: '',
@@ -310,6 +320,18 @@ describe('QA tasks', () => {
     const summary = (await response.json()) as QaSummaryView
     expect(summary).toMatchObject({ changes: 2, by: { id: 'header:admin' } })
     expect(summary.sections.autotests[0]?.testIds).toEqual(['widget-panel'])
+    // The review language is the default; the qa setting's own language wins.
+    expect(systems.at(-1)).toContain('Write every text in Russian.')
+    await store.settings.put({
+      id: 'qa',
+      key: 'qa',
+      scope: { all: true },
+      value: { language: 'German' },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    expect((await call('POST', '/qa/summary', as('admin'), { key: 'ABC-1' })).status).toBe(200)
+    expect(systems.at(-1)).toContain('Write every text in German.')
     expect(summary.stale).toBeUndefined()
     expect(prompts[0]).toContain('widget-panel')
 

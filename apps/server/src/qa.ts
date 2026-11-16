@@ -45,6 +45,10 @@ import type { QaToolsAccess } from './tools/qa.ts'
 import { listedRepos } from './updates.ts'
 import { canSee } from './visibility.ts'
 
+/** Setting whose `language` AI texts default to across the product. */
+const REVIEW_SETTING_KEY = 'analyzers.review'
+const reviewLanguageSchema = z.object({ language: z.string().trim().min(1) })
+
 /** The longest period the list offers; histories are read for it. */
 const QA_MAX_DAYS = 90
 /** Periods `GET /api/qa/tasks` accepts. */
@@ -169,6 +173,18 @@ function createQaService(deps: ServerDeps): QaService {
         repoTarget(config, repo),
       )?.value,
     )
+
+  /** The language of test notes for `repo`: the `qa` setting's, else the review language, else English. */
+  const languageOf = async (repo: RepoRef) => {
+    const own = (await settingsOf(repo)).language
+    if (own) return own
+    const review = resolveSetting(
+      await store.settings.list(REVIEW_SETTING_KEY),
+      REVIEW_SETTING_KEY,
+      repoTarget(config, repo),
+    )?.value
+    return reviewLanguageSchema.safeParse(review).data?.language ?? 'English'
+  }
 
   /** The `qa` settings of every repository, read with one settings query. */
   const settingsFor = async (repos: readonly RepoRef[]) => {
@@ -502,7 +518,11 @@ function createQaService(deps: ServerDeps): QaService {
       const repo = found.repos[0]!
       const agent = await deps.agentFor?.(repo)
       if (!agent) throw new QaSummaryError('no AI agent is configured for this repository')
-      const [issues, attributes] = await Promise.all([issuesOf([found]), attributesOf(found.repos)])
+      const [issues, attributes, language] = await Promise.all([
+        issuesOf([found]),
+        attributesOf(found.repos),
+        languageOf(repo),
+      ])
       const issue = issues[key]
       const inputs = await mapLimited(
         found.changes.map((change, index) => ({ change, index })),
@@ -525,6 +545,7 @@ function createQaService(deps: ServerDeps): QaService {
         title: issue?.title || found.title,
         ...(issue ? { issue } : {}),
         changes: inputs,
+        language,
       })
       const stored: StoredSummary = {
         sections: result.sections,

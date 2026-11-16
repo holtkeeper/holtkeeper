@@ -37,7 +37,7 @@ Branches that do not exist are skipped. Messages and descriptions are kept up to
 
 ## Summary
 
-`summarizeTask(agent, { key, title, issue?, changes, diffBudget?, signal? })` asks the agent once (task kind `qa-notes`, tier `main`, no tools and no repository access, three turns at most) for `QaSummarySections`:
+`summarizeTask(agent, { key, title, issue?, changes, diffBudget?, language?, signal? })` asks the agent once, in `language` (English by default; test attribute values and technical terms stay as they are), (task kind `qa-notes`, tier `main`, no tools and no repository access, three turns at most) for `QaSummarySections`:
 
 - `overview`, `changes` — what changed, in product language without identifiers;
 - `verdict` (`must`, `should`, `optional`) and `verdictReason`;
@@ -59,6 +59,7 @@ The Guide's `testing` section reaches the agent as context of the `qa-notes` tas
 | `enabled`      | `true`                   | The repository is read for Releases › QA                                                                                                                                                 |
 | `branches`     | —                        | Branches whose changes count, work branch first (at most 10); without it the release flow's source and target (target alone in trunk mode) when releases are on, else the default branch |
 | `catchAllKeys` | `['[A-Z][A-Z0-9_]*-0+']` | Placeholder keys such as `ABC-000`: regular expressions (at most 50, 200 characters each) that must match the whole key, case-sensitive; such keys are ignored                           |
+| `language`     | —                        | Language of the AI test notes; unset, the server uses the review language (`analyzers.review` › `language`), else English                                                                |
 
 A change naming a real key and a placeholder counts for the real key only. `qaSettings(value)` never throws (an invalid value gives the defaults) and `catchAllMatcher(patterns)` skips invalid patterns.
 
