@@ -5,6 +5,7 @@ import {
   commentFinding,
   isSummaryNote,
   sizeAdviceBlock,
+  sizeCallout,
   summaryNote,
 } from './format.ts'
 import { adviceTexts } from './size.ts'
@@ -105,4 +106,55 @@ test('summaryNote takes fixed texts from the messages and ends reviews with the 
   expect(summaryNote({ ...data, mode: 'skipped', verdict: 'skipped' })).not.toContain(
     'learns from your answers',
   )
+})
+
+test('summaryNote gives the review time in the review language, for the whole merge request when incremental', () => {
+  const data = {
+    head: 'b'.repeat(40),
+    previousHead: 'a'.repeat(40),
+    mode: 'full' as const,
+    verdict: 'looks-good' as const,
+    summary: 'The gadget is fine.',
+    size: { minutes: 130, level: 'ok' as const, files: 4, lines: 900, groups: 2 },
+    comments: [],
+    threads: [],
+    skipped: [],
+    stats: {
+      files: 1,
+      changedLines: 3,
+      dropped: { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0 },
+    },
+    checks: [],
+  }
+  expect(summaryNote(data)).toStartWith(
+    '### Holtkeeper review: Looks good\n\n> ⏱️ **Estimated review time: ~2 h 10 min.**\n\nThe gadget is fine.',
+  )
+  expect(summaryNote({ ...data, mode: 'incremental' })).toContain(
+    '> ⏱️ **Estimated review time of the whole merge request: ~2 h 10 min.**',
+  )
+  const marked = summaryNote(
+    { ...data, mode: 'incremental' },
+    { locale: 'xx', t: (key, params) => `«${key}${params ? ` ${JSON.stringify(params)}` : ''}»` },
+  )
+  expect(marked).toContain(
+    '«scope.timeWhole {"time":"«duration.hoursMinutes {\\"hours\\":2,\\"minutes\\":10}»"}»',
+  )
+})
+
+test('sizeCallout quotes the advice to split under an emoji of its level', () => {
+  const texts = adviceTexts('too-large', 150)
+  const size = {
+    minutes: 150,
+    level: 'too-large' as const,
+    files: 8,
+    lines: 1300,
+    groups: 3,
+    advice: { texts, splittable: false, reason: 'A mechanical rename.' },
+  }
+  expect(sizeCallout(size, 'full')).toBe(
+    `> 🛑 **${texts.estimate} ${texts.limit}**\n>\n> A mechanical rename.`,
+  )
+  expect(sizeCallout({ ...size, level: 'large' }, 'full')).toStartWith('> ⚠️ **')
+  expect(sizeCallout(undefined, 'full')).toBe('')
+  expect(sizeCallout({ ...size, minutes: 0 }, 'full')).toBe('')
 })

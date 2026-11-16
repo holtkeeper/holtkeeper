@@ -8,6 +8,7 @@ import {
   adviceTexts,
   estimateReviewMinutes,
   formatDuration,
+  logicalChanges,
   planSplit,
   reviewSizeLevel,
   sizeEscalated,
@@ -16,6 +17,14 @@ import {
 
 const code = (path: string, added: number, removed = 0) => ({ path, added, removed })
 const lines = (kinds: ('add' | 'remove' | 'context')[]) => kinds.map((kind) => ({ kind, text: '' }))
+const scoped = (path: string, changed: { kind: 'add' | 'remove' | 'context'; text: string }[]) => ({
+  path,
+  oldPath: path,
+  status: 'modified' as const,
+  hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: changed }],
+  lines: new Set<number>(),
+  visible: new Map<number, string>(),
+})
 
 describe('estimateReviewMinutes', () => {
   test('nothing to review takes no time, anything else at least 5 minutes', () => {
@@ -26,7 +35,7 @@ describe('estimateReviewMinutes', () => {
   test('grows with lines, files and logical changes', () => {
     const small = estimateReviewMinutes({ files: [code('src/widget.ts', 300)] })
     const big = estimateReviewMinutes({ files: [code('src/widget.ts', 1200)] })
-    expect(small).toBe(40)
+    expect(small).toBe(50)
     expect(big).toBeGreaterThan(small * 3)
     const spread = estimateReviewMinutes({
       files: Array.from({ length: 10 }, (_, i) => code(`src/part${i}.ts`, 30)),
@@ -41,6 +50,52 @@ describe('estimateReviewMinutes', () => {
     expect(estimateReviewMinutes({ files: [code('src/widget.test.ts', 600)] })).toBeLessThan(added)
     expect(estimateReviewMinutes({ files: [code('pkg/shape_test.go', 600)] })).toBeLessThan(added)
     expect(estimateReviewMinutes({ files: [code('docs/guide.md', 600)] })).toBeLessThan(added)
+  })
+
+  test('stories read like tests', () => {
+    const added = estimateReviewMinutes({ files: [code('src/Widget.tsx', 600)] })
+    expect(estimateReviewMinutes({ files: [code('src/Widget.stories.tsx', 600)] })).toBeLessThan(
+      added,
+    )
+  })
+
+  test('repeated lines read faster', () => {
+    const fresh = estimateReviewMinutes({ files: [code('src/widget.ts', 600)] })
+    const mirrored = estimateReviewMinutes({
+      files: [{ ...code('src/widget.ts', 600), repeatedAdded: 400 }],
+    })
+    expect(mirrored).toBeLessThan(fresh)
+  })
+
+  test('a file with a line or two changed costs less than a minute', () => {
+    const tiny = Array.from({ length: 40 }, (_, i) => code(`src/shape${i}.ts`, 1))
+    const small = Array.from({ length: 40 }, (_, i) => code(`src/shape${i}.ts`, 4))
+    expect(estimateReviewMinutes({ files: tiny })).toBe(20)
+    expect(estimateReviewMinutes({ files: small })).toBeGreaterThan(60)
+  })
+
+  test('logical changes past ten add nothing', () => {
+    const files = [code('src/widget.ts', 100)]
+    expect(estimateReviewMinutes({ files, groups: 30 })).toBe(
+      estimateReviewMinutes({ files, groups: 10 }),
+    )
+    expect(estimateReviewMinutes({ files, groups: 10 })).toBeGreaterThan(
+      estimateReviewMinutes({ files, groups: 2 }),
+    )
+  })
+
+  test('the reading pace is configurable', () => {
+    const files = [code('src/widget.ts', 600)]
+    expect(estimateReviewMinutes({ files })).toBe(
+      estimateReviewMinutes({ files, linesPerHour: 400 }),
+    )
+    expect(estimateReviewMinutes({ files, linesPerHour: 600 })).toBe(65)
+    expect(estimateReviewMinutes({ files, linesPerHour: 200 })).toBe(180)
+  })
+
+  test('from two hours the estimate is rounded to half an hour', () => {
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 1000)] })).toBe(150)
+    expect(estimateReviewMinutes({ files: [code('src/widget.ts', 3000)] }) % 30).toBe(0)
   })
 
   test('effort scales the reading time, neutral without it', () => {
@@ -67,6 +122,12 @@ describe('levels and durations', () => {
     expect(formatDuration(25)).toBe('~25 min')
     expect(formatDuration(60)).toBe('~1 h')
     expect(formatDuration(130)).toBe('~2 h 10 min')
+    const german = {
+      locale: 'de',
+      t: (key: string, params?: Record<string, string | number>) =>
+        `${key}:${JSON.stringify(params)}`,
+    } as never
+    expect(formatDuration(130, german)).toBe('duration.hoursMinutes:{"hours":2,"minutes":10}')
   })
 
   test('only a too-large merge request gets the sentence about the limit', () => {
@@ -97,6 +158,48 @@ describe('levels and durations', () => {
         },
       ]),
     ).toEqual([{ path: 'src/widget.ts', added: 2, removed: 1 }])
+  })
+
+  test('sizedFiles marks lines repeated from earlier files, short ones never', () => {
+    const change = [
+      { kind: 'add' as const, text: '  cullable={true}' },
+      { kind: 'remove' as const, text: 'const speed = getSpeed(widget)' },
+      { kind: 'add' as const, text: '}' },
+      { kind: 'context' as const, text: 'return widget' },
+    ]
+    expect(
+      sizedFiles([
+        scoped('src/desktop/Widget.tsx', change),
+        scoped('src/mobile/Widget.tsx', [
+          ...change,
+          { kind: 'add' as const, text: 'cullable={true}  ' },
+          { kind: 'add' as const, text: 'const speed = getSpeed(widget)' },
+        ]),
+      ]),
+    ).toEqual([
+      { path: 'src/desktop/Widget.tsx', added: 2, removed: 1 },
+      {
+        path: 'src/mobile/Widget.tsx',
+        added: 4,
+        removed: 1,
+        repeatedAdded: 2,
+        repeatedRemoved: 1,
+      },
+    ])
+  })
+
+  test('logicalChanges joins walkthrough entries that share a file', () => {
+    expect(logicalChanges([])).toBe(0)
+    expect(
+      logicalChanges([
+        { files: ['src/live.ts', 'src/widget.ts'] },
+        { files: ['src/gadget.ts'] },
+        { files: ['src/live.ts'] },
+        { files: ['src/gadget.ts', 'src/shape.ts'] },
+        { files: ['src/shape.ts', 'src/widget.ts'] },
+        { files: ['docs/guide.md'] },
+      ]),
+    ).toBe(2)
   })
 })
 

@@ -58,6 +58,7 @@ import {
   type SizeThresholds,
   adviceTexts,
   estimateReviewMinutes,
+  logicalChanges,
   planSplit,
   reviewSizeLevel,
   sizeEscalated,
@@ -102,9 +103,9 @@ export interface ReviewOptions {
   /**
    * The estimated human review time in the summary and, from `largeMinutes`, the advice to split
    * the merge request; on unless `enabled` is `false`. Thresholds default to
-   * `DEFAULT_SIZE_THRESHOLDS`.
+   * `DEFAULT_SIZE_THRESHOLDS`, the reading pace (`linesPerHour`) to `DEFAULT_LINES_PER_HOUR`.
    */
-  sizeAdvice?: { enabled: boolean } & Partial<SizeThresholds>
+  sizeAdvice?: { enabled: boolean; linesPerHour?: number } & Partial<SizeThresholds>
 }
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
@@ -662,13 +663,14 @@ async function reviewSize(
   // An incremental run sees only the new commits; the earlier review saw the rest.
   const effort = Math.max(outcome?.effort ?? 0, previous?.effort ?? 0)
   const groups = Math.max(
-    outcome?.walkthrough?.length ?? 0,
-    previous?.size?.groups ?? previous?.walkthrough?.length ?? 0,
+    logicalChanges(outcome?.walkthrough ?? []),
+    previous?.size?.groups ?? logicalChanges(previous?.walkthrough ?? []),
   )
   const minutes = estimateReviewMinutes({
     files,
     ...(effort ? { effort } : {}),
     ...(groups ? { groups } : {}),
+    ...(settings?.linesPerHour ? { linesPerHour: settings.linesPerHour } : {}),
   })
   const level = reviewSizeLevel(minutes, thresholds)
   const size: ReviewSize = {

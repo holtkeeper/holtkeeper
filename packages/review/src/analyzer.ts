@@ -31,7 +31,7 @@ import {
 import { startProgress } from './progress.ts'
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
-import { DEFAULT_SIZE_THRESHOLDS } from './size.ts'
+import { DEFAULT_LINES_PER_HOUR, DEFAULT_SIZE_THRESHOLDS } from './size.ts'
 import { DEFAULT_RELEASE_BRANCHES, skipReason, skippedReview } from './skip.ts'
 import { replyToThread } from './thread.ts'
 
@@ -99,10 +99,19 @@ export const reviewOptionsSchema = z.object({
         .int()
         .positive()
         .default(DEFAULT_SIZE_THRESHOLDS.tooLargeMinutes),
+      linesPerHour: z.coerce
+        .number()
+        .int()
+        .min(50)
+        .max(5000)
+        .default(DEFAULT_LINES_PER_HOUR)
+        .describe(
+          `Weighted lines a careful reviewer reads in an hour (default ${DEFAULT_LINES_PER_HOUR}); lower makes estimates longer.`,
+        ),
     })
-    .default({ enabled: true, ...DEFAULT_SIZE_THRESHOLDS })
+    .default({ enabled: true, ...DEFAULT_SIZE_THRESHOLDS, linesPerHour: DEFAULT_LINES_PER_HOUR })
     .describe(
-      'Estimated human review time in the summary; from largeMinutes (default 60) the summary advises splitting the merge request by functionality, from tooLargeMinutes (default 120) it says a person cannot review it thoroughly.',
+      `Estimated human review time in the summary at linesPerHour (default ${DEFAULT_LINES_PER_HOUR}); from largeMinutes (default 60) the summary advises splitting the merge request by functionality, from tooLargeMinutes (default 120) it says a person cannot review it thoroughly.`,
     ),
 })
 

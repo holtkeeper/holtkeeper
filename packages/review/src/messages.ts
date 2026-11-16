@@ -48,6 +48,19 @@ export const reviewMessageCatalog = defineCatalog({
       text: 'Estimated review time: {time}.',
       note: '{time} is a duration such as "~45 min".',
     },
+    'scope.timeWhole': {
+      text: 'Estimated review time of the whole merge request: {time}.',
+      note: 'Incremental reviews: the estimate still covers the whole merge request, not only the new commits. {time} is a duration such as "~45 min".',
+    },
+    'duration.minutes': {
+      text: '~{minutes} min',
+      note: 'Approximate duration under an hour; keep it short.',
+    },
+    'duration.hours': { text: '~{hours} h', note: 'Approximate duration in whole hours.' },
+    'duration.hoursMinutes': {
+      text: '~{hours} h {minutes} min',
+      note: 'Approximate duration in hours and minutes.',
+    },
     'walkthrough.files': { text: 'Files', note: 'Column of the walkthrough table.' },
     'walkthrough.change': { text: 'Change', note: 'Column of the walkthrough table.' },
     'findings.count': {

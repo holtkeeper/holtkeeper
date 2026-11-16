@@ -2,6 +2,7 @@ import type { Agent } from '@holtkeeper/agent'
 import { z } from 'zod'
 
 import { KEEP_ENGLISH, runTracked } from './agent.ts'
+import { type ReviewMessages, englishReviewMessages } from './messages.ts'
 import type { ReviewSizeAdvice, ReviewSizeLevel, ReviewUsage, ReviewWalkthrough } from './schema.ts'
 import type { FileScope } from './scope.ts'
 
@@ -16,67 +17,145 @@ export interface SizeThresholds {
 /** Defaults of the `sizeAdvice` option. */
 export const DEFAULT_SIZE_THRESHOLDS: SizeThresholds = { largeMinutes: 60, tooLargeMinutes: 120 }
 
+/** Weighted lines a careful reviewer reads in an hour by default (`sizeAdvice.linesPerHour`). */
+export const DEFAULT_LINES_PER_HOUR = 400
+
 /** Added and removed lines of one file the estimate counts. */
 export interface SizedFile {
   path: string
   added: number
   removed: number
+  /**
+   * How many of `added` and `removed` repeat a changed line seen earlier in the merge request
+   * (mirrored code, one edit applied to many files); absent means none.
+   */
+  repeatedAdded?: number
+  repeatedRemoved?: number
 }
 
-/** Added and removed lines of each file in a review scope (the whole merge request, not a part). */
+// Shorter lines (`}`, `);`, `</Box>`) repeat in any change and are read as structure anyway.
+const MIN_REPEATED_LENGTH = 8
+
+/**
+ * Added and removed lines of each file in a review scope (the whole merge request, not a part),
+ * in diff order. A changed line counts as repeated when the same line (whitespace ignored, at
+ * least 8 characters) was already added or removed earlier in the scope.
+ */
 export function sizedFiles(files: readonly FileScope[]): SizedFile[] {
+  const seen = new Set<string>()
   return files.map((file) => {
     let added = 0
     let removed = 0
+    let repeatedAdded = 0
+    let repeatedRemoved = 0
     for (const hunk of file.hunks)
       for (const line of hunk.lines) {
-        if (line.kind === 'add') added++
-        else if (line.kind === 'remove') removed++
+        if (line.kind === 'context') continue
+        const text = line.text.trim().replace(/\s+/g, ' ')
+        const key = `${line.kind}:${text}`
+        const repeated = text.length >= MIN_REPEATED_LENGTH && seen.has(key)
+        if (text.length >= MIN_REPEATED_LENGTH) seen.add(key)
+        if (line.kind === 'add') {
+          added++
+          if (repeated) repeatedAdded++
+        } else {
+          removed++
+          if (repeated) repeatedRemoved++
+        }
       }
-    return { path: file.path, added, removed }
+    return {
+      path: file.path,
+      added,
+      removed,
+      ...(repeatedAdded ? { repeatedAdded } : {}),
+      ...(repeatedRemoved ? { repeatedRemoved } : {}),
+    }
   })
 }
 
-const TEST_FILE = /(^|\/)(__tests__|tests?|spec|e2e|testdata)\/|\.(test|spec)\.[^/]+$|_test\.go$/
+/**
+ * The number of distinct logical changes in a walkthrough: entries that share a file are one
+ * change. A review split into parts writes a walkthrough per part, so the same change can be
+ * listed several times.
+ */
+export function logicalChanges(walkthrough: readonly { files: readonly string[] }[]): number {
+  const parent = walkthrough.map((_, index) => index)
+  const root = (index: number): number => {
+    while (parent[index] !== index) index = parent[index] = parent[parent[index]!]!
+    return index
+  }
+  const owner = new Map<string, number>()
+  walkthrough.forEach((entry, index) => {
+    for (const path of entry.files) {
+      const other = owner.get(path)
+      if (other === undefined) owner.set(path, index)
+      else parent[root(index)] = root(other)
+    }
+  })
+  return new Set(walkthrough.map((_, index) => root(index))).size
+}
+
+const TEST_FILE =
+  /(^|\/)(__tests__|tests?|spec|e2e|testdata)\/|\.(test|spec|stories)\.[^/]+$|_test\.go$/
 const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i
 
-// A careful reviewer reads about 500 lines of code an hour; past roughly an hour and 400 lines
-// the share of defects they find drops sharply. Removed lines, tests and docs read faster.
-const LINES_PER_HOUR = 500
+// Removed lines, repeated lines, tests, stories and docs read faster than new code.
 const REMOVED_WEIGHT = 0.3
+const REPEATED_WEIGHT = 0.3
 const TEST_WEIGHT = 0.5
 const DOC_WEIGHT = 0.3
 const START_MINUTES = 5
 const MINUTES_PER_FILE = 1
+// A file with a line or two changed is seen at a glance.
+const TINY_FILE_LINES = 3
+const MINUTES_PER_TINY_FILE = 0.25
 const MINUTES_PER_EXTRA_GROUP = 3
+// Past this many logical changes a merge request is too large anyway; more add only noise.
+const MAX_GROUPS = 10
 const effortFactor: Record<number, number> = { 1: 0.5, 2: 0.75, 3: 1, 4: 1.3, 5: 1.6 }
 
 const weightOf = (path: string) =>
   TEST_FILE.test(path) ? TEST_WEIGHT : DOC_FILE.test(path) ? DOC_WEIGHT : 1
 
+const weightedLines = (file: SizedFile) => {
+  const repeatedAdded = file.repeatedAdded ?? 0
+  const repeatedRemoved = file.repeatedRemoved ?? 0
+  const added = file.added - repeatedAdded + repeatedAdded * REPEATED_WEIGHT
+  const removed = file.removed - repeatedRemoved + repeatedRemoved * REPEATED_WEIGHT
+  return (added + removed * REMOVED_WEIGHT) * weightOf(file.path)
+}
+
 /**
- * Estimated minutes a person needs to review the files carefully, rounded to 5 (at least 5):
- * time to get into the change, reading time per weighted line scaled by the agent's `effort`
- * (1–5; neutral when absent), a minute per file and a few per extra logical change (`groups`).
- * Deterministic: the same input gives the same estimate.
+ * Estimated minutes a person needs to review the files carefully, at least 5: time to get into
+ * the change, reading time per weighted line at `linesPerHour` (default
+ * `DEFAULT_LINES_PER_HOUR`) scaled by the agent's `effort` (1–5; neutral when absent), time per
+ * file and a few minutes per extra logical change (`groups`, at most 10 count). Rounded to 5
+ * minutes, from two hours to 30. Deterministic: the same input gives the same estimate.
  */
 export function estimateReviewMinutes(input: {
   files: readonly SizedFile[]
   effort?: number
   groups?: number
+  linesPerHour?: number
 }): number {
   if (!input.files.length) return 0
-  const lines = input.files.reduce(
-    (sum, file) => sum + (file.added + file.removed * REMOVED_WEIGHT) * weightOf(file.path),
+  const lines = input.files.reduce((sum, file) => sum + weightedLines(file), 0)
+  const factor = effortFactor[input.effort ?? 3] ?? 1
+  const perHour =
+    input.linesPerHour && input.linesPerHour > 0 ? input.linesPerHour : DEFAULT_LINES_PER_HOUR
+  const fileMinutes = input.files.reduce(
+    (sum, file) =>
+      sum +
+      (file.added + file.removed <= TINY_FILE_LINES ? MINUTES_PER_TINY_FILE : MINUTES_PER_FILE),
     0,
   )
-  const factor = effortFactor[input.effort ?? 3] ?? 1
   const minutes =
     START_MINUTES +
-    (lines / LINES_PER_HOUR) * 60 * factor +
-    input.files.length * MINUTES_PER_FILE +
-    Math.max(0, (input.groups ?? 1) - 1) * MINUTES_PER_EXTRA_GROUP
-  return Math.max(5, Math.round(minutes / 5) * 5)
+    (lines / perHour) * 60 * factor +
+    fileMinutes +
+    Math.max(0, Math.min(input.groups ?? 1, MAX_GROUPS) - 1) * MINUTES_PER_EXTRA_GROUP
+  const step = minutes >= 120 ? 30 : 5
+  return Math.max(5, Math.round(minutes / step) * step)
 }
 
 /** The level of an estimate under the thresholds. */
@@ -92,12 +171,18 @@ const levelRank: Record<ReviewSizeLevel, number> = { ok: 0, large: 1, 'too-large
 export const sizeEscalated = (level: ReviewSizeLevel, than?: ReviewSizeLevel) =>
   levelRank[level] > (than ? levelRank[than] : -1)
 
-/** `~25 min`, `~1 h`, `~2 h 10 min`. */
-export function formatDuration(minutes: number): string {
+/**
+ * `~25 min`, `~1 h`, `~2 h 10 min`; in the language of `messages` when given (English by
+ * default).
+ */
+export function formatDuration(minutes: number, messages?: ReviewMessages): string {
+  const t = (messages ?? englishReviewMessages).t
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
-  if (!hours) return `~${rest} min`
-  return rest ? `~${hours} h ${rest} min` : `~${hours} h`
+  if (!hours) return t('duration.minutes', { minutes: rest })
+  return rest
+    ? t('duration.hoursMinutes', { hours, minutes: rest })
+    : t('duration.hours', { hours })
 }
 
 /** The English advice texts for a `large` or `too-large` estimate. */

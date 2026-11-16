@@ -976,7 +976,7 @@ describe('review size', () => {
     const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
     const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
     expect(data.size).toEqual({ minutes: 5, level: 'ok', files: 1, lines: 4, groups: 0 })
-    expect(submissions[0]?.summary).toContain('Estimated review time: ~5 min.')
+    expect(submissions[0]?.summary).toContain('> ⏱️ **Estimated review time: ~5 min.**')
     expect(tasks.map((task) => task.taskKind)).not.toContain('review-split')
   })
 
@@ -1017,9 +1017,9 @@ describe('review size', () => {
     expect(split?.prompt).not.toContain('bun.lock')
     expect(split?.system).toContain('in German')
     const summary = submissions[0]?.summary ?? ''
-    expect(summary).toContain('**Translated estimate. Translated limit.** Translated split.')
-    expect(summary).toContain('Translated parts:\n\n1. **Prices**: `src/price.ts`')
-    expect(summary).toContain('_Translated AI note._')
+    expect(summary).toContain('> 🛑 **Translated estimate. Translated limit.** Translated split.')
+    expect(summary).toContain('> Translated parts:\n>\n> 1. **Prices**: `src/price.ts`')
+    expect(summary).toContain('> _Translated AI note._')
     expect(summary).not.toContain('Estimated review time')
     expect(data.usage?.turns).toBe(4)
   })

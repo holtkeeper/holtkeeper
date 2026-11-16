@@ -117,9 +117,33 @@ export function sizeAdviceBlock(size: ReviewSize | undefined): string {
     .join('\n\n')
 }
 
+const sizeEmoji = { ok: '⏱️', large: '⚠️', 'too-large': '🛑' } as const
+
 /**
- * The summary note: verdict, the agent's summary, the estimated review time (or the advice to
- * split the merge request), a table of findings by severity, what happened to earlier threads,
+ * The estimated review time as a quoted block that leads with an emoji per level (⏱️ ok, ⚠️
+ * large, 🛑 too large): the advice to split when the size carries one, else one bold line saying
+ * the estimate (for the whole merge request when `mode` is incremental). `''` without an estimate.
+ */
+export function sizeCallout(
+  size: ReviewSize | undefined,
+  mode: ReviewData['mode'],
+  messages: ReviewMessages = englishReviewMessages,
+): string {
+  if (!size?.minutes) return ''
+  const body =
+    sizeAdviceBlock(size) ||
+    `**${messages.t(mode === 'incremental' ? 'scope.timeWhole' : 'scope.time', {
+      time: formatDuration(size.minutes, messages),
+    })}**`
+  return `${sizeEmoji[size.level]} ${body}`
+    .split('\n')
+    .map((line) => (line ? `> ${line}` : '>'))
+    .join('\n')
+}
+
+/**
+ * The summary note: verdict, the estimated review time (or the advice to split the merge request)
+ * as a callout right under the heading, the agent's summary, a table of findings by severity, what happened to earlier threads,
  * what was not reviewed and, after a review, the request to answer wrong comments. Fixed texts
  * come from `messages` (English by default); the heading, severity labels and markers never change.
  */
@@ -160,15 +184,12 @@ export function summaryNote(
   const stats = [
     t('scope.stats', { scope, files: data.stats.files, lines: data.stats.changedLines }),
     data.effort ? t('scope.effort', { effort: data.effort }) : '',
-    data.size && !data.size.advice && data.size.minutes
-      ? t('scope.time', { time: formatDuration(data.size.minutes) })
-      : '',
   ]
   const lines = [
     `${SUMMARY_HEADING} ${verdict}`,
+    sizeCallout(data.size, data.mode, messages),
     data.summary.trim(),
     stats.filter(Boolean).join(' '),
-    sizeAdviceBlock(data.size),
   ]
   if (data.walkthrough?.length)
     lines.push(
