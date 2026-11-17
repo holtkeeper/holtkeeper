@@ -110,3 +110,15 @@ test('rankAndCap filters by severity, sorts and caps', () => {
   expect(result.belowSeverity).toBe(1)
   expect(result.overLimit).toBe(1)
 })
+
+test('rankAndCap keeps behavior before tests, maintainability and style of the same severity', () => {
+  const list = [
+    candidate({ severity: 'minor', category: 'tests', path: 'a.ts', line: 1 }),
+    candidate({ severity: 'minor', category: 'maintainability', path: 'a.ts', line: 2 }),
+    candidate({ severity: 'minor', category: 'bug', path: 'z.ts', line: 3 }),
+    candidate({ severity: 'info', category: 'bug', path: 'a.ts', line: 4 }),
+    candidate({ severity: 'major', category: 'style', path: 'z.ts', line: 5 }),
+  ]
+  expect(rankAndCap(list, 'info', 5).kept.map((c) => c.line)).toEqual([5, 3, 2, 1, 4])
+  expect(rankAndCap(list, 'info', 2).overLimit).toBe(3)
+})

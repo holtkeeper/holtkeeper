@@ -135,15 +135,27 @@ const categoryOrder = [
   'security',
   'bug',
   'performance',
-  'tests',
   'maintainability',
+  'tests',
   'docs',
   'style',
 ]
 
+/** Categories about what the program does, as opposed to how its code reads or is tested. */
+const behaviorCategories = new Set(['security', 'bug', 'performance'])
+
 /**
- * Findings at or above `minSeverity`, most severe first (then by category, then position), at most
- * `max`. Returns the counts it left out.
+ * Rank of a finding for the comment limit: by severity, and below `major` a finding about
+ * behavior before one of the same severity about tests, maintainability, docs or style.
+ */
+const limitRank = (c: Candidate) =>
+  severityRank(c.severity) * 2 +
+  (behaviorCategories.has(c.category) || severityRank(c.severity) >= severityRank('major') ? 1 : 0)
+
+/**
+ * Findings at or above `minSeverity`, most important first, at most `max`: by severity, below
+ * `major` behavior (security, bug, performance) before tests, maintainability, docs and style,
+ * then by category and position. Returns the counts it left out.
  */
 export function rankAndCap(
   candidates: readonly Candidate[],
@@ -153,7 +165,7 @@ export function rankAndCap(
   const eligible = candidates.filter((c) => severityRank(c.severity) >= severityRank(minSeverity))
   const sorted = eligible.toSorted(
     (a, b) =>
-      severityRank(b.severity) - severityRank(a.severity) ||
+      limitRank(b) - limitRank(a) ||
       categoryOrder.indexOf(a.category) - categoryOrder.indexOf(b.category) ||
       a.path.localeCompare(b.path) ||
       a.line - b.line,

@@ -134,6 +134,7 @@ const severityGuide = (tests: boolean) =>
     '- major: wrong behavior, broken edge cases, race conditions, missing error handling that will bite.',
     `- minor: maintainability problems, ${tests ? 'missing tests for new logic, ' : ''}misleading names, small inefficiencies.`,
     '- info: optional remarks; use sparingly.',
+    'Category: `bug` for anything that makes the program do the wrong thing or leave out what it should do (a missing call, event, log record, check or request), `maintainability` only for code that works but is hard to read or change. Over the comment limit, findings about behavior are kept before tests, maintainability, docs and style.',
   ].join('\n')
 
 /** Prompt rule: whatever the prose language, code and technical terms stay in English. */

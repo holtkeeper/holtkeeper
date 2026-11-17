@@ -462,6 +462,33 @@ describe('reviewMergeRequest', () => {
     expect(data.verdict).toBe('looks-good')
   })
 
+  test('findings over the comment limit fill the places of refuted ones', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent } = fakeAgent({
+      review: [
+        review([
+          citedFinding(1, 'major', 'Wrong total'),
+          citedFinding(2, 'minor', 'Rounding off'),
+          citedFinding(3, 'minor', 'Tax skipped'),
+        ]),
+      ],
+      'review-verify': [
+        { findings: [{ id: 0, verdict: 'refuted', reason: 'Checked in src/price.ts:9.' }] },
+        {
+          findings: [
+            { id: 1, verdict: 'confirmed', reason: 'Holds.' },
+            { id: 2, verdict: 'confirmed', reason: 'Holds.' },
+          ],
+        },
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({ forge: requireReviewForge(forge), agent, options: { ...options, maxComments: 1 } }),
+    )
+    expect(data.comments.map((c) => c.title)).toEqual(['Rounding off'])
+    expect(data.stats.dropped).toMatchObject({ refuted: 1, overLimit: 1 })
+  })
+
   test('verify: false posts the findings unchecked', async () => {
     const { forge } = fakeForge({ files, discussions: [] })
     const { agent, tasks } = fakeAgent({

@@ -318,7 +318,8 @@ export interface ReviewSteps {
   /**
    * Checks the agent's findings that are about to be posted and drops the ones the code
    * contradicts and the `unverified` suspicions it does not confirm; without an agent or with
-   * `options.verify: false` everything but those suspicions stays.
+   * `options.verify: false` everything but those suspicions stays. `kept` is in the order of
+   * `candidates`.
    */
   verify(
     run: ReviewRun,
@@ -930,6 +931,12 @@ const baseData = (loaded: LoadedReview, planned?: ReviewPlan) => ({
   ...(planned?.previousHead ? { previousHead: planned.previousHead } : {}),
 })
 
+/**
+ * Findings verified beyond `maxComments`, so refuted ones leave no empty places; the extra ones
+ * that survive are cut after verification.
+ */
+export const VERIFY_HEADROOM = 5
+
 const emptyDropped = { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0 }
 
 /**
@@ -1067,11 +1074,14 @@ async function reviewOnce(run: ReviewRun, started: number): Promise<ReviewData> 
   const ranked = rankAndCap(
     [...fixedDeterministic.kept, ...fromAgent.kept],
     run.options.minSeverity,
-    run.options.maxComments,
+    run.options.maxComments + VERIFY_HEADROOM,
   )
   stats.dropped.belowSeverity = ranked.belowSeverity
-  stats.dropped.overLimit = ranked.overLimit
-  const verification = await steps.verify(run, loaded, ranked.kept, usage)
+  const checked = await steps.verify(run, loaded, ranked.kept, usage)
+  // The headroom fills the places of refuted findings; verification keeps the rank order, so
+  // what is left over the limit is cut from the end.
+  const verification = { ...checked, kept: checked.kept.slice(0, run.options.maxComments) }
+  stats.dropped.overLimit = ranked.overLimit + checked.kept.length - verification.kept.length
   if (verification.refuted.length) stats.dropped.refuted = verification.refuted.length
   const refutedSerious = verification.refuted.some(
     (r) => severityRank(r.candidate.severity) >= severityRank('major'),
