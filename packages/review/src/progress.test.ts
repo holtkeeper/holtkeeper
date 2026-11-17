@@ -9,7 +9,13 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { addedFile, fakeAgent, fakeForge } from '../test/fakes.ts'
 import { createReviewAnalyzer, reviewLocale, reviewOptionsSchema } from './analyzer.ts'
 import { englishReviewMessages, reviewMessageCatalog } from './messages.ts'
-import { PROGRESS_MARKER, startProgress } from './progress.ts'
+import {
+  PROGRESS_MARKER,
+  STAGE_MINUTES,
+  minutesLeft,
+  progressText,
+  startProgress,
+} from './progress.ts'
 
 const repo = { forge: 'work', path: 'toys/shelf' }
 
@@ -112,6 +118,28 @@ describe('startProgress', () => {
     expect([...notes.values()][1]).toContain('`/holtkeeper review`')
   })
 
+  test('shows the stage, edits only when the text changes and stops editing once done', async () => {
+    const { forge, notes, events } = noteForge({ canDelete: false })
+    const progress = await startProgress({
+      forge,
+      repo: repo.path,
+      mergeRequest: 7,
+      messages: englishReviewMessages,
+    })
+    progress.update({ stage: 'review', parts: 3, done: 0, deep: true })
+    progress.update({ stage: 'review', parts: 3, done: 0, deep: true })
+    progress.update({ stage: 'review', parts: 3, done: 1, deep: true })
+    await Bun.sleep(0)
+    expect([...notes.values()][0]).toContain('3 parts: 1 done')
+    // An edit still queued when the review ends is dropped.
+    progress.update({ stage: 'cross', parts: 3, deep: true })
+    await progress.finish()
+    progress.update({ stage: 'post' })
+    await Bun.sleep(0)
+    expect(events).toEqual(['post', 'update', 'update', 'update'])
+    expect([...notes.values()][0]).toContain('has finished')
+  })
+
   test('a forge that refuses notes does not stop the review', async () => {
     const { forge } = noteForge()
     const logs: string[] = []
@@ -157,7 +185,8 @@ describe('review analyzer texts', () => {
   test('posts the progress note before the review and deletes it after', async () => {
     const { forge, events, submissions, notes } = noteForge()
     await run(forge)
-    expect(events).toEqual(['post', 'review', 'delete'])
+    // The note says it is posting, then goes away.
+    expect(events).toEqual(['post', 'review', 'update', 'delete'])
     expect(notes.size).toBe(0)
     expect(submissions[0]?.summary).toContain('Holtkeeper learns from your answers')
   })
@@ -229,5 +258,54 @@ describe('review analyzer texts', () => {
     expect(reviewLocale('de', 'Добавляет виджеты на полку и кеширует их')).toBe('de')
     expect(reviewLocale(undefined, 'Добавляет виджеты на полку и кеширует их')).toBe('ru')
     expect(reviewLocale(undefined, '')).toBe('en')
+  })
+})
+
+describe('progressText', () => {
+  test('lists the steps with the current one and the time left', () => {
+    const text = progressText(
+      { stage: 'review', parts: 3, done: 1, deep: true },
+      1,
+      englishReviewMessages,
+    )
+    expect(text).toContain('~11 min left.')
+    expect(text).toContain('- ⏳ Reviewing the changes in 3 parts: 1 done')
+    expect(text).toContain('- ▫️ Final pass over the whole merge request')
+    expect(text).toContain('- ▫️ Double-checking the findings')
+    expect(text).toContain('- ▫️ Posting comments and the summary')
+    const verifying = progressText({ stage: 'verify', findings: 4 }, 0, englishReviewMessages)
+    expect(verifying).toContain('- ✅ Reviewing the changes\n')
+    expect(verifying).toContain('- ⏳ Double-checking 4 finding(s)')
+    expect(verifying).not.toContain('Final pass')
+  })
+
+  test('a single pass has no cross-part step, and without verification no verify step', () => {
+    const text = progressText(
+      { stage: 'review', parts: 1, done: 0, deep: false },
+      0,
+      englishReviewMessages,
+      false,
+    )
+    expect(text).not.toContain('Final pass')
+    expect(text).not.toContain('Double-checking')
+  })
+})
+
+describe('minutesLeft', () => {
+  test('counts what is left of the stage, at least a minute, plus the steps after it', () => {
+    const split = { stage: 'review', parts: 4, done: 0, deep: true } as const
+    expect(minutesLeft(split, 0, true)).toBe(
+      STAGE_MINUTES.part + STAGE_MINUTES.cross.deep + STAGE_MINUTES.verify + STAGE_MINUTES.post,
+    )
+    expect(minutesLeft(split, 30, true)).toBe(
+      1 + STAGE_MINUTES.cross.deep + STAGE_MINUTES.verify + STAGE_MINUTES.post,
+    )
+    expect(minutesLeft({ stage: 'review', parts: 1, done: 0, deep: false }, 0, false)).toBe(
+      STAGE_MINUTES.single.main + STAGE_MINUTES.post,
+    )
+    expect(minutesLeft({ stage: 'review', parts: 7, done: 0, deep: false }, 0, false)).toBe(
+      2 * STAGE_MINUTES.part + STAGE_MINUTES.cross.main + STAGE_MINUTES.post,
+    )
+    expect(minutesLeft({ stage: 'post' }, 0, true)).toBe(1)
   })
 })

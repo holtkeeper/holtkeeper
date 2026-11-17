@@ -2,7 +2,7 @@ import type { Agent, AgentResult, AgentTask, Toolset } from '@holtkeeper/agent'
 import { lockfileTools } from '@holtkeeper/agent-tools'
 import { z } from 'zod'
 
-import type { OpenThread } from './dedupe.ts'
+import { type OpenThread, severityRank } from './dedupe.ts'
 import { changedLineCount, renderNumberedDiff } from './diff.ts'
 import type { Guideline } from './guidelines.ts'
 import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } from './schema.ts'
@@ -11,12 +11,14 @@ import type { Candidate } from './validate.ts'
 
 /**
  * Runs a task and adds its turns, cost and token counts to `usage`; the first run that names its
- * model sets `usage.model`.
+ * model sets `usage.model`. With `report`, logs one line on what the run cost under its label,
+ * including the size of its first request (`startTokens`), so a growing fixed context shows.
  */
 export async function runTracked<Output>(
   agent: Agent,
   task: AgentTask<Output>,
   usage: ReviewUsage,
+  report?: { label: string; log?: ((line: string) => void) | undefined },
 ): Promise<AgentResult<Output>> {
   const result = await agent.run(task)
   usage.turns += result.turns
@@ -26,7 +28,22 @@ export async function runTracked<Output>(
     usage.inputTokens = (usage.inputTokens ?? 0) + result.usage.inputTokens
     usage.outputTokens = (usage.outputTokens ?? 0) + result.usage.outputTokens
   }
+  if (report?.log) report.log(`${report.label}: ${runSummary(result)}`)
   return result
+}
+
+const thousands = (tokens: number) => `${Math.round(tokens / 1000)}k`
+
+/** One run's turns, prompt tokens, first request size and cost, for a log line. */
+export function runSummary(result: AgentResult): string {
+  const { usage } = result
+  const prompt = usage ? usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : 0
+  return [
+    `${result.turns} turns`,
+    ...(usage ? [`${thousands(prompt)} prompt tokens`] : []),
+    ...(result.startTokens === undefined ? [] : [`${thousands(result.startTokens)} at the start`]),
+    ...(result.costUsd === undefined ? [] : [`$${result.costUsd.toFixed(2)}`]),
+  ].join(', ')
 }
 
 export interface ReviewPromptInput {
@@ -59,8 +76,17 @@ export interface ReviewPromptInput {
    */
   crossPart?: {
     parts: number
-    findings: readonly { path: string; line: number; title: string }[]
+    /** The parts' findings; `id` is the number the pass names in `duplicates`. */
+    findings: readonly {
+      id?: number
+      path: string
+      line: number
+      title: string
+      severity?: Candidate['severity']
+    }[]
     walkthrough: readonly string[]
+    /** The parts' summaries, which the pass's summary replaces. */
+    summaries?: readonly string[]
   }
   language?: string
   /**
@@ -194,10 +220,12 @@ export function reviewContext(input: ReviewPromptInput): string {
 /** The task prompt: the merge request, open threads and the numbered diff of the files in scope. */
 export function reviewPrompt(input: ReviewPromptInput): string {
   const description = input.mergeRequest.description.trim().slice(0, 3000)
-  const diff = input.files
-    .map((file) => renderNumberedDiff(file.path, file.hunks, file.lines))
-    .filter(Boolean)
-    .join('\n\n')
+  const diff = input.crossPart
+    ? ''
+    : input.files
+        .map((file) => renderNumberedDiff(file.path, file.hunks, file.lines))
+        .filter(Boolean)
+        .join('\n\n')
   const pathRules = (input.pathInstructions ?? []).map((rule) => {
     const files = rule.files.slice(0, 5).join(', ') + (rule.files.length > 5 ? ', ...' : '')
     return `- \`${rule.glob}\` (${files}): ${rule.text}`
@@ -229,7 +257,7 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     input.apiChanges?.trim() ?? '',
     input.impact?.trim() ?? '',
     input.goGuidelines?.trim() ?? '',
-    `Diff:\n\n${diff}`,
+    input.crossPart ? onDemandDiff(input.files, input.mode) : `Diff:\n\n${diff}`,
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -250,24 +278,105 @@ export interface AgentReviewOptions {
   toolsets?: readonly Toolset[]
   /** Turn limit of each agent pass. Default: `reviewTurns` of the pass's files. */
   maxTurns?: number
+  /** Told when the passes start and as parts finish; must not throw. */
+  onProgress?: (event: AgentProgress) => void
+  /**
+   * Soft spend limit of the whole review in USD, shared out by `REVIEW_BUDGET_SHARES`: a pass that
+   * reaches its share is asked for its answer instead of reading on. No limit when unset or 0.
+   */
+  costLimitUsd?: number
+  /** Gets one line per finished pass: turns, prompt tokens, first request size and cost. */
+  log?: (line: string) => void
   signal?: AbortSignal
 }
+
+/**
+ * Where an agent review is: `review` when its passes start and each time a part finishes (`parts`
+ * is 1 for a diff reviewed in one pass), `cross` when the cross-part pass of a split review starts.
+ */
+export type AgentProgress =
+  | { stage: 'review'; parts: number; done: number }
+  | { stage: 'cross'; parts: number }
 
 /** The prompt block of the cross-part pass: its task and what the parts already found. */
 function crossPartBlock(cross: NonNullable<ReviewPromptInput['crossPart']>): string {
   const findings = cross.findings.map(
-    (f) => `- ${f.path}:${f.line} ${f.title.replace(/\s+/g, ' ').slice(0, 160)}`,
+    (f) =>
+      `- ${f.id === undefined ? '' : `[${f.id}] `}${f.path}:${f.line}${f.severity ? ` (${f.severity})` : ''} ${f.title.replace(/\s+/g, ' ').slice(0, 160)}`,
   )
+  const summaries = (cross.summaries ?? []).map((text) => text.trim()).filter(Boolean)
   return [
     `This merge request was too large for one pass: ${cross.parts} separate passes reviewed it in parts, each seeing only its slice of the diff. This is the final pass over the whole diff. Look for what the parts could not see: contracts between changed modules and their callers in other parts, the same change applied differently in parallel code, state and lifecycle that cross files, and anything a part only skimmed. Read the code with the tools. Do not repeat a problem already reported; report only new ones.`,
+    'Your `summary` replaces the summaries of the parts: write one summary of the whole merge request for its author, covering what it does and the main problems the parts and you found, without mentioning parts or passes.',
+    cross.findings.some((f) => f.id !== undefined)
+      ? 'In `duplicates`, list the already reported findings that describe the same problem as another one in the list (often the same omission seen from two files) as `{ id, of }`, where `of` is the one to keep; leave it empty when there are none.'
+      : '',
     cross.walkthrough.length
       ? `What the parts found the change does:\n${cross.walkthrough.map((line) => `- ${line}`).join('\n')}`
+      : '',
+    summaries.length
+      ? `Summaries of the parts:\n${summaries.map((text) => `- ${text.replace(/\s+/g, ' ')}`).join('\n')}`
       : '',
     findings.length ? `Already reported (do not repeat):\n${findings.join('\n')}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
 }
+
+/**
+ * The cross-part pass's file list in place of the diff: the whole diff on every turn is what made
+ * that pass the most expensive one, and it reads only the files it looks into.
+ */
+function onDemandDiff(files: readonly FileScope[], mode: ReviewPromptInput['mode']): string {
+  return [
+    `Files of the merge request with their changed lines. Read the numbered diff of a file with \`${MR_DIFF_TOOL}\` before you judge or comment on it; comment only on lines it marks \`+\`.`,
+    files.map((file) => `- ${file.path} (${weightOf(file, mode)})`).join('\n'),
+  ].join('\n')
+}
+
+/** Name of the tool that gives the cross-part pass one file's numbered diff. */
+export const MR_DIFF_TOOL = 'mr.diff'
+
+/**
+ * The `mr` toolset of a pass: `mr.diff` answers the numbered diff of one file in `files`, as the
+ * review prompt renders it, and an error listing the files for any other path.
+ */
+export function mergeRequestDiffTools(files: readonly FileScope[]): Toolset {
+  const byPath = new Map(files.map((file) => [file.path, file]))
+  return {
+    name: 'mr',
+    instructions: `\`${MR_DIFF_TOOL}\` gives the numbered diff of a file of this merge request.`,
+    tools: [
+      {
+        name: MR_DIFF_TOOL,
+        description:
+          'The numbered diff of one file of this merge request: `+` lines are in scope for comments, `~` lines were reviewed before, `-` lines are removed.',
+        input: z.object({ path: z.string().describe('Path of a file of the merge request') }),
+        run: ({ path }: { path: string }) => {
+          const file = byPath.get(path.replace(/^\.?\//, ''))
+          if (!file)
+            return `error: ${path} is not a file of this merge request; its files: ${[...byPath.keys()].join(', ')}`
+          return renderNumberedDiff(file.path, file.hunks, file.lines) || '(no changed lines)'
+        },
+      },
+    ],
+  }
+}
+
+/** Lines `read_file` returns by default in review passes: enough for a function and its context. */
+export const REVIEW_READ_LINES = 400
+
+/**
+ * When review passes clear older tool results: once the results in the conversation pass about
+ * 15k tokens, all but the newest four long ones go.
+ */
+export const REVIEW_TRIM = { maxChars: 60_000, keepLast: 4 } as const
+
+/**
+ * Shares of `costLimitUsd` each pass may spend before it is asked for its answer: a diff reviewed
+ * in one pass, all parts of a split one together, its cross-part pass, and the verification.
+ */
+export const REVIEW_BUDGET_SHARES = { single: 0.6, parts: 0.4, cross: 0.25, verify: 0.25 } as const
 
 /** Evidence entries kept per finding. */
 const MAX_EVIDENCE = 8
@@ -276,8 +385,13 @@ const MAX_EVIDENCE = 8
 export const REVIEW_MIN_TURNS = 40
 /** Upper bound of the default turn limit of a review pass. */
 export const REVIEW_MAX_TURNS = 90
+/**
+ * Upper bound of the default turn limit of one part of a split review: a part sees a slice, and
+ * the cross-part pass reads across slices.
+ */
+export const PART_MAX_TURNS = 50
 /** Turn limit of the cross-part pass of a split review. */
-export const CROSS_PART_TURNS = 60
+export const CROSS_PART_TURNS = 30
 
 /** The default turn limit of a pass over `files`: larger slices of a diff get more turns. */
 export function reviewTurns(files: readonly FileScope[], mode: ReviewPromptInput['mode']): number {
@@ -293,8 +407,8 @@ export const INVESTIGATE_MIN_FILES = 3
 export const SPLIT_MAX_LINES = 600
 /** Files above which the diff is split into parts reviewed by separate passes. */
 export const SPLIT_MAX_FILES = 12
-/** Parts of a split diff reviewed at once. */
-export const SPLIT_CONCURRENCY = 3
+/** Parts of a split diff reviewed at once; enough that usual splits run in a single wave. */
+export const SPLIT_CONCURRENCY = 6
 
 const INVESTIGATE_FOLLOW_UP =
   'You answered without opening any code, but this diff is too large to judge from the diff alone. Inspect the changed files, their callers and the code paths they touch with the tools, then answer again with the complete JSON: every problem you find, including those from your previous answer, not only new ones.'
@@ -455,8 +569,9 @@ export function reviewPromptVersion(): string {
       part: { index: 1, count: 2, files: ['src/a.ts', 'src/b.ts'] },
       crossPart: {
         parts: 2,
-        findings: [{ path: 'src/a.ts', line: 1, title: 'T' }],
+        findings: [{ id: 1, path: 'src/a.ts', line: 1, title: 'T', severity: 'minor' }],
         walkthrough: ['W'],
+        summaries: ['S'],
       },
       goGuidelines: 'Go guidelines',
       dependencies: 'Dependencies',
@@ -480,7 +595,11 @@ export function reviewPromptVersion(): string {
         SPLIT_MAX_FILES,
         REVIEW_MIN_TURNS,
         REVIEW_MAX_TURNS,
+        PART_MAX_TURNS,
         CROSS_PART_TURNS,
+        REVIEW_READ_LINES,
+        REVIEW_TRIM,
+        REVIEW_BUDGET_SHARES,
       ]),
     ])
       hasher.update(`${text}\u0000`)
@@ -491,7 +610,7 @@ export function reviewPromptVersion(): string {
 
 type ReviewPass = Pick<
   AgentReview,
-  'summary' | 'verdict' | 'walkthrough' | 'effort' | 'reviewMinutes'
+  'summary' | 'verdict' | 'walkthrough' | 'effort' | 'reviewMinutes' | 'duplicates'
 > & {
   candidates: Candidate[]
 }
@@ -506,7 +625,11 @@ async function reviewPass(
   options: AgentReviewOptions,
   input: ReviewPromptInput,
   maxTurns = options.maxTurns ?? reviewTurns(input.files, input.mode),
+  tier: 'main' | 'deep' = options.deep ? 'deep' : 'main',
+  share: number = REVIEW_BUDGET_SHARES.single,
+  label = 'review pass',
 ) {
+  const answerAt = options.costLimitUsd ? options.costLimitUsd * share : undefined
   const impact = options.impactFor
     ? await options.impactFor(input.files).catch(() => {
         options.signal?.throwIfAborted()
@@ -528,13 +651,20 @@ async function reviewPass(
       capabilities: ['read', 'search'],
       output: agentReviewSchema,
       taskKind: 'review',
-      tier: options.deep ? 'deep' : 'main',
-      toolsets: withLockfileTools(options.toolsets),
+      tier,
+      toolsets: [
+        ...withLockfileTools(options.toolsets),
+        ...(input.crossPart ? [mergeRequestDiffTools(input.files)] : []),
+      ],
       maxTurns,
+      readLines: REVIEW_READ_LINES,
+      trimToolResults: REVIEW_TRIM,
+      ...(answerAt !== undefined && { answerAtCostUsd: answerAt }),
       ...(investigate ? { followUpWithoutTools: INVESTIGATE_FOLLOW_UP } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     },
     options.usage,
+    { label, log: options.log },
   )
   const review = result.output ?? {
     comments: [],
@@ -552,6 +682,7 @@ async function reviewPass(
     ...(review.walkthrough?.length ? { walkthrough: review.walkthrough } : {}),
     ...(review.effort ? { effort: review.effort } : {}),
     ...(review.reviewMinutes ? { reviewMinutes: review.reviewMinutes } : {}),
+    ...(review.duplicates?.length ? { duplicates: review.duplicates } : {}),
   } satisfies ReviewPass
 }
 
@@ -584,7 +715,9 @@ async function settledInParallel<Item, Result>(
 }
 
 /**
- * The final pass of a split review over the whole diff, looking for problems across parts.
+ * The final pass of a split review over the whole diff, looking for problems across parts, on the
+ * `deep` tier with `options.deep`. It is told the parts' findings by number and their summaries;
+ * its summary covers the whole merge request and its `duplicates` name part findings to drop.
  * `undefined` when it fails for another reason than a spend limit or an abort: the parts stand.
  */
 async function crossPartPass(
@@ -594,6 +727,7 @@ async function crossPartPass(
   walkthrough: NonNullable<ReviewPass['walkthrough']>,
 ): Promise<ReviewPass | undefined> {
   const { part: _part, ...input } = options.input
+  options.onProgress?.({ stage: 'cross', parts })
   try {
     const pass = await reviewPass(
       options,
@@ -601,19 +735,30 @@ async function crossPartPass(
         ...input,
         crossPart: {
           parts,
-          findings: passes.flatMap((done) =>
-            done.candidates.map((c) => ({ path: c.path, line: c.line, title: c.title })),
-          ),
+          findings: passes
+            .flatMap((done) => done.candidates)
+            .map((c, index) => ({
+              id: index + 1,
+              path: c.path,
+              line: c.line,
+              title: c.title,
+              severity: c.severity,
+            })),
           walkthrough: walkthrough.map((step) => step.change),
+          summaries: passes.map((done) => done.summary),
         },
       },
       options.maxTurns ?? CROSS_PART_TURNS,
+      options.deep ? 'deep' : 'main',
+      REVIEW_BUDGET_SHARES.cross,
+      'cross-part pass',
     )
-    // Its summary and walkthrough would repeat the parts'; only new findings count.
+    // Its walkthrough would repeat the parts'; findings, summary and duplicates count.
     return {
       candidates: pass.candidates,
-      summary: pass.candidates.length ? pass.summary : '',
+      summary: pass.summary,
       verdict: pass.verdict,
+      ...(pass.duplicates?.length ? { duplicates: pass.duplicates } : {}),
     }
   } catch (error) {
     options.signal?.throwIfAborted()
@@ -623,29 +768,66 @@ async function crossPartPass(
 }
 
 /**
- * Asks the agent for a structured review on the `main` tier (`deep` with `options.deep`); comments
- * come back as unvalidated candidates. A diff over `SPLIT_MAX_LINES` or `SPLIT_MAX_FILES` is
- * split with `splitReviewFiles` and each part reviewed by its own pass (`SPLIT_CONCURRENCY` at
- * once, each with `maxTurns`); their candidates are concatenated, summaries joined, walkthroughs
+ * `candidates` (numbered from 1 as the cross-part pass saw them) without the ones `duplicates`
+ * names; each kept finding takes the highest severity of the duplicates folded into it. Pairs
+ * naming an unknown number, the same finding, or a finding already dropped are ignored.
+ */
+export function dropDuplicates(
+  candidates: readonly Candidate[],
+  duplicates: readonly { id: number; of: number }[] = [],
+): Candidate[] {
+  const kept = [...candidates]
+  const dropped = new Set<number>()
+  for (const { id, of } of duplicates) {
+    const target = kept[of - 1]
+    const duplicate = kept[id - 1]
+    if (!target || !duplicate || id === of || dropped.has(id) || dropped.has(of)) continue
+    dropped.add(id)
+    if (severityRank(duplicate.severity) > severityRank(target.severity))
+      kept[of - 1] = { ...target, severity: duplicate.severity }
+  }
+  return kept.filter((_, index) => !dropped.has(index + 1))
+}
+
+/**
+ * Asks the agent for a structured review; comments come back as unvalidated candidates. A diff
+ * within `SPLIT_MAX_LINES` and `SPLIT_MAX_FILES` gets one pass on the `main` tier (`deep` with
+ * `options.deep`). A larger one is split with `splitReviewFiles` and each part reviewed by its own
+ * pass on the `main` tier (`SPLIT_CONCURRENCY` at once, each with `maxTurns`, by default
+ * `reviewTurns` capped at `PART_MAX_TURNS`); then one cross-part pass (`CROSS_PART_TURNS`, on the
+ * `deep` tier with `options.deep`) reviews the whole diff for problems spanning parts, told what
+ * the parts found. Its findings are added, the part findings it names as duplicates dropped, and
+ * its summary replaces the parts' (joined when it fails or has none); walkthroughs are
  * concatenated, `effort` is the highest, `reviewMinutes` the sum of the parts' (absent when a part
- * failed) and the verdict the worst. After the parts, one cross-part
- * pass (`CROSS_PART_TURNS`) reviews the whole diff for problems spanning parts, told what the
- * parts found; it adds only findings (and its summary when it has some), and its failure is
- * ignored unless a spend limit stopped it. A failed part does not lose
- * the others: its files are listed as not reviewed in the summary and the verdict becomes
- * `needs-changes`. The review fails when every part fails, a spend limit stops a part, or the run
- * is aborted. A pass over more than `INVESTIGATE_MIN_FILES` files or `INVESTIGATE_MIN_LINES`
- * changed lines that answers without reading any code is followed up once
- * (`followUpWithoutTools`). Every pass adds to `usage`.
+ * failed) and the verdict the worst. The cross-part pass failing is ignored unless a spend limit
+ * stopped it. A failed part does not lose the others: its files are listed as not reviewed in the
+ * summary and the verdict becomes `needs-changes`. The review fails when every part fails, a
+ * spend limit stops a part, or the run is aborted. A pass over more than `INVESTIGATE_MIN_FILES`
+ * files or `INVESTIGATE_MIN_LINES` changed lines that answers without reading any code is followed
+ * up once (`followUpWithoutTools`). Every pass adds to `usage`; `onProgress` hears when the passes
+ * start, as parts finish and when the cross-part pass starts.
  */
 export async function runAgentReview(options: AgentReviewOptions): Promise<ReviewPass> {
   const parts = splitReviewFiles(options.input.files, options.input.mode)
+  options.onProgress?.({ stage: 'review', parts: parts.length, done: 0 })
   if (parts.length <= 1) return reviewPass(options, options.input)
+  let done = 0
   const settled = await settledInParallel(
     parts,
     SPLIT_CONCURRENCY,
     options.signal,
-    (files, index) => reviewPass(options, partInput(options.input, files, index + 1, parts.length)),
+    (files, index) =>
+      reviewPass(
+        options,
+        partInput(options.input, files, index + 1, parts.length),
+        options.maxTurns ?? Math.min(PART_MAX_TURNS, reviewTurns(files, options.input.mode)),
+        'main',
+        REVIEW_BUDGET_SHARES.parts / parts.length,
+        `review part ${index + 1}/${parts.length}`,
+      ).finally(() => {
+        done++
+        options.onProgress?.({ stage: 'review', parts: parts.length, done })
+      }),
   )
   const errors = settled.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
   const passes = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
@@ -654,17 +836,26 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
   const failed = parts.filter((_, index) => settled[index]?.status !== 'fulfilled')
   const walkthrough = passes.flatMap((pass) => pass.walkthrough ?? [])
   const cross = await crossPartPass(options, parts.length, passes, walkthrough)
-  if (cross) passes.push(cross)
   const effort = Math.max(0, ...passes.map((pass) => pass.effort ?? 0))
   // Each part estimated its own slice; the cross-part pass gives none.
   const reviewMinutes = failed.length
     ? 0
     : passes.reduce((sum, pass) => sum + (pass.reviewMinutes ?? 0), 0)
   const notReviewed = failed.flat().map((file) => `\`${file.path}\``)
+  const summaries = cross?.summary.trim()
+    ? [cross.summary.trim()]
+    : passes.map((pass) => pass.summary.trim())
+  const all = cross ? [...passes, cross] : passes
   return {
-    candidates: passes.flatMap((pass) => pass.candidates),
+    candidates: [
+      ...dropDuplicates(
+        passes.flatMap((pass) => pass.candidates),
+        cross?.duplicates,
+      ),
+      ...(cross?.candidates ?? []),
+    ],
     summary: [
-      ...passes.map((pass) => pass.summary.trim()),
+      ...summaries,
       notReviewed.length
         ? `Not reviewed, a review pass failed on these files: ${notReviewed.join(', ')}.`
         : '',
@@ -672,7 +863,7 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
       .filter(Boolean)
       .join('\n\n'),
     verdict:
-      failed.length || passes.some((pass) => pass.verdict === 'needs-changes')
+      failed.length || all.some((pass) => pass.verdict === 'needs-changes')
         ? 'needs-changes'
         : 'looks-good',
     ...(walkthrough.length ? { walkthrough } : {}),

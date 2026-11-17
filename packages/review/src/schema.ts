@@ -241,6 +241,11 @@ export const agentReviewSchema = z.object({
   /** Minutes a careful human review of the diff in this pass takes, by the agent. */
   reviewMinutes: z.number().int().min(1).max(1440).optional(),
   verdict: z.enum(['looks-good', 'needs-changes']),
+  /**
+   * Cross-part pass only: findings of the parts that report the same problem as another one, by
+   * their numbers in the prompt; `id` is dropped in favor of `of`.
+   */
+  duplicates: z.array(z.object({ id: z.number().int(), of: z.number().int() })).optional(),
 })
 
 export type AgentReview = z.infer<typeof agentReviewSchema>

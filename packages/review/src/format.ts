@@ -142,7 +142,8 @@ export function sizeCallout(
 /**
  * The summary note: verdict, the estimated review time (or the advice to split the merge request)
  * as a callout right under the heading, the agent's summary, a table of findings by severity, what happened to earlier threads,
- * what was not reviewed and, after a review, the request to answer wrong comments. Fixed texts
+ * what was not reviewed and, after a review, how long it took and what it cost (when `durationMs`
+ * and `usage.costUsd` are set) and the request to answer wrong comments. Fixed texts
  * come from `messages` (English by default); the heading, severity labels and markers never change.
  */
 export function summaryNote(
@@ -161,7 +162,8 @@ export function summaryNote(
     | 'skipped'
     | 'stats'
     | 'checks'
-  >,
+  > &
+    Partial<Pick<ReviewData, 'usage' | 'durationMs'>>,
   messages: ReviewMessages = englishReviewMessages,
 ): string {
   const { t } = messages
@@ -228,6 +230,14 @@ export function summaryNote(
       `<details><summary>${t('notReviewed.title')}</summary>\n\n${notReviewed.join('\n')}\n\n</details>`,
     )
 
+  const cost = data.usage?.costUsd
+  if (data.mode !== 'skipped' && cost !== undefined && data.durationMs !== undefined)
+    lines.push(
+      `<sub>${t('summary.cost', {
+        time: formatDuration(Math.max(1, Math.round(data.durationMs / 60_000)), messages),
+        cost: cost.toFixed(2),
+      })}</sub>`,
+    )
   if (data.mode !== 'skipped') lines.push(t('summary.feedback'))
   lines.push(summaryMarker(data.head))
   return lines.filter(Boolean).join('\n\n')

@@ -102,6 +102,35 @@ const runOf = (extra: Partial<ReviewRun> & Pick<ReviewRun, 'forge'>): ReviewRun 
 })
 
 describe('reviewMergeRequest', () => {
+  test('costLimitUsd gives the review and its verification their shares as soft limits', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        review([
+          {
+            path: 'src/price.ts',
+            line: 2,
+            severity: 'minor',
+            category: 'bug',
+            title: 'Rounding missing',
+            body: 'Money must be rounded to cents.',
+          },
+        ]),
+      ],
+    })
+    await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        options: { ...options, costLimitUsd: 2 },
+      }),
+    )
+    expect(tasks.map((task) => [task.taskKind, task.answerAtCostUsd])).toEqual([
+      ['review', 2 * 0.6],
+      ['review-verify', 2 * 0.25],
+    ])
+  })
+
   test('posts validated, ranked comments with a summary', async () => {
     const { forge, submissions } = fakeForge({ files, discussions: [] })
     const { agent, tasks } = fakeAgent({
@@ -143,6 +172,7 @@ describe('reviewMergeRequest', () => {
         ]),
       ],
     })
+    const stages: unknown[] = []
     const data = await reviewMergeRequest(
       runOf({
         forge: requireReviewForge(forge),
@@ -151,8 +181,14 @@ describe('reviewMergeRequest', () => {
           text: `Guide with ${docs.length} docs. Check money.`,
           scopes: ['all', 'team:web'],
         }),
+        onProgress: (stage) => stages.push(stage),
       }),
     )
+    expect(stages).toEqual([
+      { stage: 'review', parts: 1, done: 0, deep: false },
+      { stage: 'verify', findings: 1 },
+      { stage: 'post' },
+    ])
 
     expect(tasks[0]?.taskKind).toBe('review')
     expect(tasks[0]?.tier).toBe('main')
@@ -188,6 +224,21 @@ describe('reviewMergeRequest', () => {
     expect(submission?.comments[0]?.body).toContain(findingMarker(data.comments[0]?.id ?? ''))
     expect(submission?.summary).toContain('| Major | 1 |')
     expect(submission?.summary).toContain('bun.lock')
+    expect(submission?.summary).toContain('<sub>The review took ~1 min and cost $0.02.</sub>')
+  })
+
+  test('showCost false leaves the time and cost out of the summary', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const { agent } = fakeAgent({ review: [review([])] })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        options: { ...options, showCost: false },
+      }),
+    )
+    expect(data.usage?.costUsd).toBeGreaterThan(0)
+    expect(submissions[0]?.summary).not.toContain('The review took')
   })
 
   test('applies REVIEW.md path rules and posts the walkthrough and effort', async () => {

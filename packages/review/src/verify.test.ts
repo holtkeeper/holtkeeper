@@ -56,11 +56,11 @@ describe('verifyFindings', () => {
       { candidate: candidates[0] as Candidate, reason: 'Guarded in src/widget.ts:2.' },
     ])
     expect(tasks).toHaveLength(1)
-    expect(tasks[0]).toMatchObject({ taskKind: 'review-verify', tier: 'main', maxTurns: 22 })
+    expect(tasks[0]).toMatchObject({ taskKind: 'review-verify', tier: 'main', maxTurns: 12 })
     expect(tasks[0]?.prompt).not.toContain('Check')
   })
 
-  test('serious findings are checked on deep, the rest on main or deep with deep', async () => {
+  test('serious findings are checked on deep, the rest on main', async () => {
     const { agent, tasks } = fakeAgent({})
     await verifyFindings({
       agent,
@@ -68,9 +68,8 @@ describe('verifyFindings', () => {
       candidates: [candidate('A', 'critical'), candidate('B', 'minor')],
       usage: usage(),
       mergeRequest,
-      deep: true,
     })
-    expect(tasks.map((t) => t.tier)).toEqual(['deep', 'deep'])
+    expect(tasks.map((t) => t.tier)).toEqual(['deep', 'main'])
   })
 
   test('nothing from the agent means no task', async () => {
@@ -119,9 +118,42 @@ describe('verifyFindings', () => {
     ).rejects.toThrow()
   })
 
-  test('turns grow with the findings, up to 50', () => {
-    expect(verifyTurns(1)).toBe(14)
-    expect(verifyTurns(20)).toBe(50)
+  test('the prompt carries the code around a finding and its evidence, the cost limit a share', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'excerpt-'))
+    try {
+      await mkdir(join(dir, 'src'))
+      const lines = Array.from({ length: 60 }, (_, i) => `export const w${i + 1} = ${i + 1}`)
+      await writeFile(join(dir, 'src/widget.ts'), lines.join('\n'))
+      const { agent, tasks } = fakeAgent({ 'review-verify': [{ findings: [] }] })
+      await verifyFindings({
+        agent,
+        dir,
+        candidates: [
+          {
+            ...candidate('A', 'minor'),
+            line: 30,
+            evidence: [{ path: 'src/widget.ts', line: 55 }],
+          },
+        ],
+        usage: usage(),
+        mergeRequest,
+        costLimitUsd: 2,
+      })
+      const prompt = tasks[0]?.prompt ?? ''
+      expect(prompt).toContain('   18  export const w18 = 18')
+      expect(prompt).toContain('   42  export const w42 = 42')
+      expect(prompt).not.toContain('w17 = 17')
+      expect(prompt).toContain('src/widget.ts:55')
+      expect(prompt).toContain('   59  export const w59 = 59')
+      expect(tasks[0]?.answerAtCostUsd).toBeCloseTo(2 * 0.25)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('turns grow with the findings, up to 30', () => {
+    expect(verifyTurns(1)).toBe(8)
+    expect(verifyTurns(20)).toBe(30)
   })
 })
 

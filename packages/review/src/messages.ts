@@ -17,6 +17,42 @@ export const reviewMessageCatalog = defineCatalog({
       text: '⏳ **Holtkeeper is reviewing this merge request.** This usually takes a few minutes. Please wait until the review finishes: its comments and a summary will appear here.',
       note: 'Posted when a review starts; removed when it ends.',
     },
+    'progress.title': {
+      text: '⏳ **Holtkeeper is reviewing this merge request.**',
+      note: 'First line of the progress note once the review knows its steps.',
+    },
+    'progress.left': {
+      text: '{time} left.',
+      note: 'After progress.title. {time} is a duration such as "~5 min".',
+    },
+    'progress.step.review': {
+      text: 'Reviewing the changes',
+      note: 'Step of the progress checklist.',
+    },
+    'progress.step.parts': {
+      text: 'Reviewing the changes in {count} parts: {done} done',
+      note: 'Step of the progress checklist for a large merge request reviewed in parts.',
+    },
+    'progress.step.cross': {
+      text: 'Final pass over the whole merge request',
+      note: 'Step of the progress checklist: looks for problems spanning the parts.',
+    },
+    'progress.step.verify': {
+      text: 'Double-checking the findings',
+      note: 'Step of the progress checklist: a second reviewer tries to disprove each finding.',
+    },
+    'progress.step.verifying': {
+      text: 'Double-checking {count} finding(s)',
+      note: 'The verify step while it runs.',
+    },
+    'progress.step.post': {
+      text: 'Posting comments and the summary',
+      note: 'Last step of the progress checklist.',
+    },
+    'progress.wait': {
+      text: 'Please wait until the review finishes: its comments and a summary will appear here.',
+      note: 'Last line of the progress note.',
+    },
     'progress.done': {
       text: '✅ The automatic review has finished; see its summary.',
       note: 'Replaces the progress note when the forge cannot delete it.',
@@ -98,6 +134,10 @@ export const reviewMessageCatalog = defineCatalog({
       text: 'The diff has {lines} changed lines, more than the limit of {limit}; it was not reviewed. Split the merge request or review it with `/holtkeeper review maxDiffLines=<n>`.',
     },
     'summary.nothingNew': { text: 'Nothing new to review.' },
+    'summary.cost': {
+      text: 'The review took {time} and cost ${cost}.',
+      note: '{time} is a duration such as "~8 min"; {cost} is a USD amount such as 1.84, keep the $ sign before it.',
+    },
     'summary.feedback': {
       text: '_Holtkeeper learns from your answers. If a comment is wrong or misses the point, reply in its thread and explain how it should be: future reviews take such replies into account. 👍 or 👎 on a comment help too._',
       note: 'Last line of every review summary.',

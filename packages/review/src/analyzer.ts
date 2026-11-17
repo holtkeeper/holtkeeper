@@ -21,6 +21,7 @@ import { type Guideline, readGuidelines } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
 import { type ReviewMessages, englishReviewMessages, reviewMessageCatalog } from './messages.ts'
 import {
+  DEFAULT_REVIEW_COST_LIMIT_USD,
   type ReviewGuide,
   type ReviewOptions,
   type ReviewSteps,
@@ -29,7 +30,7 @@ import {
   reviewMergeRequest,
   reviewRef,
 } from './pipeline.ts'
-import { startProgress } from './progress.ts'
+import { type ReviewStage, startProgress } from './progress.ts'
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
 import {
@@ -84,6 +85,16 @@ export const reviewOptionsSchema = z.object({
     .describe(
       'A second agent pass tries to disprove each finding by reading the code (Opus for major and critical, else the review model) and drops the ones the code contradicts.',
     ),
+  costLimitUsd: z.coerce
+    .number()
+    .min(0)
+    .default(DEFAULT_REVIEW_COST_LIMIT_USD)
+    .describe(
+      'Soft spend limit of one review in USD: a pass that reaches its share stops reading and posts what it found. 0 turns it off.',
+    ),
+  showCost: flag
+    .default(true)
+    .describe('How long the review took and what it cost, as a last line of the summary note.'),
   impact: flag
     .default(true)
     .describe(
@@ -300,6 +311,7 @@ async function startTexts(
           repo: repo.path,
           mergeRequest: mr.id,
           messages,
+          verify: options.verify !== false,
           ...(owner && { owner }),
           ...(context.log && { log: context.log }),
         })
@@ -491,6 +503,9 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           ...(context.log ? { log: context.log } : {}),
           ...(context.signal ? { signal: context.signal } : {}),
           ...(texts && { messages: texts.messages }),
+          ...(texts?.progress && {
+            onProgress: (stage: ReviewStage) => texts.progress?.update(stage),
+          }),
         })
         await texts?.progress?.finish()
         return { data: texts ? addUsage(data, texts.usage) : data, ref: reviewRef(mr.id) }

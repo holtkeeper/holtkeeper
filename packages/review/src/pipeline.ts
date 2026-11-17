@@ -15,6 +15,7 @@ import type { QualityCheck } from '@holtkeeper/quality'
 import type { AnalysisStore } from '@holtkeeper/store'
 
 import {
+  type AgentProgress,
   type RecheckVerdict,
   localizeFindings,
   recheckThreads,
@@ -44,6 +45,7 @@ import {
 import { impactSection } from './impact.ts'
 import { type MediaReviewer, noopMediaReviewer, reviewMedia } from './media.ts'
 import { type ReviewMessages, englishReviewMessages } from './messages.ts'
+import type { ReviewStage } from './progress.ts'
 import {
   type ReviewData,
   type ReviewFinding,
@@ -127,7 +129,17 @@ export interface ReviewOptions {
    * `DEFAULT_SIZE_THRESHOLDS`, the review time `model` to `DEFAULT_REVIEW_TIME_MODEL`.
    */
   sizeAdvice?: { enabled: boolean; model?: ReviewTimeModel } & Partial<SizeThresholds>
+  /** How long the review took and what it cost in the summary note; on unless `false`. */
+  showCost?: boolean
+  /**
+   * Soft spend limit of the agent passes in USD, split between them by `REVIEW_BUDGET_SHARES`: a
+   * pass past its share answers with what it has instead of failing. Unset or `0`: no limit.
+   */
+  costLimitUsd?: number
 }
+
+/** Default `costLimitUsd` of the `review` analyzer. */
+export const DEFAULT_REVIEW_COST_LIMIT_USD = 3
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
 export type ReviewForge = GitForge &
@@ -215,6 +227,11 @@ export interface ReviewRun {
   messages?: ReviewMessages
   /** Replaces pipeline steps, e.g. in tests or for another review strategy. */
   steps?: Partial<ReviewSteps>
+  /**
+   * Told as the review moves through its agent passes, the verification and posting (see
+   * `ReviewStage`); must not throw. Steps replaced through `steps` report nothing of their own.
+   */
+  onProgress?: (stage: ReviewStage) => void
   log?: (line: string) => void
   signal?: AbortSignal
 }
@@ -299,7 +316,6 @@ export interface ReviewSteps {
     loaded: LoadedReview,
     candidates: readonly Candidate[],
     usage: ReviewUsage,
-    deep: boolean,
   ): Promise<Verification>
   post(run: ReviewRun, loaded: LoadedReview, data: ReviewData): Promise<ReviewData>
 }
@@ -514,6 +530,8 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
     agent: run.agent,
     dir: run.dir,
     usage,
+    ...(run.options.costLimitUsd ? { costLimitUsd: run.options.costLimitUsd } : {}),
+    ...(run.log ? { log: run.log } : {}),
     input: {
       repo: run.repo.path,
       mergeRequest: {
@@ -554,6 +572,9 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
             impactSection({ dir, files, ...(run.signal ? { signal: run.signal } : {}) }),
         }),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
+    ...(run.onProgress && {
+      onProgress: (event: AgentProgress) => run.onProgress?.({ ...event, deep: depth.deep }),
+    }),
     ...(run.signal ? { signal: run.signal } : {}),
   })
   const versioned = {
@@ -566,7 +587,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
     : versioned
 }
 
-const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage, deep) => {
+const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage) => {
   const unchecked = { kept: [...candidates], refuted: [], failed: 0 }
   if (!run.agent || !run.dir || run.options.verify === false) return unchecked
   const dir = run.dir
@@ -578,13 +599,15 @@ const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage, dee
       return evidence.length ? { ...rest, evidence } : rest
     }),
   )
+  const findings = cited.filter((candidate) => candidate.source === 'agent').length
+  if (findings) run.onProgress?.({ stage: 'verify', findings })
   const result = await verifyFindings({
     agent: run.agent,
     dir,
     candidates: cited,
     usage,
     mergeRequest: { title: loaded.mr.title, description: loaded.mr.description },
-    deep,
+    ...(run.options.costLimitUsd ? { costLimitUsd: run.options.costLimitUsd } : {}),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
     ...(run.signal ? { signal: run.signal } : {}),
     ...(run.log ? { log: run.log } : {}),
@@ -699,7 +722,10 @@ const post: ReviewSteps['post'] = async (run, loaded, data) => {
   const outcome = await run.forge.submitReview(run.repo.path, loaded.mr.id, {
     refs: loaded.diff.refs,
     comments,
-    summary: summaryNote(data, run.messages),
+    summary: summaryNote(
+      run.options.showCost === false ? { ...data, usage: undefined, durationMs: undefined } : data,
+      run.messages,
+    ),
     event: approve ? 'approve' : 'comment',
   })
   const failed = new Map(outcome.failed.map((f) => [f.comment, f.error]))
@@ -864,11 +890,12 @@ const emptyDropped = { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0
  */
 export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
   const started = performance.now()
-  const data = await reviewOnce(run)
+  const data = await reviewOnce(run, started)
   return { ...data, durationMs: Math.round(performance.now() - started) }
 }
 
-async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
+async function reviewOnce(run: ReviewRun, started: number): Promise<ReviewData> {
+  const elapsed = () => Math.round(performance.now() - started)
   const steps = { ...defaultSteps, ...run.steps }
   const messages = run.messages ?? englishReviewMessages
   const usage: ReviewUsage = { turns: 0 }
@@ -907,6 +934,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       approved: false,
       checks: [],
       ...(usage.turns > 0 || usage.costUsd !== undefined ? { usage } : {}),
+      durationMs: elapsed(),
     }
     if (!tooLarge) return data
     const last = run.analyses
@@ -993,13 +1021,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
   )
   stats.dropped.belowSeverity = ranked.belowSeverity
   stats.dropped.overLimit = ranked.overLimit
-  const verification = await steps.verify(
-    run,
-    loaded,
-    ranked.kept,
-    usage,
-    agentOutcome?.deep === true,
-  )
+  const verification = await steps.verify(run, loaded, ranked.kept, usage)
   if (verification.refuted.length) stats.dropped.refuted = verification.refuted.length
   const refutedSerious = verification.refuted.some(
     (r) => severityRank(r.candidate.severity) >= severityRank('major'),
@@ -1059,6 +1081,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
     approved: run.options.approve === 'when-clean' && verdict === 'looks-good' && !stillOpen,
     checks: found.checks,
     ...(usage.turns > 0 || usage.costUsd !== undefined ? { usage } : {}),
+    durationMs: elapsed(),
   }
   return postAndResolve(steps, run, loaded, data)
 }
@@ -1069,6 +1092,7 @@ async function postAndResolve(
   loaded: LoadedReview,
   data: ReviewData,
 ) {
+  run.onProgress?.({ stage: 'post' })
   const posted = await steps.post(run, loaded, data)
   await resolveSummaries(run, loaded, posted)
   return posted

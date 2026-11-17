@@ -12,11 +12,19 @@ import {
   reviewPrompt,
   reviewSystemPrompt,
   CROSS_PART_TURNS,
+  PART_MAX_TURNS,
   REVIEW_MAX_TURNS,
+  dropDuplicates,
   reviewTurns,
   runAgentReview,
   splitGroupOf,
   splitReviewFiles,
+  REVIEW_READ_LINES,
+  REVIEW_TRIM,
+  REVIEW_BUDGET_SHARES,
+  MR_DIFF_TOOL,
+  mergeRequestDiffTools,
+  runSummary,
 } from './agent.ts'
 import { addedLines, newSideLines, parseHunks } from './diff.ts'
 import type { AgentReview, ReviewUsage } from './schema.ts'
@@ -66,6 +74,16 @@ const answer = (path: string, extra: Partial<AgentReview> = {}): AgentReview => 
   summary: `Reviewed ${path}.`,
   verdict: 'looks-good',
   ...extra,
+})
+
+const agentFinding = (title: string) => ({
+  path: 'a.ts',
+  line: 1,
+  severity: 'minor' as const,
+  category: 'bug' as const,
+  title,
+  body: '',
+  source: 'agent' as const,
 })
 
 const splitFiles = () => [
@@ -355,7 +373,8 @@ describe('runAgentReview', () => {
     })
     expect(tasks).toHaveLength(3)
     expect(tasks[0]?.prompt).toContain('part 1 of 2')
-    expect(tasks[0]?.maxTurns).toBeGreaterThan(40)
+    expect(tasks[0]?.maxTurns).toBe(PART_MAX_TURNS)
+    expect(tasks.map((task) => task.tier)).toEqual(['main', 'main', 'main'])
     expect(tasks[0]?.prompt).toContain('- lib/math.ts')
     expect(tasks[0]?.prompt).toContain('# Add widget pricing')
     expect(tasks[0]?.prompt).toContain('api/store.ts:2 (tests)')
@@ -366,9 +385,16 @@ describe('runAgentReview', () => {
     const cross = tasks[2]
     expect(cross?.prompt).toContain('final pass over the whole diff')
     expect(cross?.prompt).not.toContain('part 1 of')
-    expect(cross?.prompt).toContain('### lib/math.ts')
-    expect(cross?.prompt).toContain('### ui/form.ts')
-    expect(cross?.prompt).toContain('- api/routes.ts:1 Problem in api/routes.ts')
+    // The cross-part pass reads the diff on demand instead of carrying it in every turn.
+    expect(cross?.prompt).not.toContain('### lib/math.ts')
+    expect(cross?.prompt).toContain('- lib/math.ts (200)')
+    expect(cross?.prompt).toContain('`mr.diff`')
+    expect(cross?.toolsets?.some((toolset) => toolset.name === 'mr')).toBe(true)
+    expect(tasks[0]?.toolsets?.some((toolset) => toolset.name === 'mr')).toBe(false)
+    expect(tasks[0]?.readLines).toBe(REVIEW_READ_LINES)
+    expect(tasks[0]?.trimToolResults).toEqual(REVIEW_TRIM)
+    expect(cross?.prompt).toContain('- [1] api/routes.ts:1 (major) Problem in api/routes.ts')
+    expect(cross?.prompt).toContain('Summaries of the parts:\n- Reviewed api/routes.ts.')
     expect(cross?.prompt).toContain('What the parts found the change does:\n- A\n- B')
     expect(cross?.maxTurns).toBe(CROSS_PART_TURNS)
     expect(result.candidates.map((c) => c.path)).toEqual([
@@ -376,9 +402,8 @@ describe('runAgentReview', () => {
       'ui/form.ts',
       'lib/math.ts',
     ])
-    expect(result.summary).toBe(
-      'Reviewed api/routes.ts.\n\nReviewed ui/form.ts.\n\nReviewed lib/math.ts.',
-    )
+    // The cross-part pass writes the summary of the whole merge request.
+    expect(result.summary).toBe('Reviewed lib/math.ts.')
     expect(result.verdict).toBe('needs-changes')
     expect(result.effort).toBe(4)
     expect(result.reviewMinutes).toBe(55)
@@ -445,6 +470,145 @@ describe('runAgentReview', () => {
       (caught: unknown) => caught,
     )
     expect(error).toBe(stop)
+  })
+
+  test('with deep, parts stay on main and the cross-part pass runs on deep', async () => {
+    const { agent, tasks } = fakeAgent({
+      review: [answer('api/routes.ts'), answer('ui/form.ts'), answer('lib/math.ts')],
+    })
+    const events: unknown[] = []
+    await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf(splitFiles()),
+      usage: usage(),
+      deep: true,
+      onProgress: (event) => events.push(event),
+    })
+    expect(tasks.map((task) => task.tier)).toEqual(['main', 'main', 'deep'])
+    expect(events).toEqual([
+      { stage: 'review', parts: 2, done: 0 },
+      { stage: 'review', parts: 2, done: 1 },
+      { stage: 'review', parts: 2, done: 2 },
+      { stage: 'cross', parts: 2 },
+    ])
+  })
+
+  test('a single pass runs on deep with deep and reports one part', async () => {
+    const { agent, tasks } = fakeAgent({ review: [answer('src/a.ts')] })
+    const events: unknown[] = []
+    await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf([fileOf('src/a.ts', 10)]),
+      usage: usage(),
+      deep: true,
+      onProgress: (event) => events.push(event),
+    })
+    expect(tasks.map((task) => task.tier)).toEqual(['deep'])
+    expect(events).toEqual([{ stage: 'review', parts: 1, done: 0 }])
+  })
+
+  test('each pass logs its turns, tokens, first request size and cost', async () => {
+    const { agent } = fakeAgent({ review: [answer('src/a.ts')] })
+    const lines: string[] = []
+    await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf([fileOf('src/a.ts', 10)]),
+      usage: usage(),
+      log: (line) => lines.push(line),
+    })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toStartWith('review pass: ')
+    expect(
+      runSummary({
+        text: '',
+        turns: 12,
+        costUsd: 0.4321,
+        startTokens: 14_200,
+        usage: {
+          inputTokens: 20_000,
+          outputTokens: 900,
+          cacheReadTokens: 400_000,
+          cacheWriteTokens: 30_000,
+        },
+      }),
+    ).toBe('12 turns, 450k prompt tokens, 14k at the start, $0.43')
+  })
+
+  test('mr.diff gives the numbered diff of a file of the merge request', async () => {
+    const toolset = mergeRequestDiffTools([fileOf('src/a.ts', 3)])
+    const tool = toolset.tools.find((entry) => entry.name === MR_DIFF_TOOL)
+    const context = {} as Parameters<NonNullable<typeof tool>['run']>[1]
+    expect(await tool?.run({ path: './src/a.ts' }, context)).toContain('+')
+    expect(await tool?.run({ path: 'src/b.ts' }, context)).toBe(
+      'error: src/b.ts is not a file of this merge request; its files: src/a.ts',
+    )
+  })
+
+  test('a cost limit gives each pass its share as a soft limit', async () => {
+    const { agent, tasks } = fakeAgent({
+      review: [answer('api/routes.ts'), answer('ui/form.ts'), answer('lib/math.ts')],
+    })
+    await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf(splitFiles()),
+      usage: usage(),
+      costLimitUsd: 4,
+    })
+    expect(tasks.map((task) => task.answerAtCostUsd)).toEqual([
+      (4 * REVIEW_BUDGET_SHARES.parts) / 2,
+      (4 * REVIEW_BUDGET_SHARES.parts) / 2,
+      4 * REVIEW_BUDGET_SHARES.cross,
+    ])
+  })
+
+  test('the cross-part pass folds duplicates of the parts into the finding it keeps', async () => {
+    const minor = (path: string) =>
+      answer(path, {
+        comments: [
+          {
+            path,
+            line: 1,
+            severity: 'minor',
+            category: 'bug',
+            title: `Same gap in ${path}`,
+            body: 'Missing.',
+          },
+        ],
+      })
+    const { agent } = fakeAgent({
+      review: [
+        answer('api/routes.ts'),
+        minor('ui/form.ts'),
+        answer('lib/math.ts', { comments: [], duplicates: [{ id: 1, of: 2 }] }),
+      ],
+    })
+    const result = await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf(splitFiles()),
+      usage: usage(),
+    })
+    expect(result.candidates.map((c) => [c.path, c.severity])).toEqual([['ui/form.ts', 'major']])
+  })
+
+  test('dropDuplicates ignores unknown, self and chained pairs', () => {
+    const list = [agentFinding('A'), agentFinding('B'), agentFinding('C')]
+    expect(
+      dropDuplicates(list, [
+        { id: 9, of: 1 },
+        { id: 2, of: 2 },
+      ]).map((c) => c.title),
+    ).toEqual(['A', 'B', 'C'])
+    expect(
+      dropDuplicates(list, [
+        { id: 2, of: 1 },
+        { id: 3, of: 2 },
+      ]).map((c) => c.title),
+    ).toEqual(['A', 'C'])
   })
 
   test('the prompt of a single pass names no parts', () => {
