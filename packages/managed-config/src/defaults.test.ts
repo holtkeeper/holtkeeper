@@ -10,15 +10,33 @@ import {
   retiredScheduleIds,
   seedDefaults,
 } from './defaults.ts'
-import { triggerDataSchema } from './documents.ts'
+import { triggerDataSchema, triggerId } from './documents.ts'
 
 const now = () => new Date('2026-10-30T12:00:00.000Z')
 const kinds = ['ci-jobs', 'depgraph', 'licenses', 'api-surface']
 
 describe('seedDefaults', () => {
-  test('every default is a valid document', () => {
-    for (const trigger of defaultTriggers)
+  test('every default is a valid document under its triggerId', () => {
+    for (const trigger of defaultTriggers) {
       expect(triggerDataSchema.parse(trigger.data)).toEqual(trigger.data)
+      if (trigger.data.on === 'command') expect(triggerId(trigger.data)).toBe(trigger.id)
+    }
+  })
+
+  test('seeds the review command where the server runs the review analyzer', async () => {
+    const store = memoryStore()
+    expect(await seedDefaults({ store, analyzers: [...kinds, 'review'], now })).toContain(
+      'trigger:command:review',
+    )
+    expect((await store.config?.get('trigger', 'command:review'))?.data).toEqual({
+      on: 'command',
+      command: 'review',
+      analyzer: 'review',
+    })
+    const without = memoryStore()
+    expect(await seedDefaults({ store: without, analyzers: kinds, now })).not.toContain(
+      'trigger:command:review',
+    )
   })
 
   test('writes each default trigger once and no schedule', async () => {

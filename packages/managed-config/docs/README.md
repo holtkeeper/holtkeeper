@@ -52,7 +52,7 @@ A rebuild that fails validation keeps the previous config (`lastError()`). Panel
 
 ## Defaults
 
-`seedDefaults({ store, analyzers })` writes each of `defaultTriggers` as a panel document the first time a store sees it, so a release that adds defaults adds them to existing installs too. Each document is considered once (marker `defaultMarker(id)` = `config:default-seeded:trigger:<id>` in `Store.kv`, taken atomically when the store supports `compareAndSet`): removing it later does not bring it back, and a panel document with the same id stays as it is. Analyzers the server lacks are dropped. Audited as `config.seed` by the system actor.
+`seedDefaults({ store, analyzers })` writes each of `defaultTriggers` (the `tag` trigger with `api-surface`, the `new-repo` trigger, and the `review` command, `command:review`, so `/holtkeeper review` in a merge request runs the review, as its progress and failure notes suggest) as a panel document the first time a store sees it, so a release that adds defaults adds them to existing installs too. Each document is considered once (marker `defaultMarker(id)` = `config:default-seeded:trigger:<id>` in `Store.kv`, taken atomically when the store supports `compareAndSet`): removing it later does not bring it back, and a panel document with the same id stays as it is. Analyzers the server lacks are dropped. Audited as `config.seed` by the system actor.
 
 No schedule is seeded: analyses stay current through freshness (the `refresh` each analyzer declares, run by the server's sweeper, see [the server docs](../../../apps/server/docs/README.md#freshness)). Schedules people create in the panel still run.
 

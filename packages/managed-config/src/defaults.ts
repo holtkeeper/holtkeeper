@@ -9,11 +9,13 @@ export interface DefaultTrigger {
 /**
  * Triggers an install starts with: every new or moved tag gets a snapshot of the public API of its
  * packages; every new repository gets every analyzer that only reads, the Guide generator and
- * starter knowledge included (once, on the default branch).
+ * starter knowledge included (once, on the default branch); `/holtkeeper review` in a merge
+ * request runs the review, the command its notes suggest after a failed run.
  */
 export const defaultTriggers: DefaultTrigger[] = [
   { id: 'tag', data: { on: 'tag', analyzers: ['api-surface'] } },
   { id: 'new-repo', data: { on: 'newRepo' } },
+  { id: 'command:review', data: { on: 'command', command: 'review', analyzer: 'review' } },
 ]
 
 /**
