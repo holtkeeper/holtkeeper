@@ -46,10 +46,29 @@ function sourceOf(layer: LayerData, data: DepgraphData): string {
 }
 
 /**
+ * Go modules a main or workspace module requires itself, that is the `require` lines of its
+ * `go.mod`. Since Go 1.17 these list every module that provides a built package; the rest of
+ * `go mod graph` comes from other modules' `go.mod` files and is never compiled (osv-scanner reads
+ * `go.mod` the same way). `undefined` when the layer has no such edges, so nothing is dropped.
+ */
+function goRequired(layer: LayerData): Set<string> | undefined {
+  const { nodes, edges } = layer.graph
+  const local = new Set(nodes.filter((node) => node.kind === 'workspace').map((node) => node.id))
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const required = new Set<string>()
+  for (const edge of edges) {
+    const target = byId.get(edge.to)
+    if (local.has(edge.from) && target?.kind === 'package' && target.ecosystem === 'Go')
+      required.add(target.name)
+  }
+  return required.size ? required : undefined
+}
+
+/**
  * The third-party packages of the `packages` layers of npm and Go: every resolved version with
- * the file that pins it, deduplicated. Go keeps only versions the resolver selects and drops the
- * `v` prefix (OSV's spelling); versions that are not registry versions (links, `file:`) and
- * internal packages are left out.
+ * the file that pins it, deduplicated. Go keeps only the modules a main module requires in its
+ * `go.mod`, at the version the resolver selects, and drops the `v` prefix (OSV's spelling);
+ * versions that are not registry versions (links, `file:`) and internal packages are left out.
  */
 export function inventoryOf(data: DepgraphData, options: InventoryOptions = {}): Inventory {
   const layers = data.layers.filter((layer) => layer.id === 'packages')
@@ -63,17 +82,19 @@ export function inventoryOf(data: DepgraphData, options: InventoryOptions = {}):
   const packages: InventoryPackage[] = []
   for (const layer of layers) {
     const source = sourceOf(layer, data)
+    const required = goRequired(layer)
     for (const node of layer.graph.nodes) {
       if (node.kind !== 'package' || node.version === undefined) continue
       if (!INDEXED_ECOSYSTEMS.includes(node.ecosystem)) continue
       if (node.selected === false) continue
+      if (node.ecosystem === 'Go' && required && !required.has(node.name)) continue
       if (options.isInternal?.(node.ecosystem, node.name)) continue
       let version = node.version
       if (node.ecosystem === 'Go') {
         if (!goVersion.test(version)) continue
         version = version.slice(1)
       } else if (!npmVersion.test(version)) continue
-      const key = `${node.ecosystem}\0${node.name}\0${version}\0${source}`
+      const key = JSON.stringify([node.ecosystem, node.name, version, source])
       if (seen.has(key)) continue
       seen.add(key)
       packages.push({ ecosystem: node.ecosystem, name: node.name, version, source })

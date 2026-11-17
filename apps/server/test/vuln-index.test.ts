@@ -131,6 +131,14 @@ async function setup() {
 }
 
 describe('runVulnIndex', () => {
+  test('stores state Postgres jsonb accepts (no NUL characters)', async () => {
+    const { store, run } = await setup()
+    await run()
+    const state = JSON.stringify(await store.kv?.get('vuln-index:state'))
+    expect(state).toContain('npm:@acme/kit')
+    expect(state).not.toContain(String.raw`\u0000`)
+  })
+
   test('writes audit records from the dependency graphs and queues a fix run', async () => {
     const { store, osv, run } = await setup()
     const summary = await run()

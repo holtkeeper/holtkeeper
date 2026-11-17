@@ -39,7 +39,7 @@ export const VULN_INDEX_ACTOR = 'system:vuln-index'
 const repoStateSchema = z.object({
   /** The `depgraph` record the repository was last matched from. */
   depgraph: z.string(),
-  /** Packages the repository defines, as `<ecosystem>\0<name>`; internal to the fleet. */
+  /** Packages the repository defines, as `<ecosystem>:<name>`; internal to the fleet. Stored as jsonb, so no NUL bytes. */
   defines: z.array(z.string()).default([]),
   /** `fixableKeys` of the last match; fix runs are queued for keys not in here. */
   fixable: z.array(z.string()).default([]),
@@ -85,14 +85,17 @@ async function readState(kv: Pick<KvStore, 'get'>): Promise<IndexState> {
   return stateSchema.safeParse(await kv.get(STATE_KEY)).data ?? { repos: {} }
 }
 
+// Ecosystem names never contain ':', so the key is unambiguous; Postgres jsonb rejects '\0'.
+const defineKey = (ecosystem: string, name: string) => `${ecosystem}:${name}`
+
 /** `isInternal` over the packages repositories define; Go also matches paths inside a module. */
 function internalMatcher(defines: Iterable<string>) {
   const known = new Set(defines)
   return (ecosystem: string, name: string) => {
-    if (known.has(`${ecosystem}\0${name}`)) return true
+    if (known.has(defineKey(ecosystem, name))) return true
     if (ecosystem !== 'Go') return false
     for (let end = name.lastIndexOf('/'); end > 0; end = name.lastIndexOf('/', end - 1))
-      if (known.has(`${ecosystem}\0${name.slice(0, end)}`)) return true
+      if (known.has(defineKey(ecosystem, name.slice(0, end)))) return true
     return false
   }
 }
@@ -116,7 +119,7 @@ async function loadRepo(deps: VulnIndexDeps, head: AnalysisHead): Promise<Loaded
   return {
     ...base,
     inventory: inventoryOf(parsed.data),
-    defines: definedPackages(parsed.data).map((pkg) => `${pkg.ecosystem}\0${pkg.name}`),
+    defines: definedPackages(parsed.data).map((pkg) => defineKey(pkg.ecosystem, pkg.name)),
   }
 }
 
