@@ -27,6 +27,7 @@ import {
   capToolsets,
   codeTools,
   docsTools,
+  gitTools,
   knowledgeTools,
   libraryTools,
   mountToolsets,
@@ -41,7 +42,7 @@ import {
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
-import type { CommandRunner } from '@holtkeeper/exec'
+import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type GuideRequest, createGuideResolver, familyOf, guideTaskOf } from '@holtkeeper/guide'
 import { embeddingText, knowledgeAccess } from '@holtkeeper/knowledge'
@@ -133,7 +134,10 @@ export interface ServerDefaultsOptions {
   /** The repository's confirmed family id, so knowledge narrowed to families applies to it. */
   family?: string
   origin?: AgentRunOrigin
-  /** Runs `go list`/`go doc` for `docs.package`; the job's runner when there is one. */
+  /**
+   * Runs `go list`/`go doc` for `docs.package` and git for the `git` toolset; the job's runner
+   * when there is one. The `git` toolset falls back to `localRunner` without it.
+   */
   runner?: CommandRunner
   tools?: ServerToolSettings
   /** Knowledge kinds the agent's proposals are accepted for without review. */
@@ -339,6 +343,7 @@ export function withServerDefaults(
         const available = [
           codeTools({ budget: { maxHits: RESULT_CAPS.maxSnippets } }),
           docsTools(options.runner ? { runner: options.runner } : {}),
+          gitTools({ runner: options.runner ?? localRunner }),
           ...knowledgeOf(taskKind),
           ...(options.libraries
             ? [libraryTools({ access: options.libraries, repo: `${repo.forge}:${repo.path}` })]

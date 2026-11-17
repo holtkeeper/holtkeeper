@@ -10,6 +10,7 @@ export {
   sections,
   type Section,
 } from './docs/markdown.ts'
+export { gitTools, type GitToolsOptions } from './git.ts'
 export { insideDir, listFiles, LOCKFILE_NAMES } from './files.ts'
 export * from './knowledge.ts'
 export * from './libraries.ts'

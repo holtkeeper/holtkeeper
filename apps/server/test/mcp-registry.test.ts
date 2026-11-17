@@ -211,6 +211,7 @@ describe('mcpToolsets', () => {
       'docs',
       'knowledge',
       'libraries',
+      'git',
       'catalog',
       'stack',
       'assets',

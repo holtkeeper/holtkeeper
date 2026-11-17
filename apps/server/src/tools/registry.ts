@@ -68,9 +68,12 @@ const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
  * One-shot kinds mount none, so they stay off the agent tool loop.
  * `rules` serves related repositories' rules and test ids: the task's own Guide is already its context.
  * Chat replies run without a checkout, so they mount no `code` or `docs`.
+ * `git` (read-only history of the checkout) is for reviews, their thread replies and the
+ * verification of their findings (`review-verify`).
  */
 const TASK_TOOLSETS: Record<string, readonly string[]> = {
-  review: [...BASE_TOOLSETS, 'catalog', 'stack', 'assets'],
+  review: [...BASE_TOOLSETS, 'git', 'catalog', 'stack', 'assets'],
+  'review-verify': [...BASE_TOOLSETS, 'git', 'catalog', 'stack'],
   chat: ['knowledge', 'libraries', 'catalog', 'stack', 'rules', 'assets', 'releases', 'ops'],
   'chat-summary': [],
   learning: [],

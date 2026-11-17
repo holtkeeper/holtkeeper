@@ -702,6 +702,7 @@ describe('withServerDefaults', () => {
       'code',
       'docs',
       'knowledge',
+      'git',
       'catalog',
       'stack',
       'gadgets',

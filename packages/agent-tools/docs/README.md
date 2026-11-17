@@ -81,6 +81,21 @@ The server uses the defaults; there is no setting for them.
 
 The review mounts this toolset on every pass; its `instructions` tell the agent to use it instead of grepping lockfiles.
 
+### `git` — `gitTools({ runner, budget? })`
+
+Read-only history of the task checkout, so a review can answer "check commit 7d6c…" or explain why code looks the way it does. Every call runs `git --no-pager --literal-pathspecs -c core.quotepath=off -c color.ui=false …` in the task directory through the injected `CommandRunner` (30 s timeout, the task's abort signal); `show` and `diff` add `--no-color --no-ext-diff --no-textconv`. Its `instructions` point the agent at it when someone asks to check a commit, when it needs to know why code looks the way it does and to see what changed since an earlier (e.g. the last reviewed) commit.
+
+| Tool        | Input                                         | Output                                                                                                             |
+| ----------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `git.show`  | `rev`, `path?`                                | `commit <sha>`, author, ISO date, full message, `--stat`, then the patch (of `path` only when given)               |
+| `git.log`   | `path?`, `rev?` (`HEAD`), `limit?` (20, ≤ 50) | `<short sha> <date> <author>: <subject>` per commit, newest first; a marker when more commits exist                |
+| `git.diff`  | `from`, `to?` (`HEAD`), `path?`               | `diff <from> → <to>`, `--stat`, then the patch between the two revisions                                           |
+| `git.blame` | `path`, `start`, `end`, `rev?` (`HEAD`)       | `git blame --date=short` lines (short sha, author, date, line), at most 200 per call, then `continue with start=N` |
+
+- Revisions must be a commit sha or a ref name (`HEAD`, `HEAD~3`, `HEAD^2`, `origin/x`, `refs/tags/v1.0`): no leading `-`, no spaces, no `..` ranges, no `@{…}`. Paths are relative to the checkout, never absolute or with `..`, and always follow `--`. Invalid input is a `ToolError` and git is not run.
+- A revision git does not know is a `ToolError` `unknown revision <rev>`, or `commit <rev> is not in this checkout; fetch may be shallow` when `git rev-parse --is-shallow-repository` says the checkout is shallow. Other git failures reach the agent as git's last error lines.
+- Patches are cut to the budget (`maxResultLines`, lines clipped to `maxLineLength`, and below `RESULT_CAPS.maxChars`); the header and stat take at most half of it. The last line then says how many patch lines were cut, names the files whose patch was cut and suggests `path`. Merge commits are shown against their first parent.
+
 ### `docs` — `docsTools({ budget?, runner? })`
 
 `docs.package { name, ecosystem? ('npm' | 'go'), show?, from?, to?, heading?, workspace? }`
