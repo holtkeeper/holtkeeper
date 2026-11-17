@@ -402,6 +402,17 @@ describe('createAiSdkAgent', () => {
     expect(model.doGenerateCalls[0]?.reasoning).toBe('high')
   })
 
+  test('a task effort replaces the tier effort', async () => {
+    const { model, ids, languageModel } = scripted(say('ok'))
+    const agent = createAiSdkAgent({
+      languageModel,
+      tierModels: { fast: 'quick', main: 'smart', deep: 'wise' },
+    })
+    await agent.run({ dir: await checkout(), prompt: 'p', effort: 'high' })
+    expect(ids).toEqual(['smart'])
+    expect(model.doGenerateCalls[0]?.reasoning).toBe('high')
+  })
+
   test('at the turn limit asks once more without tools and parses that answer', async () => {
     const { model, languageModel } = scripted(
       call('glob', { pattern: '*' }),

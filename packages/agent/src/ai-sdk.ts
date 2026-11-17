@@ -620,7 +620,7 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
               }),
               stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap, overSoft, repeating],
             }),
-            reasoning: TIERS[tier].effort,
+            reasoning: task.effort ?? TIERS[tier].effort,
             abortSignal: signal,
             ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
             ...(sink && { onStepEnd: (step: StepResult<ToolSet>) => transcribeStep(step, sink) }),

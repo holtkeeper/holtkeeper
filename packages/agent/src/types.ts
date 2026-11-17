@@ -1,7 +1,7 @@
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import type { z } from 'zod'
 
-import type { ModelTier } from './tiers.ts'
+import type { ModelTier, ReasoningEffort } from './tiers.ts'
 import type { AgentRuntime, TranscriptSink } from './transcript.ts'
 
 /** What the agent may do in the checkout. */
@@ -66,6 +66,8 @@ export interface AgentTask<Output = unknown> {
    * Default `DEFAULT_TIER` (`main`). Callers never name a model.
    */
   tier?: ModelTier
+  /** Reasoning effort instead of the tier's, on providers that support effort. */
+  effort?: ReasoningEffort
   /**
    * What kind of work this is (`review`, `refactor`, `triage`, ...), for knowledge, instructions
    * and reporting. It never changes the model or what the agent may do.

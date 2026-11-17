@@ -257,7 +257,7 @@ export function claudeOptionsFor(
   return {
     cwd: dir,
     model: mapModel(modelFor(options, tier), options.modelMap),
-    effort: TIERS[tier].effort,
+    effort: task.effort ?? TIERS[tier].effort,
     tools,
     allowedTools: [...mcpTools],
     canUseTool: permissionGate(dir, [...tools, ...mcpTools], prefixes, task.commands),
