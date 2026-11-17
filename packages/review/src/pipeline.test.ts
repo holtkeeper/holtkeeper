@@ -505,6 +505,84 @@ describe('reviewMergeRequest', () => {
     expect(prompt.indexOf('removed `makeWidget`')).toBeLessThan(prompt.indexOf('Diff:'))
   })
 
+  test('the tickets the merge request names go into the prompt when they can be read', async () => {
+    const { forge } = fakeForge({
+      files,
+      discussions: [],
+      mergeRequest: {
+        title: 'ABC-1: add pricing',
+        sourceBranch: 'feature/def-2-pricing',
+        description: 'See also XYZ-3.',
+      },
+    })
+    const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+    const asked: string[][] = []
+    const lines: string[] = []
+    await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        tickets: async (keys) => {
+          asked.push([...keys])
+          return [{ key: 'DEF-2', title: 'Price widgets', description: 'Prices in cents.' }]
+        },
+        log: (line) => lines.push(line),
+      }),
+    )
+    expect(asked).toEqual([['ABC-1', 'DEF-2']])
+    expect(tasks[0]?.prompt).toContain('### DEF-2: Price widgets\n\nPrices in cents.')
+    expect(lines).toContain('ticket context: DEF-2')
+  })
+
+  test('no readable ticket, no hook or a failing one leave tickets out of the prompt', async () => {
+    const { forge } = fakeForge({ files, discussions: [], mergeRequest: { title: 'ABC-1: x' } })
+    for (const tickets of [
+      async () => [],
+      async () => {
+        throw new Error('tracker down')
+      },
+      undefined,
+    ]) {
+      const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+      const lines: string[] = []
+      // oxlint-disable-next-line no-await-in-loop -- one case after another
+      await reviewMergeRequest(
+        runOf({
+          forge: requireReviewForge(forge),
+          agent,
+          ...(tickets && { tickets }),
+          log: (line) => lines.push(line),
+        }),
+      )
+      expect(tasks[0]?.prompt).not.toContain('issue tracker')
+      expect(lines.some((line) => line.startsWith('ticket context'))).toBe(tickets !== undefined)
+    }
+  })
+
+  test('without verification, unverified suspicions are dropped', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent } = fakeAgent({
+      review: [
+        review([
+          {
+            path: 'src/price.ts',
+            line: 1,
+            severity: 'major',
+            category: 'bug',
+            title: 'Maybe broken',
+            body: 'b',
+            unverified: true,
+          },
+        ]),
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({ forge: requireReviewForge(forge), agent, options: { ...options, verify: false } }),
+    )
+    expect(data.comments).toEqual([])
+    expect(data.refuted?.[0]?.reason).toBe('Not confirmed: the review ran no verification.')
+  })
+
   test('a failing API changes hook leaves the section out', async () => {
     const { forge } = fakeForge({ files, discussions: [] })
     const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })

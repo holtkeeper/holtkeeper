@@ -11,6 +11,7 @@ import type {
   RepoRef,
   ReviewComment,
 } from '@holtkeeper/forge'
+import { type IssueDetails, issueKeysIn } from '@holtkeeper/issues'
 import type { QualityCheck } from '@holtkeeper/quality'
 import type { AnalysisStore } from '@holtkeeper/store'
 
@@ -71,7 +72,7 @@ import {
   sizedFiles,
 } from './size.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
-import { type Verification, existingEvidence, verifyFindings } from './verify.ts'
+import { type Verification, dropUnverified, existingEvidence, verifyFindings } from './verify.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
 export interface ReviewOptions {
@@ -97,7 +98,8 @@ export interface ReviewOptions {
   deepFromMinutes?: number
   /**
    * A second agent pass tries to disprove the agent's findings before they are posted and drops
-   * the ones the code contradicts (`verifyFindings`); on unless `false`.
+   * the ones the code contradicts (`verifyFindings`); on unless `false`. Without it, the agent's
+   * unverified suspicions are dropped.
    */
   verify?: boolean
   /**
@@ -207,6 +209,12 @@ export interface ReviewRun {
     signal?: AbortSignal
   }) => Promise<string | undefined>
   /**
+   * The tickets among `keys` (ticket keys the merge request names) that can be read, with their
+   * descriptions; tickets that do not exist or cannot be read are left out. Without it, or when it
+   * fails or reads none, the prompt says nothing about tickets.
+   */
+  tickets?: (keys: readonly string[]) => Promise<IssueDetails[]>
+  /**
    * `false` for a repository with no tests by design: the agent is not asked about tests and its
    * findings of category `tests` are dropped, except those completing a requested check finding
    * (test ids stay checked).
@@ -309,7 +317,8 @@ export interface ReviewSteps {
   ): Promise<Map<string, RecheckVerdict | 'gone'>>
   /**
    * Checks the agent's findings that are about to be posted and drops the ones the code
-   * contradicts; everything stays without an agent or with `options.verify: false`.
+   * contradicts and the `unverified` suspicions it does not confirm; without an agent or with
+   * `options.verify: false` everything but those suspicions stays.
    */
   verify(
     run: ReviewRun,
@@ -466,6 +475,36 @@ async function dependenciesFor(run: ReviewRun, loaded: LoadedReview): Promise<st
   }
 }
 
+/** Ticket keys of a merge request that are looked up for its review, at most. */
+export const REVIEW_TICKETS_MAX = 2
+
+/**
+ * The readable tickets the merge request names: keys from its title, source branch (upper-cased,
+ * so `feature/abc-1-x` counts) and description, in that order, at most `REVIEW_TICKETS_MAX`.
+ */
+async function ticketsFor(run: ReviewRun, loaded: LoadedReview): Promise<IssueDetails[]> {
+  if (!run.tickets) return []
+  const { title, sourceBranch, description } = loaded.mr
+  const keys = issueKeysIn(title, sourceBranch.toUpperCase(), description).slice(
+    0,
+    REVIEW_TICKETS_MAX,
+  )
+  if (!keys.length) return []
+  try {
+    const tickets = await run.tickets(keys)
+    run.log?.(
+      tickets.length
+        ? `ticket context: ${tickets.map((ticket) => ticket.key).join(', ')}`
+        : `ticket context: none of ${keys.join(', ')} could be read`,
+    )
+    return tickets
+  } catch (error) {
+    run.signal?.throwIfAborted()
+    run.log?.(`ticket context skipped: ${errorText(error)}`)
+    return []
+  }
+}
+
 async function apiChangesFor(
   run: ReviewRun,
   loaded: LoadedReview,
@@ -494,6 +533,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
   const goGuidelines = await goGuidelinesFor(run, planned.scope.files)
   const dependencies = await dependenciesFor(run, loaded)
   const apiChanges = await apiChangesFor(run, loaded, planned.scope.files)
+  const tickets = await ticketsFor(run, loaded)
   const instructions = run.options.instructions?.trim()
   const guide = run.guide
     ? await run
@@ -539,6 +579,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
         title: loaded.mr.title,
         description: loaded.mr.description,
       },
+      ...(tickets.length ? { tickets } : {}),
       files: planned.scope.files,
       mode: planned.mode,
       ...(planned.previousHead ? { previousHead: planned.previousHead } : {}),
@@ -588,8 +629,12 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
 }
 
 const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage) => {
-  const unchecked = { kept: [...candidates], refuted: [], failed: 0 }
-  if (!run.agent || !run.dir || run.options.verify === false) return unchecked
+  if (!run.agent || !run.dir || run.options.verify === false) {
+    const unchecked = dropUnverified(candidates)
+    if (unchecked.refuted.length)
+      run.log?.(`dropped ${unchecked.refuted.length} unverified suspicion(s) without verification`)
+    return unchecked
+  }
   const dir = run.dir
   const cited = await Promise.all(
     candidates.map(async (candidate) => {
@@ -612,6 +657,11 @@ const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage) => 
     ...(run.signal ? { signal: run.signal } : {}),
     ...(run.log ? { log: run.log } : {}),
   })
+  const suspicions = cited.filter((candidate) => candidate.unverified).length
+  if (suspicions)
+    run.log?.(
+      `verification confirmed ${suspicions - result.refuted.filter((r) => r.candidate.unverified).length} of ${suspicions} unverified suspicion(s)`,
+    )
   if (result.refuted.length)
     run.log?.(`verification dropped ${result.refuted.length} of ${candidates.length} finding(s)`)
   return result

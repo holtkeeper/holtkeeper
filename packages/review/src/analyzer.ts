@@ -2,6 +2,7 @@ import type { Toolset } from '@holtkeeper/agent'
 import { type KnowledgeAccess, knowledgeTools } from '@holtkeeper/agent-tools'
 import { type AnalyzerContext, defineAnalyzer } from '@holtkeeper/analyzer'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import { type IssueTracker, issueDetails } from '@holtkeeper/issues'
 import {
   type MessageStore,
   agentTranslator,
@@ -200,6 +201,11 @@ export interface ReviewAnalyzerDeps {
     repo: RepoRef,
     context: { dir: string; baseSha: string; files: readonly string[]; signal?: AbortSignal },
   ) => Promise<string | undefined>
+  /**
+   * The issue tracker of a repository, whose `issue` gives reviews the tickets a merge request
+   * names; without it, or without a tracker for the repository, reviews get no ticket context.
+   */
+  issueTrackerFor?: (repo: RepoRef) => Promise<IssueTracker | undefined>
   mediaReviewer?: MediaReviewer
   /**
    * The modern Go guidelines, for an optional pinned tag (falling back to another set when that
@@ -480,7 +486,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             })
           : deps.checks
         const tests = deps.testsExpected ? await deps.testsExpected(repo) : true
-        const { apiChangesFor } = deps
+        const { apiChangesFor, issueTrackerFor } = deps
         const data = await reviewMergeRequest({
           repo,
           forge,
@@ -495,6 +501,9 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             : {}),
           ...(toolsets ? { toolsets } : {}),
           ...(apiChangesFor ? { apiChanges: (request) => apiChangesFor(repo, request) } : {}),
+          ...(issueTrackerFor && {
+            tickets: async (keys) => issueDetails(await issueTrackerFor(repo), keys),
+          }),
           ...(!tests && { tests: false as const }),
           ...(botUsername ? { botUsername } : {}),
           ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),

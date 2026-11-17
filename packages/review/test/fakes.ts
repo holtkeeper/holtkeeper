@@ -33,6 +33,8 @@ interface FakeForgeState {
   reject?: (comment: ReviewSubmission['comments'][number]) => string | undefined
   /** Posted summaries become resolvable threads of this account, as on GitLab. */
   summaryAuthor?: string
+  /** Overrides fields of the merge request. */
+  mergeRequest?: Partial<MergeRequest>
 }
 
 /** A forge that records what the review posts. */
@@ -44,7 +46,7 @@ export function fakeForge(state: FakeForgeState) {
   const compared: [string, string][] = []
   const forge = {
     kind: 'gitlab',
-    getMergeRequest: async () => ({ ...mergeRequest }),
+    getMergeRequest: async () => ({ ...mergeRequest, ...state.mergeRequest }),
     getMergeRequestDiff: async () => ({
       refs: { baseSha: BASE, startSha: BASE, headSha: HEAD },
       files: state.files,

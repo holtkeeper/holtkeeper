@@ -25,6 +25,12 @@ import {
   MR_DIFF_TOOL,
   mergeRequestDiffTools,
   runSummary,
+  SCENARIO_TURNS,
+  TICKET_PROMPT_CHARS,
+  isLogicFile,
+  mergePassFindings,
+  riskyParts,
+  ticketBlock,
 } from './agent.ts'
 import { addedLines, newSideLines, parseHunks } from './diff.ts'
 import type { AgentReview, ReviewUsage } from './schema.ts'
@@ -59,6 +65,12 @@ const inputOf = (
 })
 
 const usage = (): ReviewUsage => ({ turns: 0 })
+
+/** The review passes among recorded tasks, without the scenario plan. */
+const reviewTasks = (tasks: readonly AgentTask[]) =>
+  tasks.filter((task) => task.taskKind === 'review')
+
+const noFindings = (path: string) => answer(path, { comments: [] })
 
 const answer = (path: string, extra: Partial<AgentReview> = {}): AgentReview => ({
   comments: [
@@ -125,11 +137,12 @@ describe('reviewSystemPrompt', () => {
     expect(prompt).toContain('Comment only on lines marked `+`')
   })
 
-  test('asks to ground findings in code read and to look for tests before calling them missing', () => {
+  test('asks to ground findings in code read, to flag open suspicions and to look for tests', () => {
     const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)]))
-    expect(prompt).toContain('Ground every finding in code you read')
+    expect(prompt).toContain('Ground findings in code you read')
     expect(prompt).toContain('`evidence`')
-    expect(prompt).toContain('never post a finding that says you did not check')
+    expect(prompt).toContain('report it with `unverified: true`')
+    expect(prompt).toContain('Investigate every suspicious pattern')
     expect(prompt).toContain('Before saying tests are missing')
     expect(prompt).toContain('code.references')
     const noTests = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)], { tests: false }))
@@ -333,7 +346,7 @@ describe('runAgentReview', () => {
   })
 
   test('a large diff is reviewed in parts whose results are merged', async () => {
-    const { agent, tasks } = fakeAgent({
+    const { agent, tasks: recorded } = fakeAgent({
       review: [
         answer('api/routes.ts', {
           effort: 2,
@@ -346,6 +359,9 @@ describe('runAgentReview', () => {
           reviewMinutes: 35,
           walkthrough: [{ files: ['ui/form.ts'], change: 'B' }],
         }),
+        // Second passes: the same finding again, then nothing new.
+        answer('api/routes.ts', { effort: 5, reviewMinutes: 50 }),
+        noFindings('ui/form.ts'),
         answer('lib/math.ts', {
           walkthrough: [{ files: ['api/routes.ts', 'ui/form.ts'], change: 'A and B' }],
           reviewMinutes: 90,
@@ -371,11 +387,20 @@ describe('runAgentReview', () => {
       }),
       usage: total,
     })
-    expect(tasks).toHaveLength(3)
+    const plan = recorded.find((task) => task.taskKind === 'review-plan')
+    expect(plan?.tier).toBe('fast')
+    const tasks = reviewTasks(recorded)
+    expect(tasks).toHaveLength(5)
     expect(tasks[0]?.prompt).toContain('part 1 of 2')
     expect(tasks[0]?.maxTurns).toBe(PART_MAX_TURNS)
-    expect(tasks.map((task) => task.tier)).toEqual(['main', 'main', 'main'])
-    expect(tasks.map((task) => task.effort)).toEqual(['high', 'high', undefined])
+    expect(tasks.map((task) => task.tier)).toEqual(['main', 'main', 'main', 'main', 'main'])
+    expect(tasks.map((task) => task.effort)).toEqual(['high', 'high', 'high', 'high', undefined])
+    // The second pass over part 1 reads its files in reverse order.
+    const second = tasks[2]?.prompt ?? ''
+    expect(second).toContain('part 1 of 2')
+    expect(second.indexOf('### api/store.ts')).toBeLessThan(second.indexOf('### api/routes.ts'))
+    const first = tasks[0]?.prompt ?? ''
+    expect(first.indexOf('### api/routes.ts')).toBeLessThan(first.indexOf('### api/store.ts'))
     expect(tasks[0]?.prompt).toContain('You are the only reviewer of these lines')
     expect(tasks[0]?.prompt).toContain('- lib/math.ts')
     expect(tasks[0]?.prompt).toContain('# Add widget pricing')
@@ -384,7 +409,7 @@ describe('runAgentReview', () => {
     expect(tasks[0]?.prompt).not.toContain('### ui/form.ts')
     expect(tasks[1]?.prompt).toContain('Old remark')
     expect(tasks[1]?.prompt).not.toContain('api/store.ts:2 (tests)')
-    const cross = tasks[2]
+    const cross = tasks[4]
     expect(cross?.prompt).toContain('final pass over the whole diff')
     expect(cross?.prompt).not.toContain('part 1 of')
     // The cross-part pass reads the diff on demand instead of carrying it in every turn.
@@ -413,7 +438,7 @@ describe('runAgentReview', () => {
     expect(result.reviewMinutes).toBe(55)
     // The cross-part pass's walkthrough replaces the parts'.
     expect(result.walkthrough?.map((entry) => entry.change)).toEqual(['A and B'])
-    expect(total.turns).toBe(6)
+    expect(total.turns).toBe(12)
   })
 
   test('a failed part keeps the findings of the others and names its files', async () => {
@@ -446,7 +471,8 @@ describe('runAgentReview', () => {
     let peak = 0
     const agent: Agent = {
       name: 'fake',
-      async run<Output>(_task: AgentTask<Output>) {
+      async run<Output>(task: AgentTask<Output>) {
+        if (task.taskKind !== 'review') return { text: '', turns: 1 }
         running++
         peak = Math.max(peak, running)
         await Bun.sleep(5)
@@ -490,11 +516,20 @@ describe('runAgentReview', () => {
       deep: true,
       onProgress: (event) => events.push(event),
     })
-    expect(tasks.map((task) => task.tier)).toEqual(['main', 'main', 'deep'])
+    expect(reviewTasks(tasks).map((task) => task.tier)).toEqual([
+      'main',
+      'main',
+      'main',
+      'main',
+      'deep',
+    ])
+    // Both parts are mostly logic, so each gets a second pass.
     expect(events).toEqual([
-      { stage: 'review', parts: 2, done: 0 },
-      { stage: 'review', parts: 2, done: 1 },
-      { stage: 'review', parts: 2, done: 2 },
+      { stage: 'review', parts: 4, done: 0 },
+      { stage: 'review', parts: 4, done: 1 },
+      { stage: 'review', parts: 4, done: 2 },
+      { stage: 'review', parts: 4, done: 3 },
+      { stage: 'review', parts: 4, done: 4 },
       { stage: 'cross', parts: 2 },
     ])
   })
@@ -563,9 +598,12 @@ describe('runAgentReview', () => {
       usage: usage(),
       costLimitUsd: 4,
     })
-    expect(tasks.map((task) => task.answerAtCostUsd)).toEqual([
-      (4 * REVIEW_BUDGET_SHARES.parts) / 2,
-      (4 * REVIEW_BUDGET_SHARES.parts) / 2,
+    const part = (4 * REVIEW_BUDGET_SHARES.parts) / 4
+    expect(reviewTasks(tasks).map((task) => task.answerAtCostUsd)).toEqual([
+      part,
+      part,
+      part,
+      part,
       4 * REVIEW_BUDGET_SHARES.cross,
     ])
   })
@@ -588,6 +626,8 @@ describe('runAgentReview', () => {
       review: [
         answer('api/routes.ts'),
         minor('ui/form.ts'),
+        noFindings('api/routes.ts'),
+        noFindings('ui/form.ts'),
         answer('lib/math.ts', { comments: [], duplicates: [{ id: 1, of: 2 }] }),
       ],
     })
@@ -618,6 +658,198 @@ describe('runAgentReview', () => {
 
   test('the prompt of a single pass names no parts', () => {
     expect(reviewPrompt(inputOf([fileOf('src/a.ts', 3)]))).not.toContain('part 1')
+  })
+
+  test('an unverified finding keeps its mark, a confirmed one has none', async () => {
+    const { agent } = fakeAgent({
+      review: [
+        answer('src/a.ts', {
+          comments: [
+            {
+              path: 'src/a.ts',
+              line: 1,
+              severity: 'major',
+              category: 'bug',
+              title: 'Maybe',
+              body: 'b',
+              unverified: true,
+            },
+            {
+              path: 'src/a.ts',
+              line: 2,
+              severity: 'major',
+              category: 'bug',
+              title: 'Sure',
+              body: 'b',
+              unverified: false,
+            },
+          ],
+        }),
+      ],
+    })
+    const result = await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf([fileOf('src/a.ts', 5)]),
+      usage: usage(),
+    })
+    expect(result.candidates.map((c) => [c.title, c.unverified])).toEqual([
+      ['Maybe', true],
+      ['Sure', undefined],
+    ])
+  })
+
+  test('the scenario plan becomes the checklist of the cross-part pass', async () => {
+    const { agent, tasks } = fakeAgent({
+      'review-plan': [
+        {
+          scenarios: [
+            {
+              title: 'Undo after removal',
+              files: ['./api/store.ts', 'ui/form.ts', 'elsewhere.ts'],
+              check: 'The undo restores what the removal took.',
+            },
+            { title: ' ', files: [], check: 'empty title' },
+          ],
+        },
+      ],
+      review: [
+        noFindings('api/routes.ts'),
+        noFindings('ui/form.ts'),
+        noFindings('api/routes.ts'),
+        noFindings('ui/form.ts'),
+        noFindings('lib/math.ts'),
+      ],
+    })
+    const lines: string[] = []
+    await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf(splitFiles(), {
+        tickets: [{ key: 'ABC-1', title: 'Widget undo', description: 'Undo must work.' }],
+      }),
+      usage: usage(),
+      log: (line) => lines.push(line),
+    })
+    const plan = tasks.find((task) => task.taskKind === 'review-plan')
+    expect(plan?.capabilities).toEqual([])
+    expect(plan?.prompt).toContain('### api/routes.ts')
+    expect(plan?.prompt).toContain('Undo must work.')
+    const cross = reviewTasks(tasks).at(-1)
+    expect(cross?.prompt).toContain('Scenarios to trace (mandatory)')
+    expect(cross?.prompt).toContain(
+      '1. Undo after removal (api/store.ts, ui/form.ts): The undo restores what the removal took.',
+    )
+    expect(cross?.prompt).not.toContain('empty title')
+    expect(cross?.maxTurns).toBe(CROSS_PART_TURNS + SCENARIO_TURNS)
+    expect(lines).toContain('scenarios traced: 0 with a problem, 0 fine, 1 not checked of 1')
+  })
+
+  test('without scenarios or with a failing plan the cross-part pass has no checklist', async () => {
+    const agent: Agent = {
+      name: 'fake',
+      async run<Output>(task: AgentTask<Output>) {
+        if (task.taskKind === 'review-plan') throw new Error('plan down')
+        return { text: '', output: noFindings('x.ts') as Output, turns: 1 }
+      },
+    }
+    const prompts: string[] = []
+    await runAgentReview({
+      agent: { ...agent, run: async (task) => (prompts.push(task.prompt), agent.run(task)) },
+      dir: '/checkout',
+      input: inputOf(splitFiles()),
+      usage: usage(),
+    })
+    expect(prompts.at(-1)).toContain('final pass over the whole diff')
+    expect(prompts.at(-1)).not.toContain('Scenarios to trace')
+  })
+
+  test('a part whose first pass fails stands on its second pass', async () => {
+    let calls = 0
+    const agent: Agent = {
+      name: 'fake',
+      async run<Output>(task: AgentTask<Output>) {
+        if (task.taskKind !== 'review') return { text: '', turns: 1 }
+        calls++
+        if (calls === 2) throw new Error('flaky')
+        return { text: '', output: answer('ui/form.ts') as Output, turns: 1 }
+      },
+    }
+    const result = await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf(splitFiles()),
+      usage: usage(),
+    })
+    expect(result.summary).not.toContain('Not reviewed')
+  })
+})
+
+describe('second passes', () => {
+  test('only parts with enough logic get one, the most logic first', () => {
+    const logic = [fileOf('src/store.ts', 400), fileOf('src/store.test.ts', 300)]
+    const styles = [fileOf('ui/form.module.css', 500), fileOf('ui/form.ts', 100)]
+    const small = [fileOf('lib/a.ts', 160)]
+    const big = [fileOf('core/b.go', 500)]
+    expect(riskyParts([logic, styles, small, big], 'full')).toEqual([0, 3])
+    expect(riskyParts([styles], 'full')).toEqual([])
+    expect(isLogicFile('src/__tests__/a.ts')).toBe(false)
+    expect(isLogicFile('src/a.stories.tsx')).toBe(false)
+    expect(isLogicFile('src/a.styles.ts')).toBe(false)
+    expect(isLogicFile('locales/en.json')).toBe(false)
+    expect(isLogicFile('pkg/a_test.go')).toBe(false)
+    expect(isLogicFile('src/services/BetService.ts')).toBe(true)
+  })
+
+  test('merging folds repeats into the first finding and adds the rest', () => {
+    const base = { ...agentFinding('Undo loses the flag'), body: 'The flag is reset.' }
+    const merged = mergePassFindings(
+      [{ ...base, unverified: true }, agentFinding('Other')],
+      [
+        {
+          ...base,
+          line: 2,
+          severity: 'major',
+          title: 'Undo resets the flag',
+          evidence: [{ path: 'b.ts', line: 3 }],
+        },
+        { ...agentFinding('New'), path: 'c.ts' },
+        { ...agentFinding('Unrelated text entirely'), line: 9 },
+      ],
+    )
+    expect(merged.map((c) => [c.title, c.severity, c.unverified, c.evidence?.length])).toEqual([
+      ['Undo loses the flag', 'major', undefined, 1],
+      ['Other', 'minor', undefined, undefined],
+      ['New', 'minor', undefined, undefined],
+      ['Unrelated text entirely', 'minor', undefined, undefined],
+    ])
+  })
+})
+
+describe('ticketBlock', () => {
+  test('shows read tickets and nothing without them', () => {
+    expect(ticketBlock([])).toBe('')
+    expect(reviewPrompt(inputOf([fileOf('src/a.ts', 3)]))).not.toContain('ticket')
+    const prompt = reviewPrompt(
+      inputOf([fileOf('src/a.ts', 3)], {
+        tickets: [
+          {
+            key: 'ABC-1',
+            title: 'Round  the corners',
+            type: 'Story',
+            status: 'In progress',
+            description: `Corners are round.${'x'.repeat(TICKET_PROMPT_CHARS)}`,
+          },
+        ],
+      }),
+    )
+    expect(prompt).toContain('The ticket this merge request implements, from the issue tracker.')
+    expect(prompt).toContain(
+      '### ABC-1 (Story, In progress): Round the corners\n\nCorners are round.',
+    )
+    expect(prompt).not.toContain('x'.repeat(TICKET_PROMPT_CHARS))
+    expect(prompt.indexOf('ABC-1')).toBeLessThan(prompt.indexOf('Diff:'))
+    expect(ticketBlock([{ key: 'ABC-2', title: 'T' }])).toContain('The ticket has no description.')
   })
 })
 

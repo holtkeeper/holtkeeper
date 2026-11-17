@@ -99,6 +99,7 @@ import { fleetPackagesOf } from './fleet-packages.ts'
 import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
 import { goGuidelinesDuty, goGuidelinesSource } from './go-guidelines.ts'
 import { retiredReadOnlyCheck } from './health.ts'
+import { issueTrackerFor } from './issues.ts'
 import {
   type AgentFor,
   type AnyAnalyzer,
@@ -338,6 +339,7 @@ export async function startServer(
   const testsExpected = testsExpectedFor(store, () => config)
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
+    issueTrackerFor: issueTrackerFor({ config, store, credentials }),
     apiChangesFor: reviewApiChanges({
       usages: createUsageIndex({ analyses: store.analyses }),
       runner: localRunner,

@@ -8,7 +8,7 @@ import type { Agent } from '@holtkeeper/agent'
 import { fakeAgent } from '../test/fakes.ts'
 import type { ReviewUsage } from './schema.ts'
 import type { Candidate } from './validate.ts'
-import { existingEvidence, verifyFindings, verifyTurns } from './verify.ts'
+import { dropUnverified, existingEvidence, verifyFindings, verifyTurns } from './verify.ts'
 
 const usage = (): ReviewUsage => ({ turns: 0 })
 const candidate = (
@@ -58,6 +58,63 @@ describe('verifyFindings', () => {
     expect(tasks).toHaveLength(1)
     expect(tasks[0]).toMatchObject({ taskKind: 'review-verify', tier: 'main', maxTurns: 12 })
     expect(tasks[0]?.prompt).not.toContain('Check')
+  })
+
+  test('an unverified suspicion stays only when confirmed, and then loses its mark', async () => {
+    const { agent, tasks } = fakeAgent({
+      'review-verify': [
+        {
+          findings: [
+            { id: 0, verdict: 'confirmed', reason: 'Holds.' },
+            { id: 1, verdict: 'uncertain', reason: 'Could not tell.' },
+            { id: 3, verdict: 'uncertain', reason: 'Could not tell.' },
+          ],
+        },
+      ],
+    })
+    const suspicion = (title: string): Candidate => ({
+      ...candidate(title, 'minor'),
+      unverified: true,
+    })
+    const candidates = [suspicion('A'), suspicion('B'), suspicion('C'), candidate('D', 'minor')]
+    const result = await verifyFindings({
+      agent,
+      dir: '/checkout',
+      candidates,
+      usage: usage(),
+      mergeRequest,
+    })
+    expect(result.kept).toEqual([candidate('A', 'minor'), candidate('D', 'minor')])
+    expect(result.refuted.map((r) => [r.candidate.title, r.reason])).toEqual([
+      ['B', 'Not confirmed: Could not tell.'],
+      ['C', 'Not confirmed: the verification gave no answer.'],
+    ])
+    expect(tasks[0]?.prompt).toContain('Unverified suspicion')
+    expect(tasks[0]?.system).toContain('posted only when you answer `confirmed`')
+  })
+
+  test('a failed verification drops suspicions, and none run without verification', async () => {
+    const failing: Agent = {
+      name: 'failing',
+      run: async () => {
+        throw new Error('model unavailable')
+      },
+    }
+    const suspicion: Candidate = { ...candidate('A', 'major'), unverified: true }
+    const result = await verifyFindings({
+      agent: failing,
+      dir: '/checkout',
+      candidates: [suspicion, candidate('B', 'major')],
+      usage: usage(),
+      mergeRequest,
+    })
+    expect(result.kept.map((c) => c.title)).toEqual(['B'])
+    expect(result.refuted[0]?.reason).toBe('Not confirmed: the verification failed.')
+    expect(dropUnverified([suspicion, candidate('B', 'major')])).toEqual({
+      kept: [candidate('B', 'major')],
+      refuted: [{ candidate: suspicion, reason: 'Not confirmed: the review ran no verification.' }],
+      failed: 0,
+    })
   })
 
   test('serious findings are checked on deep, the rest on main', async () => {

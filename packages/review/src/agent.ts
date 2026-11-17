@@ -1,8 +1,9 @@
 import type { Agent, AgentResult, AgentTask, Toolset } from '@holtkeeper/agent'
 import { lockfileTools } from '@holtkeeper/agent-tools'
+import type { IssueDetails } from '@holtkeeper/issues'
 import { z } from 'zod'
 
-import { type OpenThread, severityRank } from './dedupe.ts'
+import { LINE_TOLERANCE, type OpenThread, SIMILAR, severityRank, similarity } from './dedupe.ts'
 import { changedLineCount, renderNumberedDiff } from './diff.ts'
 import type { Guideline } from './guidelines.ts'
 import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } from './schema.ts'
@@ -46,9 +47,23 @@ export function runSummary(result: AgentResult): string {
   ].join(', ')
 }
 
+/** A cross-file scenario the cross-part pass must trace: a flow through the changed code. */
+export interface ReviewScenario {
+  title: string
+  /** Changed files the scenario crosses. */
+  files: readonly string[]
+  /** What to check along the way. */
+  check: string
+}
+
 export interface ReviewPromptInput {
   repo: string
   mergeRequest: { id: number; title: string; description: string }
+  /**
+   * Tickets the merge request names, as read from the issue tracker; only tickets that were
+   * actually read, so the prompt never points at one the agent cannot see.
+   */
+  tickets?: readonly IssueDetails[]
   files: readonly FileScope[]
   mode: 'full' | 'incremental'
   previousHead?: string
@@ -88,6 +103,8 @@ export interface ReviewPromptInput {
     walkthrough: readonly string[]
     /** The parts' summaries, which the pass's summary replaces. */
     summaries?: readonly string[]
+    /** Cross-file scenarios to trace one by one (`planScenarios`), numbered from 1. */
+    scenarios?: readonly ReviewScenario[]
   }
   language?: string
   /**
@@ -157,7 +174,8 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       `- At most ${input.maxComments} comments; when there are more, keep the most severe.`,
       `- Categories: ${listed.join(', ')}.${requestedTests ? ' Use `tests` only for the lines the checks flagged with it.' : ''}`,
       '- Do not repeat open threads listed in the prompt.',
-      '- Ground every finding in code you read. A claim about code outside the diff (a caller, a guard that does or does not exist, another method relying on a value, a test that is missing) must come from reading that code with the tools: list what you read in `evidence` (path, line, what it shows). If you could not check a premise, check it now or leave the finding out; never post a finding that says you did not check something.',
+      '- Ground findings in code you read. A claim about code outside the diff (a caller, a guard that does or does not exist, another method relying on a value, a test that is missing) should come from reading that code with the tools: list what you read in `evidence` (path, line, what it shows).',
+      '- Do not drop a suspicion because you could not prove it. When something looks wrong but a premise is still open after you looked (you ran out of turns, the code path is too indirect), report it with `unverified: true`: a second reviewer checks every such finding against the code and posts it only when it holds, so a missed bug costs more than a suspicion that turns out wrong. Write its title and body as the problem it would be (what breaks, when), and say in `evidence` what you read; do not write that you did not check something. Leave `unverified` out for findings you confirmed.',
       '- Before calling a flag, field or return value wrong, find every place that reads and writes it (code.references) and make sure your fix would not break one of them.',
       '- Lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, go.sum) are usually left out of the diff and too large for the search tools, so a search that finds nothing in them proves nothing. Never claim that a lockfile lacks a package, has a wrong entry or must be updated unless the computed dependency section or lockfiles.resolve says so; when the section says a lockfile is consistent, do not ask to update it.',
       '- verdict is `needs-changes` when any major or critical problem remains, `looks-good` otherwise.',
@@ -175,6 +193,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
         : []),
       `- Go through every changed file in the diff. Before judging a change, open the code around it, its callers and the code paths it touches with the tools; the larger the diff, the more you read.`,
       '- Check error paths, retries and idempotency, edge cases (empty, missing, boundary values), concurrency and ordering, and the contract with callers (types, return values, side effects).',
+      '- Investigate every suspicious pattern instead of explaining it away: a flag reset in one path but not another, state kept across calls, a case the old code handled and the new one does not, an early return, an ordering assumption. When in doubt, look closer and report.',
       '- Report every distinct problem you find, up to the comment limit; do not stop after the first one. A single comment on a large change is right only when the rest really is clean.',
     ].join('\n'),
     packageRules(input),
@@ -218,6 +237,26 @@ export function reviewContext(input: ReviewPromptInput): string {
   return parts.join('\n\n')
 }
 
+/** Characters of a ticket's description in a prompt. */
+export const TICKET_PROMPT_CHARS = 3000
+
+/** The prompt block of the tickets the merge request names; empty without any. */
+export function ticketBlock(tickets: readonly IssueDetails[] = []): string {
+  if (!tickets.length) return ''
+  const entries = tickets.map((ticket) => {
+    const facts = [ticket.type, ticket.status].filter(Boolean).join(', ')
+    const description = ticket.description?.trim().slice(0, TICKET_PROMPT_CHARS)
+    return [
+      `### ${ticket.key}${facts ? ` (${facts})` : ''}: ${ticket.title.replace(/\s+/g, ' ')}`,
+      description || 'The ticket has no description.',
+    ].join('\n\n')
+  })
+  return [
+    `${tickets.length === 1 ? 'The ticket this merge request implements' : 'The tickets this merge request names'}, from the issue tracker. ${tickets.length === 1 ? 'It says' : 'They say'} what the change is meant to do: check the change against it and report where the code contradicts it or leaves out something it asks for, at the changed line it concerns, as for any other finding. A ticket may be outdated or broader than this merge request; do not report work the merge request does not claim to do.`,
+    ...entries,
+  ].join('\n\n')
+}
+
 /** The task prompt: the merge request, open threads and the numbered diff of the files in scope. */
 export function reviewPrompt(input: ReviewPromptInput): string {
   const description = input.mergeRequest.description.trim().slice(0, 3000)
@@ -240,6 +279,7 @@ export function reviewPrompt(input: ReviewPromptInput): string {
   return [
     `# ${input.mergeRequest.title}`,
     description ? `Description:\n\n${description}` : 'The merge request has no description.',
+    ticketBlock(input.tickets),
     input.mode === 'incremental'
       ? `This is an incremental review: only lines added since ${input.previousHead?.slice(0, 12)} are marked \`+\`.`
       : '',
@@ -292,8 +332,9 @@ export interface AgentReviewOptions {
 }
 
 /**
- * Where an agent review is: `review` when its passes start and each time a part finishes (`parts`
- * is 1 for a diff reviewed in one pass), `cross` when the cross-part pass of a split review starts.
+ * Where an agent review is: `review` when its passes start and each time a pass over a part
+ * finishes (`parts` counts those passes, second passes included, and is 1 for a diff reviewed in
+ * one pass), `cross` when the cross-part pass of a split review starts.
  */
 export type AgentProgress =
   | { stage: 'review'; parts: number; done: number }
@@ -322,9 +363,24 @@ function crossPartBlock(cross: NonNullable<ReviewPromptInput['crossPart']>): str
       ? `Summaries of the parts:\n${summaries.map((text) => `- ${text.replace(/\s+/g, ' ')}`).join('\n')}`
       : '',
     findings.length ? `Already reported (do not repeat):\n${findings.join('\n')}` : '',
+    scenarioChecklist(cross.scenarios),
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+/** The cross-part pass's mandatory checklist of scenarios; empty without any. */
+function scenarioChecklist(scenarios: readonly ReviewScenario[] = []): string {
+  if (!scenarios.length) return ''
+  return [
+    'Scenarios to trace (mandatory): each is a flow through several changed files where a bug is likely. Take them one by one: follow the flow through the code with the tools (the diffs of its files, the code they call and the state they share), check what it says to check, and report every problem you find on the way, at the changed line that causes it. A scenario may be wrong or harmless; then move on. In `scenarios`, answer for each by its number: `problem` when you reported something for it, `fine` when you traced it and it holds, `not-checked` when you did not get to it.',
+    scenarios
+      .map(
+        (scenario, index) =>
+          `${index + 1}. ${scenario.title.replace(/\s+/g, ' ')} (${scenario.files.join(', ')}): ${scenario.check.replace(/\s+/g, ' ')}`,
+      )
+      .join('\n'),
+  ].join('\n')
 }
 
 /**
@@ -382,7 +438,7 @@ export const REVIEW_TRIM = { maxChars: 400_000, keepLast: 8 } as const
  * Shares of `costLimitUsd` each pass may spend before it is asked for its answer: a diff reviewed
  * in one pass, all parts of a split one together, its cross-part pass, and the verification.
  */
-export const REVIEW_BUDGET_SHARES = { single: 0.6, parts: 0.4, cross: 0.25, verify: 0.25 } as const
+export const REVIEW_BUDGET_SHARES = { single: 0.6, parts: 0.55, cross: 0.25, verify: 0.25 } as const
 
 /** Evidence entries kept per finding. */
 const MAX_EVIDENCE = 8
@@ -402,8 +458,23 @@ export const PART_MAX_TURNS = 50
  * read or two and left the work to the cross-part pass; high effort keeps them on the cheaper tier.
  */
 export const PART_EFFORT = 'high' as const
-/** Turn limit of the cross-part pass of a split review. */
+/** Turn limit of the cross-part pass of a split review, before its scenarios. */
 export const CROSS_PART_TURNS = 30
+
+/** Scenarios `planScenarios` keeps for the cross-part pass. */
+export const SCENARIO_MAX = 6
+/** Turns the cross-part pass gets per scenario on top of `CROSS_PART_TURNS`. */
+export const SCENARIO_TURNS = 3
+/** Characters of numbered diff the scenario planner reads; files past it are listed by path. */
+export const SCENARIO_DIFF_MAX_CHARS = 200_000
+
+/**
+ * Changed lines of logic (code that is not a test, story, style, fixture, translation, config or
+ * docs) from which a part of a split review gets a second, independent pass.
+ */
+export const SECOND_PASS_MIN_LINES = 150
+/** Parts of a split review that get a second pass at most: those with the most logic lines. */
+export const SECOND_PASS_MAX_PARTS = 2
 
 /** The default turn limit of a pass over `files`: larger slices of a diff get more turns. */
 export function reviewTurns(files: readonly FileScope[], mode: ReviewPromptInput['mode']): number {
@@ -495,12 +566,16 @@ export function splitReviewFiles(
     .map((part) => part.toSorted((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0)))
 }
 
-/** The prompt input of one part: its files, and the requests, threads and path rules on them. */
+/**
+ * The prompt input of one part: its files (in reverse order for a second pass, so it reads them
+ * differently), and the requests, threads and path rules on them.
+ */
 function partInput(
   input: ReviewPromptInput,
   files: readonly FileScope[],
   index: number,
   count: number,
+  second = false,
 ): ReviewPromptInput {
   const paths = new Set(files.map((file) => file.path))
   const pathInstructions = (input.pathInstructions ?? []).flatMap((rule) => {
@@ -511,7 +586,7 @@ function partInput(
   const { pathInstructions: _rules, requests: _requests, ...rest } = input
   return {
     ...rest,
-    files,
+    files: second ? files.toReversed() : files,
     threads: input.threads.filter((thread) => paths.has(thread.path)),
     ...(pathInstructions.length ? { pathInstructions } : {}),
     ...(requests.length ? { requests } : {}),
@@ -584,7 +659,11 @@ export function reviewPromptVersion(): string {
         findings: [{ id: 1, path: 'src/a.ts', line: 1, title: 'T', severity: 'minor' }],
         walkthrough: ['W'],
         summaries: ['S'],
+        scenarios: [{ title: 'Scenario', files: ['src/a.ts', 'src/b.ts'], check: 'Check' }],
       },
+      tickets: [
+        { key: 'ABC-1', title: 'Ticket', type: 'Story', status: 'Open', description: 'Text' },
+      ],
       goGuidelines: 'Go guidelines',
       dependencies: 'Dependencies',
       apiChanges: 'API changes',
@@ -599,6 +678,8 @@ export function reviewPromptVersion(): string {
       reviewSystemPrompt(sampleInput('main.go', { requests: everything.requests ?? [] })),
       reviewContext(everything),
       reviewPrompt(everything),
+      scenarioPrompt(everything),
+      SCENARIO_SYSTEM,
       INVESTIGATE_FOLLOW_UP,
       JSON.stringify([
         INVESTIGATE_MIN_LINES,
@@ -612,6 +693,15 @@ export function reviewPromptVersion(): string {
         REVIEW_READ_LINES,
         REVIEW_TRIM,
         REVIEW_BUDGET_SHARES,
+        PART_EFFORT,
+        SCENARIO_MAX,
+        SCENARIO_TURNS,
+        SCENARIO_DIFF_MAX_CHARS,
+        SECOND_PASS_MIN_LINES,
+        SECOND_PASS_MAX_PARTS,
+        TICKET_PROMPT_CHARS,
+        NOT_LOGIC_FOLDER.source,
+        NOT_LOGIC_FILE.source,
       ]),
     ])
       hasher.update(`${text}\u0000`)
@@ -620,9 +710,172 @@ export function reviewPromptVersion(): string {
   return cachedPromptVersion
 }
 
+const NOT_LOGIC_FOLDER =
+  /(?:^|\/)(?:__tests__|__mocks__|__snapshots__|__fixtures__|tests?|fixtures?|testdata|e2e|locales?|i18n|translations|docs?|stories)\//i
+const NOT_LOGIC_FILE =
+  /\.(?:test|spec|stories|story|styles?|styled|css|d)\.[^/.]+$|_test\.go$|\.(?:css|scss|sass|less|styl|svg|png|jpe?g|gif|webp|md|mdx|txt|json|jsonc|ya?ml|toml|ini|lock|snap|html?|xml|csv|po|sum|mod)$/i
+
+/**
+ * Whether a file holds logic a second review pass is worth: code, not tests, stories, styles,
+ * fixtures, translations, config, docs or assets.
+ */
+export const isLogicFile = (path: string): boolean =>
+  !NOT_LOGIC_FOLDER.test(path) && !NOT_LOGIC_FILE.test(path)
+
+/**
+ * Indexes of the parts of a split review that get a second pass: those with at least
+ * `SECOND_PASS_MIN_LINES` changed lines of logic (`isLogicFile`), the most first, at most
+ * `SECOND_PASS_MAX_PARTS`, in part order.
+ */
+export function riskyParts(
+  parts: readonly (readonly FileScope[])[],
+  mode: ReviewPromptInput['mode'],
+): number[] {
+  return parts
+    .map((files, index) => ({
+      index,
+      lines: sizeOf(
+        files.filter((file) => isLogicFile(file.path)),
+        mode,
+      ),
+    }))
+    .filter((part) => part.lines >= SECOND_PASS_MIN_LINES)
+    .toSorted((a, b) => b.lines - a.lines)
+    .slice(0, SECOND_PASS_MAX_PARTS)
+    .map((part) => part.index)
+    .toSorted((a, b) => a - b)
+}
+
+const findingText = (candidate: Candidate) => `${candidate.title}\n${candidate.body}`
+
+/**
+ * The findings of a second pass over the same part joined to the first pass's: a finding near one
+ * of `first` (same file, lines within `LINE_TOLERANCE`) on the same line and category or with a
+ * similar text is folded into it, which takes the higher severity, stays a suspicion only when
+ * both were, and keeps its own evidence or else the other's; the rest are added.
+ */
+export function mergePassFindings(
+  first: readonly Candidate[],
+  second: readonly Candidate[],
+): Candidate[] {
+  const merged = [...first]
+  for (const candidate of second) {
+    const at = merged.findIndex(
+      (other, index) =>
+        index < first.length &&
+        other.path === candidate.path &&
+        Math.abs(other.line - candidate.line) <= LINE_TOLERANCE &&
+        ((other.line === candidate.line && other.category === candidate.category) ||
+          similarity(findingText(other), findingText(candidate)) >= SIMILAR),
+    )
+    const target = merged[at]
+    if (!target) {
+      merged.push(candidate)
+      continue
+    }
+    const { unverified: _either, ...rest } = target
+    merged[at] = {
+      ...rest,
+      ...(severityRank(candidate.severity) > severityRank(target.severity) && {
+        severity: candidate.severity,
+      }),
+      ...(target.unverified && candidate.unverified && { unverified: true }),
+      ...(!target.evidence?.length &&
+        candidate.evidence?.length && { evidence: candidate.evidence }),
+    }
+  }
+  return merged
+}
+
+const scenarioSchema = z.object({
+  scenarios: z.array(
+    z.object({
+      title: z.string(),
+      files: z.array(z.string()),
+      check: z.string(),
+    }),
+  ),
+})
+
+const SCENARIO_SYSTEM = [
+  'You plan the review of a merge request that is too large for one reviewer: separate passes review its parts, and a final pass looks across them. Name the scenarios that final pass must trace: concrete flows through several changed files where a bug is likely and no single file shows it.',
+  'Good scenarios follow state and time across modules: an action and its undo or retry, an action after another one removed or changed the data it relies on, two inputs at once (two touches, double clicks, concurrent requests), a failure halfway, a reload, reconnect or restart, a flag or cache set in one place and read in another, a contract between a changed module and its callers. Name the concrete actions, not categories.',
+  `List at most ${SCENARIO_MAX}, the likeliest bugs first. Each has a short \`title\`, the changed \`files\` it crosses (paths as listed) and \`check\`: one or two sentences on what must hold along the way. Leave out scenarios inside one file, styling, naming, tests and documentation. When the change has no such flows, answer with an empty list.`,
+  KEEP_ENGLISH,
+].join('\n')
+
+/** The scenario planner's prompt: the merge request, its ticket and as much of the diff as fits. */
+function scenarioPrompt(input: ReviewPromptInput): string {
+  let room = SCENARIO_DIFF_MAX_CHARS
+  const diffs: string[] = []
+  const unseen: string[] = []
+  for (const file of input.files) {
+    const text = renderNumberedDiff(file.path, file.hunks, file.lines)
+    if (!text) continue
+    if (text.length <= room) {
+      diffs.push(text)
+      room -= text.length
+    } else unseen.push(file.path)
+  }
+  const description = input.mergeRequest.description.trim().slice(0, 3000)
+  return [
+    `# ${input.mergeRequest.title}`,
+    description ? `Description:\n\n${description}` : '',
+    ticketBlock(input.tickets),
+    unseen.length
+      ? `Changed files whose diff is left out:\n${unseen.map((path) => `- ${path}`).join('\n')}`
+      : '',
+    `Diff:\n\n${diffs.join('\n\n')}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/**
+ * Cross-file scenarios for the cross-part pass of a split review, from one call on the `fast` tier
+ * without tools (task kind `review-plan`) over the merge request, its tickets and its diff: at
+ * most `SCENARIO_MAX`, with files outside the merge request left out. Empty when the call fails
+ * or finds none; an abort is rethrown.
+ */
+export async function planScenarios(options: AgentReviewOptions): Promise<ReviewScenario[]> {
+  const paths = new Set(options.input.files.map((file) => file.path))
+  try {
+    const result = await runTracked(
+      options.agent,
+      {
+        dir: options.dir,
+        system: SCENARIO_SYSTEM,
+        prompt: scenarioPrompt(options.input),
+        capabilities: [],
+        output: scenarioSchema,
+        taskKind: 'review-plan',
+        tier: 'fast',
+        maxTurns: 1,
+        ...(options.signal ? { signal: options.signal } : {}),
+      },
+      options.usage,
+      { label: 'scenario plan', log: options.log },
+    )
+    return (result.output?.scenarios ?? [])
+      .map((scenario) => ({
+        title: scenario.title.trim(),
+        check: scenario.check.trim(),
+        files: scenario.files
+          .map((path) => path.replace(/^\.?\//, ''))
+          .filter((path) => paths.has(path)),
+      }))
+      .filter((scenario) => scenario.title && scenario.check)
+      .slice(0, SCENARIO_MAX)
+  } catch (error) {
+    options.signal?.throwIfAborted()
+    options.log?.(`scenario plan failed: ${error instanceof Error ? error.message : String(error)}`)
+    return []
+  }
+}
+
 type ReviewPass = Pick<
   AgentReview,
-  'summary' | 'verdict' | 'walkthrough' | 'effort' | 'reviewMinutes' | 'duplicates'
+  'summary' | 'verdict' | 'walkthrough' | 'effort' | 'reviewMinutes' | 'duplicates' | 'scenarios'
 > & {
   candidates: Candidate[]
 }
@@ -686,10 +939,11 @@ async function reviewPass(
     verdict: 'looks-good' as const,
   }
   return {
-    candidates: review.comments.map(({ evidence, ...comment }) => ({
+    candidates: review.comments.map(({ evidence, unverified, ...comment }) => ({
       ...comment,
       source: 'agent',
       ...(evidence?.length ? { evidence: evidence.slice(0, MAX_EVIDENCE) } : {}),
+      ...(unverified && { unverified: true }),
     })),
     summary: review.summary,
     verdict: review.verdict,
@@ -697,6 +951,7 @@ async function reviewPass(
     ...(review.effort ? { effort: review.effort } : {}),
     ...(review.reviewMinutes ? { reviewMinutes: review.reviewMinutes } : {}),
     ...(review.duplicates?.length ? { duplicates: review.duplicates } : {}),
+    ...(review.scenarios?.length ? { scenarios: review.scenarios } : {}),
   } satisfies ReviewPass
 }
 
@@ -739,6 +994,7 @@ async function crossPartPass(
   parts: number,
   passes: readonly ReviewPass[],
   walkthrough: NonNullable<ReviewPass['walkthrough']>,
+  scenarios: readonly ReviewScenario[],
 ): Promise<ReviewPass | undefined> {
   const { part: _part, ...input } = options.input
   options.onProgress?.({ stage: 'cross', parts })
@@ -760,13 +1016,22 @@ async function crossPartPass(
             })),
           walkthrough: walkthrough.map((step) => `${step.change} (${step.files.join(', ')})`),
           summaries: passes.map((done) => done.summary),
+          ...(scenarios.length ? { scenarios } : {}),
         },
       },
-      options.maxTurns ?? CROSS_PART_TURNS,
+      options.maxTurns ?? CROSS_PART_TURNS + SCENARIO_TURNS * scenarios.length,
       options.deep ? 'deep' : 'main',
       REVIEW_BUDGET_SHARES.cross,
       'cross-part pass',
     )
+    if (scenarios.length) {
+      const answers = new Map((pass.scenarios ?? []).map((answer) => [answer.id, answer.result]))
+      const results = scenarios.map((_, index) => answers.get(index + 1) ?? 'not-checked')
+      const count = (result: string) => results.filter((value) => value === result).length
+      options.log?.(
+        `scenarios traced: ${count('problem')} with a problem, ${count('fine')} fine, ${count('not-checked')} not checked of ${scenarios.length}`,
+      )
+    }
     // Its effort and review time would repeat the parts'.
     return {
       candidates: pass.candidates,
@@ -805,52 +1070,83 @@ export function dropDuplicates(
 }
 
 /**
- * Asks the agent for a structured review; comments come back as unvalidated candidates. A diff
- * within `SPLIT_MAX_LINES` and `SPLIT_MAX_FILES` gets one pass on the `main` tier (`deep` with
- * `options.deep`). A larger one is split with `splitReviewFiles` and each part reviewed by its own
- * pass on the `main` tier (`SPLIT_CONCURRENCY` at once, each with `maxTurns`, by default
- * `reviewTurns` capped at `PART_MAX_TURNS`); then one cross-part pass (`CROSS_PART_TURNS`, on the
- * `deep` tier with `options.deep`) reviews the whole diff for problems spanning parts, told what
- * the parts found. Its findings are added, the part findings it names as duplicates dropped, and
- * its summary and walkthrough replace the parts' (joined when it fails or gives none), `effort` is the highest, `reviewMinutes` the sum of the parts' (absent when a part
+ * Asks the agent for a structured review; comments come back as unvalidated candidates, the
+ * agent's unconfirmed suspicions marked `unverified`. A diff within `SPLIT_MAX_LINES` and
+ * `SPLIT_MAX_FILES` gets one pass on the `main` tier (`deep` with `options.deep`). A larger one is
+ * split with `splitReviewFiles` and each part reviewed by its own pass on the `main` tier
+ * (`SPLIT_CONCURRENCY` at once, each with `maxTurns`, by default `reviewTurns` capped at
+ * `PART_MAX_TURNS`); the parts with the most logic (`riskyParts`) get a second, independent pass
+ * with their files in reverse order, whose findings are joined to the first's
+ * (`mergePassFindings`). Meanwhile `planScenarios` lists cross-file scenarios. Then one cross-part
+ * pass (`CROSS_PART_TURNS` plus `SCENARIO_TURNS` per scenario, on the `deep` tier with
+ * `options.deep`) reviews the whole diff for problems spanning parts, told what the parts found
+ * and given the scenarios as a checklist. Its findings are added, the part findings it names as
+ * duplicates dropped, and its summary and walkthrough replace the parts' (joined when it fails or
+ * gives none), `effort` is the highest, `reviewMinutes` the sum of the parts' (absent when a part
  * failed) and the verdict the worst. The cross-part pass failing is ignored unless a spend limit
- * stopped it. A failed part does not lose the others: its files are listed as not reviewed in the
- * summary and the verdict becomes `needs-changes`. The review fails when every part fails, a
- * spend limit stops a part, or the run is aborted. A pass over more than `INVESTIGATE_MIN_FILES`
- * files or `INVESTIGATE_MIN_LINES` changed lines that answers without reading any code is followed
- * up once (`followUpWithoutTools`). Every pass adds to `usage`; `onProgress` hears when the passes
- * start, as parts finish and when the cross-part pass starts.
+ * stopped it. A part fails only when all its passes fail, and does not lose the others: its files
+ * are listed as not reviewed in the summary and the verdict becomes `needs-changes`. The review
+ * fails when every part fails, a spend limit stops a pass, or the run is aborted. A pass over more
+ * than `INVESTIGATE_MIN_FILES` files or `INVESTIGATE_MIN_LINES` changed lines that answers without
+ * reading any code is followed up once (`followUpWithoutTools`). Every pass adds to `usage`;
+ * `onProgress` hears when the passes start, as part passes finish and when the cross-part pass
+ * starts.
  */
 export async function runAgentReview(options: AgentReviewOptions): Promise<ReviewPass> {
   const parts = splitReviewFiles(options.input.files, options.input.mode)
-  options.onProgress?.({ stage: 'review', parts: parts.length, done: 0 })
-  if (parts.length <= 1) return reviewPass(options, options.input)
+  if (parts.length <= 1) {
+    options.onProgress?.({ stage: 'review', parts: 1, done: 0 })
+    return reviewPass(options, options.input)
+  }
+  const jobs = [
+    ...parts.map((files, index) => ({ files, index, second: false })),
+    ...riskyParts(parts, options.input.mode).flatMap((index) => {
+      const files = parts[index]
+      return files ? [{ files, index, second: true }] : []
+    }),
+  ]
+  options.onProgress?.({ stage: 'review', parts: jobs.length, done: 0 })
+  // Planned while the parts run; it only feeds the cross-part pass. Never rejects.
+  const planned = planScenarios(options).catch((): ReviewScenario[] => [])
   let done = 0
-  const settled = await settledInParallel(
-    parts,
-    SPLIT_CONCURRENCY,
-    options.signal,
-    (files, index) =>
-      reviewPass(
-        options,
-        partInput(options.input, files, index + 1, parts.length),
-        options.maxTurns ?? Math.min(PART_MAX_TURNS, reviewTurns(files, options.input.mode)),
-        'main',
-        REVIEW_BUDGET_SHARES.parts / parts.length,
-        `review part ${index + 1}/${parts.length}`,
-        PART_EFFORT,
-      ).finally(() => {
-        done++
-        options.onProgress?.({ stage: 'review', parts: parts.length, done })
-      }),
+  const settled = await settledInParallel(jobs, SPLIT_CONCURRENCY, options.signal, (job) =>
+    reviewPass(
+      options,
+      partInput(options.input, job.files, job.index + 1, parts.length, job.second),
+      options.maxTurns ?? Math.min(PART_MAX_TURNS, reviewTurns(job.files, options.input.mode)),
+      'main',
+      REVIEW_BUDGET_SHARES.parts / jobs.length,
+      `review part ${job.index + 1}/${parts.length}${job.second ? ' (second pass)' : ''}`,
+      PART_EFFORT,
+    ).finally(() => {
+      done++
+      options.onProgress?.({ stage: 'review', parts: jobs.length, done })
+    }),
   )
   const errors = settled.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
-  const passes = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
   const stop = errors.find(isBudgetStop)
+  const byPart = parts.map((_, index) => {
+    const [first, ...others] = jobs.flatMap((job, at) => {
+      const result = settled[at]
+      return job.index === index && result?.status === 'fulfilled' ? [result.value] : []
+    })
+    if (!first) return undefined
+    const pass: ReviewPass = { ...first }
+    for (const other of others) {
+      const candidates = mergePassFindings(pass.candidates, other.candidates)
+      options.log?.(
+        `second pass over part ${index + 1}/${parts.length}: ${other.candidates.length} finding(s), ${candidates.length - pass.candidates.length} new`,
+      )
+      pass.candidates = candidates
+      if (other.verdict === 'needs-changes') pass.verdict = other.verdict
+    }
+    return pass
+  })
+  const passes = byPart.filter((pass) => pass !== undefined)
   if (stop || !passes.length) throw stop ?? errors[0]
-  const failed = parts.filter((_, index) => settled[index]?.status !== 'fulfilled')
+  const failed = parts.filter((_, index) => !byPart[index])
   const partWalkthrough = passes.flatMap((pass) => pass.walkthrough ?? [])
-  const cross = await crossPartPass(options, parts.length, passes, partWalkthrough)
+  const cross = await crossPartPass(options, parts.length, passes, partWalkthrough, await planned)
   const walkthrough = cross?.walkthrough?.length ? cross.walkthrough : partWalkthrough
   const effort = Math.max(0, ...passes.map((pass) => pass.effort ?? 0))
   // Each part estimated its own slice; the cross-part pass gives none.

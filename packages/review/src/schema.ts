@@ -233,6 +233,11 @@ export const agentReviewSchema = z.object({
       suggestion: z.object({ replacement: z.string() }).optional(),
       /** Code read to back the claim, above all code outside the diff it depends on. */
       evidence: z.array(evidenceSchema).optional(),
+      /**
+       * A suspicion whose premise the agent could not confirm with the tools; it is posted only
+       * when the verification confirms it.
+       */
+      unverified: z.boolean().optional(),
     }),
   ),
   summary: z.string(),
@@ -246,6 +251,10 @@ export const agentReviewSchema = z.object({
    * their numbers in the prompt; `id` is dropped in favor of `of`.
    */
   duplicates: z.array(z.object({ id: z.number().int(), of: z.number().int() })).optional(),
+  /** Cross-part pass only: what tracing each scenario of the prompt's checklist found. */
+  scenarios: z
+    .array(z.object({ id: z.number().int(), result: z.enum(['problem', 'fine', 'not-checked']) }))
+    .optional(),
 })
 
 export type AgentReview = z.infer<typeof agentReviewSchema>

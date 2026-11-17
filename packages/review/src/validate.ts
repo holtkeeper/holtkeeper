@@ -16,6 +16,8 @@ export interface Candidate {
   suggestion?: { replacement: string; original?: string }
   /** Code the agent cites for the finding. */
   evidence?: Evidence[]
+  /** A suspicion the agent could not confirm: kept only when the verification confirms it. */
+  unverified?: boolean
 }
 
 /** How far a comment may be moved to reach a line of the diff. */

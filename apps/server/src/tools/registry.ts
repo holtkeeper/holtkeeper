@@ -75,6 +75,7 @@ const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
 const TASK_TOOLSETS: Record<string, readonly string[]> = {
   review: [...BASE_TOOLSETS, 'git', 'catalog', 'stack', 'assets'],
   'review-verify': [...BASE_TOOLSETS, 'git'],
+  'review-plan': [],
   chat: ['knowledge', 'libraries', 'catalog', 'stack', 'rules', 'assets', 'releases', 'ops'],
   'chat-summary': [],
   learning: [],

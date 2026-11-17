@@ -24,7 +24,10 @@ const verdictSchema = z.object({
   ),
 })
 
-/** An agent finding the verification pass showed wrong, with its reason. */
+/**
+ * An agent finding the verification pass showed wrong, or an unverified suspicion it did not
+ * confirm, with its reason.
+ */
 export interface RefutedFinding {
   candidate: Candidate
   reason: string
@@ -32,7 +35,7 @@ export interface RefutedFinding {
 
 /** What `verifyFindings` kept and dropped. */
 export interface Verification {
-  /** The input findings that stay, in input order. */
+  /** The input findings that stay, in input order; confirmed suspicions lose `unverified`. */
   kept: Candidate[]
   refuted: RefutedFinding[]
   /** Groups whose verification failed; their findings are all kept. */
@@ -114,6 +117,7 @@ const SYSTEM = [
   '- `refuted`: the code shows the claim is wrong (the guard exists, the value is reset elsewhere, the tests exist, the fix would break a caller that relies on the current behavior, the case cannot happen). The reason names where (path:line).',
   '- `confirmed`: you checked the premise and it holds. A remark that is a matter of taste is confirmed unless its factual premise is wrong.',
   '- `uncertain`: you could not tell either way.',
+  'A finding marked as an unverified suspicion is one the reviewer flagged without confirming its premise: it is posted only when you answer `confirmed`, so trace that premise in the code yourself and confirm it only when it holds.',
   'Answer for every finding, keeping its id. The reason is one or two sentences.',
   KEEP_ENGLISH,
 ].join('\n')
@@ -122,6 +126,9 @@ const describe = (candidate: Candidate, id: number, code: string) =>
   [
     `## Finding ${id}: ${candidate.path}:${candidate.startLine ? `${candidate.startLine}-` : ''}${candidate.line} (${candidate.severity}, ${candidate.category})`,
     `Title: ${candidate.title}`,
+    candidate.unverified
+      ? 'Unverified suspicion: the reviewer could not confirm its premise; it stays only if you confirm it.'
+      : '',
     candidate.body,
     candidate.suggestion
       ? `Suggested replacement:\n\`\`\`\n${candidate.suggestion.replacement}\n\`\`\``
@@ -139,13 +146,31 @@ const describe = (candidate: Candidate, id: number, code: string) =>
 const isBudgetStop = (error: unknown): boolean =>
   error instanceof Error && (error.name === 'BudgetExceededError' || isBudgetStop(error.cause))
 
+/** Reason a suspicion the verification did not confirm is dropped with. */
+const notConfirmed = (reason: string) => `Not confirmed: ${reason}`
+
+/**
+ * `candidates` without the `unverified` suspicions, which only a verification can confirm; for a
+ * review that runs none. The dropped ones come back as refuted.
+ */
+export function dropUnverified(candidates: readonly Candidate[]): Verification {
+  return {
+    kept: candidates.filter((candidate) => !candidate.unverified),
+    refuted: candidates
+      .filter((candidate) => candidate.unverified)
+      .map((candidate) => ({ candidate, reason: notConfirmed('the review ran no verification.') })),
+    failed: 0,
+  }
+}
+
 /**
  * Lets a skeptical second pass try to disprove the agent's findings with the tools and drops the
- * ones it refutes; confirmed, uncertain and unanswered findings stay. Findings from checks (any
+ * ones it refutes; confirmed, uncertain and unanswered findings stay, except `unverified`
+ * suspicions, which stay only when confirmed (and then lose the mark). Findings from checks (any
  * `source` but `agent`) are never sent and always stay. Major and critical findings are checked on
  * the `deep` tier, the rest on `main`, each group in one task of kind
- * `review-verify`, both at once. A group whose task fails keeps all its findings and counts in
- * `failed`; an abort is rethrown, a spend limit is not (the review goes on unverified).
+ * `review-verify`, both at once. A group whose task fails keeps all its findings but the
+ * suspicions and counts in `failed`; an abort is rethrown, a spend limit is not (the review goes on unverified).
  */
 export async function verifyFindings(options: {
   agent: Agent
@@ -184,6 +209,9 @@ export async function verifyFindings(options: {
   )
 
   const refutedIds = new Map<number, string>()
+  const suspicions = new Set(
+    agentFindings.filter(({ candidate }) => candidate.unverified).map(({ id }) => id),
+  )
   let failed = 0
   await Promise.all(
     groups.map(async (group) => {
@@ -222,12 +250,26 @@ export async function verifyFindings(options: {
           },
         )
         const ids = new Set(group.findings.map(({ id }) => id))
-        for (const answer of result.output?.findings ?? [])
-          if (answer.verdict === 'refuted' && ids.has(answer.id))
-            refutedIds.set(answer.id, answer.reason.trim())
+        const answers = new Map(
+          (result.output?.findings ?? [])
+            .filter((answer) => ids.has(answer.id))
+            .map((answer) => [answer.id, answer]),
+        )
+        for (const [id, answer] of answers)
+          if (answer.verdict === 'refuted') refutedIds.set(id, answer.reason.trim())
+        for (const id of ids) {
+          const answer = answers.get(id)
+          if (!suspicions.has(id) || answer?.verdict === 'confirmed' || refutedIds.has(id)) continue
+          refutedIds.set(
+            id,
+            notConfirmed(answer?.reason.trim() || 'the verification gave no answer.'),
+          )
+        }
       } catch (error) {
         options.signal?.throwIfAborted()
         failed++
+        for (const { id } of group.findings)
+          if (suspicions.has(id)) refutedIds.set(id, notConfirmed('the verification failed.'))
         options.log?.(
           `verification ${isBudgetStop(error) ? 'stopped by a spend limit' : 'failed'}: ${error instanceof Error ? error.message : String(error)}`,
         )
@@ -235,7 +277,12 @@ export async function verifyFindings(options: {
     }),
   )
   return {
-    kept: indexed.filter(({ id }) => !refutedIds.has(id)).map(({ candidate }) => candidate),
+    kept: indexed
+      .filter(({ id }) => !refutedIds.has(id))
+      .map(({ candidate }) => {
+        const { unverified: _confirmed, ...finding } = candidate
+        return finding
+      }),
     refuted: indexed.flatMap(({ candidate, id }) => {
       const reason = refutedIds.get(id)
       return reason === undefined ? [] : [{ candidate, reason }]
