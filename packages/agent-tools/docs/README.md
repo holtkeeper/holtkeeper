@@ -60,7 +60,7 @@ The server uses the defaults; there is no setting for them.
 | `code.search`       | `pattern`, `language`, `paths?`                              | `file:line` + snippet (≤ `snippetLines`) per ast-grep match                                                 |
 | `code.grep`         | `query`, `regex?`, `ignoreCase?`, `context?` (0–3), `paths?` | `N matches in M files`, then `line: text` / `line- context` grouped by file                                 |
 | `code.outline`      | `path`                                                       | `start-end signature` per import block, function, class (+members), interface, type, enum, variable, export |
-| `code.symbol`       | `name`, `paths?`                                             | `file:start-end signature` per definition                                                                   |
+| `code.symbol`       | `name`, `paths?`, `body?`                                    | `file:start-end signature` per definition; with `body` the numbered source of each (first 80 lines)         |
 | `code.references`   | `name`, `paths?`                                             | `line: code` per usage, grouped by file; definitions, strings and comments excluded                         |
 | `code.read`         | `path`, `start?`, `end?`                                     | Numbered lines, at most `maxResultLines - 2`, then `continue with start=N`                                  |
 | `code.dependents`   | `path`, `depth?` (1–3)                                       | Files importing the file (transitively with `depth`)                                                        |

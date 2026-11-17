@@ -153,6 +153,19 @@ function dependencySources(input: ReviewPromptInput): string {
   return paths.some((path) => NPM_FILE.test(path)) ? `${npm} (Go code: ${goSources})` : goSources
 }
 
+/**
+ * Prompt block on reading code cheaply: every tool result stays in the conversation and is paid
+ * again on each later turn, so a pass should locate code before reading it.
+ */
+export const READING_CODE = [
+  'Reading code (every tool result stays in the conversation and is paid again on each later turn, so locate before you read):',
+  '- To see a function, method, class or type of TypeScript/JavaScript, call code.symbol with `body: true`: its definition in one call, instead of a search followed by reading the file.',
+  '- To find who calls, reads or writes a name, use code.references (identifiers only; comments and strings left out) rather than grep.',
+  '- Before reading a long file, take its code.outline and read only the ranges you need (read_file with offset and limit, or code.read).',
+  '- Do not read a file or a range again: what you read earlier is still above in the conversation.',
+  '- Use grep or code.grep for strings, config, styles and other languages.',
+].join('\n')
+
 /** The system prompt: role, rules for lines and suggestions, severities, language. */
 export function reviewSystemPrompt(input: ReviewPromptInput): string {
   const language = `${
@@ -197,6 +210,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       '- Investigate every suspicious pattern instead of explaining it away: a flag reset in one path but not another, state kept across calls, a case the old code handled and the new one does not, an early return, an ordering assumption. When in doubt, look closer and report.',
       '- Report every distinct problem you find, up to the comment limit; do not stop after the first one. A single comment on a large change is right only when the rest really is clean.',
     ].join('\n'),
+    READING_CODE,
     packageRules(input),
     `Severity:\n${severityGuide(tests)}`,
   ]

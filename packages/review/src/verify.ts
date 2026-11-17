@@ -5,6 +5,7 @@ import { z } from 'zod'
 
 import {
   KEEP_ENGLISH,
+  READING_CODE,
   REVIEW_BUDGET_SHARES,
   REVIEW_READ_LINES,
   REVIEW_TRIM,
@@ -119,6 +120,7 @@ const SYSTEM = [
   '- `uncertain`: you could not tell either way.',
   'A finding marked as an unverified suspicion is one the reviewer flagged without confirming its premise: it is posted only when you answer `confirmed`, so trace that premise in the code yourself and confirm it only when it holds.',
   'Answer for every finding, keeping its id. The reason is one or two sentences.',
+  READING_CODE,
   KEEP_ENGLISH,
 ].join('\n')
 

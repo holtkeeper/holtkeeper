@@ -122,14 +122,20 @@ function checkName(name: string): void {
   if (!IDENTIFIER.test(name)) throw new Error(`${name} is not an identifier`)
 }
 
-/** `code.symbol`: where a name is defined. */
+/** Lines of one definition `code.symbol` shows with `body`. */
+const SYMBOL_BODY_LINES = 80
+
+/** `code.symbol`: where a name is defined, with `body` also its source. */
 export function symbolTool(budget: Budget): AgentTool {
   return defineTool({
     name: 'code.symbol',
-    description:
-      'Find definitions of a name (function, class, interface, type, enum, variable, method, property) across TypeScript/JavaScript files. Returns "file:start-end signature" per definition.',
-    input: z.object({ name: z.string().min(1), paths }),
-    async run({ name, paths: globs }, { dir, signal }) {
+    description: `Find definitions of a name (function, class, interface, type, enum, variable, method, property) across TypeScript/JavaScript files. Returns "file:start-end signature" per definition; with body: true also the numbered source of each definition (the first ${SYMBOL_BODY_LINES} lines of a longer one), so one call shows a function instead of a search and a file read.`,
+    input: z.object({
+      name: z.string().min(1),
+      paths,
+      body: z.boolean().optional().describe('Also return the numbered source of each definition'),
+    }),
+    async run({ name, paths: globs, body }, { dir, signal }) {
       checkName(name)
       const rule = {
         rule: {
@@ -138,14 +144,28 @@ export function symbolTool(budget: Budget): AgentTool {
         },
       }
       const lines: string[] = []
+      const blocks: string[][] = []
       for await (const file of scriptFiles(dir, name, globs, signal)) {
+        const source = body ? splitLines(file.text) : []
         for (const node of file.root.findAll(rule)) {
           const { start, end } = linesOf(node)
           const head = headOf(statementOf(node), budget.maxLineLength)
-          lines.push(`${file.path}:${start === end ? start : `${start}-${end}`} ${head}`)
+          const location = `${file.path}:${start === end ? start : `${start}-${end}`}`
+          lines.push(`${location} ${head}`)
+          if (!body) continue
+          const from = linesOf(statementOf(node)).start
+          const to = Math.min(end, from + SYMBOL_BODY_LINES - 1)
+          blocks.push([
+            location,
+            ...source
+              .slice(from - 1, to)
+              .map((text, index) => `${from + index}| ${clip(text, budget.maxLineLength)}`),
+            ...(to < end ? [`… ${end - to} more lines (code.read ${to + 1}-${end})`] : []),
+          ])
         }
       }
       if (lines.length === 0) return `no definitions of ${name}`
+      if (body) return renderBlocks(blocks, budget, 'definitions')
       return limitLines(
         lines,
         Math.min(budget.maxResultLines, budget.maxHits + 1),
