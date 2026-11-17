@@ -22,6 +22,8 @@ import { createXai } from '@ai-sdk/xai'
 import type { CommandRunner } from '@holtkeeper/exec'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import {
+  APICallError,
+  NoOutputGeneratedError,
   type LanguageModel,
   type LanguageModelUsage,
   type ModelMessage,
@@ -211,6 +213,24 @@ export interface AiSdkAgentOptions {
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+const TRANSIENT =
+  /internal (?:service|server) error|api_error|overloaded|service unavailable|bad gateway|gateway time-?out|timed? ?out|ECONNRESET|socket|network|fetch failed|terminated|\b(?:500|502|503|504|524|529)\b/i
+
+/**
+ * Whether a provider error is worth one more try of the same request: a retryable API error, or
+ * an error in the response stream that names a server-side or network failure. Bad requests,
+ * auth and budget errors are not.
+ */
+export function isTransientFailure(error: unknown): boolean {
+  if (APICallError.isInstance(error)) return error.isRetryable
+  if (error instanceof BudgetExceededError) return false
+  const described =
+    error && typeof error === 'object' && !(error instanceof Error)
+      ? JSON.stringify(error)
+      : errorText(error)
+  return TRANSIENT.test(described)
+}
 
 const DEFAULT_CAPABILITIES: readonly AgentCapability[] = ['read', 'search']
 
@@ -611,6 +631,10 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         // alive; proxies in front of routers cut a silent request after about 100 seconds.
         const generate = async (input: ModelMessage[]) => {
           let failure: unknown
+          // A step whose response stream breaks off with a server error is asked again once;
+          // the retried error is not the outcome.
+          let streamRetried = false
+          let retriedError: unknown
           const stream = streamText({
             model,
             system,
@@ -626,9 +650,24 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             reasoning: task.effort ?? TIERS[tier].effort,
             abortSignal: signal,
             ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
-            ...(sink && { onStepEnd: (step: StepResult<ToolSet>) => transcribeStep(step, sink) }),
+            onStepEnd: (step: StepResult<ToolSet>) => {
+              streamRetried = false
+              if (sink) transcribeStep(step, sink)
+            },
+            streamRetries: 0,
             onError: ({ error }: { error: unknown }) => {
+              if (
+                failure === undefined &&
+                !streamRetried &&
+                !signal.aborted &&
+                isTransientFailure(error)
+              ) {
+                streamRetried = true
+                retriedError = error
+                return { retry: true as const }
+              }
               failure ??= error
+              return undefined
             },
           })
           await stream.consumeStream()
@@ -641,6 +680,10 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             stream.responseMessages,
             stream.totalUsage,
           ]).catch((error: unknown) => {
+            // A retry that fails before its stream starts ends the stream without reaching
+            // onError; the error worth reporting is then the one that was retried.
+            if (NoOutputGeneratedError.isInstance(error) && retriedError !== undefined)
+              throw retriedError
             throw budgetExceededFrom(error) ?? error
           })
           return { steps, finishReason, text: answer, responseMessages, totalUsage }

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { APICallError, type LanguageModelV4GenerateResult } from '@ai-sdk/provider'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
-import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
+import { simulateReadableStream, simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { z } from 'zod'
 
@@ -15,6 +15,7 @@ import {
   aiSdkLanguageModel,
   createAiSdkAgent,
   isSupportedProvider,
+  isTransientFailure,
   toolResultTrimmer,
 } from './ai-sdk.ts'
 import { BudgetExceededError, MaxTurnsError } from './errors.ts'
@@ -637,5 +638,100 @@ describe('toolResultTrimmer', () => {
       900,
       10,
     ])
+  })
+})
+
+const streamOf = (chunks: unknown[]) => ({
+  stream: simulateReadableStream({
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- test chunks of the stream protocol
+    chunks: [{ type: 'stream-start', warnings: [] }, ...chunks] as never[],
+  }),
+})
+const broken = (error: unknown) => [
+  { type: 'text-start', id: 't' },
+  { type: 'error', error },
+]
+
+const failed = (run: Promise<unknown>) =>
+  run.then(
+    () => 'resolved',
+    (error: unknown) => String(error),
+  )
+
+describe('stream failures', () => {
+  const finish = {
+    type: 'finish' as const,
+    finishReason: { unified: 'stop' as const, raw: 'stop' },
+    usage,
+  }
+  const text = (value: string) => [
+    { type: 'text-start', id: 't' },
+    { type: 'text-delta', id: 't', delta: value },
+    { type: 'text-end', id: 't' },
+    finish,
+  ]
+
+  test('a step whose stream breaks off with a server error is asked again once', async () => {
+    const model = new MockLanguageModelV4({
+      doStream: [
+        streamOf(broken({ type: 'api_error', message: 'Internal service error' })),
+        streamOf(text('done')),
+      ],
+    })
+    const agent = createAiSdkAgent({ languageModel: () => model, tierModels: on('m') })
+    const result = await agent.run({ dir: await checkout(), prompt: 'look' })
+    expect(result.text).toBe('done')
+    expect(model.doStreamCalls).toHaveLength(2)
+  })
+
+  test('a second break-off or another kind of error fails the run', async () => {
+    const outage = { type: 'api_error', message: 'Internal service error' }
+    const twice = new MockLanguageModelV4({
+      doStream: [streamOf(broken(outage)), streamOf(broken(outage)), streamOf(text('late'))],
+    })
+    const agent = createAiSdkAgent({ languageModel: () => twice, tierModels: on('m') })
+    expect(await failed(agent.run({ dir: await checkout(), prompt: 'look' }))).toContain(
+      'Internal service error',
+    )
+    const invalid = new MockLanguageModelV4({
+      doStream: [streamOf(broken(new Error('invalid request: bad schema'))), streamOf(text('x'))],
+    })
+    const other = createAiSdkAgent({ languageModel: () => invalid, tierModels: on('m') })
+    expect(await failed(other.run({ dir: await checkout(), prompt: 'look' }))).toContain(
+      'bad schema',
+    )
+    expect(invalid.doStreamCalls).toHaveLength(1)
+  })
+
+  test('a retry whose request fails fails the run with an error, not an empty answer', async () => {
+    let calls = 0
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        calls += 1
+        if (calls > 1) throw new Error('connection refused')
+        return streamOf(broken(new Error('Internal service error')))
+      },
+    })
+    const agent = createAiSdkAgent({ languageModel: () => model, tierModels: on('m') })
+    expect(await failed(agent.run({ dir: await checkout(), prompt: 'look' }))).toContain(
+      'connection refused',
+    )
+    expect(calls).toBe(2)
+  })
+
+  test('isTransientFailure tells outages from bad requests', () => {
+    expect(isTransientFailure({ type: 'overloaded_error', message: 'Overloaded' })).toBe(true)
+    expect(isTransientFailure(new Error('Internal service error'))).toBe(true)
+    expect(isTransientFailure(new Error('HTTP 524'))).toBe(true)
+    expect(isTransientFailure(new Error('invalid_request_error: prompt too long'))).toBe(false)
+    const call400 = new APICallError({
+      message: 'bad',
+      url: 'https://x',
+      requestBodyValues: {},
+      statusCode: 400,
+      isRetryable: false,
+    })
+    expect(isTransientFailure(call400)).toBe(false)
+    expect(isTransientFailure(new BudgetExceededError('cap 500'))).toBe(false)
   })
 })
