@@ -10,9 +10,11 @@ import { z } from 'zod'
 
 import {
   AI_SDK_PACKAGES,
+  CLEARED_TOOL_RESULT,
   aiSdkLanguageModel,
   createAiSdkAgent,
   isSupportedProvider,
+  toolResultTrimmer,
 } from './ai-sdk.ts'
 import { BudgetExceededError, MaxTurnsError } from './errors.ts'
 import { AI_SDK_PACKAGE_NAMES } from './provider.ts'
@@ -93,6 +95,8 @@ describe('createAiSdkAgent', () => {
       text: 'done',
       turns: 2,
       usage: { inputTokens: 1600, outputTokens: 200, cacheReadTokens: 400, cacheWriteTokens: 0 },
+      // The first request alone: its fresh and cached prompt tokens.
+      startTokens: 1000,
     })
     expect(result.costUsd).toBeCloseTo(1600 / 1e6 + 2000 / 1e6 + 40 / 1e6, 10)
     expect(lastToolOutput(model)).toContain('export const a = 1')
@@ -326,6 +330,56 @@ describe('createAiSdkAgent', () => {
     expect(model.doGenerateCalls.length).toBe(2)
   })
 
+  test('at the soft cost limit the agent is asked for its answer instead of failing', async () => {
+    const { model, languageModel } = scripted(
+      call('glob', { pattern: '*' }),
+      call('glob', { pattern: 'src/*' }),
+      say('done'),
+    )
+    const agent = createAiSdkAgent({
+      languageModel,
+      tierModels: on('m'),
+      pricing: { m: { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.1 } },
+    })
+    const result = await agent.run({ dir: await checkout(), prompt: 'p', answerAtCostUsd: 0.003 })
+    expect(result.text).toBe('done')
+    expect(result.turns).toBe(3)
+    expect(model.doGenerateCalls.length).toBe(3)
+    expect(JSON.stringify(model.doGenerateCalls.at(-1)?.prompt.at(-1))).toContain(
+      'the cost limit of this task is reached',
+    )
+  })
+
+  test('older long tool results are cleared and reads are shorter with readLines', async () => {
+    const root = await checkout()
+    await writeFile(
+      join(root, 'src', 'long.ts'),
+      Array.from({ length: 300 }, (_, i) => `export const v${i} = ${i}`).join('\n'),
+    )
+    const { model, languageModel } = scripted(
+      call('read_file', { path: 'src/long.ts' }),
+      call('read_file', { path: 'src/long.ts', offset: 50 }),
+      call('read_file', { path: 'src/long.ts', offset: 100 }),
+      say('done'),
+    )
+    const agent = createAiSdkAgent({ languageModel, tierModels: on('m') })
+    await agent.run({
+      dir: root,
+      prompt: 'p',
+      readLines: 40,
+      trimToolResults: { maxChars: 1500, keepLast: 1 },
+    })
+    const last = JSON.stringify(model.doGenerateCalls.at(-1)?.prompt)
+    expect(last.split(CLEARED_TOOL_RESULT).length - 1).toBe(2)
+    expect(last).toContain('export const v138 = 138')
+    expect(last).not.toContain('export const v139 = 139')
+    // One moving breakpoint plus the system prompt's, never a leftover on a cleared result.
+    const prompt = model.doGenerateCalls.at(-1)?.prompt ?? []
+    expect(prompt.filter((message) => marked(message))).toHaveLength(2)
+    // The call that was cleared is still in the conversation.
+    expect(last).toContain('"offset":50')
+  })
+
   test('an answer that crosses the cost cap is still returned', async () => {
     const { languageModel } = scripted(say('done'))
     const agent = createAiSdkAgent({
@@ -524,5 +578,45 @@ describe('aiSdkLanguageModel', () => {
     expect(
       isSupportedProvider({ package: 'venice-ai-sdk-provider', api: 'https://v.test' }),
     ).toBeTrue()
+  })
+})
+
+const toolResult = (id: string, chars: number) => ({
+  role: 'tool' as const,
+  content: [
+    {
+      type: 'tool-result' as const,
+      toolCallId: id,
+      toolName: 'read_file',
+      output: { type: 'text' as const, value: 'x'.repeat(chars) },
+    },
+  ],
+})
+const trimmedOutputs = (messages: ReturnType<ReturnType<typeof toolResultTrimmer>>) =>
+  messages.flatMap((m) =>
+    m.role === 'tool'
+      ? m.content.flatMap((p) =>
+          p.type === 'tool-result' && p.output.type === 'text'
+            ? [p.output.value === CLEARED_TOOL_RESULT ? 'cleared' : p.output.value.length]
+            : [],
+        )
+      : [],
+  )
+
+describe('toolResultTrimmer', () => {
+  test('clears all but the newest results once over the limit, keeps short ones and stays cleared', () => {
+    const trim = toolResultTrimmer({ maxChars: 2000, keepLast: 1 })
+    const first = [toolResult('a', 900), toolResult('b', 100), toolResult('c', 900)]
+    expect(trimmedOutputs(trim(first))).toEqual([900, 100, 900])
+    const second = [...first, toolResult('d', 900)]
+    expect(trimmedOutputs(trim(second))).toEqual(['cleared', 100, 'cleared', 900])
+    // Under the limit again, but what was cleared stays cleared.
+    expect(trimmedOutputs(trim([...second, toolResult('e', 10)]))).toEqual([
+      'cleared',
+      100,
+      'cleared',
+      900,
+      10,
+    ])
   })
 })

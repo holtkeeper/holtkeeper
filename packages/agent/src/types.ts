@@ -33,6 +33,22 @@ export interface AgentTask<Output = unknown> {
    */
   maxCostUsd?: number
   /**
+   * Soft spend limit in USD: once the run's cost reaches it, the agent stops calling tools and is
+   * asked for its final answer, as at the turn limit, instead of failing. Adapters that cannot
+   * price a run or continue it ignore it.
+   */
+  answerAtCostUsd?: number
+  /**
+   * Keeps earlier tool results from filling the context: once the results still in the
+   * conversation exceed `maxChars` characters, every one but the newest `keepLast` that is longer
+   * than a short note is replaced by a note saying it was cleared (the call and its arguments
+   * stay, so the agent can repeat it). A cleared result stays cleared. Adapters that do not keep
+   * the conversation themselves ignore it.
+   */
+  trimToolResults?: { maxChars: number; keepLast: number }
+  /** Lines `read_file` returns without an explicit `limit`, below the adapter's default. */
+  readLines?: number
+  /**
    * Expected cost of the run in USD, for the budget check before it starts. Default: the mean cost
    * of this week's runs of the task kind. Adapters ignore it.
    */
@@ -92,6 +108,11 @@ export interface AgentResult<Output = unknown> {
   usage?: AgentUsage
   /** The provider's id of the model the run used, when the adapter knows it. */
   model?: string
+  /**
+   * Prompt tokens of the run's first model request (system prompt, task prompt and tool schemas,
+   * cached or not): the fixed part every later request repeats. Set when the adapter knows it.
+   */
+  startTokens?: number
   /** The loop that ran the task. */
   runtime?: AgentRuntime
   /** Where the run's transcript was stored (an artifact id), when the caller stored one. */

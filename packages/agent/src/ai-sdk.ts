@@ -27,6 +27,7 @@ import {
   type ModelMessage,
   type StepResult,
   type SystemModelMessage,
+  type ToolResultPart,
   type ToolSet,
   generateText,
   jsonSchema,
@@ -260,6 +261,15 @@ function toolLoopTools(
   const all = [
     ...localTools(task.capabilities ?? DEFAULT_CAPABILITIES, {
       ...options,
+      ...(task.readLines !== undefined && {
+        limits: {
+          ...options.limits,
+          maxReadLines: Math.min(
+            task.readLines,
+            options.limits?.maxReadLines ?? DEFAULT_LOCAL_TOOL_LIMITS.maxReadLines,
+          ),
+        },
+      }),
       ...(task.commands && { commands: task.commands }),
       ...(task.env && { env: task.env }),
     }),
@@ -412,6 +422,12 @@ const addUsage = (sum: AgentUsage, usage: LanguageModelUsage): AgentUsage => {
   }
 }
 
+/** All prompt tokens of one request: fresh, read from and written to the cache. */
+const promptTokens = (usage: LanguageModelUsage): number => {
+  const total = addUsage(emptyUsage(), usage)
+  return total.inputTokens + total.cacheReadTokens + total.cacheWriteTokens
+}
+
 const CACHE_BREAKPOINT = { anthropic: { cacheControl: { type: 'ephemeral' } } }
 
 const withBreakpoint = <Message extends ModelMessage>(message: Message): Message => ({
@@ -427,15 +443,63 @@ const withBreakpoint = <Message extends ModelMessage>(message: Message): Message
  * previous step's prefix from the cache. Earlier marks are undone because overrides carry forward
  * and Anthropic allows only four breakpoints per request.
  */
-function movingBreakpoint() {
+function movingBreakpoint(transform?: (messages: ModelMessage[]) => ModelMessage[]) {
   const originals = new WeakMap<ModelMessage, ModelMessage>()
   return (messages: ModelMessage[]): ModelMessage[] => {
-    const plain = messages.map((message) => originals.get(message) ?? message)
+    // Unmarked first: a transform copies messages, and a copied mark would never be undone.
+    const unmarked = messages.map((message) => originals.get(message) ?? message)
+    const plain = transform ? transform(unmarked) : unmarked
     const last = plain.at(-1)
     if (!last) return plain
     const marked = withBreakpoint(last)
     originals.set(marked, last)
     return [...plain.slice(0, -1), marked]
+  }
+}
+
+/** What a cleared tool result says instead of its output. */
+export const CLEARED_TOOL_RESULT =
+  '[Output cleared to keep the context small. Call the tool again if you still need it.]'
+
+/** Tool results shorter than this stay even when older ones are cleared: clearing saves nothing. */
+const MIN_CLEARED_CHARS = 500
+
+const outputChars = (part: ToolResultPart) =>
+  part.output.type === 'text' || part.output.type === 'error-text'
+    ? part.output.value.length
+    : JSON.stringify(part.output).length
+
+/**
+ * `task.trimToolResults` for one run: clears the older long tool results once the ones still in
+ * the conversation exceed `maxChars`. Deterministic and monotonic, so every later request sends
+ * the same prefix and the prompt cache keeps working between clearings.
+ */
+export function toolResultTrimmer(settings: { maxChars: number; keepLast: number }) {
+  const cleared = new Set<string>()
+  return (messages: ModelMessage[]): ModelMessage[] => {
+    const results = messages.flatMap((message) =>
+      message.role === 'tool'
+        ? message.content.filter((part): part is ToolResultPart => part.type === 'tool-result')
+        : [],
+    )
+    const live = results.filter((part) => !cleared.has(part.toolCallId))
+    if (live.reduce((sum, part) => sum + outputChars(part), 0) > settings.maxChars)
+      for (const part of live.slice(0, Math.max(0, live.length - settings.keepLast)))
+        if (outputChars(part) >= MIN_CLEARED_CHARS) cleared.add(part.toolCallId)
+    if (!cleared.size) return messages
+    return messages.map((message) =>
+      message.role === 'tool' &&
+      message.content.some((part) => part.type === 'tool-result' && cleared.has(part.toolCallId))
+        ? {
+            ...message,
+            content: message.content.map((part) =>
+              part.type === 'tool-result' && cleared.has(part.toolCallId)
+                ? { ...part, output: { type: 'text' as const, value: CLEARED_TOOL_RESULT } }
+                : part,
+            ),
+          }
+        : message,
+    )
   }
 }
 
@@ -485,7 +549,9 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         role: 'system',
         content: toolLoopSystemPrompt(task, [...tools.keys()]),
       })
-      const mark = movingBreakpoint()
+      const mark = movingBreakpoint(
+        task.trimToolResults ? toolResultTrimmer(task.trimToolResults) : undefined,
+      )
       const set = toolSet(tools, ctx, maxChars)
       const sink = task.transcript
       const costOf = (sum: AgentUsage) =>
@@ -531,11 +597,16 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         let turns = 0
         let finishing = false
         const cap = task.maxCostUsd
-        const overCap = ({ steps }: { steps: { usage: LanguageModelUsage }[] }) => {
-          if (cap === undefined) return false
-          const cost = costOf(steps.reduce((sum, step) => addUsage(sum, step.usage), usage))
-          return cost !== undefined && cost >= cap
-        }
+        const soft = task.answerAtCostUsd
+        const reaches =
+          (limit: number | undefined) =>
+          ({ steps }: { steps: { usage: LanguageModelUsage }[] }) => {
+            if (limit === undefined) return false
+            const cost = costOf(steps.reduce((sum, step) => addUsage(sum, step.usage), usage))
+            return cost !== undefined && cost >= limit
+          }
+        const overCap = reaches(cap)
+        const overSoft = reaches(soft)
         const generate = (input: ModelMessage[]) =>
           generateText({
             model,
@@ -547,7 +618,7 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
               prepareStep: ({ messages: current }: { messages: ModelMessage[] }) => ({
                 messages: mark(current),
               }),
-              stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap, repeating],
+              stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap, overSoft, repeating],
             }),
             reasoning: TIERS[tier].effort,
             abortSignal: signal,
@@ -560,6 +631,10 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         const capped = () => {
           const cost = spent()
           return cap !== undefined && cost !== undefined && cost >= cap
+        }
+        const softCapped = () => {
+          const cost = spent()
+          return soft !== undefined && cost !== undefined && cost >= soft
         }
         const overBudget = () => {
           const cost = spent()
@@ -575,9 +650,12 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             { usage, turns, ...(cost !== undefined && { costUsd: cost }), cause },
           )
         }
+        let startTokens: number | undefined
         const step = async (input: ModelMessage[]) => {
           const result = await generate(input)
           signal.throwIfAborted()
+          const first = result.steps[0]?.usage
+          if (startTokens === undefined && first) startTokens = promptTokens(first)
           turns += result.steps.length
           usage = addUsage(usage, result.totalUsage)
           return result
@@ -591,6 +669,7 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             turns,
             usage,
             model: modelId,
+            ...(startTokens !== undefined && { startTokens }),
             runtime: 'ai-sdk',
             ...(cost !== undefined && { costUsd: cost }),
           }
@@ -621,7 +700,9 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             if (capped()) return useFallback(overBudget())
             const reason = repeating(result)
               ? 'you keep repeating the same calls'
-              : 'the turn limit is reached'
+              : softCapped()
+                ? 'the cost limit of this task is reached'
+                : 'the turn limit is reached'
             finishing = true
             messages = [
               ...messages,
@@ -648,7 +729,8 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             toolCalls === 0 &&
             tools.size > 0 &&
             turns < maxTurns &&
-            !capped()
+            !capped() &&
+            !softCapped()
           ) {
             followedUp = true
             fallback = parsed(result.text)
