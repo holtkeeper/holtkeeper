@@ -891,6 +891,7 @@
       "name": "@holtkeeper/review",
       "version": "0.0.0",
       "dependencies": {
+        "@ast-grep/napi": "^0.51.0",
         "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/agent-tools": "workspace:*",
         "@holtkeeper/analyzer": "workspace:*",

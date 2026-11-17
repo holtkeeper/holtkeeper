@@ -84,6 +84,7 @@ import { WRITE_POOL, createWriteTaskAnalyzer } from '@holtkeeper/write-task'
 import { autoAcceptFrom, semanticAccess, settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
 import { createApiCatalog } from './api-surface/catalog.ts'
+import { createUsageIndex } from './api-surface/usages.ts'
 import { createApp } from './app.ts'
 import { assetsPolicyFor } from './assets.ts'
 import { verifyAuditChainIfDue } from './audit-verify.ts'
@@ -126,6 +127,7 @@ import { releaseAnnouncerFor } from './release-announce.ts'
 import { agentReleaseAccess } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
 import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
+import { reviewApiChanges } from './review-api-changes.ts'
 import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { secretReportsEnabled } from './secret-reports.ts'
@@ -336,6 +338,10 @@ export async function startServer(
   const testsExpected = testsExpectedFor(store, () => config)
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
+    apiChangesFor: reviewApiChanges({
+      usages: createUsageIndex({ analyses: store.analyses }),
+      runner: localRunner,
+    }),
     checksFor: async (repo) =>
       reviewChecks({
         testids: testIdOverridesFor(

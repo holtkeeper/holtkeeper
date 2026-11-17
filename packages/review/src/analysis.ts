@@ -291,6 +291,10 @@ export const reviewAnalysis = defineAnalysis<ReviewData, ReviewMetrics>({
             },
           ]
         : []),
+      ...(data.refuted ?? []).map((r) => ({
+        item: `${r.path}:${r.line} ${r.title}`,
+        reason: `refuted by verification: ${r.reason}`,
+      })),
       ...data.checks
         .filter((c) => !c.ok)
         .map((c) => ({ item: `check ${c.name}`, reason: c.error ?? 'failed' })),

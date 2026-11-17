@@ -25,6 +25,15 @@ const suggestionSchema = z.object({
   original: z.string().optional(),
 })
 
+/** Code a finding rests on: a file of the checkout, a line in it and what it shows. */
+export const evidenceSchema = z.object({
+  path: z.string(),
+  line: z.number().int().positive().optional(),
+  note: z.string().optional(),
+})
+
+export type Evidence = z.infer<typeof evidenceSchema>
+
 const findingSchema = z.object({
   /** Stable for the same problem at the same place across runs. */
   id: z.string(),
@@ -38,6 +47,8 @@ const findingSchema = z.object({
   /** `agent` or the quality check that found it, e.g. `gitleaks`, `testids`. */
   source: z.string(),
   suggestion: suggestionSchema.optional(),
+  /** Code the agent read to back the finding; only paths that exist in the checkout are kept. */
+  evidence: z.array(evidenceSchema).optional(),
   /** Whether the forge accepted it; `false` with `error` when it rejected the comment. */
   posted: z.boolean(),
   error: z.string().optional(),
@@ -159,8 +170,25 @@ export const reviewDataSchema = z.object({
       overLimit: z.number().int(),
       duplicates: z.number().int(),
       invalid: z.number().int(),
+      /** Agent findings the verification pass showed wrong; absent in records before it. */
+      refuted: z.number().int().optional(),
     }),
   }),
+  /**
+   * Agent findings the verification pass dropped, with the reason it gave; absent when it dropped
+   * none or did not run.
+   */
+  refuted: z
+    .array(
+      z.object({
+        path: z.string(),
+        line: z.number().int(),
+        severity: z.enum(severities),
+        title: z.string(),
+        reason: z.string(),
+      }),
+    )
+    .optional(),
   approved: z.boolean(),
   checks: z.array(z.object({ name: z.string(), ok: z.boolean(), error: z.string().optional() })),
   usage: z
@@ -203,6 +231,8 @@ export const agentReviewSchema = z.object({
       title: z.string(),
       body: z.string(),
       suggestion: z.object({ replacement: z.string() }).optional(),
+      /** Code read to back the claim, above all code outside the diff it depends on. */
+      evidence: z.array(evidenceSchema).optional(),
     }),
   ),
   summary: z.string(),

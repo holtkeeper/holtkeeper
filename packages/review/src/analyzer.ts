@@ -14,6 +14,7 @@ import { z } from 'zod'
 
 import { reviewAnalysis } from './analysis.ts'
 import { type ReviewCheckName, reviewCheckNames } from './checks.ts'
+import { DEFAULT_DEEP_FROM_MINUTES, DEFAULT_REVIEW_DEPTH, reviewDepths } from './depth.ts'
 import { GO_GUIDELINES_TAG, type GoGuidelineSet } from './go-guidelines/schema.ts'
 import { bundledGoGuidelines } from './go-guidelines/snapshot.ts'
 import { type Guideline, readGuidelines } from './guidelines.ts'
@@ -66,7 +67,28 @@ export const reviewOptionsSchema = z.object({
   includeChecks: z.union([flag, list(z.enum(reviewCheckNames))]).default(['testids']),
   approve: z.enum(['never', 'when-clean']).default('never'),
   resolveSummary: z.enum(['when-clean', 'always', 'never']).default('when-clean'),
-  depth: z.enum(['standard', 'deep']).default('standard'),
+  depth: z
+    .enum(reviewDepths)
+    .default(DEFAULT_REVIEW_DEPTH)
+    .describe(
+      'Model of the review: standard (Sonnet), deep (Opus), or auto (default): Opus when the estimated review time of the reviewed changes reaches deepFromMinutes, Sonnet otherwise.',
+    ),
+  deepFromMinutes: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_DEEP_FROM_MINUTES)
+    .describe('Estimated review minutes from which depth auto reviews with Opus (default 60).'),
+  verify: flag
+    .default(true)
+    .describe(
+      'A second agent pass tries to disprove each finding by reading the code (Opus for major and critical, else the review model) and drops the ones the code contradicts.',
+    ),
+  impact: flag
+    .default(true)
+    .describe(
+      'Computed callers, readers and writers and tests of the changed declarations in the review prompt.',
+    ),
   ignore: list(z.string().min(1)).default([...DEFAULT_IGNORE]),
   maxDiffLines: z.coerce.number().int().positive().default(3000),
   language: z.string().min(1).optional(),
@@ -158,6 +180,15 @@ export interface ReviewAnalyzerDeps {
    * attaches the shared code tools to every agent itself.
    */
   toolsetsFor?: (context: { repo: RepoRef; dir: string }) => readonly Toolset[]
+  /**
+   * The public API changes a merge request makes, computed from its base commit and the head
+   * checkout without storing anything (see `ReviewRun.apiChanges`); without it the prompt has no
+   * such section.
+   */
+  apiChangesFor?: (
+    repo: RepoRef,
+    context: { dir: string; baseSha: string; files: readonly string[]; signal?: AbortSignal },
+  ) => Promise<string | undefined>
   mediaReviewer?: MediaReviewer
   /**
    * The modern Go guidelines, for an optional pinned tag (falling back to another set when that
@@ -437,6 +468,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             })
           : deps.checks
         const tests = deps.testsExpected ? await deps.testsExpected(repo) : true
+        const { apiChangesFor } = deps
         const data = await reviewMergeRequest({
           repo,
           forge,
@@ -450,6 +482,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             ? { guide: (docs, query, files) => guideFor(repo, { docs, query, files }) }
             : {}),
           ...(toolsets ? { toolsets } : {}),
+          ...(apiChangesFor ? { apiChanges: (request) => apiChangesFor(repo, request) } : {}),
           ...(!tests && { tests: false as const }),
           ...(botUsername ? { botUsername } : {}),
           ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),

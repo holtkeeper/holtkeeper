@@ -15,6 +15,7 @@ import {
   REVIEW_MAX_TURNS,
   reviewTurns,
   runAgentReview,
+  splitGroupOf,
   splitReviewFiles,
 } from './agent.ts'
 import { addedLines, newSideLines, parseHunks } from './diff.ts'
@@ -106,6 +107,17 @@ describe('reviewSystemPrompt', () => {
     expect(prompt).toContain('Comment only on lines marked `+`')
   })
 
+  test('asks to ground findings in code read and to look for tests before calling them missing', () => {
+    const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)]))
+    expect(prompt).toContain('Ground every finding in code you read')
+    expect(prompt).toContain('`evidence`')
+    expect(prompt).toContain('never post a finding that says you did not check')
+    expect(prompt).toContain('Before saying tests are missing')
+    expect(prompt).toContain('code.references')
+    const noTests = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)], { tests: false }))
+    expect(noTests).not.toContain('Before saying tests are missing')
+  })
+
   test('points dependency versions at the manifests of the languages in scope', () => {
     const npm = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3), fileOf('README.md', 1)]))
     expect(npm).toContain('from package.json, lockfiles.resolve or repo_packages')
@@ -157,6 +169,28 @@ describe('reviewSystemPrompt', () => {
 })
 
 describe('splitReviewFiles', () => {
+  test('test, mock and snapshot folders count as the folder above', () => {
+    expect(splitGroupOf('src/widget/__tests__/widget.test.ts')).toBe('src/widget')
+    expect(splitGroupOf('src/widget/__mocks__/api.ts')).toBe('src/widget')
+    expect(splitGroupOf('src/widget/__tests__/__snapshots__/a.snap')).toBe('src/widget')
+    expect(splitGroupOf('__tests__/root.test.ts')).toBe('')
+    expect(splitGroupOf('src/widget/widget.ts')).toBe('src/widget')
+    expect(splitGroupOf('README.md')).toBe('')
+  })
+
+  test('tests stay in the part of the code they test', () => {
+    const files = [
+      fileOf('src/gadget/gadget.ts', 300),
+      fileOf('src/widget/widget.ts', 250),
+      fileOf('src/widget/__tests__/widget.test.ts', 200),
+      fileOf('src/gadget/__tests__/gadget.test.ts', 200),
+    ]
+    const parts = splitReviewFiles(files, 'full').map((part) => part.map((file) => file.path))
+    expect(parts).toHaveLength(2)
+    expect(parts).toContainEqual(['src/gadget/gadget.ts', 'src/gadget/__tests__/gadget.test.ts'])
+    expect(parts).toContainEqual(['src/widget/widget.ts', 'src/widget/__tests__/widget.test.ts'])
+  })
+
   test('a diff within the limits stays one part', () => {
     const files = [fileOf('src/a.ts', 100), fileOf('src/b.ts', 100)]
     expect(splitReviewFiles(files, 'full')).toEqual([files])
@@ -216,6 +250,57 @@ describe('runAgentReview', () => {
     expect(tasks[0]?.followUpWithoutTools).toBeUndefined()
     expect(tasks[0]?.prompt).not.toContain('The diff is split')
     expect(result.candidates.map((c) => c.path)).toEqual(['src/widget.ts'])
+  })
+
+  test('each pass gets the impact of its own files before the diff, evidence is kept', async () => {
+    const { agent, tasks } = fakeAgent({
+      review: [
+        {
+          ...answer('src/widget.ts'),
+          comments: [
+            {
+              path: 'src/widget.ts',
+              line: 1,
+              severity: 'minor',
+              category: 'bug',
+              title: 't',
+              body: 'b',
+              evidence: [{ path: 'src/caller.ts', line: 4 }],
+            },
+          ],
+        },
+      ],
+    })
+    const asked: string[][] = []
+    const result = await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf([fileOf('src/widget.ts', 20)]),
+      usage: usage(),
+      impactFor: async (files) => {
+        asked.push(files.map((file) => file.path))
+        return '## Impact of the changed code (computed)\n\nWidget.pending is read in src/caller.ts'
+      },
+    })
+    expect(asked).toEqual([['src/widget.ts']])
+    const prompt = tasks[0]?.prompt ?? ''
+    expect(prompt.indexOf('Widget.pending is read')).toBeGreaterThan(-1)
+    expect(prompt.indexOf('Widget.pending is read')).toBeLessThan(prompt.indexOf('Diff:'))
+    expect(result.candidates[0]?.evidence).toEqual([{ path: 'src/caller.ts', line: 4 }])
+  })
+
+  test('a failing impact section is left out', async () => {
+    const { agent, tasks } = fakeAgent({ review: [answer('src/widget.ts')] })
+    await runAgentReview({
+      agent,
+      dir: '/checkout',
+      input: inputOf([fileOf('src/widget.ts', 20)]),
+      usage: usage(),
+      impactFor: async () => {
+        throw new Error('parse failed')
+      },
+    })
+    expect(tasks[0]?.prompt).not.toContain('Impact of the changed code')
   })
 
   test('a non-trivial diff asks for a follow-up when the answer reads no code', async () => {

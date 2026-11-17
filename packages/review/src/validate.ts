@@ -1,5 +1,5 @@
 import { nearestLine } from './diff.ts'
-import type { ReviewCategory, ReviewSeverity } from './schema.ts'
+import type { Evidence, ReviewCategory, ReviewSeverity } from './schema.ts'
 import type { FileScope } from './scope.ts'
 
 /** A finding before it is validated, deduplicated and posted. */
@@ -14,6 +14,8 @@ export interface Candidate {
   /** `agent` or the quality check that found it. */
   source: string
   suggestion?: { replacement: string; original?: string }
+  /** Code the agent cites for the finding. */
+  evidence?: Evidence[]
 }
 
 /** How far a comment may be moved to reach a line of the diff. */

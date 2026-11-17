@@ -30,6 +30,7 @@ import {
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
 import { dependencySection } from './dependencies.ts'
+import { DEFAULT_REVIEW_DEPTH, type ReviewDepth, resolveReviewDepth } from './depth.ts'
 import { commentBody, isSummaryNote, summaryNote, threadNote } from './format.ts'
 import { changedGoModules, goGuidelinesSection } from './go-guidelines/prompt.ts'
 import type { GoGuidelineSet } from './go-guidelines/schema.ts'
@@ -40,6 +41,7 @@ import {
   pathInstructionsInReviewMd,
   readGuidelines,
 } from './guidelines.ts'
+import { impactSection } from './impact.ts'
 import { type MediaReviewer, noopMediaReviewer, reviewMedia } from './media.ts'
 import { type ReviewMessages, englishReviewMessages } from './messages.ts'
 import {
@@ -67,6 +69,7 @@ import {
   sizedFiles,
 } from './size.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
+import { type Verification, existingEvidence, verifyFindings } from './verify.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
 export interface ReviewOptions {
@@ -82,8 +85,24 @@ export interface ReviewOptions {
    * `never` none.
    */
   resolveSummary?: 'when-clean' | 'always' | 'never'
-  /** `deep` reviews on the `deep` model tier (Opus) instead of `main` (Sonnet). Default `standard`. */
-  depth?: 'standard' | 'deep'
+  /**
+   * `standard` reviews on the `main` model tier (Sonnet), `deep` on the `deep` tier (Opus), `auto`
+   * (default) on `deep` when the estimated review time of the files under review reaches
+   * `deepFromMinutes` (see `resolveReviewDepth`).
+   */
+  depth?: ReviewDepth
+  /** Estimated minutes from which `auto` reviews on the `deep` tier; default `DEFAULT_DEEP_FROM_MINUTES`. */
+  deepFromMinutes?: number
+  /**
+   * A second agent pass tries to disprove the agent's findings before they are posted and drops
+   * the ones the code contradicts (`verifyFindings`); on unless `false`.
+   */
+  verify?: boolean
+  /**
+   * The computed impact section (callers, readers and writers, tests of the changed declarations)
+   * in the review prompt; on unless `false`.
+   */
+  impact?: boolean
   ignore: string[]
   maxDiffLines: number
   language?: string
@@ -165,6 +184,17 @@ export interface ReviewRun {
   /** Passed to the agent as `toolsets`, e.g. code navigation and knowledge tools. */
   toolsets?: readonly Toolset[]
   /**
+   * The public API changes of the merge request, computed from its base and head without storing
+   * anything (Markdown for the prompt, `undefined` when nothing public changed). A failure leaves
+   * the section out.
+   */
+  apiChanges?: (context: {
+    dir: string
+    baseSha: string
+    files: readonly string[]
+    signal?: AbortSignal
+  }) => Promise<string | undefined>
+  /**
    * `false` for a repository with no tests by design: the agent is not asked about tests and its
    * findings of category `tests` are dropped, except those completing a requested check finding
    * (test ids stay checked).
@@ -228,6 +258,8 @@ export interface AgentOutcome {
   guideScopes?: string[]
   /** `reviewPromptVersion()` of the prompts that were sent. */
   promptVersion?: string
+  /** Whether the review ran on the `deep` tier. */
+  deep?: boolean
 }
 
 /** The replaceable steps of a review. */
@@ -258,6 +290,17 @@ export interface ReviewSteps {
     plan: ReviewPlan,
     usage: ReviewUsage,
   ): Promise<Map<string, RecheckVerdict | 'gone'>>
+  /**
+   * Checks the agent's findings that are about to be posted and drops the ones the code
+   * contradicts; everything stays without an agent or with `options.verify: false`.
+   */
+  verify(
+    run: ReviewRun,
+    loaded: LoadedReview,
+    candidates: readonly Candidate[],
+    usage: ReviewUsage,
+    deep: boolean,
+  ): Promise<Verification>
   post(run: ReviewRun, loaded: LoadedReview, data: ReviewData): Promise<ReviewData>
 }
 
@@ -407,10 +450,34 @@ async function dependenciesFor(run: ReviewRun, loaded: LoadedReview): Promise<st
   }
 }
 
+async function apiChangesFor(
+  run: ReviewRun,
+  loaded: LoadedReview,
+  files: readonly FileScope[],
+): Promise<string> {
+  if (!run.apiChanges || !run.dir) return ''
+  try {
+    const section = await run.apiChanges({
+      dir: run.dir,
+      baseSha: loaded.diff.refs.baseSha,
+      files: files.map((file) => file.path),
+      ...(run.signal ? { signal: run.signal } : {}),
+    })
+    if (section) run.log?.(`public API changes computed: ${section.length} characters`)
+    return section ?? ''
+  } catch (error) {
+    run.signal?.throwIfAborted()
+    run.log?.(`public API changes skipped: ${errorText(error)}`)
+    return ''
+  }
+}
+
 const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usage, requests) => {
   if (!run.agent || !run.dir) return undefined
+  const dir = run.dir
   const goGuidelines = await goGuidelinesFor(run, planned.scope.files)
   const dependencies = await dependenciesFor(run, loaded)
+  const apiChanges = await apiChangesFor(run, loaded, planned.scope.files)
   const instructions = run.options.instructions?.trim()
   const guide = run.guide
     ? await run
@@ -435,6 +502,14 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       .filter((path) => matchesAny(path, [rule.glob]))
     return files.length ? [{ ...rule, files }] : []
   })
+  const depth = resolveReviewDepth(
+    run.options.depth ?? DEFAULT_REVIEW_DEPTH,
+    planned.scope.files,
+    run.options.deepFromMinutes,
+  )
+  run.log?.(
+    `review depth: ${depth.deep ? 'deep' : 'standard'}${depth.minutes === undefined ? '' : ` (auto, estimated ${depth.minutes} min)`}`,
+  )
   const outcome = await runAgentReview({
     agent: run.agent,
     dir: run.dir,
@@ -469,15 +544,54 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       ...(run.options.language ? { language: run.options.language } : {}),
       ...(goGuidelines ? { goGuidelines } : {}),
       ...(dependencies ? { dependencies } : {}),
+      ...(apiChanges ? { apiChanges } : {}),
     },
-    ...(run.options.depth === 'deep' ? { deep: true } : {}),
+    ...(depth.deep ? { deep: true } : {}),
+    ...(run.options.impact === false
+      ? {}
+      : {
+          impactFor: (files: readonly FileScope[]) =>
+            impactSection({ dir, files, ...(run.signal ? { signal: run.signal } : {}) }),
+        }),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
     ...(run.signal ? { signal: run.signal } : {}),
   })
-  const versioned = { ...outcome, promptVersion: reviewPromptVersion() }
+  const versioned = {
+    ...outcome,
+    promptVersion: reviewPromptVersion(),
+    ...(depth.deep ? { deep: true } : {}),
+  }
   return guide?.text && guide.scopes.length
     ? { ...versioned, guideScopes: guide.scopes }
     : versioned
+}
+
+const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage, deep) => {
+  const unchecked = { kept: [...candidates], refuted: [], failed: 0 }
+  if (!run.agent || !run.dir || run.options.verify === false) return unchecked
+  const dir = run.dir
+  const cited = await Promise.all(
+    candidates.map(async (candidate) => {
+      if (!candidate.evidence?.length) return candidate
+      const evidence = await existingEvidence(dir, candidate.evidence)
+      const { evidence: _all, ...rest } = candidate
+      return evidence.length ? { ...rest, evidence } : rest
+    }),
+  )
+  const result = await verifyFindings({
+    agent: run.agent,
+    dir,
+    candidates: cited,
+    usage,
+    mergeRequest: { title: loaded.mr.title, description: loaded.mr.description },
+    deep,
+    ...(run.toolsets ? { toolsets: run.toolsets } : {}),
+    ...(run.signal ? { signal: run.signal } : {}),
+    ...(run.log ? { log: run.log } : {}),
+  })
+  if (result.refuted.length)
+    run.log?.(`verification dropped ${result.refuted.length} of ${candidates.length} finding(s)`)
+  return result
 }
 
 const media: ReviewSteps['media'] = async (run, loaded, usage) => {
@@ -720,6 +834,7 @@ export const defaultSteps: ReviewSteps = {
   agentReview,
   media,
   recheck,
+  verify,
   post,
 }
 
@@ -760,7 +875,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
   const loaded = await steps.load(run)
   const planned = await steps.plan(run, loaded)
   const { scope } = planned
-  const stats = {
+  const stats: ReviewData['stats'] = {
     files: scope.files.length,
     changedLines: scope.changedLines,
     dropped: { ...emptyDropped },
@@ -878,8 +993,19 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
   )
   stats.dropped.belowSeverity = ranked.belowSeverity
   stats.dropped.overLimit = ranked.overLimit
+  const verification = await steps.verify(
+    run,
+    loaded,
+    ranked.kept,
+    usage,
+    agentOutcome?.deep === true,
+  )
+  if (verification.refuted.length) stats.dropped.refuted = verification.refuted.length
+  const refutedSerious = verification.refuted.some(
+    (r) => severityRank(r.candidate.severity) >= severityRank('major'),
+  )
 
-  const comments: ReviewFinding[] = ranked.kept.map((candidate) => ({
+  const comments: ReviewFinding[] = verification.kept.map((candidate) => ({
     id: findingId(candidate),
     path: candidate.path,
     line: candidate.line,
@@ -890,13 +1016,15 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
     body: candidate.body,
     source: candidate.source,
     ...(candidate.suggestion ? { suggestion: candidate.suggestion } : {}),
+    ...(candidate.evidence?.length ? { evidence: candidate.evidence } : {}),
     posted: true,
     href: `${loaded.mr.webUrl}/diffs`,
   }))
   const serious = comments.some((c) => severityRank(c.severity) >= severityRank('major'))
   const stillOpen = threads.some((t) => t.action !== 'resolved')
-  const verdict =
-    serious || agentOutcome?.verdict === 'needs-changes' ? 'needs-changes' : 'looks-good'
+  // The agent's verdict may rest on findings the verification refuted; the rest still decide.
+  const agentVerdict = refutedSerious ? undefined : agentOutcome?.verdict
+  const verdict = serious || agentVerdict === 'needs-changes' ? 'needs-changes' : 'looks-good'
 
   const data: ReviewData = {
     ...baseData(loaded, planned),
@@ -914,6 +1042,17 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
     ...(agentOutcome?.guideScopes?.length ? { guideScopes: agentOutcome.guideScopes } : {}),
     ...(agentOutcome?.promptVersion ? { promptVersion: agentOutcome.promptVersion } : {}),
     comments,
+    ...(verification.refuted.length
+      ? {
+          refuted: verification.refuted.map(({ candidate, reason }) => ({
+            path: candidate.path,
+            line: candidate.line,
+            severity: candidate.severity,
+            title: candidate.title,
+            reason,
+          })),
+        }
+      : {}),
     threads,
     skipped: scope.skipped,
     stats,

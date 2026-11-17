@@ -60,6 +60,16 @@ const review = (
   verdict,
 })
 
+const citedFinding = (line: number, severity: 'major' | 'minor', title: string) => ({
+  path: 'src/price.ts',
+  line,
+  severity,
+  category: 'bug' as const,
+  title,
+  body: 'b',
+  evidence: [{ path: 'src/missing.ts', line: 3, note: 'made up' }],
+})
+
 const finding = (line: number, source: string) => ({
   path: 'src/price.ts',
   line,
@@ -164,7 +174,10 @@ describe('reviewMergeRequest', () => {
       invalid: 2,
     })
     expect(data.skipped).toEqual([{ path: 'bun.lock', reason: 'ignored' }])
-    expect(data.usage).toMatchObject({ turns: 2, inputTokens: 100, model: 'fake-main' })
+    // The review and the verification of its one major finding, which answered nothing.
+    expect(tasks[1]).toMatchObject({ taskKind: 'review-verify', tier: 'deep' })
+    expect(tasks[1]?.prompt).toContain('Rounding missing')
+    expect(data.usage).toMatchObject({ turns: 4, inputTokens: 200, model: 'fake-main' })
     expect(data.guideScopes).toEqual(['all', 'team:web'])
     expect(data.durationMs).toBeGreaterThanOrEqual(0)
 
@@ -358,6 +371,125 @@ describe('reviewMergeRequest', () => {
       }),
     )
     expect(tasks[0]?.tier).toBe('deep')
+  })
+
+  test('drops findings the verification refutes and lets the rest decide the verdict', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        review(
+          [
+            citedFinding(2, 'major', 'Flag never reset'),
+            citedFinding(3, 'minor', 'Tax not documented'),
+          ],
+          'needs-changes',
+        ),
+      ],
+      'review-verify': [
+        { findings: [{ id: 0, verdict: 'refuted', reason: 'Reset in src/price.ts:9.' }] },
+        { findings: [{ id: 1, verdict: 'confirmed', reason: 'Holds.' }] },
+      ],
+    })
+    const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
+    expect(tasks.filter((t) => t.taskKind === 'review-verify').map((t) => t.tier)).toEqual([
+      'deep',
+      'main',
+    ])
+    expect(data.comments.map((c) => c.title)).toEqual(['Tax not documented'])
+    // The cited file does not exist in the checkout, so the citation is dropped.
+    expect(data.comments[0]?.evidence).toBeUndefined()
+    expect(data.refuted).toEqual([
+      {
+        path: 'src/price.ts',
+        line: 2,
+        severity: 'major',
+        title: 'Flag never reset',
+        reason: 'Reset in src/price.ts:9.',
+      },
+    ])
+    expect(data.stats.dropped.refuted).toBe(1)
+    expect(data.verdict).toBe('looks-good')
+  })
+
+  test('verify: false posts the findings unchecked', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        review([
+          {
+            path: 'src/price.ts',
+            line: 2,
+            severity: 'major',
+            category: 'bug',
+            title: 't',
+            body: 'b',
+          },
+        ]),
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({ forge: requireReviewForge(forge), agent, options: { ...options, verify: false } }),
+    )
+    expect(tasks.map((t) => t.taskKind)).toEqual(['review'])
+    expect(data.comments).toHaveLength(1)
+  })
+
+  test('puts the computed public API changes before the diff', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+    const asked: { baseSha: string; files: readonly string[] }[] = []
+    await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        apiChanges: async ({ baseSha, files: changed }) => {
+          asked.push({ baseSha, files: changed })
+          return '## Public API changes (computed: base → head)\n\n- removed `makeWidget`'
+        },
+      }),
+    )
+    expect(asked).toEqual([{ baseSha: 'b'.repeat(40), files: ['src/price.ts'] }])
+    const prompt = tasks[0]?.prompt ?? ''
+    expect(prompt.indexOf('removed `makeWidget`')).toBeGreaterThan(-1)
+    expect(prompt.indexOf('removed `makeWidget`')).toBeLessThan(prompt.indexOf('Diff:'))
+  })
+
+  test('a failing API changes hook leaves the section out', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        apiChanges: async () => {
+          throw new Error('worktree failed')
+        },
+      }),
+    )
+    expect(tasks[0]?.prompt).not.toContain('Public API changes')
+    expect(data.verdict).toBe('looks-good')
+  })
+
+  test('auto depth reviews a small change on main and a large one on deep', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const small = fakeAgent({ review: [review([], 'looks-good')] })
+    await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent: small.agent,
+        options: { ...options, depth: 'auto' },
+      }),
+    )
+    expect(small.tasks[0]?.tier).toBe('main')
+    const large = fakeAgent({ review: [review([], 'looks-good')] })
+    await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent: large.agent,
+        options: { ...options, depth: 'auto', deepFromMinutes: 1 },
+      }),
+    )
+    expect(large.tasks[0]?.tier).toBe('deep')
   })
 
   test('marks comments the forge rejected', async () => {

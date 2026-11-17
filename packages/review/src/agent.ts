@@ -72,6 +72,16 @@ export interface ReviewPromptInput {
   goGuidelines?: string
   /** The computed dependency section (`dependencySection`), placed before the diff. */
   dependencies?: string
+  /**
+   * The computed public API changes between the merge request's base and head (packages other
+   * code imports), placed before the diff.
+   */
+  apiChanges?: string
+  /**
+   * The computed impact of the changed declarations of this pass (callers, readers and writers,
+   * tests), placed before the diff.
+   */
+  impact?: string
 }
 
 const severityGuide = (tests: boolean) =>
@@ -120,6 +130,8 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       `- At most ${input.maxComments} comments; when there are more, keep the most severe.`,
       `- Categories: ${listed.join(', ')}.${requestedTests ? ' Use `tests` only for the lines the checks flagged with it.' : ''}`,
       '- Do not repeat open threads listed in the prompt.',
+      '- Ground every finding in code you read. A claim about code outside the diff (a caller, a guard that does or does not exist, another method relying on a value, a test that is missing) must come from reading that code with the tools: list what you read in `evidence` (path, line, what it shows). If you could not check a premise, check it now or leave the finding out; never post a finding that says you did not check something.',
+      '- Before calling a flag, field or return value wrong, find every place that reads and writes it (code.references) and make sure your fix would not break one of them.',
       '- Lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, go.sum) are usually left out of the diff and too large for the search tools, so a search that finds nothing in them proves nothing. Never claim that a lockfile lacks a package, has a wrong entry or must be updated unless the computed dependency section or lockfiles.resolve says so; when the section says a lockfile is consistent, do not ask to update it.',
       '- verdict is `needs-changes` when any major or critical problem remains, `looks-good` otherwise.',
       '- `walkthrough`: the changes in scope grouped by logical change, most important first; each entry lists its files and says in one or two sentences what changed and why. Group related files instead of listing each one.',
@@ -129,6 +141,11 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
     ].join('\n'),
     [
       'How to review:',
+      ...(tests
+        ? [
+            '- Before saying tests are missing, look for them: the files in scope of the merge request (other parts of a split review included) and the test files of the checkout (`__tests__/`, `*.test.*`, `*.spec.*`, the computed impact section). Name the test file you looked at in `evidence`.',
+          ]
+        : []),
       `- Go through every changed file in the diff. Before judging a change, open the code around it, its callers and the code paths it touches with the tools; the larger the diff, the more you read.`,
       '- Check error paths, retries and idempotency, edge cases (empty, missing, boundary values), concurrency and ordering, and the contract with callers (types, return values, side effects).',
       '- Report every distinct problem you find, up to the comment limit; do not stop after the first one. A single comment on a large change is right only when the rest really is clean.',
@@ -209,6 +226,8 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     input.crossPart ? crossPartBlock(input.crossPart) : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
     input.dependencies?.trim() ?? '',
+    input.apiChanges?.trim() ?? '',
+    input.impact?.trim() ?? '',
     input.goGuidelines?.trim() ?? '',
     `Diff:\n\n${diff}`,
   ]
@@ -223,6 +242,11 @@ export interface AgentReviewOptions {
   usage: ReviewUsage
   /** Run on the `deep` model tier instead of `main`. */
   deep?: boolean
+  /**
+   * The computed impact section of the files one pass reviews (`impact` of its prompt input);
+   * a failure or an empty answer leaves the section out.
+   */
+  impactFor?: (files: readonly FileScope[]) => Promise<string>
   toolsets?: readonly Toolset[]
   /** Turn limit of each agent pass. Default: `reviewTurns` of the pass's files. */
   maxTurns?: number
@@ -244,6 +268,9 @@ function crossPartBlock(cross: NonNullable<ReviewPromptInput['crossPart']>): str
     .filter(Boolean)
     .join('\n\n')
 }
+
+/** Evidence entries kept per finding. */
+const MAX_EVIDENCE = 8
 
 /** Turn limit of a review pass by default: 40, one more per file and per 15 changed lines. */
 export const REVIEW_MIN_TURNS = 40
@@ -279,11 +306,22 @@ const weightOf = (file: FileScope, mode: ReviewPromptInput['mode']) =>
 const sizeOf = (files: readonly FileScope[], mode: ReviewPromptInput['mode']) =>
   files.reduce((sum, file) => sum + weightOf(file, mode), 0)
 
+// Test, mock and snapshot folders belong to the code next to them, so a part sees its tests.
+const SIDE_FOLDER = /\/(?:__tests__|__mocks__|__snapshots__|__fixtures__)(?=\/|$)/g
+
+/** The folder a file is kept with when a diff is split: its own, minus test and mock folders. */
+export function splitGroupOf(path: string): string {
+  const directory = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+  return `/${directory}`.replace(SIDE_FOLDER, '').slice(1)
+}
+
 /**
  * Splits the files in scope into parts of at most `SPLIT_MAX_FILES` files that keep files of one
  * directory together and balance changed lines; one part when the diff is within
  * `SPLIT_MAX_LINES` and `SPLIT_MAX_FILES`. A directory that alone exceeds a limit is cut in path
- * order, and a single file larger than `SPLIT_MAX_LINES` forms its own part. Files keep their
+ * order, and a single file larger than `SPLIT_MAX_LINES` forms its own part. Files under
+ * `__tests__`, `__mocks__`, `__snapshots__` and `__fixtures__` count as files of the folder above,
+ * so tests stay in the part of the code they test. Files keep their
  * diff order inside a part.
  */
 export function splitReviewFiles(
@@ -294,7 +332,7 @@ export function splitReviewFiles(
   if (total <= SPLIT_MAX_LINES && files.length <= SPLIT_MAX_FILES) return [[...files]]
   const directories = new Map<string, FileScope[]>()
   for (const file of files) {
-    const directory = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
+    const directory = splitGroupOf(file.path)
     directories.set(directory, [...(directories.get(directory) ?? []), file])
   }
   const pieces: FileScope[][] = []
@@ -422,6 +460,8 @@ export function reviewPromptVersion(): string {
       },
       goGuidelines: 'Go guidelines',
       dependencies: 'Dependencies',
+      apiChanges: 'API changes',
+      impact: 'Impact',
     })
     const hasher = new Bun.CryptoHasher('sha256')
     for (const text of [
@@ -467,6 +507,13 @@ async function reviewPass(
   input: ReviewPromptInput,
   maxTurns = options.maxTurns ?? reviewTurns(input.files, input.mode),
 ) {
+  const impact = options.impactFor
+    ? await options.impactFor(input.files).catch(() => {
+        options.signal?.throwIfAborted()
+        return ''
+      })
+    : ''
+  if (impact) input = { ...input, impact }
   const context = reviewContext(input)
   const investigate =
     input.files.length > INVESTIGATE_MIN_FILES ||
@@ -495,7 +542,11 @@ async function reviewPass(
     verdict: 'looks-good' as const,
   }
   return {
-    candidates: review.comments.map((comment) => ({ ...comment, source: 'agent' })),
+    candidates: review.comments.map(({ evidence, ...comment }) => ({
+      ...comment,
+      source: 'agent',
+      ...(evidence?.length ? { evidence: evidence.slice(0, MAX_EVIDENCE) } : {}),
+    })),
     summary: review.summary,
     verdict: review.verdict,
     ...(review.walkthrough?.length ? { walkthrough: review.walkthrough } : {}),
