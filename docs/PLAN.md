@@ -226,6 +226,10 @@ The MCP endpoint serves developers at work in one repository: read tools plus tw
 - **Task merge requests.** `task_status` left MCP; `review_status` on the task's branch covers the review but not the CI status or the task group's spend. Decide whether `review_status` should show the pipeline status of the head.
 - **Agents in review threads.** Let a developer's agent answer Holtkeeper's review threads (explain why a finding is wrong, or say it is fixed) and get Holtkeeper's answer. Open: whether the agent posts through the developer's own forge access (honest authorship, Holtkeeper already answers replies) or through a Holtkeeper write tool (posts as the bot, which Holtkeeper ignores today); how agent-written replies are marked so 👍/👎 counts, review quality and review learnings keep measuring people; and how an agent waits for a review (`wait` on `review_status`, an MCP prompt) since MCP cannot wake it.
 
+### Faster split reviews
+
+In a split review the cross-part pass starts after every part is done and adds about 2.5–3 minutes (Chip Drag bench: parts ~5 min, cross-part ~2.7 min). It is also where the most important findings come from, so it should not get worse. To check: start it together with the parts (it needs only the scenario plan to begin), and move what it takes from the parts — the list of findings not to repeat, `duplicates`, the merged summary and walkthrough — into a short assembly step after them (`main` tier, no tools, one answer). A variant keeps the context: the cross-part pass runs in parallel and, near its end, asks for the parts' findings through a tool, so it still marks duplicates knowing the code. Ship it behind a setting with the sequential mode kept, run it twice on the bench and compare the reference majors found, duplicate comments and time with the sequential runs; keep the sequential mode if majors go missing or duplicates appear.
+
 ## Decisions
 
 - Web UI kit: HeroUI 3. App code uses it through our own thin components where a swap would otherwise touch many screens (tables, forms, layout).
