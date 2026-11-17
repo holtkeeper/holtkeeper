@@ -13,9 +13,10 @@ export interface MergeRequestTarget {
 
 /**
  * Told whenever the review state of a merge request may have changed: a review was queued or
- * canceled, or a review job ended (stored, failed or blocked). It reads the current state
- * itself, so a call too many is harmless. Implementations never throw; the review pipeline
- * knows nothing about them.
+ * canceled, a review job ended (stored, failed or blocked), or the forge reported activity on
+ * the merge request (an update, such as its last thread being resolved, or a note). It reads the
+ * current state itself, so a call too many is harmless. Implementations never throw; the review
+ * pipeline knows nothing about them.
  */
 export interface MergeRequestStatusSink {
   reviewChanged(target: MergeRequestTarget): Promise<void>
@@ -35,6 +36,19 @@ export function reviewTargetOf(
   return { repo: job.repo, mergeRequest }
 }
 
+/** Tells `deps.mergeRequestStatus` about `target`, in the background; errors are logged. */
+export function noteMergeRequestChange(
+  deps: Pick<ServerDeps, 'mergeRequestStatus' | 'onBackground'>,
+  target: MergeRequestTarget,
+): void {
+  const sink = deps.mergeRequestStatus
+  if (!sink) return
+  const work = sink.reviewChanged(target).catch((error: unknown) => {
+    console.error(`merge request status: ${error instanceof Error ? error.message : String(error)}`)
+  })
+  deps.onBackground?.(work)
+}
+
 /**
  * Tells `deps.mergeRequestStatus` about a review job that was queued, canceled or ended, in the
  * background; jobs that review no merge request are ignored.
@@ -43,11 +57,6 @@ export function noteReviewJob(
   deps: Pick<ServerDeps, 'config' | 'mergeRequestStatus' | 'onBackground'>,
   job: Pick<Job, 'analyzer' | 'repo' | 'options'>,
 ): void {
-  const sink = deps.mergeRequestStatus
-  const target = sink && reviewTargetOf(deps.config, job)
-  if (!sink || !target) return
-  const work = sink.reviewChanged(target).catch((error: unknown) => {
-    console.error(`merge request status: ${error instanceof Error ? error.message : String(error)}`)
-  })
-  deps.onBackground?.(work)
+  const target = deps.mergeRequestStatus && reviewTargetOf(deps.config, job)
+  if (target) noteMergeRequestChange(deps, target)
 }

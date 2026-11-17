@@ -281,12 +281,12 @@ Badge size prop is ready: https://gitlab.acme.dev/acme/widget-kit/-/merge_reques
 | Status    | Emoji                         | Fallback                | When                                                       |
 | --------- | ----------------------------- | ----------------------- | ---------------------------------------------------------- |
 | Reviewing | <Emoji name="hk-reviewing" /> | `:eyes:`                | A review is queued or running.                             |
-| Clean     | <Emoji name="hk-clean" />     | `:large_green_circle:`  | The latest review looks good and posted no findings.       |
-| Minor     | <Emoji name="hk-minor" />     | `:large_orange_circle:` | Looks good, with minor or info findings.                   |
-| Changes   | <Emoji name="hk-changes" />   | `:red_circle:`          | Needs changes, or any major or critical finding.           |
+| Clean     | <Emoji name="hk-clean" />     | `:large_green_circle:`  | Reviewed, and no Holtkeeper finding thread is left open.   |
+| Minor     | <Emoji name="hk-minor" />     | `:large_orange_circle:` | Open finding threads, all of them minor or info.           |
+| Changes   | <Emoji name="hk-changes" />   | `:red_circle:`          | An open major or critical finding thread.                  |
 | Skipped   | <Emoji name="hk-skipped" />   | `:white_circle:`        | The review was skipped (diff too large, nothing in scope). |
 
-The status follows the newest review run, so an incremental review that finds nothing new shows clean even while earlier findings are still open. A new push swaps the emoji back to reviewing until the next verdict.
+After a review, the open Holtkeeper finding threads decide the status, so resolving the threads turns it clean without a new review, and findings an earlier review left open still count after an incremental review that finds nothing new. A new push swaps the emoji back to reviewing until the next verdict.
 
 When one message links several merge requests, the emoji shows the worst status among them, and the app posts one reply in the message's thread with a line per merge request (`path!number`). It edits that reply whenever a status changes and never posts a second one.
 

@@ -160,7 +160,7 @@ function openThreads(
     threads.push({
       ...(path !== undefined && { path }),
       ...(line !== undefined && { line }),
-      ...(finding && { severity: finding.severity }),
+      severity: finding?.severity ?? marked.severity,
       category: marked.category,
       title,
       replies: rest.filter(

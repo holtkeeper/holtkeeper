@@ -93,14 +93,14 @@ Two more for the release: [!1830](#what-it-looks-like) and [!1831](#what-it-look
 | Emoji                         | Status    | When                                                       | Default          | Fallback                |
 | ----------------------------- | --------- | ---------------------------------------------------------- | ---------------- | ----------------------- |
 | <Emoji name="hk-reviewing" /> | reviewing | A review of the merge request is queued or running         | `:hk-reviewing:` | `:eyes:`                |
-| <Emoji name="hk-clean" />     | clean     | The latest review says looks good and posted no findings   | `:hk-clean:`     | `:large_green_circle:`  |
-| <Emoji name="hk-minor" />     | minor     | Looks good, with minor or info findings posted             | `:hk-minor:`     | `:large_orange_circle:` |
-| <Emoji name="hk-changes" />   | changes   | Needs changes, or any major or critical finding            | `:hk-changes:`   | `:red_circle:`          |
+| <Emoji name="hk-clean" />     | clean     | Reviewed, and no Holtkeeper finding thread is left open    | `:hk-clean:`     | `:large_green_circle:`  |
+| <Emoji name="hk-minor" />     | minor     | Open finding threads, all of them minor or info            | `:hk-minor:`     | `:large_orange_circle:` |
+| <Emoji name="hk-changes" />   | changes   | An open major or critical finding thread                   | `:hk-changes:`   | `:red_circle:`          |
 | <Emoji name="hk-skipped" />   | skipped   | Not reviewed: the diff is too large or nothing is in scope | `:hk-skipped:`   | `:white_circle:`        |
 
 The defaults are Holtkeeper's own emoji. A workspace that has not uploaded them gets the standard fallback instead, so the app works before anyone uploads anything.
 
-A message that links several merge requests shows the worst of them: changes, then reviewing, minor, skipped, clean. The status follows the newest review, so an incremental review that finds nothing new shows clean even while earlier findings are still open.
+A message that links several merge requests shows the worst of them: changes, then reviewing, minor, skipped, clean. After a review, the open Holtkeeper finding threads on the merge request decide the status. Resolve a thread (or fix its lines; the next review resolves it) and it no longer counts: once every thread is resolved the merge request shows clean, without waiting for a new review. Findings an earlier review left open still count after an incremental review that finds nothing new.
 
 ## Set up the app
 

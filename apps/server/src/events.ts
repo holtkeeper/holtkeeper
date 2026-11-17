@@ -41,7 +41,7 @@ import { noteDefaultBranchPush } from './freshness.ts'
 import { automaticJobReady } from './jobs.ts'
 import { captureReplyLearning, harvestReviewSignals } from './learnings.ts'
 import { commentsOffFor, isReviewAnalyzer } from './mr-comments.ts'
-import { noteReviewJob } from './mr-status.ts'
+import { noteMergeRequestChange, noteReviewJob } from './mr-status.ts'
 import { releaseAnnouncerFor } from './release-announce.ts'
 import { releaseServiceFor } from './releases.ts'
 import { analyzerOffFor } from './repo-analyzers.ts'
@@ -150,6 +150,8 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  *   `verify`, `help`) answer in the merge request; a reply in a review thread Holtkeeper started
  *   queues `review` with `{ mergeRequest, replyTo: discussionId }` and, in the background, is
  *   looked at for a lasting rule (`captureReplyLearning`).
+ * - Every merge request change and note, whatever else it does, tells `deps.mergeRequestStatus`
+ *   (`noteMergeRequestChange`), since resolved or answered threads change the status it shows.
  * - A merge request seen closed or merged that Holtkeeper reviewed has what became of its review
  *   comments read in the background (`harvestReviewSignals`): 👍/👎, whether the commented lines
  *   changed afterwards, the thread's state.
@@ -691,6 +693,12 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
     }
     if (event.kind !== 'tag' && event.kind !== 'push' && (await deps.readOnly?.(event.repo)))
       return ignore('the repository is read-only')
+    // Threads resolved or answered change what the merge request shows, also when the event
+    // queues nothing (GitLab sends an update when the last thread is resolved).
+    if (event.kind === 'mergeRequest')
+      noteMergeRequestChange(deps, { repo: event.repo, mergeRequest: event.mr.id })
+    else if (event.kind === 'note')
+      noteMergeRequestChange(deps, { repo: event.repo, mergeRequest: event.mergeRequest })
     const handle = handlers(source)
     if (event.kind === 'tag') {
       const outcome = await handle.handleTag(event)

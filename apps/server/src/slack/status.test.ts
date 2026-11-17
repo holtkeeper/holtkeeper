@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test'
 
-import type { ReviewData } from '@holtkeeper/review'
+import type { Discussion } from '@holtkeeper/forge'
+import { type ReviewData, commentBody, summaryNote } from '@holtkeeper/review'
 
 import { fallbackSlackEmoji } from './connection.ts'
-import { reviewStatusOf, statusListText, worstStatus } from './status.ts'
+import { mergeRequestStatusOf, reviewStatusOf, statusListText, worstStatus } from './status.ts'
 
 const finding = (severity: 'info' | 'minor' | 'major' | 'critical', posted = true) => ({
   id: `f-${severity}`,
@@ -50,6 +51,57 @@ test('a finished review maps to clean, minor, changes or skipped', () => {
   expect(reviewStatusOf(review({ comments: [finding('critical')] }))).toBe('changes')
   expect(reviewStatusOf(review({ verdict: 'needs-changes' }))).toBe('changes')
   expect(reviewStatusOf(review({ mode: 'skipped', verdict: 'skipped' }))).toBe('skipped')
+})
+
+const thread = (
+  body: string,
+  options: { resolved?: boolean; resolvable?: boolean } = {},
+): Discussion => ({
+  id: `d-${body.length}-${options.resolved ? 'r' : 'o'}`,
+  resolvable: options.resolvable ?? true,
+  resolved: options.resolved ?? false,
+  notes: [
+    { id: 1, author: 'holtkeeper', body: 'changed the description', createdAt: '', system: true },
+    { id: 2, author: 'holtkeeper', body, createdAt: '', system: false },
+  ],
+})
+
+const findingThread = (
+  severity: 'info' | 'minor' | 'major' | 'critical',
+  options: { resolved?: boolean } = {},
+) => thread(commentBody({ ...finding(severity), id: `f-${severity}-thread` }), options)
+
+test('open Holtkeeper finding threads decide the status, whatever the verdict', () => {
+  const serious = review({ verdict: 'needs-changes', comments: [finding('major')] })
+  expect(mergeRequestStatusOf(serious, [findingThread('major')])).toBe('changes')
+  expect(mergeRequestStatusOf(serious, [findingThread('major', { resolved: true })])).toBe('clean')
+  expect(
+    mergeRequestStatusOf(serious, [
+      findingThread('critical', { resolved: true }),
+      findingThread('info'),
+    ]),
+  ).toBe('minor')
+  // Threads of earlier runs count too: an incremental run that found nothing new is not clean.
+  expect(mergeRequestStatusOf(review({ mode: 'incremental' }), [findingThread('critical')])).toBe(
+    'changes',
+  )
+})
+
+test('other threads, the summary and unresolvable notes do not count', () => {
+  const summary = summaryNote(review({ verdict: 'needs-changes' }))
+  expect(
+    mergeRequestStatusOf(review({ verdict: 'needs-changes' }), [
+      thread(summary),
+      thread('Please rename the gizmo.'),
+      thread(commentBody({ ...finding('major'), id: 'f-note' }), { resolvable: false }),
+    ]),
+  ).toBe('clean')
+})
+
+test('a skipped run stays skipped and without threads the run alone decides', () => {
+  const skipped = review({ mode: 'skipped', verdict: 'skipped' })
+  expect(mergeRequestStatusOf(skipped, [findingThread('major')])).toBe('skipped')
+  expect(mergeRequestStatusOf(review({ comments: [finding('minor')] }), undefined)).toBe('minor')
 })
 
 test('a message about several merge requests shows the worst status', () => {

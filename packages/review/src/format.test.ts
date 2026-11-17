@@ -10,7 +10,7 @@ import {
 } from './format.ts'
 import { adviceTexts } from './size.ts'
 
-test('commentFinding reads back the category and id commentBody wrote', () => {
+test('commentFinding reads back the category, severity and id commentBody wrote', () => {
   const body = commentBody({
     id: 'f-12',
     severity: 'minor',
@@ -19,7 +19,20 @@ test('commentFinding reads back the category and id commentBody wrote', () => {
     body: 'Use a named function.',
     source: 'agent',
   })
-  expect(commentFinding(body)).toEqual({ category: 'style', findingId: 'f-12' })
+  expect(commentFinding(body)).toEqual({ category: 'style', severity: 'minor', findingId: 'f-12' })
+  const major = commentBody({
+    id: 'f-13',
+    severity: 'major',
+    category: 'bug',
+    title: 'Widget count can go negative',
+    body: 'Clamp it at zero.',
+    source: 'lint',
+  })
+  expect(commentFinding(major)).toEqual({
+    category: 'bug',
+    severity: 'major',
+    findingId: 'f-13',
+  })
   expect(commentFinding('Plain reply without a marker.')).toBeUndefined()
   expect(commentFinding('Summary\n\n<!-- holtkeeper:review summary head=abc -->')).toBeUndefined()
 })

@@ -74,7 +74,7 @@ Every summary except a skipped one ends with a request for feedback (`summary.fe
 
 `replyToThread({ forge, repo, mr, discussion, agent, dir?, botUsername?, language?, context? })` answers the latest reply in a thread we started, on the `main` model tier: `explain`, `concede` (and resolve) or `update` with a new suggestion (GitLab ` ```suggestion:-N+0 ` markup). Threads not started by us, and threads whose last note is ours, are skipped. With `options.replyTo` the analyzer runs it with the Guide as `context` and stores a `reply` record.
 
-Lasting rules taught in replies are not extracted here: the server looks at each reply separately with a cheap filter and a fast-tier call ([review learnings](../../guide/docs/README.md#review-learnings)). `commentFinding(body)` reads the category and finding id back from an inline comment `commentBody` wrote, so reactions on it can be counted per category.
+Lasting rules taught in replies are not extracted here: the server looks at each reply separately with a cheap filter and a fast-tier call ([review learnings](../../guide/docs/README.md#review-learnings)). `commentFinding(body)` reads the category, severity and finding id back from an inline comment `commentBody` wrote, so reactions on it can be counted per category and an open thread's severity is known without the stored run.
 
 ## Images
 

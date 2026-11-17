@@ -43,17 +43,18 @@ export function commentBody(
 }
 
 /**
- * The category and finding id of an inline comment `commentBody` wrote; `undefined` for other
- * notes, ours or not.
+ * The category, severity and finding id of an inline comment `commentBody` wrote; `undefined` for
+ * other notes, ours or not.
  */
 export function commentFinding(
   body: string,
-): { category: ReviewCategory; findingId: string } | undefined {
+): { category: ReviewCategory; severity: ReviewSeverity; findingId: string } | undefined {
   const findingId = markerOf(body)
   if (!findingId) return undefined
-  const match = /^\*\*\w+\*\* · (\w+)/.exec(body.trimStart())
-  const category = categories.find((name) => name === match?.[1])
-  return category ? { category, findingId } : undefined
+  const match = /^\*\*(\w+)\*\* · (\w+)/.exec(body.trimStart())
+  const category = categories.find((name) => name === match?.[2])
+  const severity = severities.find((name) => severityLabel[name] === match?.[1])
+  return category && severity ? { category, severity, findingId } : undefined
 }
 
 /** The marker of the summary note; carries the reviewed head. */

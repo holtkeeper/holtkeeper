@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { RepoRef } from '@holtkeeper/forge'
+import type { Discussion, RepoRef } from '@holtkeeper/forge'
 import type { SlackMessageLink, SlackMessageStore, SlackReviewStatus } from '@holtkeeper/store'
 
 import { type ServerDeps, repoKey, repoTarget } from '../context.ts'
@@ -14,7 +14,7 @@ import { type SlackApi, type SlackPoster, slackWebApi, slackWebPoster } from './
 import { type SlackConnection, slackConnection } from './connection.ts'
 import { type SlackEmojiChoice, slackEmojiCatalog } from './emoji.ts'
 import { type MergeRequestLink, mergeRequestLinks } from './links.ts'
-import { latestReview, reviewStatusOf, statusListText, worstStatus } from './status.ts'
+import { latestReview, mergeRequestStatusOf, statusListText, worstStatus } from './status.ts'
 
 /** How long a Slack message keeps following its merge requests. */
 const SLACK_RETENTION_DAYS = 30
@@ -174,14 +174,47 @@ export function createSlackReviews(
     return !(await commentsOffFor(store, config, repo))
   }
 
-  const stateOf = async (repo: RepoRef, mergeRequest: number): Promise<MergeRequestState> => {
+  /**
+   * The merge request's threads now: none listed when the forge cannot list them, `failed` when
+   * listing them failed (logged).
+   */
+  const threadsOf = async (
+    repo: RepoRef,
+    mergeRequest: number,
+  ): Promise<{ discussions?: Discussion[]; failed?: true }> => {
+    const forge = config.forges[repo.forge]?.create()
+    if (!forge?.listDiscussions) return {}
+    try {
+      return { discussions: await forge.listDiscussions(repo.path, mergeRequest) }
+    } catch (error) {
+      log(`slack reviews: threads of ${repoKey(repo)}!${mergeRequest}: ${messageOf(error)}`)
+      return { failed: true }
+    }
+  }
+
+  /**
+   * The status of a merge request now: reviewing while a review job is queued or running, else
+   * `mergeRequestStatusOf` its newest review and open threads. When the forge fails to list the
+   * threads, a settled `previous` status is kept rather than guessed from the run alone.
+   */
+  const stateOf = async (
+    repo: RepoRef,
+    mergeRequest: number,
+    previous?: SlackReviewStatus,
+  ): Promise<MergeRequestState> => {
     const active = await store.jobs.list({ status: ['queued', 'running'], repo, limit: 500 })
     const job = active.find(
       (candidate) => reviewTargetOf(config, candidate)?.mergeRequest === mergeRequest,
     )
     if (job) return { status: 'reviewing', ...(job.ref !== undefined && { head: job.ref }) }
     const review = await latestReview(store.analyses, repo, mergeRequest)
-    return review ? { status: reviewStatusOf(review), head: review.head } : {}
+    if (!review) return {}
+    if (review.mode === 'skipped' || review.verdict === 'skipped')
+      return { status: mergeRequestStatusOf(review, undefined), head: review.head }
+    const threads = await threadsOf(repo, mergeRequest)
+    if (threads.failed && previous && previous !== 'reviewing')
+      return { status: previous, head: review.head }
+    return { status: mergeRequestStatusOf(review, threads.discussions), head: review.head }
   }
 
   const mergeRequestUrl = (link: SlackMessageLink) => {
@@ -394,12 +427,12 @@ export function createSlackReviews(
           async (existing) => {
             const at = deps.now().toISOString()
             for (const { repo, mergeRequest } of targets) {
-              // oxlint-disable-next-line no-await-in-loop -- see above
-              const state = await stateOf(repo, mergeRequest)
               const key = slackRepoKey(repo)
               const before = existing.find(
                 (entry) => entry.repo === key && entry.mergeRequest === mergeRequest,
               )
+              // oxlint-disable-next-line no-await-in-loop -- see above
+              const state = await stateOf(repo, mergeRequest, before?.status)
               // oxlint-disable-next-line no-await-in-loop -- see above
               await messages.put(
                 withState(
@@ -445,6 +478,8 @@ export function createSlackReviews(
         if (!connection) return
         const stillFollowed = await followed(target.repo)
         const clients = clientsFor(connection)
+        // Read once for all messages linking it: the state includes a forge call.
+        let state: Promise<MergeRequestState> | undefined
         for (const { channel, ts } of tracked) {
           // oxlint-disable-next-line no-await-in-loop -- one message at a time keeps reactions in order
           await settle(clients, connection, channel, ts, async (links) => {
@@ -456,9 +491,9 @@ export function createSlackReviews(
               await messages.delete(channel, ts, { repo: key, mergeRequest })
               return
             }
-            const state = await stateOf(target.repo, mergeRequest)
+            state ??= stateOf(target.repo, mergeRequest, link.status)
             await messages.put(
-              withState({ ...link, path: target.repo.path }, state, deps.now().toISOString()),
+              withState({ ...link, path: target.repo.path }, await state, deps.now().toISOString()),
             )
           })
         }

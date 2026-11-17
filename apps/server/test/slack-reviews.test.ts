@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { GitForge, MergeRequest } from '@holtkeeper/forge'
-import { type ReviewData, reviewMetrics } from '@holtkeeper/review'
+import type { Discussion, GitForge, MergeRequest } from '@holtkeeper/forge'
+import { type ReviewData, commentBody, reviewMetrics } from '@holtkeeper/review'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Job, SettingEntry, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -27,6 +27,8 @@ const BOUND = 'C0123WIDGET'
 const OTHER = 'C0456OTHER'
 
 let forgeCalls: string[]
+/** The merge request's threads; without them the forge cannot list discussions. */
+let threads: Discussion[] | Error | undefined
 
 /** The status reply never asks the forge for anything: it shows no titles. */
 const forge = {
@@ -34,6 +36,13 @@ const forge = {
   getMergeRequest: async (path: string, iid: number) => {
     forgeCalls.push(`${path}!${iid}`)
     return structuredClone(mr)
+  },
+  get listDiscussions() {
+    if (threads === undefined) return undefined
+    return async () => {
+      if (threads instanceof Error) throw threads
+      return structuredClone(threads)
+    }
   },
 } as unknown as GitForge
 
@@ -252,6 +261,62 @@ const finishReview = async (job: Job, data: ReviewData) => {
   await settle()
 }
 
+/** A thread Holtkeeper opened for `finding`. */
+const findingThread = (finding: ReviewData['comments'][number], resolved = false): Discussion => ({
+  id: `thread-${finding.id}`,
+  resolvable: true,
+  resolved,
+  notes: [
+    { id: 1, author: 'holtkeeper', body: commentBody(finding), createdAt: '', system: false },
+  ],
+})
+
+const gitlabHook = (event: string, body: Record<string, unknown>) =>
+  app.request('/api/webhooks/gitlab', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-gitlab-token': 'hook-secret',
+      'x-gitlab-event': event,
+    },
+    body: JSON.stringify({
+      user: { username: 'alex' },
+      project: {
+        path_with_namespace: 'shapes/widget',
+        web_url: 'https://git.acme.test/shapes/widget',
+      },
+      ...body,
+    }),
+  })
+
+/** GitLab's update when the last thread of the merge request is resolved: no new commits. */
+const threadsResolved = () =>
+  gitlabHook('Merge Request Hook', {
+    object_kind: 'merge_request',
+    object_attributes: {
+      iid: 7,
+      title: mr.title,
+      source_branch: 'feature/widget',
+      target_branch: 'main',
+      state: 'opened',
+      action: 'update',
+    },
+    labels: [],
+  })
+
+const commented = () =>
+  gitlabHook('Note Hook', {
+    object_kind: 'note',
+    object_attributes: {
+      id: 41,
+      note: 'Fixed in the gizmo refactor.',
+      noteable_type: 'MergeRequest',
+      discussion_id: 'thread-f1',
+      type: 'DiffNote',
+    },
+    merge_request: { iid: 7, state: 'opened' },
+  })
+
 const pushed = () =>
   app.request('/api/webhooks/gitlab', {
     method: 'POST',
@@ -295,6 +360,7 @@ beforeEach(async () => {
   workspaceEmoji = new Set()
   attempts = []
   forgeCalls = []
+  threads = undefined
   mr = {
     id: 7,
     title: 'Add widget',
@@ -587,6 +653,59 @@ describe('slack review status', () => {
       },
     })
     expect(reactions).toEqual([`+large_green_circle ${BOUND}/1700000000.000100`])
+  })
+})
+
+describe('slack review status and threads', () => {
+  const minorFinding = { ...majorFinding, id: 'f2', severity: 'minor' as const }
+
+  test('open Holtkeeper threads decide the status, and resolving them all clears it', async () => {
+    threads = [findingThread(majorFinding), findingThread(minorFinding)]
+    await storeReview(review({ verdict: 'needs-changes', comments: [majorFinding, minorFinding] }))
+    await message(link())
+    threads = [findingThread(majorFinding, true), findingThread(minorFinding, true)]
+    await threadsResolved()
+    await settle()
+    expect(await store.jobs.list({ status: ['queued'] })).toEqual([])
+    expect(reactions).toEqual([
+      `+red_circle ${BOUND}/1700000000.000100`,
+      `-red_circle ${BOUND}/1700000000.000100`,
+      `+large_green_circle ${BOUND}/1700000000.000100`,
+    ])
+  })
+
+  test('a note on the merge request rereads its threads', async () => {
+    threads = [findingThread(majorFinding), findingThread(minorFinding)]
+    await storeReview(review({ verdict: 'needs-changes', comments: [majorFinding, minorFinding] }))
+    await message(link())
+    threads = [findingThread(majorFinding, true), findingThread(minorFinding)]
+    await commented()
+    await settle()
+    expect(reactions).toEqual([
+      `+red_circle ${BOUND}/1700000000.000100`,
+      `-red_circle ${BOUND}/1700000000.000100`,
+      `+large_orange_circle ${BOUND}/1700000000.000100`,
+    ])
+  })
+
+  test('threads an earlier run opened still count after a run with nothing new', async () => {
+    threads = [findingThread(majorFinding)]
+    await storeReview(review({ comments: [majorFinding] }))
+    await message(link())
+    const job = await queueReview(NEXT)
+    await finishReview(job, review({ head: NEXT, mode: 'incremental' }))
+    expect(reactions.at(-1)).toBe(`+red_circle ${BOUND}/1700000000.000100`)
+  })
+
+  test('threads that cannot be listed keep the status shown and are logged', async () => {
+    threads = [findingThread(majorFinding)]
+    await storeReview(review({ comments: [majorFinding] }))
+    await message(link())
+    threads = new Error('GitLab answered 502')
+    await threadsResolved()
+    await settle()
+    expect(reactions).toEqual([`+red_circle ${BOUND}/1700000000.000100`])
+    expect(logs).toContain('slack reviews: threads of acme:shapes/widget!7: GitLab answered 502')
   })
 })
 

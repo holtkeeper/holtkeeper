@@ -1,5 +1,12 @@
+import type { Discussion } from '@holtkeeper/forge'
 import { mrkdwnLink } from '@holtkeeper/notify'
-import { type ReviewData, reviewDataSchema, reviewMetrics, reviewRef } from '@holtkeeper/review'
+import {
+  type ReviewData,
+  commentFinding,
+  reviewDataSchema,
+  reviewMetrics,
+  reviewRef,
+} from '@holtkeeper/review'
 import type { AnalysisStore, SlackReviewStatus } from '@holtkeeper/store'
 
 /** The analysis kind review runs are stored under. */
@@ -43,6 +50,33 @@ export function reviewStatusOf(data: ReviewData): Exclude<SlackReviewStatus, 're
   )
     return 'changes'
   return metrics.comments > 0 ? 'minor' : 'clean'
+}
+
+/**
+ * What a merge request shows once its latest review run is known, given the merge request's
+ * threads as the forge lists them now: `skipped` when that run reviewed nothing; otherwise the
+ * unresolved threads Holtkeeper opened for findings decide, from any run: `changes` for a major or
+ * critical one, `minor` for others, `clean` when none is left. Resolving or fixing a finding
+ * (Holtkeeper resolves the threads it sees fixed) thus clears it, and the run's verdict, which
+ * only restates its findings, is not used. Without `discussions` (the forge cannot list them)
+ * the run alone decides, as `reviewStatusOf`.
+ */
+export function mergeRequestStatusOf(
+  review: ReviewData,
+  discussions: readonly Discussion[] | undefined,
+): Exclude<SlackReviewStatus, 'reviewing'> {
+  const own = reviewStatusOf(review)
+  if (own === 'skipped' || !discussions) return own
+  let status: 'clean' | 'minor' | 'changes' = 'clean'
+  for (const discussion of discussions) {
+    if (!discussion.resolvable || discussion.resolved) continue
+    const first = discussion.notes.find((note) => !note.system)
+    const finding = first && commentFinding(first.body)
+    if (!finding) continue
+    if (finding.severity === 'major' || finding.severity === 'critical') return 'changes'
+    status = 'minor'
+  }
+  return status
 }
 
 /**
