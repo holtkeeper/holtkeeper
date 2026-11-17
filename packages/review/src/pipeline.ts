@@ -139,7 +139,7 @@ export interface ReviewOptions {
 }
 
 /** Default `costLimitUsd` of the `review` analyzer. */
-export const DEFAULT_REVIEW_COST_LIMIT_USD = 3
+export const DEFAULT_REVIEW_COST_LIMIT_USD = 4.5
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
 export type ReviewForge = GitForge &
