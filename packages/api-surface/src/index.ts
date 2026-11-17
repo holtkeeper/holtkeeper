@@ -1,4 +1,5 @@
 export * from './analyzer.ts'
+export * from './branch.ts'
 export * from './diff.ts'
 export * from './extract.ts'
 export * from './model.ts'
