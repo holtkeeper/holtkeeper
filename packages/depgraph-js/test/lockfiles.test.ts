@@ -3,10 +3,15 @@ import { cp, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { findCycles, findDuplicates } from '@holtkeeper/depgraph'
+import { PartialLoadError, findCycles, findDuplicates } from '@holtkeeper/depgraph'
 import type { DepGraph } from '@holtkeeper/depgraph'
 
-import { findLockfile, jsLockfileSource, jsWorkspaceSource } from '../src/index.ts'
+import {
+  findLockfile,
+  findNestedProjects,
+  jsLockfileSource,
+  jsWorkspaceSource,
+} from '../src/index.ts'
 
 const fixtures = join(import.meta.dir, 'fixtures')
 const managers = ['npm', 'bun', 'pnpm', 'yarn-classic', 'yarn-berry'] as const
@@ -117,5 +122,61 @@ describe('findLockfile', () => {
     dir = await mkdtemp(join(tmpdir(), 'holtkeeper-depgraph-js-'))
     await Bun.write(join(dir, 'package.json'), '{"name":"x"}')
     expect(await jsLockfileSource().detect(dir)).toBe(false)
+  })
+})
+
+describe('nested projects', () => {
+  let dir: string | undefined
+  afterEach(() => (dir ? rm(dir, { recursive: true, force: true }) : undefined))
+
+  test('reads every project with its own lockfile as a layer of its own', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'holtkeeper-depgraph-js-'))
+    await cp(join(fixtures, 'npm'), dir, { recursive: true })
+    await cp(join(fixtures, 'yarn-classic'), join(dir, 'editor'), { recursive: true })
+    await Bun.write(join(dir, 'tools/package.json'), '{}')
+    await Bun.write(join(dir, 'tools/yarn.lock'), '# yarn lockfile v1\n')
+    await Bun.write(join(dir, 'node_modules/some-lib/package-lock.json'), '{}')
+    await Bun.write(join(dir, '.cache/yarn.lock'), '')
+
+    expect(await findNestedProjects(dir)).toEqual(['editor', 'tools'])
+    const layers = await jsLockfileSource().load(dir)
+    expect(layers.map((layer) => layer.source)).toEqual([
+      'package-lock.json',
+      'editor/yarn.lock',
+      'tools/yarn.lock',
+    ])
+    const [root, editor, tools] = layers.map((layer) => summary(layer.graph))
+    expect(root).toEqual(expected)
+    expect(editor?.nodes).toContain('workspace fx-root editor')
+    expect(editor?.nodes).toContain('workspace @fx/a editor/packages/a')
+    expect(editor?.nodes).toContain('package finalhandler@1.2.0')
+    expect(editor?.edges).toEqual(expected.edges)
+    expect(tools).toEqual({ nodes: ['workspace tools tools'], edges: [] })
+  })
+
+  test('keeps the other layers when a nested project fails', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'holtkeeper-depgraph-js-'))
+    await cp(join(fixtures, 'npm'), dir, { recursive: true })
+    await Bun.write(join(dir, 'broken/package-lock.json'), '{}')
+
+    const failure = await jsLockfileSource()
+      .load(dir)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+    expect(failure).toBeInstanceOf(PartialLoadError)
+    if (!(failure instanceof PartialLoadError)) return
+    expect(failure.layers.map((layer) => layer.source)).toEqual(['package-lock.json'])
+    expect(failure.messages).toHaveLength(1)
+    expect(failure.messages[0]).toStartWith('broken: ')
+  })
+
+  test('detects a repository whose only lockfile is nested', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'holtkeeper-depgraph-js-'))
+    await cp(join(fixtures, 'bun'), join(dir, 'app'), { recursive: true })
+    expect(await jsLockfileSource().detect(dir)).toBe(true)
+    const layers = await jsLockfileSource().load(dir)
+    expect(layers.map((layer) => layer.source)).toEqual(['app/bun.lock'])
   })
 })

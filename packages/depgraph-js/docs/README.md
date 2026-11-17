@@ -13,9 +13,9 @@ const data = await analyzeDependencies({ dir, sources: jsSources() })
 
 - `jsSources()` — the three sources below.
 - `jsWorkspaceSource()` — layer `workspaces`, source `package.json` or `pnpm-workspace.yaml`.
-- `jsLockfileSource()` — layer `packages`, source is the lockfile name.
+- `jsLockfileSource({ depth? })` — layers `packages`: one for the root, source is the lockfile name, and one per nested project, source `<dir>/<lockfile>` (see [Lockfiles](#lockfiles)).
 - `jsModuleSource()` — layer `modules`, source `imports`.
-- `readJsWorkspaces(dir)`, `findLockfile(dir)`, `lockfiles`, `resolveImport(files, importer, specifier)`, `sourceExtensions`.
+- `readJsWorkspaces(dir)`, `findLockfile(dir)`, `findNestedProjects(dir, depth = 4)`, `lockfiles`, `resolveImport(files, importer, specifier)`, `sourceExtensions`.
 - Pure lockfile parsers `parseNpmLock`, `parseBunLock`, `parsePnpmLock`, `parseYarnLock`: `(content, workspaces) => DepGraph`.
 - `indexLockfile(lockfile, content, workspaces): LockIndex` — what one lockfile resolves: `packages` (name → sorted versions) and `importers` (path → dependencies with the range the lockfile recorded as `specifier` and the resolved `version`, `workspace:<path>` for a workspace). `recorded` says whether the lockfile has its own entry for the importer; yarn classic never does, so its resolutions come from the `package.json` ranges. A dependency without `version` is not resolved by the lockfile.
 - `declaredDependencies(manifest)` — every `dependencies`, `optionalDependencies`, `peerDependencies` and `devDependencies` entry of a manifest-shaped object as `{ name, range, kind }`.
@@ -29,7 +29,9 @@ Patterns come from `workspaces` in the root `package.json` (array or `{ packages
 
 ## Lockfiles
 
-One lockfile is read. With several present, the one matching `packageManager` in `package.json` wins, otherwise the first of `pnpm-lock.yaml`, `bun.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`.
+One lockfile is read per project. With several present, the one matching `packageManager` in `package.json` wins, otherwise the first of `pnpm-lock.yaml`, `bun.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`.
+
+Besides the root, every directory up to 4 levels deep with a lockfile of its own is a separate project (`findNestedProjects`; `node_modules`, `vendor`, `testdata` and hidden directories are skipped), read with its own `package.json` and workspaces into a `packages` layer of its own. Its source is `<dir>/<lockfile>` (`editor/yarn.lock`), its workspace paths are relative to the repository (`editor`, `editor/packages/a`), and an unnamed project root is named after its directory instead of `root`. The root needs no lockfile when a nested project has one. A nested project that fails to read is reported in `errors` (`<dir>: <message>`) while the other layers still load.
 
 | File                                       | Versions                                                | Resolution                                                                                                                   |
 | ------------------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
