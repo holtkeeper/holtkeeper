@@ -327,6 +327,7 @@ export function credentialRoutes(deps: ServerDeps) {
     const listing = await listProviderModels(await aiProvider(c, 'credentials:read'), {
       signal: AbortSignal.timeout(15_000),
       ...(deps.aiCatalog && { catalog: deps.aiCatalog }),
+      ...(deps.aiProviders && { plugins: deps.aiProviders }),
     })
     return c.json<ProviderModelList>(listing)
   })
@@ -340,6 +341,7 @@ export function credentialRoutes(deps: ServerDeps) {
         await listProviderModels(provider, {
           signal: AbortSignal.timeout(15_000),
           ...(deps.aiCatalog && { catalog: deps.aiCatalog }),
+          ...(deps.aiProviders && { plugins: deps.aiProviders }),
         }),
       ).main
       if (provider.kind !== 'ai-sdk') {

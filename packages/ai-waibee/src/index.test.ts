@@ -6,6 +6,7 @@ import {
   aiProviderOptionsValidatorFor,
   createAiSdkAgent,
 } from '@holtkeeper/agent'
+import { WAIBEE_MODELS_SNAPSHOT } from '@holtkeeper/waibee-ai-provider'
 
 import { WAIBEE_PACKAGE, waibee } from './index.ts'
 
@@ -28,6 +29,16 @@ test('Claude models run on Messages, others on Chat Completions, unless the cred
     'anthropic/claude-sonnet-4.6',
   ])
   expect(route('openai/gpt-5.4-nano', { endpoint: 'messages' })[0]).toBe('waibee.messages')
+})
+
+test("a credential's listing comes from the router with prices", async () => {
+  const plugin = waibee({
+    listModels: async () => WAIBEE_MODELS_SNAPSHOT.models.slice(0, 2),
+  })
+  const models = await plugin.listModels?.(connection)
+  expect(models?.map((model) => model.id)).toEqual(
+    WAIBEE_MODELS_SNAPSHOT.models.slice(0, 2).map((model) => model.id),
+  )
 })
 
 const agent = () =>

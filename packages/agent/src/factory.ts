@@ -15,6 +15,7 @@ import {
   type AiProviderKind,
   type ModelPricing,
   type ProviderOptions,
+  aiSdkConnection,
   mapModel,
   parseProviderOptions,
   renderHeaders,
@@ -81,22 +82,6 @@ export function anthropicMessagesConnection(
     baseUrl: `${messagesRoot(baseUrl)}/v1`,
     ...(Object.keys(headers).length > 0 && { headers }),
     ...(bearer && { settings: { authToken: provider.secret } }),
-  }
-}
-
-type AiSdkOptions = Extract<ProviderOptions, { kind: 'ai-sdk' }>
-
-/** How an `ai-sdk` provider is reached: its package, endpoint, secret, headers and settings. */
-function aiSdkConnection(provider: AiProvider, parsed: AiSdkOptions): AiSdkConnection {
-  const endpoint =
-    parsed.baseUrl ?? (parsed.package === '@ai-sdk/openai-compatible' ? provider.url : undefined)
-  return {
-    package: parsed.package,
-    name: parsed.provider,
-    secret: provider.secret,
-    ...(endpoint && { baseUrl: endpoint }),
-    ...(parsed.headers && { headers: renderHeaders(parsed.headers, provider.secret) }),
-    ...(parsed.settings && { settings: parsed.settings }),
   }
 }
 

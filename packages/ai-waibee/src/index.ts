@@ -35,7 +35,8 @@ const endpointFor = (modelId: string, setting: unknown): 'chat' | 'messages' =>
  * '@holtkeeper/waibee-ai-provider'` run on it, with the credential secret as the key. Claude models
  * go through Anthropic Messages, where prompt caching works; other models through Chat
  * Completions. `settings: { endpoint: 'chat' | 'messages' }` forces one route. The catalog lists
- * Waibee's chat models with prices.
+ * Waibee's chat models with prices; a credential's own listing (`listModels`) asks the router with
+ * the credential's key, so it shows the models and prices of that account.
  */
 export function waibee(options: WaibeeOptions = {}): AiProviderPlugin {
   const id = options.id ?? 'waibee'
@@ -62,6 +63,17 @@ export function waibee(options: WaibeeOptions = {}): AiProviderPlugin {
       return endpointFor(modelId, connection.settings?.['endpoint']) === 'messages'
         ? provider.messages(modelId)
         : provider.chat(modelId)
+    },
+    async listModels(connection) {
+      const models = await (options.listModels?.() ??
+        listWaibeeModels({
+          apiKey: connection.secret,
+          classes: ['text'],
+          ...((connection.baseUrl ?? options.baseUrl) && {
+            baseURL: connection.baseUrl ?? options.baseUrl,
+          }),
+        }))
+      return parseModelsDev({ [id]: toModelsDev(models, { id }) })[0]?.models ?? []
     },
     async catalog(): Promise<CatalogProvider[]> {
       const entry = toModelsDev(await listModels(), {

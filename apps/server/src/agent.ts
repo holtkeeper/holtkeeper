@@ -576,7 +576,11 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     return repoTarget(config, { forge, path: value.slice(separator + 1) })
   }
   const catalog =
-    options.models ?? modelCatalog(options.aiCatalog ? { catalog: options.aiCatalog } : {})
+    options.models ??
+    modelCatalog({
+      ...(options.aiCatalog && { catalog: options.aiCatalog }),
+      ...(options.aiProviders && { plugins: options.aiProviders }),
+    })
   const budgets =
     options.budgets === false
       ? undefined

@@ -37,8 +37,8 @@ A credential stores the key as its secret:
 ```
 
 Model ids carry the vendor prefix (`anthropic/claude-sonnet-4.6`, `openai/gpt-5.4`); agents run
-on the model tiers of `@holtkeeper/agent`, which resolve to the newest `anthropic/claude-*` models
-the catalog lists.
+on the model tiers of `@holtkeeper/agent`: the models the `llm.tiers` setting names for each tier,
+in order, then the newest `anthropic/claude-*` model of the tier's family the credential lists.
 
 ## API
 
@@ -58,3 +58,7 @@ the catalog lists.
   `WAIBEE_API_KEY` from the server environment, so prices follow that account's plan; without a key
   it is the snapshot bundled with the provider package, with approximate prices. It is refreshed
   daily.
+- A credential's own model listing (`listModels(connection)`) asks the router with the credential's
+  key, so the models panel and `llm.tiers` see that account's live models and prices even without
+  `WAIBEE_API_KEY`. When the router cannot be asked, the listing falls back on the catalog.
+  `options.listModels` replaces both listings in tests.

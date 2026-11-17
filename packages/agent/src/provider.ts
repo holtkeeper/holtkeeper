@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import type { AiSdkConnection } from './ai-sdk.ts'
 import type { AgentUsage } from './types.ts'
 
 /** Provider kinds an AI provider credential may have. */
@@ -188,4 +189,24 @@ export const aiProviderOptionsValidator = (
   )
     issues.push(`options.package: ${pkg} is not an available AI SDK package`)
   return issues
+}
+
+/**
+ * How an `ai-sdk` provider is reached: its package, endpoint (`baseUrl`, else the credential `url`
+ * for the OpenAI-compatible package), secret, rendered headers and settings.
+ */
+export function aiSdkConnection(
+  provider: AiProvider,
+  parsed: Extract<ProviderOptions, { kind: 'ai-sdk' }>,
+): AiSdkConnection {
+  const endpoint =
+    parsed.baseUrl ?? (parsed.package === '@ai-sdk/openai-compatible' ? provider.url : undefined)
+  return {
+    package: parsed.package,
+    name: parsed.provider,
+    secret: provider.secret,
+    ...(endpoint && { baseUrl: endpoint }),
+    ...(parsed.headers && { headers: renderHeaders(parsed.headers, provider.secret) }),
+    ...(parsed.settings && { settings: parsed.settings }),
+  }
 }

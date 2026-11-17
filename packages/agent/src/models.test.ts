@@ -254,6 +254,32 @@ describe('ai-sdk models', () => {
     expect(seen).toEqual(['https://llm.corp.test/v1/models Bearer k'])
     expect(listing.models).toEqual([{ id: 'corp-large', source: 'provider' }])
   })
+
+  test("a plugin lists a credential's models with its key, else the catalog", async () => {
+    const keys: string[] = []
+    const plugin = (fail: boolean) => ({
+      package: '@openrouter/ai-sdk-provider',
+      languageModel: () => {
+        throw new Error('not used')
+      },
+      listModels: async (connection: { secret: string }) => {
+        keys.push(connection.secret)
+        if (fail) throw new Error('HTTP 503')
+        return [{ id: 'acme/widget', toolCall: true, reasoning: false }]
+      },
+    })
+    const provider = {
+      kind: 'ai-sdk' as const,
+      url: 'https://openrouter.ai/api/v1',
+      secret: 'own-key',
+      options: { provider: 'openrouter', package: '@openrouter/ai-sdk-provider' },
+    }
+    const listed = await listProviderModels(provider, { catalog, plugins: [plugin(false)] })
+    expect(listed.models).toEqual([{ id: 'acme/widget', toolCall: true, source: 'provider' }])
+    const fallback = await listProviderModels(provider, { catalog, plugins: [plugin(true)] })
+    expect(fallback.models.map((model) => model.id)).toEqual(['openai/gpt-5', 'old/model'])
+    expect(keys).toEqual(['own-key', 'own-key'])
+  })
 })
 
 describe('resolveModelReference', () => {

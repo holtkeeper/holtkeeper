@@ -1,6 +1,8 @@
-import type { AiCatalog } from './catalog.ts'
+import type { AiCatalog, CatalogModel } from './catalog.ts'
+import type { AiProviderPlugin } from './plugin.ts'
 import {
   type AiProvider,
+  aiSdkConnection,
   type ModelPricing,
   type ProviderOptions,
   parseProviderOptions,
@@ -39,6 +41,8 @@ export interface ListModelsDependencies {
   signal?: AbortSignal
   /** Lists the models of `ai-sdk` providers; without it only their API (if OpenAI-compatible) is asked. */
   catalog?: AiCatalog
+  /** Plugins whose `listModels` lists the models of `ai-sdk` credentials on their package. */
+  plugins?: readonly AiProviderPlugin[]
 }
 
 /** Suffix of a model reference that resolves to the newest listed version, e.g. `claude-opus@latest`. */
@@ -154,16 +158,23 @@ async function catalogModels(
   options: Extract<ProviderOptions, { kind: 'ai-sdk' }>,
   deps: ListModelsDependencies,
 ): Promise<ProviderModel[]> {
-  const entry = (await deps.catalog?.providers())?.find((p) => p.id === options.provider)
+  const plugin = deps.plugins?.find(
+    (p) => p.package === options.package && p.listModels !== undefined,
+  )
+  // A plugin that cannot list (router down, key without list rights) still leaves the shared catalog.
+  const own = await plugin?.listModels?.(aiSdkConnection(provider, options)).catch(() => undefined)
+  const entry = own
+    ? { models: own }
+    : (await deps.catalog?.providers())?.find((p) => p.id === options.provider)
   if (entry) {
-    return entry.models.map((model) => ({
+    return entry.models.map((model: CatalogModel) => ({
       id: model.id,
       ...(model.name && { name: model.name }),
       ...(dateOf(model.releaseDate) && { createdAt: dateOf(model.releaseDate) }),
       ...(model.pricing && { pricing: model.pricing }),
       toolCall: model.toolCall,
       ...(model.contextWindow !== undefined && { contextWindow: model.contextWindow }),
-      source: 'catalog' as const,
+      source: own ? ('provider' as const) : ('catalog' as const),
     }))
   }
   if (options.package !== '@ai-sdk/openai-compatible') return []
@@ -226,7 +237,8 @@ function configuredModels(options: ProviderOptions): string[] {
 /**
  * The models of an AI provider: what its API lists (Anthropic and Anthropic-compatible
  * `/v1/models`; `ai-sdk` providers from
- * `deps.catalog`, else their OpenAI-compatible `/models`), plus every model its
+ * their plugin's `listModels` with the credential's key, else `deps.catalog`, else their
+ * OpenAI-compatible `/models`), plus every model its
  * options name. Prices come from the `pricing` option (by provider or logical name), else from the
  * listing when it carries OpenRouter-style per-token prices. A failing API call is reported in
  * `error` with the configured models still returned.

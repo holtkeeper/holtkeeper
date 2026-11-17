@@ -1,7 +1,7 @@
 import type { LanguageModel } from 'ai'
 
 import type { AiSdkConnection } from './ai-sdk.ts'
-import type { AiCatalog, CatalogProvider } from './catalog.ts'
+import type { AiCatalog, CatalogModel, CatalogProvider } from './catalog.ts'
 import {
   AI_SDK_PACKAGE_NAMES,
   aiProviderOptionsValidator,
@@ -26,6 +26,12 @@ export interface AiProviderPlugin {
    * until it succeeds, without affecting other providers.
    */
   catalog?(): Promise<CatalogProvider[]> | CatalogProvider[]
+  /**
+   * The models one credential may use, asked with its own key and endpoint, e.g. when the
+   * provider's catalog depends on the account. When given, a credential's model listing comes
+   * from it instead of `catalog`.
+   */
+  listModels?(connection: AiSdkConnection): Promise<CatalogModel[]>
 }
 
 /** `plugin` as given; a typed helper for writing plugins. */
