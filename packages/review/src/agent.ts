@@ -72,7 +72,8 @@ export interface ReviewPromptInput {
   part?: { index: number; count: number; files: readonly string[] }
   /**
    * Set for the cross-part pass after a split review: what the parts already reported (`path`,
-   * `line`, `title`) and their walkthrough, so this pass looks only for problems that span parts.
+   * `line`, `title`) and their walkthrough entries (`change (files)`), so this pass looks only for
+   * problems that span parts and writes one walkthrough of the whole merge request.
    */
   crossPart?: {
     parts: number
@@ -249,7 +250,7 @@ export function reviewPrompt(input: ReviewPromptInput): string {
       ? `Checks flagged these lines. Comment on each one that is right, with that category, severity \`minor\` and a \`suggestion\` that fixes it in the style the note describes (for a missing test attribute: add the project's attribute with a short value unique within the component, named like the examples). Skip the ones that are wrong; they count toward the comment limit:\n${requests.join('\n')}`
       : '',
     input.part
-      ? `The diff is split for review; this is part ${input.part.index} of ${input.part.count}. Comment only on lines of the diff below, and read the other files of the merge request when the change depends on them. Every file in scope:\n${input.part.files.map((path) => `- ${path}`).join('\n')}`
+      ? `The diff is split for review; this is part ${input.part.index} of ${input.part.count}. Comment only on lines of the diff below, and read the other files of the merge request when the change depends on them. You are the only reviewer of these lines: before you answer, read with the tools the code each changed function relies on and its callers, and check the cases the change has to handle; an answer after a read or two misses problems. Every file in scope:\n${input.part.files.map((path) => `- ${path}`).join('\n')}`
       : '',
     input.crossPart ? crossPartBlock(input.crossPart) : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
@@ -308,11 +309,14 @@ function crossPartBlock(cross: NonNullable<ReviewPromptInput['crossPart']>): str
   return [
     `This merge request was too large for one pass: ${cross.parts} separate passes reviewed it in parts, each seeing only its slice of the diff. This is the final pass over the whole diff. Look for what the parts could not see: contracts between changed modules and their callers in other parts, the same change applied differently in parallel code, state and lifecycle that cross files, and anything a part only skimmed. Read the code with the tools. Do not repeat a problem already reported; report only new ones.`,
     'Your `summary` replaces the summaries of the parts: write one summary of the whole merge request for its author, covering what it does and the main problems the parts and you found, without mentioning parts or passes.',
+    cross.walkthrough.length
+      ? 'Your `walkthrough` replaces the walkthroughs of the parts: merge their entries into one list by logical change, most important first, each file in one entry where it fits, without mentioning parts.'
+      : '',
     cross.findings.some((f) => f.id !== undefined)
       ? 'In `duplicates`, list the already reported findings that describe the same problem as another one in the list (often the same omission seen from two files) as `{ id, of }`, where `of` is the one to keep; leave it empty when there are none.'
       : '',
     cross.walkthrough.length
-      ? `What the parts found the change does:\n${cross.walkthrough.map((line) => `- ${line}`).join('\n')}`
+      ? `Walkthroughs of the parts (change and its files):\n${cross.walkthrough.map((line) => `- ${line}`).join('\n')}`
       : '',
     summaries.length
       ? `Summaries of the parts:\n${summaries.map((text) => `- ${text.replace(/\s+/g, ' ')}`).join('\n')}`
@@ -367,10 +371,12 @@ export function mergeRequestDiffTools(files: readonly FileScope[]): Toolset {
 export const REVIEW_READ_LINES = 400
 
 /**
- * When review passes clear older tool results: once the results in the conversation pass about
- * 15k tokens, all but the newest four long ones go.
+ * When review passes clear older tool results: only once the results in the conversation pass
+ * about 100k tokens, a guard for the context window, not a saving. Clearing changes the cached
+ * prefix, so the provider writes the conversation after it again at 1.25x the input price, while
+ * keeping a result costs a cache read (0.05x) per later turn: clearing early costs more.
  */
-export const REVIEW_TRIM = { maxChars: 60_000, keepLast: 4 } as const
+export const REVIEW_TRIM = { maxChars: 400_000, keepLast: 8 } as const
 
 /**
  * Shares of `costLimitUsd` each pass may spend before it is asked for its answer: a diff reviewed
@@ -390,6 +396,12 @@ export const REVIEW_MAX_TURNS = 90
  * the cross-part pass reads across slices.
  */
 export const PART_MAX_TURNS = 50
+
+/**
+ * Reasoning effort of a part's pass. At the `main` tier's medium effort parts answered after a
+ * read or two and left the work to the cross-part pass; high effort keeps them on the cheaper tier.
+ */
+export const PART_EFFORT = 'high' as const
 /** Turn limit of the cross-part pass of a split review. */
 export const CROSS_PART_TURNS = 30
 
@@ -628,6 +640,7 @@ async function reviewPass(
   tier: 'main' | 'deep' = options.deep ? 'deep' : 'main',
   share: number = REVIEW_BUDGET_SHARES.single,
   label = 'review pass',
+  effort?: 'high',
 ) {
   const answerAt = options.costLimitUsd ? options.costLimitUsd * share : undefined
   const impact = options.impactFor
@@ -652,6 +665,7 @@ async function reviewPass(
       output: agentReviewSchema,
       taskKind: 'review',
       tier,
+      ...(effort ? { effort } : {}),
       toolsets: [
         ...withLockfileTools(options.toolsets),
         ...(input.crossPart ? [mergeRequestDiffTools(input.files)] : []),
@@ -744,7 +758,7 @@ async function crossPartPass(
               title: c.title,
               severity: c.severity,
             })),
-          walkthrough: walkthrough.map((step) => step.change),
+          walkthrough: walkthrough.map((step) => `${step.change} (${step.files.join(', ')})`),
           summaries: passes.map((done) => done.summary),
         },
       },
@@ -753,11 +767,12 @@ async function crossPartPass(
       REVIEW_BUDGET_SHARES.cross,
       'cross-part pass',
     )
-    // Its walkthrough would repeat the parts'; findings, summary and duplicates count.
+    // Its effort and review time would repeat the parts'.
     return {
       candidates: pass.candidates,
       summary: pass.summary,
       verdict: pass.verdict,
+      ...(pass.walkthrough?.length ? { walkthrough: pass.walkthrough } : {}),
       ...(pass.duplicates?.length ? { duplicates: pass.duplicates } : {}),
     }
   } catch (error) {
@@ -797,8 +812,7 @@ export function dropDuplicates(
  * `reviewTurns` capped at `PART_MAX_TURNS`); then one cross-part pass (`CROSS_PART_TURNS`, on the
  * `deep` tier with `options.deep`) reviews the whole diff for problems spanning parts, told what
  * the parts found. Its findings are added, the part findings it names as duplicates dropped, and
- * its summary replaces the parts' (joined when it fails or has none); walkthroughs are
- * concatenated, `effort` is the highest, `reviewMinutes` the sum of the parts' (absent when a part
+ * its summary and walkthrough replace the parts' (joined when it fails or gives none), `effort` is the highest, `reviewMinutes` the sum of the parts' (absent when a part
  * failed) and the verdict the worst. The cross-part pass failing is ignored unless a spend limit
  * stopped it. A failed part does not lose the others: its files are listed as not reviewed in the
  * summary and the verdict becomes `needs-changes`. The review fails when every part fails, a
@@ -824,6 +838,7 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
         'main',
         REVIEW_BUDGET_SHARES.parts / parts.length,
         `review part ${index + 1}/${parts.length}`,
+        PART_EFFORT,
       ).finally(() => {
         done++
         options.onProgress?.({ stage: 'review', parts: parts.length, done })
@@ -834,8 +849,9 @@ export async function runAgentReview(options: AgentReviewOptions): Promise<Revie
   const stop = errors.find(isBudgetStop)
   if (stop || !passes.length) throw stop ?? errors[0]
   const failed = parts.filter((_, index) => settled[index]?.status !== 'fulfilled')
-  const walkthrough = passes.flatMap((pass) => pass.walkthrough ?? [])
-  const cross = await crossPartPass(options, parts.length, passes, walkthrough)
+  const partWalkthrough = passes.flatMap((pass) => pass.walkthrough ?? [])
+  const cross = await crossPartPass(options, parts.length, passes, partWalkthrough)
+  const walkthrough = cross?.walkthrough?.length ? cross.walkthrough : partWalkthrough
   const effort = Math.max(0, ...passes.map((pass) => pass.effort ?? 0))
   // Each part estimated its own slice; the cross-part pass gives none.
   const reviewMinutes = failed.length

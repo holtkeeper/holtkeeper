@@ -268,7 +268,7 @@ describe('progressText', () => {
       1,
       englishReviewMessages,
     )
-    expect(text).toContain('~11 min left.')
+    expect(text).toContain('~6 min left.')
     expect(text).toContain('- ⏳ Reviewing the changes in 3 parts: 1 done')
     expect(text).toContain('- ▫️ Final pass over the whole merge request')
     expect(text).toContain('- ▫️ Double-checking the findings')

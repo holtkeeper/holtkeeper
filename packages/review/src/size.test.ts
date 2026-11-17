@@ -226,7 +226,7 @@ describe('planSplit', () => {
     texts,
   }
 
-  test('gives the direction of the split and takes the translated texts', async () => {
+  test('judges whether to split, without a plan, and takes the translated texts', async () => {
     const { agent, tasks } = fakeAgent({
       'review-split': [
         {
@@ -239,19 +239,15 @@ describe('planSplit', () => {
     })
     const usage = { turns: 0 }
     const advice = await planSplit({ ...base, agent, usage, language: 'German' })
-    expect(advice).toEqual({
-      texts: { ...texts, ai: 'Translated AI note.' },
-      splittable: true,
-      direction: 'Ship the widget model first, then the gadget screens on top of it.',
-    })
+    expect(advice).toEqual({ texts: { ...texts, ai: 'Translated AI note.' }, splittable: true })
     expect(tasks[0]).toMatchObject({ tier: 'fast', taskKind: 'review-split', capabilities: [] })
     expect(tasks[0]?.system).toContain('in German')
-    expect(tasks[0]?.system).toContain('never by file paths')
+    expect(tasks[0]?.system).not.toContain('direction')
     expect(tasks[0]?.prompt).toContain('- src/widget.ts (+400 -0)')
     expect(usage.turns).toBe(2)
   })
 
-  test('an empty direction gives none; not splittable keeps the reason', async () => {
+  test('a direction in the answer is ignored; not splittable keeps the reason', async () => {
     const empty = fakeAgent({
       'review-split': [{ splittable: true, reason: 'x', direction: ' ', texts }],
     })

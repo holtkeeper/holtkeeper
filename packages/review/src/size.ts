@@ -271,7 +271,6 @@ const textsSchema = z.object({
 const splitSchema = z.object({
   splittable: z.boolean(),
   reason: z.string(),
-  direction: z.string(),
   texts: textsSchema,
 })
 
@@ -279,12 +278,11 @@ const MAX_LISTED_FILES = 300
 const MAX_DESCRIPTION = 3000
 
 /**
- * Asks the `fast` model tier, without tools, how a large merge request could be split by
- * functionality, and to put the advice texts into the review language (`language`, else the
- * merge request description's). Parts keep only listed paths, each path in one part; fewer than
- * two parts means not splittable. Texts the answer leaves empty stay as given. Never throws
- * unless `signal` is aborted: a failed call or unusable answer gives the English texts without
- * a plan.
+ * Asks the `fast` model tier, without tools, whether splitting a large merge request by
+ * functionality would make its review easier (with the reason when not), and to put the advice
+ * texts into the review language (`language`, else the merge request description's). It gives
+ * no split plan. Texts the answer leaves empty stay as given. Never throws unless `signal` is
+ * aborted: a failed call or unusable answer gives the English texts, splittable.
  */
 export async function planSplit(options: {
   agent: Agent
@@ -308,10 +306,9 @@ export async function planSplit(options: {
       {
         dir: options.dir,
         system: [
-          'You advise how to split a merge request that is too large to review in one sitting into smaller merge requests, each reviewable on its own.',
-          '- `direction`: one to three plain sentences on how to split it by functionality: which coherent pieces to cut out and in what order to merge them, each building only on earlier ones, tests going with the code they test. Name pieces by what they do, never by file paths; no lists, no Markdown headings.',
-          '- Set `splittable` to false when splitting would not make the review easier: a mechanical change (a rename, formatting, generated code, a dependency bump touching many files) or one atomic change whose pieces cannot work alone. `reason` then says in one or two sentences why; leave `direction` empty. When splittable, leave `reason` empty.',
-          `- \`texts\`: rewrite every given text ${language}, keeping its meaning, Markdown and numbers; return a text unchanged when it is already in that language. Write \`reason\` and \`direction\` ${language} as well.`,
+          'You judge whether a merge request that is too large to review in one sitting could be split into smaller merge requests by functionality, each reviewable on its own.',
+          '- Set `splittable` to false when splitting would not make the review easier: a mechanical change (a rename, formatting, generated code, a dependency bump touching many files) or one atomic change whose pieces cannot work alone. `reason` then says in one or two sentences why. When splittable, leave `reason` empty.',
+          `- \`texts\`: rewrite every given text ${language}, keeping its meaning, Markdown and numbers; return a text unchanged when it is already in that language. Write \`reason\` ${language} as well.`,
           KEEP_ENGLISH,
         ].join('\n'),
         prompt: [
@@ -361,6 +358,5 @@ function mergeTexts(
 function splitAdvice(answer: z.infer<typeof splitSchema>): Omit<ReviewSizeAdvice, 'texts'> {
   const reason = answer.reason.trim()
   if (!answer.splittable) return { splittable: false, ...(reason ? { reason } : {}) }
-  const direction = answer.direction.trim()
-  return { splittable: true, ...(direction ? { direction } : {}) }
+  return { splittable: true }
 }

@@ -36,12 +36,13 @@ const quiet: ReviewProgress = { update: () => {}, finish: async () => {}, fail: 
 /**
  * Rough minutes each step takes, for the time left in the progress note: a pass over a part on the
  * main tier, a single pass, the cross-part pass and the verification (main and deep), and posting.
+ * Measured on a split review of about 2 000 changed lines in four parts.
  */
 export const STAGE_MINUTES = {
-  part: 4,
+  part: 2,
   single: { main: 3, deep: 6 },
-  cross: { main: 3, deep: 4 },
-  verify: 3,
+  cross: { main: 2, deep: 3 },
+  verify: 1,
   post: 1,
 } as const
 

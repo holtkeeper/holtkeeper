@@ -127,7 +127,7 @@ const reviewSizeSchema = z.object({
       /** `false` when splitting would not make the review easier (`reason` says why). */
       splittable: z.boolean(),
       reason: z.string().optional(),
-      /** One to three sentences on how to split it by functionality, without file paths. */
+      /** How to split it by functionality; only in records from before the plan was dropped. */
       direction: z.string().optional(),
       /** Proposed parts with their files; only in records from before `direction`. */
       parts: z.array(sizePartSchema).optional(),

@@ -1182,7 +1182,7 @@ describe('review size', () => {
     expect(capped.size).toMatchObject({ minutes: 22, agentMinutes: 600 })
   })
 
-  test('a too-large merge request gets the split plan and the note for AI agents', async () => {
+  test('a too-large merge request gets the advice to split, no plan, and the note for AI agents', async () => {
     const { forge, submissions } = fakeForge({ files: twoFiles, discussions: [] })
     const { agent, tasks } = fakeAgent({
       review: [
@@ -1209,7 +1209,7 @@ describe('review size', () => {
       }),
     )
     expect(data.size?.level).toBe('too-large')
-    expect(data.size?.advice?.direction).toBe('Merge prices first, then gadgets.')
+    expect(data.size?.advice?.direction).toBeUndefined()
     expect(data.size?.advice?.parts).toBeUndefined()
     const split = tasks.find((task) => task.taskKind === 'review-split')
     expect(split?.prompt).toContain('Adds prices.')
@@ -1219,7 +1219,8 @@ describe('review size', () => {
     expect(summary).toContain(
       '> 🛑 **Translated estimate. Translated limit.** Review effort: 3/5. Translated split.',
     )
-    expect(summary).toContain('Translated split.\n>\n> Merge prices first, then gadgets.\n>\n')
+    expect(summary).toContain('Translated split.\n>\n> _Translated AI note._')
+    expect(summary).not.toContain('Merge prices first')
     expect(summary).not.toContain('src/price.ts`:')
     expect(summary).toContain('> _Translated AI note._')
     expect(summary).not.toContain('Estimated review time')

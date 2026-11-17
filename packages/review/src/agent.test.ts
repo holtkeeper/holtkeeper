@@ -347,7 +347,7 @@ describe('runAgentReview', () => {
           walkthrough: [{ files: ['ui/form.ts'], change: 'B' }],
         }),
         answer('lib/math.ts', {
-          walkthrough: [{ files: ['lib/math.ts'], change: 'C' }],
+          walkthrough: [{ files: ['api/routes.ts', 'ui/form.ts'], change: 'A and B' }],
           reviewMinutes: 90,
         }),
       ],
@@ -375,6 +375,8 @@ describe('runAgentReview', () => {
     expect(tasks[0]?.prompt).toContain('part 1 of 2')
     expect(tasks[0]?.maxTurns).toBe(PART_MAX_TURNS)
     expect(tasks.map((task) => task.tier)).toEqual(['main', 'main', 'main'])
+    expect(tasks.map((task) => task.effort)).toEqual(['high', 'high', undefined])
+    expect(tasks[0]?.prompt).toContain('You are the only reviewer of these lines')
     expect(tasks[0]?.prompt).toContain('- lib/math.ts')
     expect(tasks[0]?.prompt).toContain('# Add widget pricing')
     expect(tasks[0]?.prompt).toContain('api/store.ts:2 (tests)')
@@ -395,7 +397,9 @@ describe('runAgentReview', () => {
     expect(tasks[0]?.trimToolResults).toEqual(REVIEW_TRIM)
     expect(cross?.prompt).toContain('- [1] api/routes.ts:1 (major) Problem in api/routes.ts')
     expect(cross?.prompt).toContain('Summaries of the parts:\n- Reviewed api/routes.ts.')
-    expect(cross?.prompt).toContain('What the parts found the change does:\n- A\n- B')
+    expect(cross?.prompt).toContain(
+      'Walkthroughs of the parts (change and its files):\n- A (api/routes.ts)\n- B (ui/form.ts)',
+    )
     expect(cross?.maxTurns).toBe(CROSS_PART_TURNS)
     expect(result.candidates.map((c) => c.path)).toEqual([
       'api/routes.ts',
@@ -407,7 +411,8 @@ describe('runAgentReview', () => {
     expect(result.verdict).toBe('needs-changes')
     expect(result.effort).toBe(4)
     expect(result.reviewMinutes).toBe(55)
-    expect(result.walkthrough?.map((entry) => entry.change)).toEqual(['A', 'B'])
+    // The cross-part pass's walkthrough replaces the parts'.
+    expect(result.walkthrough?.map((entry) => entry.change)).toEqual(['A and B'])
     expect(total.turns).toBe(6)
   })
 

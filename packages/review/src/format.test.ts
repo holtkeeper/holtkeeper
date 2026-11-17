@@ -58,7 +58,7 @@ test('isSummaryNote recognizes the summary note only', () => {
   expect(isSummaryNote(`Quoting:\n\n${summary}`)).toBe(false)
 })
 
-test('sizeAdviceBlock gives the direction of the split and the note for AI agents', () => {
+test('sizeAdviceBlock gives the advice to split and the note for AI agents, never a direction', () => {
   const texts = adviceTexts('too-large', 150)
   const size = { minutes: 150, level: 'too-large' as const, files: 8, lines: 1300, groups: 3 }
   expect(sizeAdviceBlock(size)).toBe('')
@@ -74,7 +74,7 @@ test('sizeAdviceBlock gives the direction of the split and the note for AI agent
     'Review effort: 4/5.',
   )
   expect(block).toBe(
-    `**${texts.estimate} ${texts.limit}** Review effort: 4/5. ${texts.split}\n\nShip the widget model first, then the gadget screens.\n\n_${texts.ai}_`,
+    `**${texts.estimate} ${texts.limit}** Review effort: 4/5. ${texts.split}\n\n_${texts.ai}_`,
   )
 
   const atomic = sizeAdviceBlock({

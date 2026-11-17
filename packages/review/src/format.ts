@@ -90,9 +90,9 @@ export function countBySeverity(findings: readonly Pick<ReviewFinding, 'severity
 }
 
 /**
- * The advice to split a large merge request: the estimate (with `extra` after it), the advice,
- * the direction of the split and the note for code an AI agent writes; `''` without advice. When the agent found that splitting would
- * not help, only the estimate and its reason.
+ * The advice to split a large merge request: the estimate (with `extra` after it), the advice
+ * and the note for code an AI agent writes; `''` without advice. When the agent found that
+ * splitting would not help, only the estimate and its reason.
  */
 export function sizeAdviceBlock(size: ReviewSize | undefined, extra = ''): string {
   const advice = size?.advice
@@ -102,9 +102,7 @@ export function sizeAdviceBlock(size: ReviewSize | undefined, extra = ''): strin
     .filter(Boolean)
     .join(' ')
   if (!advice.splittable) return [lead, advice.reason ?? ''].filter(Boolean).join('\n\n')
-  return [`${lead} ${texts.split}`, advice.direction ?? '', `_${texts.ai}_`]
-    .filter(Boolean)
-    .join('\n\n')
+  return [`${lead} ${texts.split}`, `_${texts.ai}_`].join('\n\n')
 }
 
 const sizeEmoji = { ok: '⏱️', large: '⚠️', 'too-large': '🛑' } as const
