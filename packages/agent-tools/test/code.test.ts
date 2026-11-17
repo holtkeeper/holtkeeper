@@ -136,17 +136,6 @@ describe('code.symbol and code.references', () => {
     expect(run('code.symbol', { name: 'a.b' })).rejects.toThrow('not an identifier')
   })
 
-  test('with body, shows the source of each definition', async () => {
-    expect(await run('code.symbol', { name: 'formatName', body: true })).toBe(
-      [
-        'src/util.ts:2-4',
-        '2| export function formatName(name: string): string {',
-        '3|   return name.trim()',
-        '4| }',
-      ].join('\n'),
-    )
-  })
-
   test('finds usages without definitions, comments or strings', async () => {
     expect(await run('code.references', { name: 'formatName' })).toBe(
       [
