@@ -433,6 +433,23 @@ describe('createAiSdkAgent', () => {
     expect(marked(final?.prompt.at(-1) ?? {})).toBeTrue()
   })
 
+  test('a model that answers nothing with tools disabled is asked once more without them', async () => {
+    const { model, languageModel } = scripted(
+      call('glob', { pattern: '*' }),
+      say(''),
+      say('{"score": 3}'),
+    )
+    const agent = createAiSdkAgent({ languageModel, tierModels: on('m'), maxTurns: 1 })
+    const result = await agent.run({
+      dir: await checkout(),
+      prompt: 'p',
+      output: z.object({ score: z.number() }),
+    })
+    expect(result).toMatchObject({ output: { score: 3 }, turns: 3 })
+    const final = model.doGenerateCalls.at(-1)
+    expect(final?.tools).toBeUndefined()
+  })
+
   test('an identical repeated call is not run again and three such steps end the loop', async () => {
     const { model, languageModel } = scripted(
       call('read_file', { path: 'src/a.ts', offset: 1 }),

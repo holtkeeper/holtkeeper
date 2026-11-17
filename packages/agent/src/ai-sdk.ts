@@ -525,8 +525,9 @@ const UNPRICED_FALLBACK = {
  * an earlier read-only tool call with no `edit_file`, `write_file` or `run_command` in between is
  * answered with an error instead of running, and three steps of nothing but repeats end the loop
  * early. When the loop ends on tool calls (turn limit or repeats) under the cost cap, one more
- * request with tools disabled asks for the answer; it counts as a turn, so `turns` can reach
- * `maxTurns + 1`. Only when that request gives no answer does the run fail, with `MaxTurnsError`
+ * request with tools disabled asks for the answer, and when that gives none, one more without
+ * the tool declarations; each counts as a turn, so `turns` can reach `maxTurns + 2`. Only when
+ * neither gives an answer does the run fail, with `MaxTurnsError`
  * carrying what it used. With `task.followUpWithoutTools`, a final answer given before any tool
  * call is followed up once in the same conversation; the answer to it wins, and the first one is
  * returned when the follow-up yields no valid answer. Steps reach `task.transcript` as they finish.
@@ -596,6 +597,9 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         let usage = emptyUsage()
         let turns = 0
         let finishing = false
+        // Some models (Gemini) answer nothing when tools are declared but disabled; the last try
+        // drops the declarations.
+        let bare = false
         const cap = task.maxCostUsd
         const soft = task.answerAtCostUsd
         const reaches =
@@ -612,8 +616,8 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             model,
             system,
             messages: finishing ? mark(input) : input,
-            ...(tools.size && { tools: set, toolCallConcurrency: 1 }),
-            ...(finishing && tools.size && { toolChoice: 'none' as const }),
+            ...(tools.size && !bare && { tools: set, toolCallConcurrency: 1 }),
+            ...(finishing && tools.size && !bare && { toolChoice: 'none' as const }),
             ...(!finishing && {
               prepareStep: ({ messages: current }: { messages: ModelMessage[] }) => ({
                 messages: mark(current),
@@ -720,8 +724,19 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
               if (error instanceof BudgetExceededError) throw error
               return useFallback(noAnswer(error))
             }
-            if (result.finishReason === 'tool-calls' || !result.text.trim())
-              return useFallback(noAnswer())
+            if (result.finishReason === 'tool-calls' || !result.text.trim()) {
+              bare = true
+              try {
+                // oxlint-disable-next-line no-await-in-loop -- one last request without tools
+                result = await step(messages)
+              } catch (error) {
+                signal.throwIfAborted()
+                if (error instanceof BudgetExceededError) throw error
+                return useFallback(noAnswer(error))
+              }
+              if (result.finishReason === 'tool-calls' || !result.text.trim())
+                return useFallback(noAnswer())
+            }
           }
           if (
             followUp &&
