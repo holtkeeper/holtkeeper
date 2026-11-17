@@ -319,6 +319,74 @@ describe('settingsAgentFor', () => {
     ])
   })
 
+  test('llm.tiers runs a tier on its models in order and falls back when one fails', async () => {
+    const credentials = createCredentialService({ credentials: store.credentials, vault })
+    await credentials.create({
+      name: 'Gateway',
+      kind: 'ai-sdk',
+      url: 'https://gateway.test/v1',
+      scope: { all: true },
+      secret: 'gw-key',
+      options: { provider: 'gateway', package: '@ai-sdk/openai-compatible' },
+    })
+    await setting('llm.provider', 'Gateway')
+    await setting('llm.tiers', {
+      main: [
+        { model: 'widget-pro', effort: 'high' },
+        { model: 'gizmo-2' },
+        { model: 'missing-model' },
+      ],
+    })
+    const asked: string[] = []
+    const log: string[] = []
+    const answer = (modelId: string) =>
+      new MockLanguageModelV4({
+        doGenerate: async () => {
+          asked.push(modelId)
+          if (modelId === 'acme/widget-pro')
+            throw Object.assign(new Error('Service Unavailable'), { statusCode: 503 })
+          return {
+            content: [{ type: 'text', text: `answer of ${modelId}` }],
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: {
+              inputTokens: { total: 4, noCache: 4, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 2, text: 2, reasoning: 0 },
+            },
+            warnings: [],
+          }
+        },
+      })
+    const routedFor = settingsAgentFor({
+      config,
+      store,
+      vault,
+      now,
+      log: (line) => log.push(line),
+      agentOptions: { languageModel: answer },
+      models: {
+        list: async () => ({
+          models: ['acme/widget-pro', 'other/gizmo-2', 'anthropic/claude-sonnet-5.5'].map((id) => ({
+            id,
+            source: 'provider' as const,
+          })),
+        }),
+      },
+    })
+    const agent = await routedFor(repo, { jobId: 'j7' })
+    const result = await agent?.run({ dir: '/r', prompt: 'p', capabilities: [] })
+    expect(result).toMatchObject({ text: 'answer of other/gizmo-2', provider: 'Gateway' })
+    expect(asked).toEqual(['acme/widget-pro', 'other/gizmo-2'])
+    expect(log).toContain('agent: llm.tiers: provider "Gateway" lists no model "missing-model"')
+    expect(log.some((line) => line.includes('Gateway acme/widget-pro failed'))).toBe(true)
+    expect(await store.aiUsage.list({ jobId: 'j7' })).toMatchObject([
+      { provider: 'Gateway', model: 'other/gizmo-2', outcome: 'ok' },
+    ])
+
+    asked.length = 0
+    await agent?.run({ dir: '/r', prompt: 'p', capabilities: [], tier: 'deep' })
+    expect(asked).toEqual(['anthropic/claude-sonnet-5.5'])
+  })
+
   test('only the global llm.provider entry counts', async () => {
     await anthropic('sk')
     await store.settings.remove('llm.provider')

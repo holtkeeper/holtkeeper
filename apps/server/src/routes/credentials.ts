@@ -19,7 +19,7 @@ import type {
   ProviderModelList,
 } from '@holtkeeper/api'
 import { parseCredentialInput } from '@holtkeeper/credentials'
-import { resolveGlobalSetting } from '@holtkeeper/settings'
+import { llmTiersSchema, resolveGlobalSetting } from '@holtkeeper/settings'
 import type { CredentialCapabilities, ForgeDocumentData } from '@holtkeeper/store'
 import { webPaths } from '@holtkeeper/web-paths'
 import { Hono } from 'hono'
@@ -72,6 +72,7 @@ type UsedCredential = Pick<CredentialView, 'id' | 'name' | 'kind'>
 
 /**
  * What refers to each credential: panel forges by token or SSH key, the global `llm.provider`,
+ * credentials `llm.tiers` routes name besides it,
  * `knowledge.embeddings` (while on) and `libraries` settings by id or name, and the services that use every credential of a kind.
  */
 async function credentialUses(
@@ -114,6 +115,22 @@ async function credentialUses(
       label: 'Agents',
       href: webPaths.settings('ai'),
     })
+
+  const tiers = llmTiersSchema.safeParse(resolveGlobalSetting(settings, 'llm.tiers')?.value ?? {})
+  const routed = new Set(
+    tiers.success
+      ? Object.values(tiers.data).flatMap((routes) =>
+          (routes ?? []).flatMap((route) => {
+            const found = named(route.credential ?? provider ?? '')
+            return found && isAiProviderKind(found.kind) && found.id !== providerCredential?.id
+              ? [found.id]
+              : []
+          }),
+        )
+      : [],
+  )
+  for (const id of routed)
+    add(id, { kind: 'setting', id: 'llm.tiers', label: 'Models', href: webPaths.settings('ai') })
 
   const embeddings = embeddingsSettingOf(settings)
   const embeddingReference = embeddings.credential ?? provider

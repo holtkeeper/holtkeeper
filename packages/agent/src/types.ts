@@ -110,6 +110,8 @@ export interface AgentResult<Output = unknown> {
   usage?: AgentUsage
   /** The provider's id of the model the run used, when the adapter knows it. */
   model?: string
+  /** Who served the run (e.g. the credential name), when an agent routes between providers. */
+  provider?: string
   /**
    * Prompt tokens of the run's first model request (system prompt, task prompt and tool schemas,
    * cached or not): the fixed part every later request repeats. Set when the adapter knows it.

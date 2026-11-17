@@ -339,6 +339,33 @@ export function resolveLatestModel(
   return newest?.id
 }
 
+/**
+ * The listed model a configured `reference` names, or `undefined` when the listing does not have
+ * it. `<prefix>@latest` resolves like `resolveLatestModel`. Any other reference matches a listed
+ * id exactly, else by its name without the vendor (`gemini-4-carbon` matches
+ * `google/gemini-4-carbon`), dots and dashes between digits being the same separator
+ * (`claude-sonnet-5-5` matches `anthropic/claude-sonnet-5.5`). A reference with a vendor matches
+ * only that vendor's models. When the listing failed or is empty, the reference is returned as is
+ * (`@latest` ones excepted), since nothing can be checked.
+ */
+export function resolveModelReference(
+  reference: string,
+  listing: ModelListing,
+): string | undefined {
+  const unlisted = listing.error !== undefined || listing.models.length === 0
+  if (reference.endsWith(LATEST_SUFFIX)) return resolveLatestModel(reference, listing.models)
+  if (unlisted) return reference
+  if (listing.models.some((model) => model.id === reference)) return reference
+  const wanted = splitVendor(reference)
+  const name = dotsToDashes(wanted.name)
+  const matches = listing.models.filter((model) => {
+    const listed = splitVendor(model.id)
+    if (wanted.vendor !== undefined && wanted.vendor !== listed.vendor) return false
+    return dotsToDashes(listed.name) === name
+  })
+  return (matches.find((model) => !model.id.includes('/')) ?? matches[0])?.id
+}
+
 /** Caches `listProviderModels` per key (e.g. the credential id) for `ttlMs`. */
 export interface ModelCatalog {
   list(key: string, provider: AiProvider): Promise<ModelListing>

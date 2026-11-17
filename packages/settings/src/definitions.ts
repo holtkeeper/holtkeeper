@@ -65,9 +65,61 @@ export const llmProvider = defineSetting({
   help: `Pick the AI provider credential agents use. The key, endpoint and kind live in **Credentials**, so rotating a key never touches settings.
 
 - One provider serves every repository; its credential scope must cover the repositories agents work on.
-- Models are not configured: tasks run on fixed tiers, resolved to the newest models the provider lists. Summaries and classification use Haiku, reviews, replies and changes use Sonnet, deep reviews use Opus.`,
+- Tasks run on fixed tiers. **Models** (\`llm.tiers\`) picks the models of each tier and their fallbacks; a tier it leaves out runs on the newest Claude model the provider lists: Haiku for summaries and classification, Sonnet for reviews, replies and changes, Opus for deep reviews.`,
   default: null,
   schema: z.string().trim().min(1).meta({ 'x-credential': 'ai-provider' }),
+})
+
+/** One model a tier may run on, in `llm.tiers`. */
+export const modelRouteSchema = z.object({
+  /**
+   * Model id as the credential lists it (`google/gemini-4-carbon`), without the vendor
+   * (`gemini-4-carbon`), or the newest of a family (`claude-sonnet@latest`).
+   */
+  model: z.string().trim().min(1),
+  /** Id or name of an AI provider credential; unset: the credential `llm.provider` names. */
+  credential: z.string().trim().min(1).optional().meta({ 'x-credential': 'ai-provider' }),
+  /** Reasoning effort; unset: the tier's (fast low, main medium, deep high). */
+  effort: z.enum(['low', 'medium', 'high']).optional(),
+})
+
+/** A `llm.tiers` route. */
+export type ModelRouteSetting = z.output<typeof modelRouteSchema>
+
+const tierRoutesSchema = z.array(modelRouteSchema).max(8).optional()
+
+/** Value of `llm.tiers`: the models of each tier, most preferred first. */
+export const llmTiersSchema = z.object({
+  fast: tierRoutesSchema,
+  main: tierRoutesSchema,
+  deep: tierRoutesSchema,
+})
+
+/** A parsed `llm.tiers` value. */
+export type LlmTiers = z.output<typeof llmTiersSchema>
+
+export const llmTiers = defineSetting({
+  key: 'llm.tiers',
+  label: 'Models',
+  description:
+    'Models of each tier in order of preference; when one fails, the task moves to the next. Unset tiers run on the newest Claude model of the provider.',
+  section: 'AI',
+  global: true,
+  help: `Picks the models agent tasks run on. Every task asks for a tier:
+
+- **fast**: summaries, classification, translation and size estimates.
+- **main**: reviews (also each part of a split review), replies, verification and changes.
+- **deep**: deep reviews, the cross-part pass of split reviews and verification of serious findings.
+
+Each tier is a list, most preferred first. A task runs on the first model; when that model is unavailable (overloaded, rate limited, unknown, refused key or balance, a network failure) the task starts over on the next one, and the failed model waits behind the others for five minutes. A task that already changed files does not start over.
+
+- **model**: the id as the credential lists it (\`google/gemini-4-carbon\`), the id without the vendor (\`gemini-4-carbon\`), or the newest of a family (\`claude-sonnet@latest\`). Models the credential does not list are skipped.
+- **credential**: the AI provider credential to use; unset, **AI provider** (\`llm.provider\`).
+- **effort**: reasoning effort; unset, the tier's. Some tasks set their own.
+
+After the list, every tier still falls back on the newest Claude model of its family that **AI provider** lists (Haiku, Sonnet, Opus).`,
+  default: null,
+  schema: llmTiersSchema,
 })
 
 export const llmBudget = defineSetting({
@@ -550,6 +602,7 @@ The level applies to every person, team and agent alike; there are no per-team e
 /** Settings Holtkeeper knows about out of the box; plugins can register more. */
 export const builtinSettings: SettingDefinition[] = [
   llmProvider,
+  llmTiers,
   llmBudget,
   agentTools,
   knowledgeAutoAccept,

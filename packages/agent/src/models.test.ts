@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
-import { listProviderModels, modelCatalog, resolveLatestModel } from './models.ts'
+import {
+  listProviderModels,
+  modelCatalog,
+  resolveLatestModel,
+  resolveModelReference,
+} from './models.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -248,5 +253,36 @@ describe('ai-sdk models', () => {
     )
     expect(seen).toEqual(['https://llm.corp.test/v1/models Bearer k'])
     expect(listing.models).toEqual([{ id: 'corp-large', source: 'provider' }])
+  })
+})
+
+describe('resolveModelReference', () => {
+  const listing = {
+    models: [
+      { id: 'google/gemini-4-carbon', source: 'provider' as const },
+      { id: 'anthropic/claude-sonnet-5.5', source: 'provider' as const },
+      { id: 'anthropic/claude-sonnet-5', source: 'provider' as const },
+      { id: 'acme/widget-1', source: 'provider' as const },
+      { id: 'widget-1', source: 'provider' as const },
+    ],
+  }
+
+  test('finds a listed model by its id, its name without the vendor or its dashed version', () => {
+    expect(resolveModelReference('google/gemini-4-carbon', listing)).toBe('google/gemini-4-carbon')
+    expect(resolveModelReference('gemini-4-carbon', listing)).toBe('google/gemini-4-carbon')
+    expect(resolveModelReference('claude-sonnet-5-5', listing)).toBe('anthropic/claude-sonnet-5.5')
+    expect(resolveModelReference('claude-sonnet@latest', listing)).toBe(
+      'anthropic/claude-sonnet-5.5',
+    )
+    expect(resolveModelReference('widget-1', listing)).toBe('widget-1')
+  })
+
+  test('a vendor narrows the match and an unlisted model resolves to nothing', () => {
+    expect(resolveModelReference('other/gemini-4-carbon', listing)).toBeUndefined()
+    expect(resolveModelReference('gemini-9', listing)).toBeUndefined()
+  })
+
+  test('without a listing the reference stays as is', () => {
+    expect(resolveModelReference('gemini-9', { models: [], error: 'offline' })).toBe('gemini-9')
   })
 })

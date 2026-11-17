@@ -11,14 +11,22 @@ import {
   type ModelCatalog,
   type ModelListing,
   type ModelPricing,
+  type TierModels,
+  type ModelRoute,
+  type ModelTier,
+  MODEL_TIERS,
   type ProviderAgent,
+  type RouteHealth,
+  type RoutedAgent,
   type Toolset,
   createAgent,
   createLimiter,
   createTranscript,
+  fallbackAgent,
   isAiProviderKind,
   modelCatalog,
   parseProviderOptions,
+  resolveModelReference,
   resolveTierModels,
 } from '@holtkeeper/agent'
 import {
@@ -47,7 +55,12 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { type GuideRequest, createGuideResolver, familyOf, guideTaskOf } from '@holtkeeper/guide'
 import { embeddingText, knowledgeAccess } from '@holtkeeper/knowledge'
 import { type Limiter, limitAgent, limitPolicySchema, resolveLimitPolicy } from '@holtkeeper/limits'
-import { resolveGlobalSetting, resolveSetting } from '@holtkeeper/settings'
+import {
+  type LlmTiers,
+  llmTiersSchema,
+  resolveGlobalSetting,
+  resolveSetting,
+} from '@holtkeeper/settings'
 import type { KnowledgeKind, SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
 import { z } from 'zod'
@@ -104,11 +117,11 @@ interface AgentRunOrigin {
 export interface AgentRunInfo extends AgentRunOrigin {
   repo: RepoTarget
   taskKind: string
-  /** The provider credential's name. */
+  /** The name of the provider credential the run used (its route's, when it fell back). */
   provider: string
-  /** Provider kind, e.g. `anthropic-compatible`. */
+  /** Provider kind of `llm.provider`, e.g. `anthropic-compatible`. */
   providerKind: string
-  /** The provider's model name the task ran on (its tier's model). */
+  /** The provider's model name the task ran on: the model that answered, else its tier's first. */
   model: string
   result?: AgentResult
   error?: unknown
@@ -127,8 +140,10 @@ export interface ServerDefaultsOptions {
   store: Pick<Store, 'knowledge' | 'guides' | 'families' | 'settings'> &
     Partial<Pick<Store, 'audit'>>
   now: () => Date
-  /** Provider label for `onRun`; default the provider kind. */
+  /** Provider label for `onRun` when the result names none; default the provider kind. */
   provider?: string
+  /** Provider kind for `onRun`; default the agent's. */
+  providerKind?: string
   /** Names team keys in Guide block titles; default the raw key. */
   teamTitle?: (key: string) => string
   /** The repository's confirmed family id, so knowledge narrowed to families applies to it. */
@@ -221,7 +236,7 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
  * successful, failed or denied.
  */
 export function withServerDefaults(
-  agent: Agent | ProviderAgent,
+  agent: Agent | ProviderAgent | RoutedAgent,
   options: ServerDefaultsOptions,
 ): Agent {
   const { repo, store, now, tools = {} } = options
@@ -237,9 +252,12 @@ export function withServerDefaults(
     store,
     ...(options.teamTitle && { teamTitle: options.teamTitle }),
   })
-  const providerKind = 'provider' in agent ? agent.provider : agent.name
+  const providerKind = options.providerKind ?? ('provider' in agent ? agent.provider : agent.name)
   const provider = options.provider ?? providerKind
-  const modelOf = (task: AgentTask) => ('modelFor' in agent ? agent.modelFor(task.tier) : '')
+  const modelOf = (task: AgentTask) => {
+    if ('routesFor' in agent) return agent.routesFor(task.tier)[0]?.model ?? ''
+    return 'modelFor' in agent ? agent.modelFor(task.tier) : ''
+  }
   const onRunError = options.onRunError ?? ((error: unknown) => console.error(error))
   const rules = options.rules && rulesToolset(options.rules)
   const { requester } = options
@@ -287,9 +305,9 @@ export function withServerDefaults(
             ...options.origin,
             repo,
             taskKind,
-            provider,
+            provider: ('result' in outcome && outcome.result.provider) || provider,
             providerKind,
-            model: modelOf(task),
+            model: ('result' in outcome && outcome.result.model) || modelOf(task),
             ...outcome,
             durationMs: Math.max(0, now().getTime() - started.getTime()),
             at: started.toISOString(),
@@ -482,6 +500,13 @@ export interface SettingsAgentOptions {
   neighbours?: NeighbourIndex
 }
 
+/** Tiers a tier without models borrows from, nearest first. */
+const NEAREST_TIERS: Readonly<Record<ModelTier, readonly ModelTier[]>> = {
+  deep: ['main', 'fast'],
+  fast: ['main', 'deep'],
+  main: ['deep', 'fast'],
+}
+
 /** Prices of the listed models that have them, by model id; `undefined` when none do. */
 function pricingOf(listing: ModelListing): Record<string, ModelPricing> | undefined {
   const priced = listing.models.flatMap((m) => (m.pricing ? [[m.id, m.pricing] as const] : []))
@@ -537,6 +562,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
   const log = options.log ?? (() => {})
   const limiters = new Map<string, ConcurrencyLimiter>()
   const tierNotes = new Set<string>()
+  const routeHealth: RouteHealth = new Map()
   const apiCatalog = createApiCatalog({ analyses: store.analyses })
   const usageIndex = createUsageIndex({ analyses: store.analyses })
   const resolveGuide = createGuideResolver({ store, teamTitle: teamLabeler(config) })
@@ -574,6 +600,128 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     return limiter
   }
 
+  const note = (message: string) => {
+    if (tierNotes.has(message)) return
+    tierNotes.add(message)
+    log(`agent: ${message}`)
+  }
+
+  /** An opened credential: its provider, model listing and prices. */
+  const openCredential = async (credential: StoredCredential) => {
+    parseProviderOptions(credential)
+    const provider: AiProvider = {
+      kind: credential.kind,
+      url: credential.url,
+      secret: await vault.open(credential.secret),
+      ...(credential.options && { options: credential.options }),
+    }
+    void options.credentials?.markUsed(credential.id)
+    const key = `${credential.id}:${credential.updatedAt}`
+    const listing = await catalog.list(key, provider)
+    const pricing =
+      credential.kind === 'ai-sdk'
+        ? pricingOf(listing)
+        : await anthropicCatalogPricing(options.aiCatalog)
+    return { credential, provider, key, listing, pricing }
+  }
+  type OpenedCredential = Awaited<ReturnType<typeof openCredential>>
+
+  const agentOn = (opened: OpenedCredential, tierModels: TierModels, runner?: CommandRunner) => {
+    const limiter = limiterFor(opened.credential)
+    const { capabilities } = opened.credential
+    return createAgent(opened.provider, {
+      ...(capabilities && { agentLoop: capabilities.agentLoop }),
+      ...options.agentOptions,
+      tierModels,
+      ...(runner && { runner }),
+      ...(limiter && { limiter }),
+      ...(opened.pricing && { pricing: opened.pricing }),
+      ...(options.aiProviders && { plugins: options.aiProviders }),
+    })
+  }
+
+  /**
+   * The routes of every tier: the `llm.tiers` models each credential lists, then the newest
+   * Claude model of the tier's family the primary credential lists. A tier left without routes
+   * borrows the nearest tier's.
+   */
+  const routedAgent = async (input: {
+    primary: StoredCredential
+    credentials: readonly StoredCredential[]
+    target: RepoTarget
+    tiers: LlmTiers
+    runner: CommandRunner | undefined
+  }): Promise<RoutedAgent> => {
+    const opened = new Map<string, Promise<OpenedCredential>>()
+    const open = (credential: StoredCredential) => {
+      let found = opened.get(credential.id)
+      if (!found) {
+        found = openCredential(credential)
+        opened.set(credential.id, found)
+      }
+      return found
+    }
+    const primary = await open(input.primary)
+    let claudeTiers: TierModels | undefined
+    try {
+      claudeTiers = resolveTierModels(primary.listing, {
+        log: (message) => note(`provider "${input.primary.name}": ${message}`),
+      })
+    } catch (error) {
+      if (!Object.values(input.tiers).some((routes) => routes?.length)) throw error
+    }
+    const routes: Record<ModelTier, ModelRoute[]> = { fast: [], main: [], deep: [] }
+    for (const tier of MODEL_TIERS) {
+      const list: ModelRoute[] = []
+      for (const setting of input.tiers[tier] ?? []) {
+        const credential = setting.credential
+          ? findProviderCredential(input.credentials, setting.credential, input.target)
+          : input.primary
+        if (!credential) {
+          note(`llm.tiers: no AI provider credential "${setting.credential}" covers the repository`)
+          continue
+        }
+        // oxlint-disable-next-line no-await-in-loop -- each credential opens once, cached
+        const source = await open(credential).catch((error: unknown) => {
+          note(
+            `llm.tiers: provider "${credential.name}": ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return undefined
+        })
+        if (!source) continue
+        const model = resolveModelReference(setting.model, source.listing)
+        if (!model) {
+          note(`llm.tiers: provider "${credential.name}" lists no model "${setting.model}"`)
+          continue
+        }
+        const agent = agentOn(source, { fast: model, main: model, deep: model }, input.runner)
+        list.push({
+          provider: credential.name,
+          model: agent.modelFor(tier),
+          ...(setting.effort && { effort: setting.effort }),
+          agent,
+        })
+      }
+      if (claudeTiers) {
+        const agent = agentOn(primary, claudeTiers, input.runner)
+        const model = agent.modelFor(tier)
+        const known = list.some(
+          (route) => route.provider === input.primary.name && route.model === model,
+        )
+        if (!known) list.push({ provider: input.primary.name, model, agent })
+      }
+      routes[tier] = list
+    }
+    for (const tier of MODEL_TIERS) {
+      if (routes[tier].length) continue
+      const nearest = NEAREST_TIERS[tier].find((other) => routes[other].length)
+      if (!nearest) throw new Error(`no model for tier ${tier}`)
+      note(`llm.tiers: tier ${tier} has no model and runs on ${nearest}'s`)
+      routes[tier] = routes[nearest]
+    }
+    return fallbackAgent(routes, { health: routeHealth, log: (line) => log(`agent: ${line}`) })
+  }
+
   return async (repo, job) => {
     const target = 'teams' in repo ? repo : repoTarget(config, repo)
     const entries = await store.settings.list()
@@ -581,43 +729,21 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
 
     const reference = providerReference(entries)
     if (!reference) return undefined
-    const credential = findProviderCredential(await store.credentials.list(), reference, target)
+    const credentials = await store.credentials.list()
+    const credential = findProviderCredential(credentials, reference, target)
     if (!credential) {
       log(`agent: no AI provider credential "${reference}" covers ${repo.forge}:${repo.path}`)
       return undefined
     }
-    let agent: ProviderAgent
+    const tiers = llmTiersSchema.safeParse(resolveGlobalSetting(entries, 'llm.tiers')?.value)
+    let agent: RoutedAgent
     try {
-      parseProviderOptions(credential)
-      const limiter = limiterFor(credential)
-      const aiProvider: AiProvider = {
-        kind: credential.kind,
-        url: credential.url,
-        secret: await vault.open(credential.secret),
-        ...(credential.options && { options: credential.options }),
-      }
-      void options.credentials?.markUsed(credential.id)
-      const key = `${credential.id}:${credential.updatedAt}`
-      const listing = await catalog.list(key, aiProvider)
-      const pricing =
-        credential.kind === 'ai-sdk'
-          ? pricingOf(listing)
-          : await anthropicCatalogPricing(options.aiCatalog)
-      agent = createAgent(aiProvider, {
-        ...(credential.capabilities && { agentLoop: credential.capabilities.agentLoop }),
-        ...options.agentOptions,
-        tierModels: resolveTierModels(listing, {
-          log: (message) => {
-            const once = `${key}:${message}`
-            if (tierNotes.has(once)) return
-            tierNotes.add(once)
-            log(`agent: provider "${credential.name}": ${message}`)
-          },
-        }),
-        ...(runner && { runner }),
-        ...(limiter && { limiter }),
-        ...(pricing && { pricing }),
-        ...(options.aiProviders && { plugins: options.aiProviders }),
+      agent = await routedAgent({
+        primary: credential,
+        credentials,
+        target,
+        tiers: tiers.success ? tiers.data : {},
+        runner,
       })
     } catch (error) {
       log(
@@ -686,6 +812,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       store,
       now,
       provider,
+      providerKind: credential.kind,
       teamTitle: teamLabeler(config),
       ...(family && { family }),
       origin,
