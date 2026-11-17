@@ -10,6 +10,7 @@ import { createCredentialService } from '@holtkeeper/credentials'
 import type { KnowledgeEntryInput, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
+import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { z } from 'zod'
 
@@ -24,6 +25,13 @@ import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { createUsageIndex } from '../src/api-surface/usages.ts'
 import { agentCatalogContext } from '../src/tools/registry.ts'
 import { readTranscript } from '../src/transcripts.ts'
+
+/** The agent streams; a mock answers its `doGenerate` results as a stream. */
+const streamingMock = (...settings: ConstructorParameters<typeof MockLanguageModelV4>) =>
+  wrapLanguageModel({
+    model: new MockLanguageModelV4(...settings),
+    middleware: simulateStreamingMiddleware(),
+  })
 
 async function failure(promise: Promise<unknown>): Promise<string> {
   try {
@@ -216,7 +224,7 @@ describe('settingsAgentFor', () => {
       agentOptions: {
         query,
         languageModel: () =>
-          new MockLanguageModelV4({
+          streamingMock({
             doGenerate: {
               content: [{ type: 'text', text: 'fallback answer' }],
               finishReason: { unified: 'stop', raw: 'stop' },
@@ -340,7 +348,7 @@ describe('settingsAgentFor', () => {
     const asked: string[] = []
     const log: string[] = []
     const answer = (modelId: string) =>
-      new MockLanguageModelV4({
+      streamingMock({
         doGenerate: async () => {
           asked.push(modelId)
           if (modelId === 'acme/widget-pro')

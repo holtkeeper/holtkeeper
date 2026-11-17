@@ -17,9 +17,17 @@ import { createCredentialService } from '@holtkeeper/credentials'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
+import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 
 import { createApp } from '../src/app.ts'
+
+/** The agent streams; a mock answers its `doGenerate` results as a stream. */
+const streamingMock = (...settings: ConstructorParameters<typeof MockLanguageModelV4>) =>
+  wrapLanguageModel({
+    model: new MockLanguageModelV4(...settings),
+    middleware: simulateStreamingMiddleware(),
+  })
 
 const config = parseConfig({ forges: {}, teams: {} })
 
@@ -81,7 +89,7 @@ const setup = (
     ...(options.aiCatalog && { aiCatalog: options.aiCatalog }),
     ...(options.probeFetch && { probeFetch: options.probeFetch }),
     languageModel: () =>
-      new MockLanguageModelV4({
+      streamingMock({
         doGenerate: async (call) => {
           prompts.push(JSON.stringify(call.prompt))
           if (options.fail) throw new Error('401 invalid key')
@@ -128,7 +136,7 @@ describe('AI provider plugins', () => {
   test('a closed package becomes available once a plugin provides it', async () => {
     const plugin = {
       package: 'closed-ai-sdk',
-      languageModel: () => new MockLanguageModelV4(),
+      languageModel: () => streamingMock(),
     }
     const app = createApp({
       config,

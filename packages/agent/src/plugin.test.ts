@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { LanguageModelV4GenerateResult } from '@ai-sdk/provider'
+import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 
 import { type AiSdkConnection, aiSdkLanguageModel, isSupportedProvider } from './ai-sdk.ts'
@@ -14,6 +15,13 @@ import {
   withPluginCatalogs,
 } from './plugin.ts'
 import { aiProviderOptionsValidator } from './provider.ts'
+
+/** The agent streams; a mock answers its `doGenerate` results as a stream. */
+const streamingMock = (...settings: ConstructorParameters<typeof MockLanguageModelV4>) =>
+  wrapLanguageModel({
+    model: new MockLanguageModelV4(...settings),
+    middleware: simulateStreamingMiddleware(),
+  })
 
 const reply: LanguageModelV4GenerateResult = {
   content: [{ type: 'text', text: 'OK' }],
@@ -39,7 +47,7 @@ function acme(catalog?: AiProviderPlugin['catalog']) {
     package: 'acme-ai-provider',
     languageModel: (connection, modelId) => {
       calls.push({ connection, modelId })
-      return new MockLanguageModelV4({ doGenerate: async () => reply })
+      return streamingMock({ doGenerate: async () => reply })
     },
     ...(catalog && { catalog }),
   })

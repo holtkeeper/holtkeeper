@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { APICallError, type LanguageModelV4GenerateResult } from '@ai-sdk/provider'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
+import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { z } from 'zod'
 
@@ -55,6 +56,10 @@ const call = (toolName: string, input: Record<string, unknown>): LanguageModelV4
   warnings: [],
 })
 
+/** The agent streams; the mock answers `doGenerate` results as a stream and still records them. */
+const streaming = (model: MockLanguageModelV4) =>
+  wrapLanguageModel({ model, middleware: simulateStreamingMiddleware() })
+
 const scripted = (...results: LanguageModelV4GenerateResult[]) => {
   const model = new MockLanguageModelV4({ doGenerate: results })
   const ids: string[] = []
@@ -63,7 +68,7 @@ const scripted = (...results: LanguageModelV4GenerateResult[]) => {
     ids,
     languageModel: (id: string) => {
       ids.push(id)
-      return model
+      return streaming(model)
     },
   }
 }
@@ -302,7 +307,10 @@ describe('createAiSdkAgent', () => {
         })
       },
     })
-    const error = await createAiSdkAgent({ languageModel: () => model, tierModels: on('m') })
+    const error = await createAiSdkAgent({
+      languageModel: () => streaming(model),
+      tierModels: on('m'),
+    })
       .run({ dir: await checkout(), prompt: 'p' })
       .catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(BudgetExceededError)
@@ -431,23 +439,6 @@ describe('createAiSdkAgent', () => {
     expect(final?.tools?.length).toBe(3)
     expect(JSON.stringify(final?.prompt.at(-1))).toContain('Stop calling tools')
     expect(marked(final?.prompt.at(-1) ?? {})).toBeTrue()
-  })
-
-  test('a model that answers nothing with tools disabled is asked once more without them', async () => {
-    const { model, languageModel } = scripted(
-      call('glob', { pattern: '*' }),
-      say(''),
-      say('{"score": 3}'),
-    )
-    const agent = createAiSdkAgent({ languageModel, tierModels: on('m'), maxTurns: 1 })
-    const result = await agent.run({
-      dir: await checkout(),
-      prompt: 'p',
-      output: z.object({ score: z.number() }),
-    })
-    expect(result).toMatchObject({ output: { score: 3 }, turns: 3 })
-    const final = model.doGenerateCalls.at(-1)
-    expect(final?.tools).toBeUndefined()
   })
 
   test('an identical repeated call is not run again and three such steps end the loop', async () => {

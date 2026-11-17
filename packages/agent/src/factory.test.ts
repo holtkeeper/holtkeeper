@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { z } from 'zod'
 
@@ -16,6 +17,13 @@ import {
 import { parseProviderOptions } from './provider.ts'
 import { createTranscript } from './transcript.ts'
 import type { Agent, AgentResult, Toolset } from './types.ts'
+
+/** The agent streams; a mock answers its `doGenerate` results as a stream. */
+const streamingMock = (...settings: ConstructorParameters<typeof MockLanguageModelV4>) =>
+  wrapLanguageModel({
+    model: new MockLanguageModelV4(...settings),
+    middleware: simulateStreamingMiddleware(),
+  })
 
 async function failure(promise: Promise<unknown>): Promise<string> {
   try {
@@ -137,7 +145,7 @@ describe('limitConcurrency', () => {
 })
 
 const reply = (text: string) =>
-  new MockLanguageModelV4({
+  streamingMock({
     doGenerate: {
       content: [{ type: 'text', text }],
       finishReason: { unified: 'stop', raw: 'stop' },
@@ -315,7 +323,7 @@ describe('runtime routing', () => {
   })
 
   test('transcripts never receive the provider secret or rendered headers', async () => {
-    const leaky = new MockLanguageModelV4({
+    const leaky = streamingMock({
       doGenerate: {
         content: [{ type: 'text', text: 'the key is gateway-secret-123 and team-header-value' }],
         finishReason: { unified: 'stop', raw: 'stop' },

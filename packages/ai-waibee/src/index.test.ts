@@ -76,21 +76,39 @@ describe('runs on Messages', () => {
   }
 
   test('with cache breakpoints on the system prompt and the newest message', async () => {
-    const requests = stubFetch(() =>
-      Response.json({
-        id: 'msg_1',
-        type: 'message',
-        role: 'assistant',
-        model: 'claude-sonnet-4-6',
-        content: [{ type: 'text', text: 'done' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 90 },
-      }),
+    const events = [
+      {
+        type: 'message_start',
+        message: {
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-sonnet-4-6',
+          content: [],
+          stop_reason: null,
+          usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 90 },
+        },
+      },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'done' } },
+      { type: 'content_block_stop', index: 0 },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
+      { type: 'message_stop' },
+    ]
+    const requests = stubFetch(
+      () =>
+        new Response(
+          events
+            .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+            .join(''),
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        ),
     )
     const result = await agent().run({ dir: '.', prompt: 'Summarize the widget.' })
     expect(result.usage?.cacheReadTokens).toBe(90)
     const [request] = requests
     expect(request?.url).toEndWith('/messages')
+    expect(request?.body.stream).toBe(true)
     expect(JSON.stringify(request?.body.system)).toContain('"cache_control":{"type":"ephemeral"}')
     expect(JSON.stringify(request?.body.messages)).toContain('"cache_control":{"type":"ephemeral"}')
   })
