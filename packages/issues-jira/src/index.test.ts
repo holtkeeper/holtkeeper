@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  JIRA_DESCRIPTION_MAX_CHARS,
   JiraApiError,
   jiraFromCredential,
   jiraTracker,
@@ -120,6 +121,119 @@ describe('jiraTracker', () => {
     expect(error).toBeInstanceOf(JiraApiError)
     expect((error as JiraApiError).status).toBe(401)
     expect((error as Error).message).not.toContain('pat-secret')
+  })
+})
+
+const withDescription = (description: unknown) => {
+  const issue = raw('ABC-1', 'Round the corners')
+  return { ...issue, fields: { ...issue.fields, description } }
+}
+
+describe('jiraTracker issue', () => {
+  test('flattens a Cloud document description to plain text', async () => {
+    const { fetch, requests } = fakeFetch(() =>
+      json(
+        withDescription({
+          type: 'doc',
+          content: [
+            { type: 'heading', content: [{ type: 'text', text: 'Goal' }] },
+            {
+              type: 'paragraph',
+              content: [
+                { type: 'text', text: 'Corners get ' },
+                { type: 'text', text: 'round' },
+                { type: 'hardBreak' },
+                { type: 'mention', attrs: { text: '@Someone' } },
+              ],
+            },
+            {
+              type: 'bulletList',
+              content: [
+                {
+                  type: 'listItem',
+                  content: [{ type: 'paragraph', content: [{ type: 'text', text: 'one' }] }],
+                },
+                {
+                  type: 'listItem',
+                  content: [{ type: 'paragraph', content: [{ type: 'text', text: 'two' }] }],
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    )
+    const tracker = jiraTracker({
+      url: 'https://widgets.atlassian.net',
+      auth: { kind: 'bearer', token: 'pat' },
+      fetch,
+    })
+    const issue = await tracker.issue?.('ABC-1')
+    expect(issue?.title).toBe('Round the corners')
+    expect(issue?.description).toBe('Goal\n\nCorners get round\n@Someone\n\n- one\n- two')
+    expect(requests[0]?.url.pathname).toBe('/rest/api/3/issue/ABC-1')
+    expect(requests[0]?.url.searchParams.get('fields')).toBe('summary,status,issuetype,description')
+  })
+
+  test('keeps Data Center wiki text and cuts long descriptions', async () => {
+    const { fetch, requests } = fakeFetch(() =>
+      json(withDescription(`h1. Goal\n\n${'x'.repeat(7000)}`)),
+    )
+    const tracker = jiraTracker({
+      url: 'https://jira.example.com/jira',
+      auth: { kind: 'bearer', token: 'pat' },
+      fetch,
+    })
+    const issue = await tracker.issue?.('ABC-1')
+    expect(issue?.description?.startsWith('h1. Goal\n\nxxx')).toBe(true)
+    expect(issue?.description).toHaveLength(JIRA_DESCRIPTION_MAX_CHARS)
+    expect(requests[0]?.url.pathname).toBe('/jira/rest/api/2/issue/ABC-1')
+  })
+
+  test('leaves the description out when it is empty', async () => {
+    const { fetch } = fakeFetch(() => json(withDescription(null)))
+    const tracker = jiraTracker({
+      url: 'https://widgets.atlassian.net',
+      auth: { kind: 'bearer', token: 'pat' },
+      fetch,
+    })
+    expect(await tracker.issue?.('ABC-1')).not.toHaveProperty('description')
+  })
+
+  test('is undefined for a missing or unreadable issue and throws on other failures', async () => {
+    for (const status of [401, 403, 404]) {
+      const { fetch } = fakeFetch(() => json({ errorMessages: ['nope'] }, status))
+      const tracker = jiraTracker({
+        url: 'https://widgets.atlassian.net',
+        auth: { kind: 'bearer', token: 'pat' },
+        fetch,
+      })
+      // oxlint-disable-next-line no-await-in-loop -- one status after another
+      expect(await tracker.issue?.('ABC-1')).toBeUndefined()
+    }
+    const { fetch } = fakeFetch(() => json({}, 500))
+    const tracker = jiraTracker({
+      url: 'https://widgets.atlassian.net',
+      auth: { kind: 'bearer', token: 'pat' },
+      fetch,
+    })
+    expect(await tracker.issue?.('ABC-1').catch((error: unknown) => error)).toBeInstanceOf(
+      JiraApiError,
+    )
+  })
+
+  test('never sends a malformed key or one outside the allowed projects', async () => {
+    const { fetch, requests } = fakeFetch(() => json(raw('ABC-1', 'Round the corners')))
+    const tracker = jiraTracker({
+      url: 'https://widgets.atlassian.net',
+      auth: { kind: 'bearer', token: 'pat' },
+      projects: ['ABC'],
+      fetch,
+    })
+    expect(await tracker.issue?.('XYZ-2')).toBeUndefined()
+    expect(await tracker.issue?.('abc-1')).toBeUndefined()
+    expect(await tracker.issue?.('ABC-1/../../x')).toBeUndefined()
+    expect(requests).toHaveLength(0)
   })
 })
 

@@ -1,4 +1,4 @@
-import type { Issue, IssueCategory, IssueTracker } from '@holtkeeper/issues'
+import type { Issue, IssueCategory, IssueDetails, IssueTracker } from '@holtkeeper/issues'
 import { z } from 'zod'
 
 /** The subset of `fetch` the client uses; the global `fetch` satisfies it. */
@@ -36,6 +36,42 @@ const issueSchema = z.object({
 
 const searchSchema = z.object({ issues: z.array(issueSchema) })
 
+const detailsSchema = issueSchema.extend({
+  fields: issueSchema.shape.fields.extend({ description: z.unknown().optional() }),
+})
+
+/** How much of a description `issue` returns. */
+export const JIRA_DESCRIPTION_MAX_CHARS = 6000
+
+interface AdfNode {
+  type?: unknown
+  text?: unknown
+  content?: unknown
+  attrs?: { text?: unknown; shortName?: unknown; url?: unknown } | null
+}
+
+const BLOCKS = new Set(['paragraph', 'heading', 'codeBlock', 'blockquote', 'rule', 'panel'])
+
+/** Plain text of an Atlassian Document Format node: paragraphs on lines, list items with `- `. */
+function adfText(node: unknown): string {
+  if (!node || typeof node !== 'object') return ''
+  const { type, text, content, attrs } = node as AdfNode
+  if (type === 'text') return typeof text === 'string' ? text : ''
+  if (type === 'hardBreak') return '\n'
+  if (type === 'mention' || type === 'emoji' || type === 'inlineCard') {
+    const label = attrs?.text ?? attrs?.shortName ?? attrs?.url
+    return typeof label === 'string' ? label : ''
+  }
+  const inner = Array.isArray(content) ? content.map(adfText).join('') : ''
+  if (type === 'listItem') return `- ${inner.trim()}\n`
+  if (typeof type === 'string' && BLOCKS.has(type)) return `${inner.trim()}\n\n`
+  return inner
+}
+
+/** A description as Jira returns it: wiki text (REST v2) or a document (REST v3). */
+const descriptionText = (value: unknown): string =>
+  (typeof value === 'string' ? value : adfText(value)).replace(/\n{3,}/g, '\n\n').trim()
+
 const categories: Record<string, IssueCategory> = {
   new: 'todo',
   indeterminate: 'doing',
@@ -61,8 +97,10 @@ const isCloud = (url: URL) =>
 /**
  * A read-only `IssueTracker` for one Jira site: up to 100 keys per search (`key in (...)`), and
  * when Jira refuses the search because a key does not exist, one request per key with unknown
- * ones left out. Keys that do not look like Jira keys, or belong to a project outside
- * `projects`, are never sent. Requests never follow
+ * ones left out. `issue` reads one issue with its description as plain text (documents of REST v3
+ * flattened, at most `JIRA_DESCRIPTION_MAX_CHARS`), and `undefined` when Jira answers 401, 403 or
+ * 404. Keys that do not look like Jira keys, or belong to a project outside `projects`, are never
+ * sent. Requests never follow
  * redirects, so the credentials stay on the configured host.
  */
 export function jiraTracker(options: JiraOptions): IssueTracker {
@@ -121,6 +159,22 @@ export function jiraTracker(options: JiraOptions): IssueTracker {
     return parsed.success ? toIssue(parsed.data) : undefined
   }
 
+  const details = async (key: string): Promise<IssueDetails | undefined> => {
+    if (!KEY.test(key) || (projects && !projects.has(key.slice(0, key.lastIndexOf('-')))))
+      return undefined
+    const { status, body } = await get(`${api}/issue/${key}?fields=${fields},description`)
+    // Unknown, or not readable with these credentials: either way there is nothing to show.
+    if (status === 404 || status === 401 || status === 403) return undefined
+    if (status !== 200) throw failed(`issue ${key}`, status)
+    const parsed = detailsSchema.safeParse(body)
+    if (!parsed.success) return undefined
+    const description = descriptionText(parsed.data.fields.description)
+    return {
+      ...toIssue(parsed.data),
+      ...(description && { description: description.slice(0, JIRA_DESCRIPTION_MAX_CHARS) }),
+    }
+  }
+
   const singly = async (keys: readonly string[]) => {
     const found: Issue[] = []
     for (let at = 0; at < keys.length; at += SINGLE_CONCURRENCY) {
@@ -150,6 +204,7 @@ export function jiraTracker(options: JiraOptions): IssueTracker {
 
   return {
     provider: 'jira',
+    issue: details,
     async issues(keys) {
       const valid = [...new Set(keys)].filter(
         (key) => KEY.test(key) && (!projects || projects.has(key.slice(0, key.lastIndexOf('-')))),

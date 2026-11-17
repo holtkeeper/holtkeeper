@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { cachedTracker, issuesByKey } from './index.ts'
+import { cachedTracker, issueDetails, issueKeysIn, issuesByKey } from './index.ts'
 import { fakeIssueTracker } from './testing.ts'
 
 const memoryCache = () => {
@@ -68,5 +68,58 @@ describe('issuesByKey', () => {
     )
     expect(result).toEqual({})
     expect(errors).toHaveLength(1)
+  })
+})
+
+describe('issueKeysIn', () => {
+  test('finds keys in order, once each, and ignores look-alikes', () => {
+    expect(
+      issueKeysIn(
+        'ABC-12: round the corners (see XY-3)',
+        undefined,
+        'Fixes ABC-12 and utf-8 and ABC-0 and xABC-4 and ABC-5x',
+        'FEATURE/DEF-7-ADD-WIDGET',
+      ),
+    ).toEqual(['ABC-12', 'XY-3', 'DEF-7'])
+  })
+
+  test('keys are matched as written', () => {
+    expect(issueKeysIn('feature/abc-1-widget')).toEqual([])
+  })
+})
+
+describe('cachedTracker issue', () => {
+  test('passes issue through uncached when the tracker has it', async () => {
+    const tracker = fakeIssueTracker([shape], {
+      details: [{ ...shape, description: 'Make the corners round.' }],
+    })
+    const cached = cachedTracker(tracker, memoryCache(), { namespace: 'c1' })
+    expect(await cached.issue?.('ABC-1')).toEqual({
+      ...shape,
+      description: 'Make the corners round.',
+    })
+    expect(await cached.issue?.('ABC-9')).toBeUndefined()
+  })
+
+  test('has no issue when the tracker has none', () => {
+    expect(
+      'issue' in cachedTracker(fakeIssueTracker([shape]), memoryCache(), { namespace: 'c1' }),
+    ).toBe(false)
+  })
+})
+
+describe('issueDetails', () => {
+  test('reads the known keys and is empty without a tracker or details', async () => {
+    const details = [{ ...shape, description: 'Round.' }]
+    expect(await issueDetails(fakeIssueTracker([shape], { details }), ['ABC-9', 'ABC-1'])).toEqual(
+      details,
+    )
+    expect(await issueDetails(undefined, ['ABC-1'])).toEqual([])
+    expect(await issueDetails(fakeIssueTracker([shape]), ['ABC-1'])).toEqual([])
+  })
+
+  test('throws when the tracker fails', async () => {
+    const tracker = fakeIssueTracker([], { details: [], fail: new Error('down') })
+    expect(issueDetails(tracker, ['ABC-1'])).rejects.toThrow('down')
   })
 })

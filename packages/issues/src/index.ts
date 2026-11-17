@@ -17,13 +17,22 @@ export interface Issue {
   url?: string
 }
 
+/** One issue with the text agents read to know what a change is for. */
+export interface IssueDetails extends Issue {
+  /** The issue's description as plain text or the tracker's markup, possibly shortened. */
+  description?: string
+}
+
 /**
  * A read-only issue tracker. `issues` returns the issues it knows among `keys`, in any order;
- * unknown keys are left out rather than failing the call. Implementations never write.
+ * unknown keys are left out rather than failing the call. `issue`, when the tracker offers it,
+ * returns one issue with its description, or `undefined` when the tracker does not know the key
+ * or its credentials may not read it. Implementations never write.
  */
 export interface IssueTracker {
   readonly provider: string
   issues(keys: readonly string[]): Promise<Issue[]>
+  issue?(key: string): Promise<IssueDetails | undefined>
 }
 
 /** Where looked-up issues are kept; `Store.kv` fits. */
@@ -58,7 +67,7 @@ export interface CachedTrackerOptions {
 /**
  * `tracker` behind `cache`: keys found in the cache, including keys remembered as missing, are not
  * asked again until they expire; the rest go to the tracker in one call. A cache that fails to
- * read or write is skipped.
+ * read or write is skipped. `issue` goes to the tracker uncached.
  */
 export function cachedTracker(
   tracker: IssueTracker,
@@ -69,8 +78,11 @@ export function cachedTracker(
   const done = options.doneTtlSeconds ?? 86_400
   const missing = options.missingTtlSeconds ?? 3600
   const keyOf = (key: string) => `issues:${tracker.provider}:${options.namespace}:${key}`
+  const details = tracker.issue?.bind(tracker)
   return {
     provider: tracker.provider,
+    // Details are read once per review or task, so they are not worth caching.
+    ...(details && { issue: details }),
     async issues(keys) {
       const wanted = [...new Set(keys)]
       const found: Issue[] = []
@@ -114,4 +126,33 @@ export async function issuesByKey(
     onError(error)
     return {}
   }
+}
+
+/** Ticket keys as written in titles, branch names and commits, e.g. `ABC-123`. */
+const ISSUE_KEY = /(?<![A-Za-z0-9])([A-Z][A-Z0-9]{1,9}-[1-9]\d{0,6})(?![A-Za-z0-9])/g
+
+/**
+ * The ticket keys found in `texts`, in order of first appearance and without repeats. Keys are
+ * matched as written; upper-case a branch name first to find `abc-123` in it.
+ */
+export function issueKeysIn(...texts: readonly (string | undefined)[]): string[] {
+  const keys: string[] = []
+  for (const text of texts)
+    for (const match of (text ?? '').matchAll(ISSUE_KEY))
+      if (match[1] && !keys.includes(match[1])) keys.push(match[1])
+  return keys
+}
+
+/**
+ * The details of the issues among `keys` the tracker can read, in key order; empty without a
+ * tracker or when it cannot read details. Unknown and unreadable keys are left out; a tracker
+ * failure is thrown.
+ */
+export async function issueDetails(
+  tracker: IssueTracker | undefined,
+  keys: readonly string[],
+): Promise<IssueDetails[]> {
+  if (!tracker?.issue || !keys.length) return []
+  const found = await Promise.all(keys.map(async (key) => tracker.issue?.(key)))
+  return found.filter((issue) => issue !== undefined)
 }
