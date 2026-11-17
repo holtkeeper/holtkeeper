@@ -28,6 +28,7 @@ Built in: `llm.provider` (global; the id or name of an AI provider credential, s
 | Key                    | Default                                                                                                                                                   |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `llm.budget`           | preset `default`: `block` above $150 a week, the last $25 kept for interactive work                                                                       |
+| `llm.tiers`            | `fast` `claude-haiku@latest` (low), `main` `claude-sonnet@latest` (medium), `deep` `claude-sonnet@latest` (high)                                          |
 | `agent.tools`          | `knowledgeTokens: 1500`                                                                                                                                   |
 | `knowledge.autoAccept` | `quirk`, `howto`                                                                                                                                          |
 | `audit.upgrade`        | `minor`                                                                                                                                                   |
