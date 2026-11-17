@@ -25,7 +25,14 @@ type SecurityView = 'findings' | 'runs' | 'allowlist'
 export type FindingsSort = 'severity' | 'repos' | 'seen' | 'package'
 
 const views: readonly SecurityView[] = ['findings', 'runs', 'allowlist']
-const triggers: readonly AuditTrigger[] = ['cli', 'schedule', 'freshness', 'manual', 'webhook']
+const triggers: readonly AuditTrigger[] = [
+  'cli',
+  'schedule',
+  'freshness',
+  'manual',
+  'webhook',
+  'vuln-index',
+]
 const statuses: readonly FindingStatus[] = ['open', 'fixing', 'allowlisted']
 const sorts: readonly FindingsSort[] = ['severity', 'repos', 'seen', 'package']
 
@@ -81,6 +88,7 @@ export const triggerLabel: Record<AuditTrigger, string> = {
   freshness: 'Freshness',
   manual: 'Manual',
   webhook: 'Webhook',
+  'vuln-index': 'Vulnerability index',
 }
 
 /** Words for a finding's status, as tables and the sheet print it. */

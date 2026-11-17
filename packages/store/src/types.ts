@@ -7,7 +7,8 @@ import type { AuditReport } from '@holtkeeper/vuln'
 export type Timestamp = string
 
 /** What started an audit run; `freshness` is the server's sweeper keeping results current. */
-export type AuditTrigger = 'cli' | 'schedule' | 'freshness' | 'manual' | 'webhook'
+/** `vuln-index`: the fleet vulnerability index wrote the run without a checkout. */
+export type AuditTrigger = 'cli' | 'schedule' | 'freshness' | 'manual' | 'webhook' | 'vuln-index'
 
 /** One finished audit of one repository. */
 export interface AuditRun {
@@ -270,6 +271,7 @@ export type JobTrigger =
   | 'poll'
   | 'new-repo'
   | 'freshness'
+  | 'vuln-index'
 
 /** `blocked`: an AI budget refused or stopped the run; it is not retried and is not a failure. */
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'canceled'

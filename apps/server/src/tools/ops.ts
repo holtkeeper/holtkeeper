@@ -68,6 +68,7 @@ const triggers = [
   'poll',
   'new-repo',
   'freshness',
+  'vuln-index',
 ] as const
 
 const MAX_JOBS = 30

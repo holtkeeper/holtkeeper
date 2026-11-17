@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
 import scan from '../test/fixtures/scan.json'
-import { fixedVersionsFor, parseScanOutput } from './parse.ts'
+import { parseScanOutput } from './parse.ts'
+import { fixedVersionsFor } from './records.ts'
 
 describe('parseScanOutput', () => {
   const findings = parseScanOutput(scan, '/project')

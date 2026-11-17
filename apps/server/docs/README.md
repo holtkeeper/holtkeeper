@@ -496,15 +496,15 @@ After each sweep the same duty runs the release announcements' sweep (`startFres
 
 Settings (section `Automation`): `freshness` (scoped, e.g. one entry per team) `{ mode: 'on' | 'off' | 'slower', factor }`, default on, `slower` multiplies every interval and cadence by `factor` (default 3); `freshness.sweep` (global) `{ maxJobsPerHour, maxAiJobsPerHour, nightWindow: { from, to }, headPollMinutes }`, night window default 01:00–07:00 in the instance time zone. `freshnessStatus(deps, target)` evaluates one target without queuing or reading heads, for the `analysis_status` tool. Each sweep also keeps its decisions per analyzer and target in `freshness:summary` (one day); `freshnessSummary(deps, visible)` sums them per team (every target, and each owner team of each target; `FreshnessTeamSummary.team`) for `GET /api/automation/freshness`, the Freshness cards of Ops › Automation, with the next sweep five minutes after the last.
 
-| Analyzer                       | Refresh                                                             |     | Analyzer                              | Refresh                                                        |
-| ------------------------------ | ------------------------------------------------------------------- | --- | ------------------------------------- | -------------------------------------------------------------- |
-| `depgraph`                     | change, 1m, debounce 2m, manifests and lockfiles                    |     | `audit`                               | every 12h                                                      |
-| `api-surface`                  | change, 1m, debounce 2m, JS/TS and Go sources, manifests            |     | `ci-jobs`, `stack`, `tracker`         | every 1d                                                       |
-| `usages`                       | change, 1m, debounce 2m, JS/TS and Go sources, tsconfigs, lockfiles |     | `renovate`                            | every 1d, heavy                                                |
-| `licenses`                     | change, 12h, manifests and lockfiles                                |     | `branches`                            | every 7d                                                       |
-| `testids`                      | change, 30m                                                         |     | `review`, `propagate`, `browserslist` | never automatically (they write to repositories or run on MRs) |
-| `coverage`, `bundle`, `assets` | change, 1d, heavy                                                   |     | `i18n`                                | never automatically until its records have a consumer          |
-| `guide`                        | change, 7d, LLM                                                     |     |                                       |                                                                |
+| Analyzer                       | Refresh                                                             |     | Analyzer                              | Refresh                                                          |
+| ------------------------------ | ------------------------------------------------------------------- | --- | ------------------------------------- | ---------------------------------------------------------------- |
+| `depgraph`                     | change, 1m, debounce 2m, manifests and lockfiles                    |     | `audit`                               | never: the [vulnerability index](#vulnerability-index) covers it |
+| `api-surface`                  | change, 1m, debounce 2m, JS/TS and Go sources, manifests            |     | `ci-jobs`, `stack`, `tracker`         | every 1d                                                         |
+| `usages`                       | change, 1m, debounce 2m, JS/TS and Go sources, tsconfigs, lockfiles |     | `renovate`                            | every 1d, heavy                                                  |
+| `licenses`                     | change, 12h, manifests and lockfiles                                |     | `branches`                            | every 7d                                                         |
+| `testids`                      | change, 30m                                                         |     | `review`, `propagate`, `browserslist` | never automatically (they write to repositories or run on MRs)   |
+| `coverage`, `bundle`, `assets` | change, 1d, heavy                                                   |     | `i18n`                                | never automatically until its records have a consumer            |
+| `guide`                        | change, 7d, LLM                                                     |     |                                       |                                                                  |
 
 ### GitLab webhook
 
@@ -783,6 +783,18 @@ One `@holtkeeper/limits` limiter is shared by the server (`deps.limiter`): GitLa
 | `POST /api/messages/:catalog/:locale/retranslate` | drops every model translation of the language and keeps people's; audit `messages.retranslate`                                                                                                                                         |
 
 `:locale` must be a normalized language code other than `en` (400), an unknown catalog is 404.
+
+## Vulnerability index
+
+The leader duty `vulnIndexDuty` (`vuln-index.ts`) audits npm and Go dependencies of the whole fleet without checkouts, with [@holtkeeper/vuln-index](../../../packages/vuln-index/docs/README.md). `runVulnIndex` runs every minute:
+
+- **What it matches.** The newest `depgraph` record of every repository: all of them on a full run (the first run, then hourly, `FULL_INTERVAL_MS`), otherwise only repositories whose newest graph changed since the last run. Their package versions go to OSV in one batch (`osvClient` of [@holtkeeper/vuln-osv](../../../packages/vuln-osv/docs/README.md#osv-api)); advisory records are cached in `Store.kv` (`vuln-index:osv:<id>`) and fetched again only when their `modified` time changes. Packages any repository of the fleet defines are never matched.
+- **What it writes.** Per repository an `audit` record (`scanner: 'osv-index'`, `actor: 'system:vuln-index'`, the graph's `sha`, metrics as for audit jobs) with the repository's `audit.allowlist` and traits applied, when the state differs from the newest `audit` record (whoever wrote it) or that record is a day old, and an audit run with trigger `vuln-index` when it differs. Home, the Security page, security alerts and health read these like any audit.
+- **Fix runs.** Where `audit.fix` is on, an `audit` job (trigger `vuln-index`, `reason` naming the advisories) is queued when the match has fixable findings (`fixableKeys`) the last match of the repository did not; the usual `automaticJobReady` checks, deduplication and daily limits apply. Nothing new to fix queues nothing.
+- **Skipped.** Repositories whose graph failed to load (a failed source in `errors`), that have no lockfile the index reads, whose `audit` `repo.analyzers` turns off or whose audit settings do not validate get no record; their older audit records stay.
+- **Failures.** When OSV fails the run throws, writes nothing and the duty waits ten minutes before the next try.
+
+Its state (`vuln-index:state` in `Store.kv`: the time of the last full run and per repository the graph record it matched, the packages it defines and its fixable keys) is written only by the leader. Without `Store.kv` the index does nothing. The `audit` analyzer has no freshness of its own: ecosystems other than npm and Go are audited only by runs people start or schedule.
 
 ## Feeding audits
 

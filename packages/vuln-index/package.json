@@ -1,0 +1,19 @@
+{
+  "name": "@holtkeeper/vuln-index",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/depgraph": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/vuln": "workspace:*",
+    "@holtkeeper/vuln-osv": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@holtkeeper/depgraph-js": "workspace:*"
+  }
+}

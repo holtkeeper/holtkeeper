@@ -335,6 +335,7 @@ const auditTriggers: Partial<Record<Job['trigger'], AuditTrigger>> = {
   manual: 'manual',
   schedule: 'schedule',
   freshness: 'freshness',
+  'vuln-index': 'vuln-index',
 }
 
 /** Stores a finished `audit` job's report as an audit run, so it shows up next to CLI uploads. */

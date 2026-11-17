@@ -211,7 +211,8 @@ export const auditAnalyzer = defineAnalyzer({
   kind: 'audit',
   analysis: auditAnalysis,
   scope: 'repo',
-  refresh: { on: 'time', cadence: '12h' },
+  // No `refresh`: the server's vulnerability index audits npm and Go repositories without a
+  // checkout and queues this analyzer when it finds something to fix.
   needs: { checkout: true },
   options: z.object({
     fix: z.boolean().default(false),

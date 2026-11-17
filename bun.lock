@@ -102,6 +102,8 @@
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
+        "@holtkeeper/vuln-index": "workspace:*",
+        "@holtkeeper/vuln-osv": "workspace:*",
         "@holtkeeper/vuln-triage": "workspace:*",
         "@holtkeeper/web-paths": "workspace:*",
         "@holtkeeper/workspace": "workspace:*",
@@ -1053,6 +1055,20 @@
         "@holtkeeper/vuln": "workspace:*",
       },
     },
+    "packages/vuln-index": {
+      "name": "@holtkeeper/vuln-index",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/depgraph": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/vuln": "workspace:*",
+        "@holtkeeper/vuln-osv": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@holtkeeper/depgraph-js": "workspace:*",
+      },
+    },
     "packages/vuln-js": {
       "name": "@holtkeeper/vuln-js",
       "version": "0.0.0",
@@ -1480,6 +1496,8 @@
     "@holtkeeper/vuln": ["@holtkeeper/vuln@workspace:packages/vuln"],
 
     "@holtkeeper/vuln-go": ["@holtkeeper/vuln-go@workspace:packages/vuln-go"],
+
+    "@holtkeeper/vuln-index": ["@holtkeeper/vuln-index@workspace:packages/vuln-index"],
 
     "@holtkeeper/vuln-js": ["@holtkeeper/vuln-js@workspace:packages/vuln-js"],
 

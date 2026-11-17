@@ -20,9 +20,10 @@ test('default triggers only name analyzers the server ships', () => {
   expect(named).not.toContain('guide')
 })
 
-test('every shipped analyzer declares freshness except review, starter knowledge, i18n and those that write to repositories', () => {
+test('every shipped analyzer declares freshness except review, starter knowledge, i18n, audit (queued by the vulnerability index) and those that write to repositories', () => {
   const manual = builtinAnalyzers.filter((analyzer) => !analyzer.refresh).map((a) => a.kind)
   expect(manual.toSorted()).toEqual([
+    'audit',
     'browserslist',
     'i18n',
     'knowledge-bootstrap',

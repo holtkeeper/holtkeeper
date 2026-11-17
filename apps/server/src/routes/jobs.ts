@@ -56,6 +56,7 @@ const triggerSchema = z
     'poll',
     'new-repo',
     'freshness',
+    'vuln-index',
   ])
   .optional()
 

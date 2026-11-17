@@ -19,6 +19,10 @@ const triggers: Record<JobTrigger, (job: Job) => string> = {
   'new-repo': () => 'The new repository trigger queued it',
   freshness: (job) =>
     job.reason ? `Freshness queued it: ${job.reason}` : 'Freshness queued it: the record was stale',
+  'vuln-index': (job) =>
+    job.reason
+      ? `The vulnerability index queued it: ${job.reason}`
+      : 'The vulnerability index found something to fix and queued it',
 }
 
 const firstLine = (text: string) =>

@@ -9,6 +9,7 @@ import {
   ListChecks,
   type LucideIcon,
   RefreshCw,
+  ShieldAlert,
   Tag as TagIcon,
   Terminal,
   User,
@@ -91,6 +92,7 @@ const triggerIcons: Record<JobTrigger, LucideIcon> = {
   poll: Clock,
   'new-repo': FolderPlus,
   freshness: RefreshCw,
+  'vuln-index': ShieldAlert,
 }
 
 const sublineTones = { muted: 'text-muted', warning: 'text-warn', danger: 'text-bad' } as const

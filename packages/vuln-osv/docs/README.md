@@ -43,6 +43,19 @@ It always passes `--no-introduce` (no patch may add a new advisory) and `--vulns
 
 Whatever this fixer leaves unfixed goes to the next fixer in the chain (for npm that is `@holtkeeper/vuln-js`).
 
+## OSV API
+
+For matching without a checkout (the fleet index of [@holtkeeper/vuln-index](../../vuln-index/docs/README.md)):
+
+- `osvClient({ fetch?, baseUrl = 'https://api.osv.dev', batchSize = 1000, timeoutMs = 30000 }): OsvClient`
+  - `queryBatch(queries)` — `POST /v1/querybatch` for `{ ecosystem, name, version }` queries (Go versions without `v`), split into batches of `batchSize` (OSV accepts at most 1000) sent one after another, `next_page_token` followed per query. Answers `{ id, modified }[]` per query, in query order. Throws on any failed request or a result count that does not match.
+  - `vulnerability(id)` — `GET /v1/vulns/<id>` parsed with `osvRecordSchema`; `undefined` for 404, throws on other errors.
+- `osvRecordSchema` / `OsvRecord` — the fields of an OSV record findings use (`id`, `modified`, `withdrawn`, `aliases`, `summary`, `severity`, `database_specific.severity`, `affected[].package` and `ranges`); osv-scanner's JSON entries are parsed with it too.
+- `findingsForPackage(pkg, source, records)` — findings for one package version: records that share an id or alias (transitively) are one issue, mirroring osv-scanner's groups; the GHSA id is primary when the issue has one, withdrawn records are dropped, `fixedVersions` as for scans. Sorted by id.
+- `recordsSeverity(records)` — the highest CVSS 3 base score among the records (`cvss3BaseScore`), else the highest GHSA label, else `unknown`. CVSS 4 vectors are not scored; their GHSA label applies.
+- `cvss3BaseScore(vector)` — the CVSS 3.0/3.1 base score, `undefined` for other versions or incomplete vectors.
+- `fixedVersionsFor(records, pkg)` — the fixed versions of the ranges containing `pkg.version`, lowest first; every fixed version when versions are not semver.
+
 ## Caveats
 
 - `osv-scanner fix` may run the package manager and follow registries configured in the project. Use it on trusted checkouts only, and in an isolated runner once one exists.

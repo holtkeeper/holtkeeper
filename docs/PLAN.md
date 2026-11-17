@@ -125,7 +125,7 @@ Status: our own packages roll out through [packages/propagate](../packages/propa
 
 ### 4. Vulnerability audit
 
-Status: scanner, fixers and allowlist run as the server's `audit` analyzer (see [packages/vuln](../packages/vuln/docs/README.md)); opening MRs with the fixes comes with the workspace and forge adapters.
+Status: scanner, fixers and allowlist run as the server's `audit` analyzer (see [packages/vuln](../packages/vuln/docs/README.md)); for npm and Go the fleet vulnerability index ([packages/vuln-index](../packages/vuln-index/docs/README.md)) matches every repository's dependency graph against OSV in one batch without checkouts, writes the audit records and queues the analyzer only when there is something new to fix. Other ecosystems still need a checkout and have no automatic refresh yet. Opening MRs with the fixes comes with the workspace and forge adapters.
 
 - One contract for every language: a `Scanner` produces `Finding`s, a chain of `Fixer`s changes the project, a rescan decides what was resolved. Ecosystems are added as fixer packages without touching the rest.
 - Scanning: **OSV-Scanner** reads lockfiles of any supported ecosystem (JS, Go, Python, Java, PHP, Rust, Ruby…) without installing dependencies.

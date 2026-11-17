@@ -63,6 +63,7 @@ const triggerLabels: Record<JobTrigger, string> = {
   poll: 'Poll',
   'new-repo': 'New repository',
   freshness: 'Freshness',
+  'vuln-index': 'Vulnerability index',
 }
 
 /** Every trigger, for the trigger filter. */
@@ -76,6 +77,7 @@ export const jobTriggers = [
   'poll',
   'new-repo',
   'freshness',
+  'vuln-index',
 ] as const satisfies readonly JobTrigger[]
 
 /** Whether `value` is a known trigger, for parsing search params. */

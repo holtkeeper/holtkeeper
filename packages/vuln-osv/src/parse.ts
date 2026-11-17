@@ -3,29 +3,7 @@ import { relative } from 'node:path'
 import { type Finding, type Severity, severityFromScore } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
-const vulnerabilitySchema = z.object({
-  id: z.string(),
-  aliases: z.array(z.string()).nullish(),
-  summary: z.string().nullish(),
-  database_specific: z.object({ severity: z.string().nullish() }).nullish(),
-  affected: z
-    .array(
-      z.object({
-        package: z.object({ name: z.string(), ecosystem: z.string() }).nullish(),
-        ranges: z
-          .array(
-            z.object({
-              type: z.string(),
-              events: z.array(
-                z.object({ introduced: z.string().optional(), fixed: z.string().optional() }),
-              ),
-            }),
-          )
-          .nullish(),
-      }),
-    )
-    .nullish(),
-})
+import { type OsvRecord, fixedVersionsFor, labelSeverity, osvRecordSchema } from './records.ts'
 
 /** The subset of `osv-scanner --format json` output that findings are built from. */
 export const osvScanOutputSchema = z.object({
@@ -37,7 +15,7 @@ export const osvScanOutputSchema = z.object({
           .array(
             z.object({
               package: z.object({ name: z.string(), version: z.string(), ecosystem: z.string() }),
-              vulnerabilities: z.array(vulnerabilitySchema).nullish(),
+              vulnerabilities: z.array(osvRecordSchema).nullish(),
               groups: z
                 .array(
                   z.object({
@@ -56,69 +34,13 @@ export const osvScanOutputSchema = z.object({
 })
 
 export type OsvScanOutput = z.input<typeof osvScanOutputSchema>
-type OsvVulnerability = z.output<typeof vulnerabilitySchema>
 
-const advisorySeverity: Record<string, Severity> = {
-  CRITICAL: 'critical',
-  HIGH: 'high',
-  MODERATE: 'medium',
-  MEDIUM: 'medium',
-  LOW: 'low',
-}
-
-function compare(a: string, b: string): number | undefined {
-  try {
-    return Bun.semver.order(a, b)
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Fixed versions for the ranges that contain `version`. Ecosystems whose versions are not semver
- * cannot be compared here, so every fixed version of the package is returned for them.
- */
-export function fixedVersionsFor(
-  vulnerabilities: readonly OsvVulnerability[],
-  pkg: { name: string; version: string; ecosystem: string },
-): string[] {
-  const all = new Set<string>()
-  const applicable = new Set<string>()
-  let comparable = true
-
-  for (const vulnerability of vulnerabilities) {
-    for (const affected of vulnerability.affected ?? []) {
-      if (affected.package?.name !== pkg.name || affected.package.ecosystem !== pkg.ecosystem)
-        continue
-      for (const range of affected.ranges ?? []) {
-        if (range.type === 'GIT') continue
-        let introduced = '0'
-        for (const event of range.events) {
-          if (event.introduced !== undefined) introduced = event.introduced
-          if (event.fixed === undefined) continue
-          all.add(event.fixed)
-          const afterStart = introduced === '0' ? 0 : compare(pkg.version, introduced)
-          const beforeFix = compare(pkg.version, event.fixed)
-          if (afterStart === undefined || beforeFix === undefined) comparable = false
-          else if (afterStart >= 0 && beforeFix < 0) applicable.add(event.fixed)
-        }
-      }
-    }
-  }
-
-  const versions = [...(comparable ? applicable : all)]
-  return comparable ? versions.toSorted((a, b) => compare(a, b) ?? 0) : versions
-}
-
-function severityOf(
-  score: string | null | undefined,
-  vulnerabilities: OsvVulnerability[],
-): Severity {
+function severityOf(score: string | null | undefined, vulnerabilities: OsvRecord[]): Severity {
   const fromScore = severityFromScore(Number(score))
   if (fromScore !== 'unknown') return fromScore
   for (const vulnerability of vulnerabilities) {
-    const label = vulnerability.database_specific?.severity?.toUpperCase()
-    if (label && label in advisorySeverity) return advisorySeverity[label] ?? 'unknown'
+    const label = labelSeverity(vulnerability)
+    if (label !== 'unknown') return label
   }
   return 'unknown'
 }

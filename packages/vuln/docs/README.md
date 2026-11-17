@@ -2,11 +2,12 @@
 
 Language-independent contracts and orchestration for vulnerability audits: what a finding is, what scanners and fixers do, how the allowlist works, and how an audit run combines them. It has no knowledge of any tool or ecosystem; implementations live in their own packages.
 
-| Package                                                 | Implements                                                                   |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [`@holtkeeper/vuln-osv`](../../vuln-osv/docs/README.md) | `Scanner` via `osv-scanner scan`, `Fixer` via `osv-scanner fix` (npm, Maven) |
-| [`@holtkeeper/vuln-js`](../../vuln-js/docs/README.md)   | `Fixer` for npm, bun, pnpm and yarn projects via ranges and overrides        |
-| [`@holtkeeper/vuln-go`](../../vuln-go/docs/README.md)   | `Fixer` for Go modules via `go get`                                          |
+| Package                                                     | Implements                                                                                    |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [`@holtkeeper/vuln-osv`](../../vuln-osv/docs/README.md)     | `Scanner` via `osv-scanner scan`, `Fixer` via `osv-scanner fix` (npm, Maven)                  |
+| [`@holtkeeper/vuln-js`](../../vuln-js/docs/README.md)       | `Fixer` for npm, bun, pnpm and yarn projects via ranges and overrides                         |
+| [`@holtkeeper/vuln-go`](../../vuln-go/docs/README.md)       | `Fixer` for Go modules via `go get`                                                           |
+| [`@holtkeeper/vuln-index`](../../vuln-index/docs/README.md) | `AuditReport`s for a whole fleet from dependency graphs and one OSV batch, without a checkout |
 
 ## Finding
 

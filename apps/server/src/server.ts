@@ -147,6 +147,7 @@ import {
 import { type SupplyToolsAccess, supplyToolsAccess } from './tools/repos.ts'
 import { commitConventionsReader } from './tools/rules.ts'
 import { serverPoller } from './updates.ts'
+import { vulnIndexDuty } from './vuln-index.ts'
 import { serveWeb } from './web.ts'
 import { checkWebhookHealth } from './webhook-health.ts'
 import { startWebhookSync } from './webhook-sync.ts'
@@ -664,6 +665,7 @@ export async function startServer(
         log,
       }),
       () => startLibraryIndex(deps, log),
+      vulnIndexDuty(deps, { log }),
       () => startDatabaseSnapshots(store, { log }),
       periodicDuty(
         'storage snapshot',
