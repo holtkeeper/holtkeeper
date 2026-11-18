@@ -203,21 +203,6 @@ describe('403 body', () => {
       createdAt: '2026-11-15T10:00:00.000Z',
       data: {},
     })
-    const run = await store.auditRuns.add({
-      repo: hidden,
-      trigger: 'cli',
-      startedAt: '2026-11-15T10:00:00.000Z',
-      finishedAt: '2026-11-15T10:00:00.000Z',
-      report: {
-        scanner: 'osv-scanner',
-        findings: [],
-        ignored: [],
-        expired: [],
-        fixes: [],
-        resolved: [],
-        changedFiles: [],
-      },
-    })
     await store.learnings.put({
       id: 'l1',
       repo: 'work:other/secret',
@@ -235,7 +220,6 @@ describe('403 body', () => {
     const cases: [string, Action, { method?: string; body?: unknown }][] = [
       [`/api/jobs/${job.id}`, 'analyses:read', {}],
       [`/api/analyses/${analysis.id}`, 'analyses:read', {}],
-      [`/api/audit-runs/${run.id}`, 'audits:read', {}],
       ['/api/learnings/l1/reject', 'knowledge:write', { method: 'POST', body: {} }],
     ]
     for (const [path, action, init] of cases) {

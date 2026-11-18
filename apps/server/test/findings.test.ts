@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test'
 
 import { recordMetrics } from '@holtkeeper/analyzer'
-import type { FindingsResponse } from '@holtkeeper/api'
+import type { AuditFixesResponse, FindingsResponse } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -340,4 +340,42 @@ test('the table reads stored metrics only, never record data', async () => {
     principal,
   )
   expect(body.groups).toHaveLength(3)
+})
+
+const attempt = (requested: string[], fixer = 'npm') => ({
+  fixer,
+  source: 'package-lock.json',
+  requested,
+  changedFiles: ['package-lock.json'],
+  fixed: requested,
+  notes: [],
+})
+
+test('fix attempts come from the newest audit of each readable repository', async () => {
+  await ingest('acme/web-cart', '2026-11-02T00:00:00.000Z', {
+    ...report([]),
+    fixes: [attempt(['GHSA-7'], 'older')],
+  })
+  await ingest('acme/web-cart', '2026-11-06T00:00:00.000Z', {
+    ...report([]),
+    fixes: [attempt(['CVE-2026-7000']), attempt(['GHSA-8'])],
+  })
+  await ingest('acme/pay-api', '2026-11-06T00:00:00.000Z', {
+    ...report([]),
+    fixes: [attempt(['GHSA-7'])],
+  })
+  const fixes = async (role: string, query: string) => {
+    const response = await app.request(`/api/audits/fixes${query}`, { headers: as(role) })
+    expect(response.status).toBe(200)
+    return (await response.json()) as AuditFixesResponse
+  }
+  const all = await fixes('admin', '?ids=GHSA-7,CVE-2026-7000')
+  expect(all.repos.map((repo) => [repo.repo, repo.fixes.map((fix) => fix.requested)])).toEqual([
+    ['work:acme/pay-api', [['GHSA-7']]],
+    ['work:acme/web-cart', [['CVE-2026-7000']]],
+  ])
+  expect((await fixes('admin', '?ids=GHSA-7&repos=work:acme/web-cart')).repos).toEqual([])
+  expect((await fixes('webAuditor', '?ids=GHSA-7')).repos).toEqual([])
+  expect((await fixes('reader', '?ids=GHSA-7')).repos).toEqual([])
+  expect((await app.request('/api/audits/fixes', { headers: as('admin') })).status).toBe(400)
 })

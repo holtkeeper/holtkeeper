@@ -36,7 +36,7 @@ Review the vulnerability findings of every repository's latest audit, hand fixes
     <Button ghost>Configure</Button>
     <Button primary>Run audit</Button>
   </Toolbar>
-  <Tabs items={['Findings:9', 'Runs', 'Allowlist:3']} />
+  <Tabs items={['Findings:9', 'Allowlist:3']} />
   <Strip
     items={[
       { value: 1, label: 'critical', tone: 'bad' },
@@ -73,7 +73,7 @@ Each repository in a row has a status, and the row takes the most urgent one:
 | fixing      | An approved, queued, running or open-merge-request upgrade task is moving the package in that repository. |
 | allowlisted | Every finding there is hidden by an allowlist entry that has not expired.                                 |
 
-The page has three views as tabs: **Findings**, **Runs** and **Allowlist**. The tab counts include allowlisted findings, as the strip does.
+The page has two views as tabs: **Findings** and **Allowlist**. The tab counts include allowlisted findings, as the strip does.
 
 ## Filter findings
 
@@ -105,14 +105,13 @@ Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>.
         ['Repositories', '7 open · 1 fixing · 1 allowlisted'],
       ]}
     />
-    <Tabs items={['Repositories:9', 'Run history', 'Fix attempts']} />
+    <Tabs items={['Repositories:9', 'Fix attempts']} />
   </Sheet>
 </Screen>
 
 | Part         | What it shows                                                                                      |
 | ------------ | -------------------------------------------------------------------------------------------------- |
 | Repositories | Every affected repository with its version, lockfile and status.                                   |
-| Run history  | The audit runs of those repositories, each linking to its run record.                              |
 | Fix attempts | What the newest audit of each repository tried for this advisory, per fixer, plus the fixing task. |
 
 ## Fix with an agent
@@ -178,7 +177,7 @@ A narrower allowlist entry replaces the whole list for its repositories. So repo
 The **Allowlist** view lists every `audit.allowlist` entry: what it applies to, the reason, the last day, its state and the repositories where it hides a finding now.
 
 <Screen title="Supply chain › Security › Allowlist">
-  <Tabs items={['Findings:9', 'Runs', 'Allowlist:3']} active={2} />
+  <Tabs items={['Findings:9', 'Allowlist:3']} active={1} />
   <Scroll>
 
 | Advisory             | Applies to                       | Reason                      | Last day     | State                           | Hides in |
@@ -208,26 +207,11 @@ An entry can also be written by hand through <Ui>Configure</Ui>:
 
 `id` is the advisory id or any alias, `reason` is required, `package` and `paths` (globs over lockfile paths) narrow it further.
 
-## Audit runs
+## Current state
 
-The **Runs** view lists the latest audit run per repository; with a repository picked, every run. Filter by trigger and by whether findings stayed. A row opens the run record.
+Security shows the current state only: the findings of the newest audit of each repository. There is no history of past audits; when a new audit finishes, it replaces what the page shows for that repository.
 
-<Screen title="Supply chain › Security › Runs › acme/checkout-web">
-  <Toolbar crumbs={['Security', 'Runs']} title="acme/checkout-web · 3 h ago">
-    <Button>Run again</Button>
-  </Toolbar>
-  <Strip
-    items={[
-      { value: 2, label: 'active', tone: 'bad' },
-      { value: 3, label: 'fixed', tone: 'ok' },
-      { value: 1, label: 'allowlisted' },
-      { value: 2, label: 'changed files' },
-    ]}
-  />
-  <Tabs items={['Findings:2', 'Fix attempts', 'Resolved:3', 'Allowlisted:1', 'Changed files:2']} />
-</Screen>
-
-An audit run scans the checkout, applies the allowlist, lets the fixers try each lockfile in turn, then scans again and trusts only that second scan. **Fix attempts** shows each fixer's try per file; **Resolved** what the rescan no longer found.
+An audit scans the checkout, applies the allowlist, lets the fixers try each lockfile in turn, then scans again and trusts only that second scan. **Fix attempts** in the finding sheet shows each fixer's try per file from the newest audit.
 
 ## Run and configure audits
 
@@ -236,7 +220,7 @@ An audit run scans the checkout, applies the allowlist, lets the fixers try each
   `audit.allowlist`. See [Settings › Analyzers](/guide/settings/analyzers/) and [Setting
   keys](/reference/setting-keys/).
 
-Audits made elsewhere, such as in CI, can be uploaded to `POST /api/audit-runs` with `audits:run` on the repository.
+Audits made elsewhere, such as in CI, can be uploaded to `POST /api/analyses` as a record of kind `audit` with `analyses:run` on the repository.
 
 ## In one repository
 

@@ -30,7 +30,7 @@ describe('ci-jobs analyzer', () => {
     const store = memoryStore()
     const jobs = toJobRuns(quarter())
     const forge = fakeForge(() => jobs)
-    const history = { analyses: store.analyses, auditRuns: store.auditRuns, ciJobs: store.ciJobs }
+    const history = { analyses: store.analyses, ciJobs: store.ciJobs }
     const analyzer = createCiJobsAnalyzer({ now: () => new Date(at(90)) })
     const options = ciJobsOptionsSchema.parse({ branch: 'main' })
 
@@ -70,7 +70,7 @@ describe('ci-jobs analyzer', () => {
     const store = memoryStore()
     const jobs = toJobRuns(quarter())
     const forge = fakeForge(() => jobs)
-    const history = { analyses: store.analyses, auditRuns: store.auditRuns, ciJobs: store.ciJobs }
+    const history = { analyses: store.analyses, ciJobs: store.ciJobs }
     const analyzer = createCiJobsAnalyzer({ now: () => new Date(at(90)) })
     const options = ciJobsOptionsSchema.parse({})
     await analyzer.run({ repo, forge, runner, history, options })

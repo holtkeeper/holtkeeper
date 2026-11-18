@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import { auditAnalysis } from '@holtkeeper/analyzers'
-import type { AuditRunSummary, FindingGroup, HomeView, ReleaseCard } from '@holtkeeper/api'
+import type { FindingGroup, HomeView, ReleaseCard, SecuritySummary } from '@holtkeeper/api'
 import { emptySeverities } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -56,24 +56,17 @@ const job = (patch: Partial<Job> & { path: string }): Job => {
 
 const summary = (
   path: string,
-  severities: Partial<AuditRunSummary['severities']>,
-  patch: Partial<AuditRunSummary> = {},
-): AuditRunSummary => {
+  severities: Partial<SecuritySummary['severities']>,
+  patch: Partial<SecuritySummary> = {},
+): SecuritySummary => {
   const counts = { ...emptySeverities(), ...severities }
   return {
-    id: `run-${path}`,
-    repo: { forge: 'work', path },
-    trigger: 'schedule',
-    startedAt: hoursAgo(3),
-    finishedAt: hoursAgo(3),
+    analysisId: `audit-${path}`,
+    createdAt: hoursAgo(3),
     severities: counts,
     active: Object.values(counts).reduce((a, b) => a + b, 0),
     ignored: 0,
-    resolved: 0,
     expiredAllowlist: 0,
-    languages: [],
-    tools: [],
-    changedFiles: 0,
     ...patch,
   }
 }
@@ -271,10 +264,14 @@ describe('Needs attention rules', () => {
       sources({
         audits: [
           {
+            repo: { forge: 'work', path: 'shapes/circle' },
             latest: summary('shapes/circle', { critical: 1, high: 2 }, { expiredAllowlist: 2 }),
             previous: summary('shapes/circle', { high: 1 }),
           },
-          { latest: summary('colors/red', { medium: 4 }) },
+          {
+            repo: { forge: 'work', path: 'colors/red' },
+            latest: summary('colors/red', { medium: 4 }),
+          },
         ],
       }),
     )
@@ -286,11 +283,11 @@ describe('Needs attention rules', () => {
         'Up from 1 in the audit before',
       ],
     ])
-    expect(items[0]?.href).toBe('/supply/security/runs/run-shapes%2Fcircle')
+    expect(items[0]?.href).toBe('/supply/security?repo=work%3Ashapes%2Fcircle')
     expect(items[0]?.action).toEqual({
       type: 'open',
-      label: 'Open audit',
-      href: '/supply/security/runs/run-shapes%2Fcircle',
+      label: 'Open findings',
+      href: '/supply/security?repo=work%3Ashapes%2Fcircle',
     })
   })
 
@@ -320,7 +317,12 @@ describe('Needs attention rules', () => {
     const all = attentionItems(
       sources({
         urgentFindings,
-        audits: [{ latest: summary('shapes/circle', { critical: 1 }) }],
+        audits: [
+          {
+            repo: { forge: 'work', path: 'shapes/circle' },
+            latest: summary('shapes/circle', { critical: 1 }),
+          },
+        ],
       }),
     )
     expect(all.map((item) => item.kind)).toEqual(['urgent-vulnerability', 'vulnerabilities'])
@@ -519,7 +521,7 @@ describe('Needs attention rules', () => {
           createdAt: NOW,
         },
       ],
-      audits: [{ latest: summary('colors/red', {}) }],
+      audits: [{ repo: { forge: 'work', path: 'colors/red' }, latest: summary('colors/red', {}) }],
     }
     expect(notAnalysedItems(sources(base)).map((item) => [item.id, item.title])).toEqual([
       ['not-analysed:work:colors/blue', 'Not analysed yet'],
@@ -546,7 +548,12 @@ describe('Needs attention rules', () => {
         blockedJobs: [
           job({ path: 'shapes/circle', status: 'blocked', error: 'weekly budget reached' }),
         ],
-        audits: [{ latest: summary('colors/red', { critical: 1 }) }],
+        audits: [
+          {
+            repo: { forge: 'work', path: 'colors/red' },
+            latest: summary('colors/red', { critical: 1 }),
+          },
+        ],
         repos: ['work:colors/teal'],
         knowledge: [
           {
@@ -913,7 +920,7 @@ describe('GET /api/home', () => {
       },
     })
     const home = await read(asShapes)
-    expect(home.attention.map((item) => item.kind)).toEqual([])
+    expect(home.attention.map((item) => item.kind)).toEqual(['vulnerabilities'])
   })
 
   test('an audit turned off leaves its vulnerabilities and stale records out', async () => {
@@ -936,12 +943,11 @@ describe('GET /api/home', () => {
       resolved: [],
       changedFiles: [],
     }
-    await store.auditRuns.add({
+    await store.analyses.add({
       repo: { forge: 'work', path: 'shapes/circle' },
-      trigger: 'cli',
-      startedAt: hoursAgo(3),
-      finishedAt: hoursAgo(3),
-      report,
+      kind: 'audit',
+      createdAt: '2026-09-01T00:00:00.000Z',
+      data: { ...report, findings: [] },
     })
     await store.analyses.add({
       repo: { forge: 'work', path: 'shapes/circle' },
@@ -949,10 +955,9 @@ describe('GET /api/home', () => {
       createdAt: '2026-10-01T00:00:00.000Z',
       data: report,
     })
-    expect((await read(asShapes)).attention.map((item) => item.kind)).toEqual([
-      'vulnerabilities',
-      'stale-analyses',
-    ])
+    const before = (await read(asShapes)).attention
+    expect(before.map((item) => item.kind)).toEqual(['vulnerabilities', 'stale-analyses'])
+    expect(before[0]?.detail).toBe('Up from 0 in the audit before')
     await store.settings.put({
       id: 'off',
       key: 'repo.analyzers',

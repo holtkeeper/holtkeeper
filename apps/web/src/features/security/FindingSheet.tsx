@@ -1,17 +1,12 @@
 import type { FindingGroup } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
-import { Bot, ExternalLink, FileSearch, ShieldOff } from 'lucide-react'
+import { Bot, ExternalLink, ShieldOff } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import {
-  useAuditRunDetails,
-  useAuditRuns,
-  useTaskGroupMutations,
-  useWriteTasks,
-} from '../../api/queries.ts'
+import { useAuditFixes, useTaskGroupMutations, useWriteTasks } from '../../api/queries.ts'
 import { formatDate, formatRelative, plural, shortId } from '../../lib/format.ts'
-import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
+import { parseRepoKey, repoSplat } from '../../lib/repo.ts'
 import {
   findingStatusLabel,
   findingStatusTone,
@@ -27,7 +22,6 @@ import { taskGroupCap } from '../../lib/tasks.ts'
 import { httpUrl } from '../../lib/url.ts'
 import {
   ConfirmDialog,
-  EmptyState,
   ErrorState,
   KeyValue,
   Placeholder,
@@ -46,11 +40,8 @@ import { FixTimeline } from './FixTimeline.tsx'
 const tabs = [
   { id: 'repos', label: 'Repositories' },
   { id: 'details', label: 'Details' },
-  { id: 'runs', label: 'Run history' },
   { id: 'fixes', label: 'Fix attempts' },
 ] as const
-
-const repoSet = (group: FindingGroup) => new Set(group.repos.map((entry) => entry.repo))
 
 /**
  * The urgency verdict of a group: urgent or not, what it lets an attacker do, why, who judged it
@@ -93,67 +84,13 @@ function UrgencyNote({ group }: { group: FindingGroup }) {
   )
 }
 
-function RunHistory({ group }: { group: FindingGroup }) {
-  const runs = useAuditRuns()
-  if (runs.isPending) return <Placeholder className="h-40" />
-  if (runs.isError) return <ErrorState error={runs.error} />
-  const repos = repoSet(group)
-  const list = runs.data.runs.filter((run) => repos.has(repoKey(run.repo)))
-  if (!list.length)
-    return <EmptyState icon={<FileSearch />} title="No audit runs of these repositories" />
-  return (
-    <Table label="Audit runs of the repositories with this finding">
-      <thead>
-        <tr>
-          <Th>Run</Th>
-          <Th>Repository</Th>
-          <Th align="right">Active</Th>
-          <Th>When</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {list.map((run) => (
-          <tr key={run.id}>
-            <Td>
-              <Link
-                to="/supply/security/runs/$runId"
-                params={{ runId: run.id }}
-                className="mono text-[12.5px] hover:underline"
-              >
-                {shortId(run.id)}
-              </Link>
-            </Td>
-            <Td className="mono text-[12.5px]">{run.repo.path}</Td>
-            <Td align="right" className="tabular">
-              {run.active}
-            </Td>
-            <Td className="text-xs text-muted">{formatRelative(run.finishedAt)}</Td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
-  )
-}
-
 function FixAttempts({ group }: { group: FindingGroup }) {
-  const runs = useAuditRuns()
-  const repos = repoSet(group)
-  const newest = new Map<string, string>()
-  for (const run of runs.data?.runs ?? []) {
-    const key = repoKey(run.repo)
-    if (repos.has(key) && !newest.has(key)) newest.set(key, run.id)
-  }
-  const details = useAuditRunDetails([...newest.values()])
-  if (runs.isPending || details.some((detail) => detail.isPending))
-    return <Placeholder className="h-40" />
-  if (runs.isError) return <ErrorState error={runs.error} />
-  const ids = new Set([group.advisory, ...group.aliases])
-  const fixes = details.flatMap(
-    (detail) =>
-      detail.data?.run.report.fixes.filter((fix) =>
-        fix.requested.some((requested) => ids.has(requested)),
-      ) ?? [],
+  const fixes = useAuditFixes(
+    [group.advisory, ...group.aliases],
+    group.repos.map((entry) => entry.repo),
   )
+  if (fixes.isPending) return <Placeholder className="h-40" />
+  if (fixes.isError) return <ErrorState error={fixes.error} />
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted">
@@ -173,7 +110,7 @@ function FixAttempts({ group }: { group: FindingGroup }) {
           </>
         ) : null}
       </p>
-      <FixTimeline fixes={fixes} />
+      <FixTimeline fixes={fixes.data.repos.flatMap((repo) => repo.fixes)} />
     </div>
   )
 }
@@ -500,8 +437,6 @@ function GroupSheet({
         {fix.reason ? <p className="text-xs text-muted">{fix.reason}</p> : null}
         {current === 'repos' ? (
           <Repositories group={group} />
-        ) : current === 'runs' ? (
-          <RunHistory group={group} />
         ) : current === 'fixes' ? (
           <FixAttempts group={group} />
         ) : (

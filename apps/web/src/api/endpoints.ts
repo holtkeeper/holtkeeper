@@ -169,8 +169,7 @@ import type {
   SnoozeInput,
   SnoozeList,
   PutConfigInput,
-  AuditRunDetail,
-  AuditRunList,
+  AuditFixesResponse,
   CreateCredentialInput,
   CredentialList,
   CredentialTestInput,
@@ -376,15 +375,10 @@ export const api = {
   listFleet: (forge: string) =>
     request<FleetListingView>('POST', `/api/repos/updates/fleet/${id(forge)}/list`),
 
-  auditRuns: (query: { repo?: RepoRef; limit?: number; before?: string }) =>
-    request<AuditRunList>('GET', '/api/audit-runs', {
-      query: {
-        repo: query.repo ? repoKey(query.repo) : undefined,
-        limit: query.limit,
-        before: query.before,
-      },
+  auditFixes: (ids: readonly string[], repos: readonly string[]) =>
+    request<AuditFixesResponse>('GET', '/api/audits/fixes', {
+      query: { ids: ids.join(','), repos: repos.join(',') },
     }),
-  auditRun: (runId: string) => request<AuditRunDetail>('GET', `/api/audit-runs/${id(runId)}`),
   findings: (repo?: RepoRef) =>
     request<FindingsResponse>('GET', '/api/audits/findings', {
       query: { repo: repo ? repoKey(repo) : undefined },

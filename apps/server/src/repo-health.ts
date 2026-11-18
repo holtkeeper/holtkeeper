@@ -1,9 +1,7 @@
 import type { Action, Principal, RepoTarget } from '@holtkeeper/access'
 import { metricsOf } from '@holtkeeper/analyzer'
 import { auditAnalysis } from '@holtkeeper/analyzers'
-import { summarizeRun } from '@holtkeeper/api'
 import type {
-  AuditRunSummary,
   HealthTone,
   ReleaseCard,
   RepoFreshness,
@@ -11,6 +9,7 @@ import type {
   RepoHealthCellKey,
   RepoHealthCells,
   RepoHealthStatus,
+  SecuritySummary,
 } from '@holtkeeper/api'
 import { bundleAnalysis, bundleBudgetsSchema, judgeTarget } from '@holtkeeper/bundles'
 import { ciJobsAnalysis } from '@holtkeeper/ci-jobs'
@@ -94,7 +93,7 @@ export interface RepoHealth {
 /**
  * Everything health is classified from, read once per request: every setting entry, the newest
  * main-line record head per repository and kind (metrics filled in at read time for records stored
- * without), recent jobs newest first, the stored release cards and recent audit runs newest first.
+ * without), recent jobs newest first and the stored release cards.
  */
 export interface HealthSources {
   now: Date
@@ -102,8 +101,6 @@ export interface HealthSources {
   heads: readonly AnalysisHead[]
   jobs: readonly Job[]
   releases: readonly ReleaseCard[]
-  /** Audit runs, also those ingested without an `audit` record; none when absent. */
-  audits?: readonly AuditRunSummary[]
   /**
    * What the last freshness sweep decided per repository and analyzer, keyed by `repoKey` and kind
    * joined with `\0`; none when absent.
@@ -189,18 +186,26 @@ const durationText = (seconds: number) => {
 export const isStale = (head: Pick<AnalysisHead, 'createdAt'>, now: Date) =>
   now.getTime() - Date.parse(head.createdAt) > STALE_ANALYSIS_DAYS * DAY_MS
 
-/** The audit counts of the newer of the `audit` head and the newest audit run. */
-function auditCounts(head: AnalysisHead | undefined, run: AuditRunSummary | undefined) {
-  if (run && (!head || run.finishedAt > head.createdAt))
-    return { severities: run.severities, ignored: run.ignored, expired: run.expiredAllowlist }
-  return head && metricsOf(auditAnalysis, head)
+/**
+ * The headline numbers of an `audit` head from its metrics; `undefined` without a head or when its
+ * metrics carry no severity counts.
+ */
+export function securitySummary(head: AnalysisHead | undefined): SecuritySummary | undefined {
+  const metrics = head && metricsOf(auditAnalysis, head)
+  if (!head || !metrics?.severities) return undefined
+  const { critical, high, medium, low, unknown } = metrics.severities
+  return {
+    analysisId: head.id,
+    createdAt: head.createdAt,
+    severities: { critical, high, medium, low, unknown },
+    active: critical + high + medium + low + unknown,
+    ignored: metrics.ignored ?? 0,
+    expiredAllowlist: metrics.expired ?? 0,
+  }
 }
 
-function securityCell(
-  head: AnalysisHead | undefined,
-  run: AuditRunSummary | undefined,
-): RepoHealthCell {
-  const metrics = auditCounts(head, run)
+function securityCell(head: AnalysisHead | undefined): RepoHealthCell {
+  const metrics = head && metricsOf(auditAnalysis, head)
   if (!metrics?.severities) return head ? cell('—', 'no counts', 'none') : noRecord()
   const { critical, high, medium, low, unknown } = metrics.severities
   const ignored = metrics.ignored ?? 0
@@ -448,10 +453,7 @@ export function indexSources(sources: HealthSources) {
     if (job.group === undefined)
       jobs.set(repoKey(job.repo), [...(jobs.get(repoKey(job.repo)) ?? []), job])
   const releases = new Map(sources.releases.map((card) => [repoKey(card.repo), card]))
-  const audits = new Map<string, AuditRunSummary>()
-  for (const run of sources.audits ?? [])
-    if (!audits.has(repoKey(run.repo))) audits.set(repoKey(run.repo), run)
-  return { sources, heads, jobs, releases, audits }
+  return { sources, heads, jobs, releases }
 }
 
 /** Sources indexed by `indexSources`. */
@@ -484,7 +486,7 @@ export function repoHealth(
     return { ...(job && { job }), ...(sweep && { sweep }) }
   }
   const build: Record<RepoHealthCellKey, () => RepoHealthCell> = {
-    security: () => securityCell(heads.get('audit'), indexed.audits.get(key)),
+    security: () => securityCell(heads.get('audit')),
     dependencies: () => dependenciesCell(heads.get('renovate'), pending('renovate')),
     coverage: () => coverageCell(heads.get('coverage'), options().target, options().tests),
     bundles: () => bundlesCell(heads.get('bundle'), options().budgets, pending('bundle')),
@@ -531,15 +533,11 @@ export function repoHealth(
 /** Jobs read for the jobs cell. */
 const JOBS_READ = 500
 
-/** Audit runs read for the security cell. */
-const AUDITS_READ = 500
-
 /**
  * Reads `HealthSources` once per request: every setting entry, the newest main-line heads (of
  * `repo` when given) with read-time metrics, the newest jobs of `jobRepos` (none when it is an
- * empty list, all when absent), the cards `releases` gives (none without it) and, with `audits`,
- * the newest audit runs (of `repo` when given), and the last freshness sweep's decisions. Heads of
- * kinds `known` rejects are left out.
+ * empty list, all when absent), the cards `releases` gives (none without it) and the last
+ * freshness sweep's decisions. Heads of kinds `known` rejects are left out.
  */
 export async function readHealthSources(
   deps: Pick<ServerDeps, 'store' | 'analyses' | 'now'>,
@@ -548,22 +546,18 @@ export async function readHealthSources(
     repo?: RepoRef
     jobRepos?: RepoRef[]
     releases?: () => Promise<ReleaseCard[]>
-    audits?: boolean
     known?: (kind: string) => boolean
   } = {},
 ): Promise<HealthSources> {
   const { store } = deps
   const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
-  const [settings, heads, jobs, releases, runs, sweep] = await Promise.all([
+  const [settings, heads, jobs, releases, sweep] = await Promise.all([
     store.settings.list(),
     latestHeadsWithMetrics(store.analyses, kinds, options.repo ? { repo: options.repo } : {}),
     options.jobRepos?.length === 0
       ? []
       : store.jobs.list({ ...(options.jobRepos && { repos: options.jobRepos }), limit: JOBS_READ }),
     options.releases ? options.releases() : [],
-    options.audits
-      ? store.auditRuns.list({ ...(options.repo && { repo: options.repo }), limit: AUDITS_READ })
-      : [],
     lastSweepVerdicts(deps),
   ])
   const known = options.known ?? (() => true)
@@ -573,7 +567,6 @@ export async function readHealthSources(
     heads: heads.filter((head) => known(head.kind)),
     jobs,
     releases,
-    audits: runs.map(summarizeRun),
     sweep,
   }
 }

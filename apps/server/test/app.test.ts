@@ -4,8 +4,6 @@ import type {
   AnalysisDetail,
   AnalysisList,
   AnalysisSummary,
-  AuditRunDetail,
-  AuditRunList,
   CredentialList,
   CredentialView,
   MeResponse,
@@ -91,35 +89,6 @@ const config = parseConfig({
   },
 })
 
-const report = (severity: 'high' | 'low') => ({
-  scanner: 'osv-scanner',
-  findings: [
-    {
-      id: 'GHSA-1',
-      aliases: ['CVE-1'],
-      summary: 'bad',
-      severity,
-      url: 'https://osv.dev/GHSA-1',
-      package: { name: 'lodash', version: '4.17.15', ecosystem: 'npm' },
-      source: 'pnpm-lock.yaml',
-      fixedVersions: ['4.17.21'],
-    },
-  ],
-  ignored: [],
-  expired: [],
-  fixes: [],
-  resolved: [],
-  changedFiles: [],
-})
-
-const run = (path: string, finishedAt: string) => ({
-  repo: { forge: 'work', path },
-  trigger: 'cli',
-  startedAt: finishedAt,
-  finishedAt,
-  report: report('high'),
-})
-
 let store: Store
 const tokenSetting = defineSetting({
   key: 'test.token',
@@ -196,78 +165,7 @@ describe('server', () => {
 
     const anonymous = (await (await setup(games).request('/api/me')).json()) as MeResponse
     expect(anonymous.principal).toBeNull()
-    expect((await setup(games).request('/api/audit-runs')).status).toBe(401)
-  })
-
-  test('ingests audit runs and lists them with summaries', async () => {
-    const app = setup()
-    const created = await send(
-      app,
-      'POST',
-      '/api/audit-runs',
-      run('games/a', '2026-10-29T10:00:00.000Z'),
-    )
-    expect(created.status).toBe(201)
-    const detail = (await created.json()) as AuditRunDetail
-    expect(detail.summary).toMatchObject({
-      active: 1,
-      severities: { high: 1 },
-      tools: ['pnpm'],
-      languages: ['JavaScript'],
-    })
-    expect(detail.run.actor).toBe('root')
-
-    await send(app, 'POST', '/api/audit-runs', run('games/a', '2026-10-30T10:00:00.000Z'))
-    const list = (await (
-      await app.request('/api/audit-runs?repo=work:games/a&limit=1')
-    ).json()) as AuditRunList
-    expect(list.runs.map((r) => r.finishedAt)).toEqual(['2026-10-30T10:00:00.000Z'])
-
-    const one = await app.request(`/api/audit-runs/${detail.run.id}`)
-    expect(((await one.json()) as AuditRunDetail).run.report.findings).toHaveLength(1)
-    expect((await store.audit.list()).events.map((e) => e.action)).toEqual([
-      'audit_run.ingest',
-      'audit_run.ingest',
-    ])
-  })
-
-  test('rejects malformed reports', async () => {
-    const response = await send(setup(), 'POST', '/api/audit-runs', {
-      ...run('games/a', 'yesterday'),
-    })
-    expect(response.status).toBe(400)
-    expect(((await response.json()) as { error: string }).error).toContain('startedAt')
-  })
-
-  test('scopes audit runs to the caller', async () => {
-    await store.auditRuns.add({
-      ...run('games/a', '2026-10-29T10:00:00.000Z'),
-      trigger: 'cli',
-      report: report('high'),
-    })
-    const tool = await store.auditRuns.add({
-      ...run('tools/x', '2026-10-29T11:00:00.000Z'),
-      trigger: 'cli',
-      report: report('low'),
-    })
-    const app = setup(games)
-
-    const list = (await (
-      await app.request('/api/audit-runs', { headers: asGames })
-    ).json()) as AuditRunList
-    expect(list.runs.map((r) => r.repo.path)).toEqual(['games/a'])
-    expect((await app.request(`/api/audit-runs/${tool.id}`, { headers: asGames })).status).toBe(403)
-    expect(
-      (
-        await send(
-          app,
-          'POST',
-          '/api/audit-runs',
-          run('games/a', '2026-10-29T12:00:00.000Z'),
-          asGames,
-        )
-      ).status,
-    ).toBe(403)
+    expect((await setup(games).request('/api/audits/findings')).status).toBe(401)
   })
 
   test('stores settings per scope, seals secrets and resolves for a repository', async () => {

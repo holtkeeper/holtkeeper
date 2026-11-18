@@ -1,4 +1,4 @@
-import type { AuditFindingMetric, AuditMetrics } from '@holtkeeper/analyzers'
+import { type AuditFindingMetric, type AuditMetrics, auditAnalysis } from '@holtkeeper/analyzers'
 import type {
   DependencyAdvisory,
   DependencyBundleShare,
@@ -30,13 +30,14 @@ import { type RenovateMetrics, isBroken, renovateDataSchema } from '@holtkeeper/
 import type {
   AnalysisHead,
   AnalysisStore,
-  AuditRunStore,
   KnowledgeEntry,
   KnowledgeStore,
   LibraryEcosystem,
   LibraryRef,
 } from '@holtkeeper/store'
 import type { Severity } from '@holtkeeper/vuln'
+
+import { latestHeadsWithMetrics } from './analyses.ts'
 
 const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
@@ -112,35 +113,21 @@ export type AdvisorySighting = Pick<
   'id' | 'severity' | 'summary' | 'url' | 'fixedIn' | 'package' | 'ecosystem' | 'version'
 >
 
-/** Audit runs read to find the newest one of each repository. */
-const AUDIT_POOL = 1000
-
-/** Every finding (ignored ones too) of the newest audit run of each repository `canRead` allows. */
+/**
+ * Every finding (allowlisted ones too) of the newest main-line `audit` record of each repository
+ * `canRead` allows, by `forge:path`, from stored metrics (computed at read time for records stored
+ * without).
+ */
 export async function newestAuditFindings(
-  auditRuns: Pick<AuditRunStore, 'list'>,
+  analyses: Pick<AnalysisStore, 'latest' | 'latestHeads' | 'heads' | 'get'>,
   canRead: (repo: RepoRef) => boolean,
 ): Promise<Map<string, AdvisorySighting[]>> {
-  const newest = new Map<string, AdvisorySighting[]>()
-  for (const run of await auditRuns.list({ limit: AUDIT_POOL })) {
-    const key = repoKey(run.repo)
-    if (newest.has(key) || !canRead(run.repo)) continue
-    newest.set(
-      key,
-      [...run.report.findings, ...run.report.ignored.map((ignored) => ignored.finding)].map(
-        (finding) => ({
-          id: finding.id,
-          severity: finding.severity,
-          summary: finding.summary,
-          url: finding.url,
-          fixedIn: finding.fixedVersions,
-          package: finding.package.name,
-          ecosystem: finding.package.ecosystem,
-          version: finding.package.version,
-        }),
-      ),
-    )
-  }
-  return newest
+  const heads = await latestHeadsWithMetrics(
+    analyses,
+    new Map([[auditAnalysis.kind, auditAnalysis]]),
+    { kind: auditAnalysis.kind },
+  )
+  return auditHeadFindings(heads, canRead)
 }
 
 /**

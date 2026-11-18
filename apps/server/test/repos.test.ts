@@ -252,13 +252,12 @@ describe('GET /api/repos', () => {
     expect(repos.every((r) => r.configurable === undefined)).toBe(true)
   })
 
-  test('names the newest audit run to callers who may read audits', async () => {
-    await store.auditRuns.add({
+  test('names the newest audit to callers who may read audits', async () => {
+    await store.analyses.add({
       repo: { forge: 'work', path: 'shapes/circle' },
-      trigger: 'cli',
-      startedAt: hoursAgo(5),
-      finishedAt: hoursAgo(5),
-      report: {
+      kind: 'audit',
+      createdAt: hoursAgo(5),
+      data: {
         scanner: 'osv-scanner',
         findings: [],
         ignored: [],
@@ -268,7 +267,7 @@ describe('GET /api/repos', () => {
         changedFiles: [],
       },
     })
-    expect((await list('auditor'))[0]?.latestAudit?.finishedAt).toBe(hoursAgo(5))
+    expect((await list('auditor'))[0]?.latestAudit?.createdAt).toBe(hoursAgo(5))
     expect((await list('analyst'))[0]?.latestAudit).toBeUndefined()
     await store.settings.put({
       id: 'off',

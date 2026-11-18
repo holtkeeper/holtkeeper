@@ -19,7 +19,6 @@ const domainOf: Record<string, DatabaseDomain> = {
   jobs: 'jobs',
   ci_jobs: 'jobs',
   analyses: 'analyses',
-  audit_runs: 'analyses',
   audit_events: 'audit',
   audit_state: 'audit',
   audit_chain: 'audit',

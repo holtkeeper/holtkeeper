@@ -2,7 +2,6 @@ import { Database } from 'bun:sqlite'
 
 import type {
   AnalysisRecord,
-  AuditRun,
   Identity,
   Job,
   JobSearch,
@@ -48,27 +47,6 @@ export interface SqliteStoreOptions {
 
 const json = (value: unknown) => JSON.stringify(value)
 const orNull = <T>(value: T | undefined) => value ?? null
-
-interface AuditRunRow {
-  id: string
-  repo_forge: string
-  repo_path: string
-  trigger: AuditRun['trigger']
-  actor: string | null
-  started_at: string
-  finished_at: string
-  report: string
-}
-
-const toAuditRun = (r: AuditRunRow): AuditRun => ({
-  id: r.id,
-  repo: { forge: r.repo_forge, path: r.repo_path },
-  trigger: r.trigger,
-  ...(r.actor !== null && { actor: r.actor }),
-  startedAt: r.started_at,
-  finishedAt: r.finished_at,
-  report: JSON.parse(r.report),
-})
 
 interface AnalysisRow {
   id: string
@@ -245,16 +223,6 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
   migrate(db)
 
   const sql = {
-    runInsert: db.prepare(
-      `INSERT INTO audit_runs (id, repo_forge, repo_path, trigger, actor, started_at, finished_at, report)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ),
-    runGet: db.query<AuditRunRow, [string]>('SELECT * FROM audit_runs WHERE id = ?'),
-    runList: db.query<AuditRunRow, [string | null, string | null, string | null, number]>(
-      `SELECT * FROM audit_runs
-       WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR finished_at < ?3)
-       ORDER BY finished_at DESC, seq DESC LIMIT ?4`,
-    ),
     analysisInsert: db.prepare(
       `INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, sha, created_at, actor, data, metrics)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -379,31 +347,6 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
   }
 
   return {
-    auditRuns: {
-      async add(run) {
-        const stored: AuditRun = { ...run, id: crypto.randomUUID() }
-        sql.runInsert.run(
-          stored.id,
-          run.repo.forge,
-          run.repo.path,
-          run.trigger,
-          orNull(run.actor),
-          run.startedAt,
-          run.finishedAt,
-          json(run.report),
-        )
-        return stored
-      },
-      async get(id) {
-        const row = sql.runGet.get(id)
-        return row ? toAuditRun(row) : undefined
-      },
-      async list({ repo, before, limit = 50 } = {}) {
-        return sql.runList
-          .all(orNull(repo?.forge), orNull(repo?.path), orNull(before), limit)
-          .map(toAuditRun)
-      },
-    },
     analyses: {
       async add(record) {
         const stored: AnalysisRecord = { ...record, id: crypto.randomUUID() }

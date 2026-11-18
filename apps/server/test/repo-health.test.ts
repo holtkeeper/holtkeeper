@@ -67,22 +67,6 @@ const job = (status: Job['status'], patch: Partial<Job> = {}): Job => ({
   ...patch,
 })
 
-const auditRun = (finishedAt: string, patch: Record<string, number>) => ({
-  id: `run-${finishedAt}`,
-  repo: { forge: 'work', path: 'shapes/circle' },
-  trigger: 'cli' as const,
-  startedAt: finishedAt,
-  finishedAt,
-  severities: severities(patch),
-  active: 1,
-  ignored: 0,
-  resolved: 0,
-  expiredAllowlist: 0,
-  languages: [],
-  tools: [],
-  changedFiles: 0,
-})
-
 const card = (patch: Partial<ReleaseCard>): ReleaseCard => ({
   repo: { forge: 'work', path: 'shapes/circle' },
   stage: 'idle',
@@ -162,19 +146,6 @@ describe('repoHealth cells', () => {
       tone: 'ok',
     })
     expect(cellOf('security', {})).toEqual({ value: '—', sub: 'no record', tone: 'none' })
-  })
-
-  test('security reads an ingested audit run newer than the audit record', () => {
-    expect(cellOf('security', { audits: [auditRun(hoursAgo(2), { critical: 1 })] })).toMatchObject({
-      value: '1 critical',
-      tone: 'bad',
-    })
-    expect(
-      cellOf('security', { heads: [audit()], audits: [auditRun(hoursAgo(0), { high: 3 })] }),
-    ).toMatchObject({ value: '3 high' })
-    expect(
-      cellOf('security', { heads: [audit()], audits: [auditRun(hoursAgo(5), { high: 3 })] }),
-    ).toMatchObject({ value: 'None' })
   })
 
   test('coverage is judged by the target of the most specific analyzers.coverage entry', () => {

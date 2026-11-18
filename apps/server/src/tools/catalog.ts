@@ -44,8 +44,8 @@ import { whoUses } from './who-uses.ts'
 export interface CatalogToolsContext {
   catalog: ApiCatalog
   usages: UsageIndex
-  /** Stored analyses and audits that `evaluate_dependency` reads. */
-  store: Pick<Store, 'analyses' | 'auditRuns'>
+  /** Stored analyses (audits included) that `evaluate_dependency` reads. */
+  store: Pick<Store, 'analyses'>
   /** The knowledge base `evaluate_dependency` quotes. */
   knowledge: KnowledgeToolsContext
   /** Repositories whose API, usages and stored analyses the caller may read (catalog reach). */
@@ -811,7 +811,6 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
           evaluateDependency(
             {
               analyses: context.store.analyses,
-              auditRuns: context.store.auditRuns,
               catalog,
               usages,
               canRead,

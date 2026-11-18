@@ -2,7 +2,7 @@ import type { Agent } from '@holtkeeper/agent'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { ForgeFetch, GitForge, RepoRef } from '@holtkeeper/forge'
 import type { AnalysisKind } from '@holtkeeper/report'
-import type { AnalysisStore, AuditRunStore, CiJobStore } from '@holtkeeper/store'
+import type { AnalysisStore, CiJobStore } from '@holtkeeper/store'
 import type { z } from 'zod'
 
 import type { Applicability } from './applies.ts'
@@ -101,7 +101,6 @@ export interface AnalyzerContext<Options> {
   /** Earlier results, for analyzers that build on other analyses. */
   history?: {
     analyses: AnalysisStore
-    auditRuns: AuditRunStore
     /** CI job attempts kept between runs, for analyzers that accumulate job history. */
     ciJobs?: CiJobStore
   }

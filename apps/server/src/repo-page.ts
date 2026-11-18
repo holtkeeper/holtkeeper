@@ -4,7 +4,6 @@ import { metricsOf } from '@holtkeeper/analyzer'
 import { auditAnalysis } from '@holtkeeper/analyzers'
 import type {
   AnalysisSummary,
-  AuditRunSummary,
   HealthTone,
   ReleaseCard,
   RepoAccessSummary,
@@ -60,6 +59,7 @@ import {
   indexSources,
   readHealthSources,
   repoHealth,
+  securitySummary,
 } from './repo-health.ts'
 import { findingUrgencies } from './security-alert-state.ts'
 import { repoDependencies, stackTeamViews } from './stack.ts'
@@ -400,7 +400,6 @@ interface CardInputs {
   heads: ReadonlyMap<string, AnalysisHead>
   summaries: ReadonlyMap<string, AnalysisSummary>
   cells: RepoHealthCells
-  audit?: AuditRunSummary
   direct?: number
   stack?: RepoStackView
   toolchain: RepoToolchainEntry[]
@@ -452,17 +451,12 @@ const card = (
 const fromCell = (cell: RepoHealthCell | undefined) =>
   cell && cell.tone !== 'none' ? { tone: cell.tone, status: cell.value } : undefined
 
-function securityCard({ heads, audit, cells, now, urgent = [] }: CardInputs): RepoOverviewCard {
+function securityCard({ heads, cells, now, urgent = [] }: CardInputs): RepoOverviewCard {
   const head = heads.get('audit')
-  const fromRun = audit && (!head || audit.finishedAt > head.createdAt)
-  const metrics = head ? metricsOf(auditAnalysis, head) : undefined
-  const counts = fromRun
-    ? { severities: audit.severities, ignored: audit.ignored, expired: audit.expiredAllowlist }
-    : metrics
+  const counts = securitySummary(head)
   if (!counts) return notAnalysed('security', 'supply', 'active findings')
   const { critical, high, medium, low, unknown } = counts.severities
-  const active = critical + high + medium + low + unknown
-  const at = fromRun ? audit.finishedAt : (head?.createdAt ?? '')
+  const { active, createdAt: at } = counts
   const status = urgent.length
     ? { tone: 'bad' as const, status: `${urgent.length} urgent` }
     : (fromCell(cells.security) ?? { tone: 'ok' as const, status: 'None' })
@@ -482,7 +476,7 @@ function securityCard({ heads, audit, cells, now, urgent = [] }: CardInputs): Re
       [
         `Audited ${ago(at, now)}`,
         counts.ignored ? `${counts.ignored} allowlisted` : '',
-        counts.expired ? `${counts.expired} expired` : '',
+        counts.expiredAllowlist ? `${counts.expiredAllowlist} expired` : '',
       ]
         .filter(Boolean)
         .join(' · '),
@@ -931,7 +925,6 @@ export async function repoOverview(
       repo: ref,
       jobRepos: [ref],
       ...(may('releases:read') && options.releases && { releases: options.releases }),
-      audits: may('audits:read'),
       ...(labels.size && { known: (kind: string) => labels.has(kind) }),
     }),
     repoDependencies(store.analyses, ref),
@@ -950,7 +943,9 @@ export async function repoOverview(
   const indexed = indexSources(sources)
   const { health, cells } = repoHealth(indexed, repo, may)
   const key = repoKey(repo)
-  const audit = may('audits:read') ? indexed.audits.get(key) : undefined
+  const audit = may('audits:read')
+    ? securitySummary(indexed.heads.get(key)?.get('audit'))
+    : undefined
   const urgent = urgencyOf
     ? urgentPackages(indexed.heads.get(key)?.get('audit'), urgencyOf, now)
     : []
@@ -970,7 +965,6 @@ export async function repoOverview(
       heads: indexed.heads.get(key) ?? new Map(),
       summaries: new Map(summaries.map((summary) => [summary.kind, summary])),
       cells,
-      ...(audit ? { audit } : {}),
       ...(depgraph ? { direct: dependencies.length } : {}),
       ...(toolchain.stack ? { stack: toolchain.stack } : {}),
       toolchain: toolchain.toolchain,

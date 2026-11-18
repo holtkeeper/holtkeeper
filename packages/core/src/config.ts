@@ -34,7 +34,7 @@ const authSchema = z.custom<AuthProvider>(
 )
 
 const storeSchema = z.custom<Store>(
-  (value) => isObject(value) && isObject(value.auditRuns) && typeof value.close === 'function',
+  (value) => isObject(value) && isObject(value.analyses) && typeof value.close === 'function',
   'expected a store, e.g. sqliteStore({ path: "holtkeeper.db" })',
 )
 

@@ -28,7 +28,7 @@ for (const team of ['games', 'tools'])
     updatedAt: at,
   })
 
-/** Real audits of the fixtures, stored as runs of made-up repositories over the past days. */
+/** Real audits of the fixtures, stored as `audit` records of made-up repositories over the past days. */
 const repos = [
   { path: 'games/app-x', layout: { web: 'npm', server: 'go' }, fix: false },
   { path: 'games/adventure', layout: { '.': 'npm' }, fix: true },
@@ -65,13 +65,12 @@ for (const [index, repo] of repos.entries()) {
             ]
           : [],
     })
-    await store.auditRuns.add({
+    await store.analyses.add({
       repo: { forge: 'work', path: repo.path },
-      trigger: daysAgo === 0 ? 'manual' : 'schedule',
+      kind: 'audit',
+      createdAt: new Date(startedAt.getTime() + 42_000).toISOString(),
       actor: 'root',
-      startedAt: startedAt.toISOString(),
-      finishedAt: new Date(startedAt.getTime() + 42_000).toISOString(),
-      report,
+      data: report,
     })
     console.log(
       `${repo.path} -${daysAgo}d: ${report.findings.length} active, ${report.resolved.length} fixed`,

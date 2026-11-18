@@ -2,7 +2,6 @@ import type { SQL } from 'bun'
 
 /** Schema-qualified, quoted names of every table (and the search fold function) of one store. */
 export interface Tables {
-  auditRuns: SQL.Query<unknown>
   analyses: SQL.Query<unknown>
   credentials: SQL.Query<unknown>
   settings: SQL.Query<unknown>
@@ -49,7 +48,6 @@ export interface Tables {
 export function tables(sql: SQL, schema: string): Tables {
   const name = (table: string) => sql(`${schema}.${table}`)
   return {
-    auditRuns: name('audit_runs'),
     analyses: name('analyses'),
     credentials: name('credentials'),
     settings: name('settings'),

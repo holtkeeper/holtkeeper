@@ -203,12 +203,11 @@ describe('repository overview', () => {
   })
 
   test('leaves the audit out without audits:read', async () => {
-    await store.auditRuns.add({
+    await store.analyses.add({
       repo: circle,
-      trigger: 'cli',
-      startedAt: at,
-      finishedAt: at,
-      report: {
+      kind: 'audit',
+      createdAt: at,
+      data: {
         scanner: 'osv-scanner',
         findings: [],
         ignored: [],
@@ -219,7 +218,7 @@ describe('repository overview', () => {
       },
     })
     const admin = (await get('/api/repos/overview?repo=work:shapes/circle')).body as RepoOverview
-    expect(admin.audit?.repo).toEqual(circle)
+    expect(admin.audit).toMatchObject({ createdAt: at, active: 0 })
     const reader = (await get('/api/repos/overview?repo=work:shapes/circle', asShapes))
       .body as RepoOverview
     expect(reader.audit).toBeUndefined()

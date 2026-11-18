@@ -1,7 +1,6 @@
 import type { RepoTarget } from '@holtkeeper/access'
 import type {
   FindingGroup,
-  AuditRunSummary,
   HomeAttentionAction,
   HomeAttentionItem,
   HomeChange,
@@ -9,7 +8,9 @@ import type {
   HomeRepoRef,
   HomeSeverity,
   ReleaseCard,
+  SecuritySummary,
 } from '@holtkeeper/api'
+import type { RepoRef } from '@holtkeeper/forge'
 import type {
   AnalysisHead,
   AuditEvent,
@@ -40,10 +41,11 @@ const ATTENTION_WINDOW_MS = DAY_MS
 /** What changed covers this many days of the audit log. */
 export const CHANGES_DAYS = 7
 
-/** The newest and the one before it of one repository's audits. */
+/** The newest `audit` record of one repository (main line) and, when known, the one before it. */
 export interface RepoAudits {
-  latest: AuditRunSummary
-  previous?: AuditRunSummary
+  repo: RepoRef
+  latest: SecuritySummary
+  previous?: SecuritySummary
 }
 
 /** Everything Needs attention is computed from, already narrowed to what the caller may read. */
@@ -185,7 +187,7 @@ function blockedItems(sources: HomeSources): HomeAttentionItem[] {
   }))
 }
 
-const urgent = (summary: AuditRunSummary) => summary.severities.critical + summary.severities.high
+const urgent = (summary: SecuritySummary) => summary.severities.critical + summary.severities.high
 
 /**
  * One item per urgent finding group (`FindingGroup.urgency`), above every other critical item:
@@ -216,11 +218,14 @@ export function urgentFindingItems(sources: HomeSources): HomeAttentionItem[] {
   })
 }
 
-/** Critical and high vulnerabilities of each repository's latest audit. */
+/**
+ * Critical and high vulnerabilities of each repository's newest audit, linking to Security narrowed
+ * to the repository.
+ */
 export function auditItems(sources: HomeSources): HomeAttentionItem[] {
-  return sources.audits.flatMap(({ latest, previous }): HomeAttentionItem[] => {
-    const repo = repoRef(sources, keyOf(latest.repo))
-    const href = webPaths.securityRun(latest.id)
+  return sources.audits.flatMap(({ repo: ref, latest, previous }): HomeAttentionItem[] => {
+    const repo = repoRef(sources, keyOf(ref))
+    const href = webPaths.security({ repo: repo.repo })
     const items: HomeAttentionItem[] = []
     const { critical, high } = latest.severities
     if (critical + high > 0) {
@@ -240,9 +245,9 @@ export function auditItems(sources: HomeSources): HomeAttentionItem[] {
           }),
         repos: [repo],
         count: critical + high,
-        at: latest.finishedAt,
+        at: latest.createdAt,
         href,
-        action: open('Open audit', href),
+        action: open('Open findings', href),
       })
     }
     return items
@@ -404,12 +409,12 @@ export function staleItems(sources: HomeSources): HomeAttentionItem[] {
 
 /**
  * Repositories the caller may see and read analyses of that have no record at all: no analysis
- * head and no audit run.
+ * head and no audit.
  */
 export function notAnalysedItems(sources: HomeSources): HomeAttentionItem[] {
   const recorded = new Set([
     ...sources.analyses.map((head) => keyOf(head.repo)),
-    ...sources.audits.map((audit) => keyOf(audit.latest.repo)),
+    ...sources.audits.map((audit) => keyOf(audit.repo)),
   ])
   return [...new Set(sources.repos)]
     .filter(

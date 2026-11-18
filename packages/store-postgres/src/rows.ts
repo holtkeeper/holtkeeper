@@ -1,7 +1,6 @@
 import type {
   AiUsageRecord,
   AnalysisRecord,
-  AuditRun,
   Identity,
   Job,
   JobAttempt,
@@ -28,27 +27,6 @@ const isoOr = (value: PgTimestamp | null) => (value === null ? undefined : iso(v
 
 /** Postgres `int8` and `numeric` arrive as strings; counters and sums are plain numbers here. */
 export const num = (value: number | string | null | undefined): number => Number(value ?? 0)
-
-export interface AuditRunRow {
-  id: string
-  repo_forge: string
-  repo_path: string
-  trigger: AuditRun['trigger']
-  actor: string | null
-  started_at: PgTimestamp
-  finished_at: PgTimestamp
-  report: AuditRun['report']
-}
-
-export const toAuditRun = (r: AuditRunRow): AuditRun => ({
-  id: r.id,
-  repo: { forge: r.repo_forge, path: r.repo_path },
-  trigger: r.trigger,
-  ...(r.actor !== null && { actor: r.actor }),
-  startedAt: iso(r.started_at),
-  finishedAt: iso(r.finished_at),
-  report: r.report,
-})
 
 export interface AnalysisRow {
   id: string

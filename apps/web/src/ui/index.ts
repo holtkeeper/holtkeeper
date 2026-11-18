@@ -11,7 +11,7 @@ export { CopyButton, CopyField, Kbd, SearchInput, ToastHost, Tooltip, notify } f
 export { Markdown } from './Markdown.tsx'
 export { Page } from './Page.tsx'
 export { Select } from './Select.tsx'
-export { SeverityBar, SeverityChip } from './Severity.tsx'
+export { SeverityChip } from './Severity.tsx'
 export { LoadMore } from './LoadMore.tsx'
 export { Table, Td, Th, tableScrollClass } from './Table.tsx'
 /** @public */

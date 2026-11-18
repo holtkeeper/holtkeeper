@@ -21,10 +21,12 @@ interface RunsSearch {
 }
 
 /**
- * What a Supply › Security link opens: `urgent: 'only'` keeps urgent findings, `finding` opens a
- * finding group's sheet (`<advisory>:<package>`).
+ * What a Supply › Security link opens: `repo` (`forge:path`) narrows it to one repository,
+ * `urgent: 'only'` keeps urgent findings, `finding` opens a finding group's sheet
+ * (`<advisory>:<package>`).
  */
 interface SecuritySearch {
+  repo?: string
   urgent?: 'only'
   finding?: string
 }
@@ -109,7 +111,6 @@ export const webPaths = {
   repo: (repo: string, search: RepoHubSearch = {}) => withSearch(repoHubPath(repo), { ...search }),
   teams: () => '/repos/teams',
   security: (search: SecuritySearch = {}) => withSearch('/supply/security', { ...search }),
-  securityRun: (runId: string) => `/supply/security/runs/${segment(runId)}`,
   secretReports: (report?: string) => withSearch('/supply/secret-reports', { report }),
   releaseTimeline: (repo: string) => withSearch('/releases/timeline', { repo }),
   knowledge: (tab: KnowledgeSection, search: KnowledgeSearch = {}) =>

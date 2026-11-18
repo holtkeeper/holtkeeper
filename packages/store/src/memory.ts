@@ -22,7 +22,6 @@ import { memoryTasks } from './tasks.ts'
 import type {
   AnalysisQuery,
   AnalysisRecord,
-  AuditRun,
   Identity,
   Job,
   JobAttempt,
@@ -50,7 +49,6 @@ const newestFirst = <T>(items: T[], at: (item: T) => string) =>
 
 /** A `Store` kept in process memory. For tests and throwaway local runs; nothing survives a restart. */
 export function memoryStore(): Store {
-  const auditRuns = new Map<string, AuditRun>()
   const analyses = new Map<string, AnalysisRecord>()
   const credentials = new Map<string, StoredCredential>()
   const settings = new Map<string, SettingEntry>()
@@ -86,24 +84,6 @@ export function memoryStore(): Store {
   }
 
   return {
-    auditRuns: {
-      async add(run) {
-        const stored = { ...clone(run), id: crypto.randomUUID() }
-        auditRuns.set(stored.id, stored)
-        return clone(stored)
-      },
-      get: async (id) => clone(auditRuns.get(id)),
-      async list({ repo, before, limit = 50 } = {}) {
-        const matching = [...auditRuns.values()].filter(
-          (run) =>
-            (!repo || (run.repo.forge === repo.forge && run.repo.path === repo.path)) &&
-            (!before || run.finishedAt < before),
-        )
-        return newestFirst(matching, (run) => run.finishedAt)
-          .slice(0, limit)
-          .map(clone)
-      },
-    },
     analyses: {
       async add(record) {
         const stored = { ...clone(record), id: crypto.randomUUID() }

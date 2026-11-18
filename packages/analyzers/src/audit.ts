@@ -153,7 +153,7 @@ export function auditMetrics(
   }
 }
 
-/** Vulnerability audits run as background jobs; the server also stores each one as an audit run. */
+/** Vulnerability audits run as background jobs; the newest record of each repository is its current security state. */
 export const auditAnalysis = defineAnalysis<AuditReport, AuditMetrics>({
   kind: 'audit',
   label: 'Vulnerability audit',

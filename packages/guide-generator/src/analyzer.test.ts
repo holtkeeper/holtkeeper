@@ -96,7 +96,7 @@ const run = (
     ...(agent && { agent }),
     ...(extra.forge && { forge: extra.forge as never }),
     ...(extra.jobId && { jobId: extra.jobId }),
-    history: { analyses: store.analyses, auditRuns: store.auditRuns },
+    history: { analyses: store.analyses },
     options: { force: false, ...options },
   })
 
@@ -143,7 +143,7 @@ test('a repository with no tests by design skips testing without asking the mode
     dir,
     runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
     agent,
-    history: { analyses: store.analyses, auditRuns: store.auditRuns },
+    history: { analyses: store.analyses },
     options: { force: false },
   })
   expect(tasks).toHaveLength(1)
@@ -282,7 +282,7 @@ test('sections the policy lists are stored accepted by auto-accept and audited; 
     runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
     agent: fakeAgent().agent,
     jobId: 'job-7',
-    history: { analyses: store.analyses, auditRuns: store.auditRuns },
+    history: { analyses: store.analyses },
     options: { force: false },
   })
   expect(asked).toEqual(['shapes/service'])

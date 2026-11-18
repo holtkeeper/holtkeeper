@@ -1,15 +1,16 @@
 import { type Action, type Principal, type Scope, can } from '@holtkeeper/access'
 import { broadestBudget, budgetKey, budgetStatuses } from '@holtkeeper/ai-usage'
-import type { HomeSpend, HomeView } from '@holtkeeper/api'
-import { summarizeRun } from '@holtkeeper/api'
+import { analysisMetrics } from '@holtkeeper/analyzer'
+import { auditAnalysis } from '@holtkeeper/analyzers'
+import type { HomeSpend, HomeView, SecuritySummary } from '@holtkeeper/api'
 import { fleetPatterns } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import { staticPrefix } from '@holtkeeper/jobs'
 import { analyzerOff, repoAnalyzersKey } from '@holtkeeper/settings'
-import type { AuditEvent } from '@holtkeeper/store'
+import type { AnalysisHead, AnalysisStore, AuditEvent } from '@holtkeeper/store'
 import { Hono } from 'hono'
 
-import { latestHeadsWithMetrics } from '../analyses.ts'
+import { LINE_SCAN, latestHeadsWithMetrics } from '../analyses.ts'
 import { type Env, type ServerDeps, parseRepo, principalOf, repoTarget } from '../context.ts'
 import { readFindings } from '../findings.ts'
 import {
@@ -21,7 +22,7 @@ import {
   summarizeChanges,
 } from '../home.ts'
 import { releaseServiceFor } from '../releases.ts'
-import { principalHealthAccess } from '../repo-health.ts'
+import { principalHealthAccess, securitySummary } from '../repo-health.ts'
 import { snoozedIds } from '../snoozes.ts'
 import { canSee } from '../visibility.ts'
 import { aiReadScopes, canReadAiScope } from './ai.ts'
@@ -102,8 +103,29 @@ async function eventsOf(deps: ServerDeps, principal: Principal): Promise<AuditEv
 }
 
 /**
+ * The numbers of the `audit` record before `head` on the same line of history (same ref), from
+ * its stored metrics or, for records stored without, computed from its data.
+ */
+async function previousAudit(
+  analyses: Pick<AnalysisStore, 'heads' | 'get'>,
+  head: AnalysisHead,
+): Promise<SecuritySummary | undefined> {
+  const earlier = await analyses.heads({
+    repo: head.repo,
+    kind: head.kind,
+    before: head.createdAt,
+    limit: LINE_SCAN,
+  })
+  const previous = earlier.find((candidate) => candidate.ref === head.ref)
+  if (!previous || previous.metrics) return securitySummary(previous)
+  const record = await analyses.get(previous.id)
+  const metrics = record && analysisMetrics(auditAnalysis, record.data)
+  return metrics ? securitySummary({ ...previous, metrics }) : undefined
+}
+
+/**
  * Everything Home is computed from, narrowed to what `principal` may read; no forge calls. Records
- * and audit runs of analyzers `repo.analyzers` turns off on their repository are left out.
+ * of analyzers `repo.analyzers` turns off on their repository are left out.
  */
 async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSources> {
   const { store, config } = deps
@@ -138,7 +160,6 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     failedJobs,
     blockedJobs,
     recentJobs,
-    runs,
     cards,
     learnings,
     knowledge,
@@ -150,7 +171,6 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     store.jobs.list({ status: 'failed', ...scoped, limit: 200 }),
     store.jobs.list({ status: 'blocked', ...scoped, limit: 100 }),
     store.jobs.list({ ...scoped, limit: 500 }),
-    store.auditRuns.list({ limit: 300 }),
     releases.snapshot(principal),
     store.learnings.list({ status: ['proposed'] }),
     store.knowledge.list({ status: 'proposed' }),
@@ -162,14 +182,27 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
   const off = (repo: RepoRef, kind: string) =>
     analyzerOff(switches, repoTarget(config, repo), kind) !== undefined
 
-  const audits = new Map<string, RepoAudits>()
-  for (const run of runs) {
-    if (!sees('audits:read', run.repo) || off(run.repo, 'audit')) continue
-    const key = keyOf(run.repo)
-    const entry = audits.get(key)
-    if (!entry) audits.set(key, { latest: summarizeRun(run) })
-    else if (!entry.previous) entry.previous = summarizeRun(run)
-  }
+  const audits = await Promise.all(
+    heads
+      .filter(
+        (head) =>
+          head.kind === auditAnalysis.kind &&
+          sees('audits:read', head.repo) &&
+          !off(head.repo, auditAnalysis.kind),
+      )
+      .flatMap((head) => {
+        const latest = securitySummary(head)
+        return latest ? [{ head, latest }] : []
+      })
+      .map(async ({ head, latest }): Promise<RepoAudits> => {
+        // Only an item with critical or high findings says how they changed.
+        const previous =
+          latest.severities.critical + latest.severities.high > 0
+            ? await previousAudit(store.analyses, head)
+            : undefined
+        return { repo: head.repo, latest, ...(previous && { previous }) }
+      }),
+  )
 
   const known = labels.size ? (kind: string) => labels.has(kind) : () => true
   const analyses = heads.filter(
@@ -182,7 +215,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
 
   const repos = new Set<string>()
   for (const job of recentJobs) if (job.group === undefined) repos.add(keyOf(job.repo))
-  for (const key of audits.keys()) repos.add(key)
+  for (const audit of audits) repos.add(keyOf(audit.repo))
   for (const card of cards) repos.add(keyOf(card.repo))
   for (const head of analyses) repos.add(keyOf(head.repo))
   for (const forge of Object.keys(config.forges))
@@ -198,7 +231,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     analyzerLabel,
     failedJobs: failedJobs.filter((job) => (job.finishedAt ?? job.createdAt) >= since),
     blockedJobs: blockedJobs.filter((job) => (job.finishedAt ?? job.createdAt) >= since),
-    audits: [...audits.values()],
+    audits,
     urgentFindings: findings.groups.filter(
       (group) => group.urgency?.urgent && group.status !== 'allowlisted',
     ),

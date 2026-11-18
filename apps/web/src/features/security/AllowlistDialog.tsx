@@ -77,7 +77,7 @@ export function AllowlistDialog({ group, onClose }: { group: FindingGroup; onClo
       },
       {
         onSuccess: () => {
-          void client.invalidateQueries({ queryKey: ['audit-runs'] })
+          void client.invalidateQueries({ queryKey: ['findings'] })
           notify.success('Allowlisted', `${group.advisory} until ${expires}`)
           onClose()
         },

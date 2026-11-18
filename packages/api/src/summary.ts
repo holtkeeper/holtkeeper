@@ -1,8 +1,6 @@
-import type { AuditRun } from '@holtkeeper/store'
+import type { SeverityCounts } from './types.ts'
 
-import { sourceInfo } from './sources.ts'
-import type { AuditRunSummary, SeverityCounts } from './types.ts'
-
+/** Severity counts with every severity at zero. */
 export const emptySeverities = (): SeverityCounts => ({
   critical: 0,
   high: 0,
@@ -10,32 +8,3 @@ export const emptySeverities = (): SeverityCounts => ({
   low: 0,
   unknown: 0,
 })
-
-/** Condenses a run for lists and charts. Pure, so the server and the UI compute the same numbers. */
-export function summarizeRun(run: AuditRun): AuditRunSummary {
-  const { report } = run
-  const severities = emptySeverities()
-  for (const finding of report.findings) severities[finding.severity]++
-
-  const sources = [
-    ...report.findings,
-    ...report.resolved,
-    ...report.ignored.map((i) => i.finding),
-  ].map((f) => sourceInfo(f.source))
-  return {
-    id: run.id,
-    repo: run.repo,
-    trigger: run.trigger,
-    ...(run.actor ? { actor: run.actor } : {}),
-    startedAt: run.startedAt,
-    finishedAt: run.finishedAt,
-    severities,
-    active: report.findings.length,
-    ignored: report.ignored.length,
-    resolved: report.resolved.length,
-    expiredAllowlist: report.expired.length,
-    languages: [...new Set(sources.map((s) => s.language))].toSorted(),
-    tools: [...new Set(sources.map((s) => s.label))].toSorted(),
-    changedFiles: report.changedFiles.length,
-  }
-}

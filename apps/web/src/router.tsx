@@ -79,10 +79,6 @@ const SecurityPage = lazyRouteComponent(
   () => import('./features/security/SecurityPage.tsx'),
   'SecurityPage',
 )
-const AuditRunPage = lazyRouteComponent(
-  () => import('./features/security/AuditRunPage.tsx'),
-  'AuditRunPage',
-)
 const SettingsPage = lazyRouteComponent(
   () => import('./features/settings/SettingsPage.tsx'),
   'SettingsPage',
@@ -374,7 +370,6 @@ const routeTree = rootRoute.addChildren([
     librariesRoute,
     libraryRoute,
     securityRoute,
-    page('supply/security/runs/$runId', AuditRunPage),
     secretReportsRoute,
     licensesRoute,
     stackRoute,

@@ -56,8 +56,6 @@ import type {
   AiUsageRecord,
   AiUsageTotals,
   AuditEvent,
-  AuditRun,
-  AuditTrigger,
   ChatMessageRef,
   Family,
   GuideGenerated,
@@ -111,7 +109,7 @@ import type {
   UsageEcosystem,
   UsedExport,
 } from '@holtkeeper/usages'
-import type { AllowlistEntry, Severity } from '@holtkeeper/vuln'
+import type { AllowlistEntry, FixAttempt, Severity } from '@holtkeeper/vuln'
 
 import type { McpToolsetInfo, McpToolsetName } from './mcp.ts'
 
@@ -246,39 +244,24 @@ export interface AccountChallenge {
 
 export type SeverityCounts = Record<Severity, number>
 
-/** Compact view of an audit run for lists, charts and dashboards. */
-export interface AuditRunSummary {
-  id: string
-  repo: RepoRef
-  trigger: AuditTrigger
-  actor?: string
-  startedAt: Timestamp
-  finishedAt: Timestamp
+/**
+ * Headline numbers of the newest `audit` record (main line) of one repository: the current
+ * security state, as its stored metrics give it.
+ */
+export interface SecuritySummary {
+  /** The `audit` analysis record the numbers come from. */
+  analysisId: string
+  /** When that record was stored. */
+  createdAt: Timestamp
   /** Active (not allowlisted, not fixed) findings by severity. */
   severities: SeverityCounts
+  /** Active findings, every severity. */
   active: number
+  /** Findings the allowlist hides. */
   ignored: number
-  resolved: number
+  /** Allowlist entries past their expiry. */
   expiredAllowlist: number
-  /** Languages and package managers present among the findings, e.g. `JavaScript`, `pnpm`. */
-  languages: string[]
-  tools: string[]
-  changedFiles: number
 }
-
-/** `GET /api/audit-runs` */
-export interface AuditRunList {
-  runs: AuditRunSummary[]
-}
-
-/** `GET /api/audit-runs/:id` */
-export interface AuditRunDetail {
-  run: AuditRun
-  summary: AuditRunSummary
-}
-
-/** `POST /api/audit-runs` — ingests a report produced elsewhere (CLI, CI). */
-export type IngestAuditRun = Omit<AuditRun, 'id' | 'actor'>
 
 /**
  * Where a finding stands in one repository: `open`, `fixing` while an agent task that fixes it is
@@ -357,6 +340,27 @@ export interface FindingGroup {
   firstSeenAt: Timestamp
   /** The urgency verdict; absent while nothing judged the advisory. */
   urgency?: FindingUrgency
+}
+
+/** The fix attempts of the newest audit (main line) of one repository that touched an advisory. */
+export interface AuditRepoFixes {
+  /** `forge:path`. */
+  repo: string
+  /** The `audit` analysis record they come from. */
+  analysisId: string
+  createdAt: Timestamp
+  /** Attempts whose requested advisories include one of the asked ids, in report order. */
+  fixes: FixAttempt[]
+}
+
+/**
+ * `GET /api/audits/fixes?ids=&repos=` — for each repository the caller may read audits of
+ * (`audits:read`) whose audit `repo.analyzers` does not turn off, of `repos` (comma-separated
+ * `forge:path`) when given, the fix attempts its newest audit made for any of `ids`
+ * (comma-separated advisory id and aliases). Repositories without such an attempt are left out.
+ */
+export interface AuditFixesResponse {
+  repos: AuditRepoFixes[]
 }
 
 /**
@@ -570,8 +574,8 @@ export interface RepoSummary {
   lastAnalysedAt?: Timestamp
   /** Absent without `settings:read` on this repository (or a scope covering it). */
   updates?: RepoUpdatesSummary
-  /** The newest audit run, when the caller holds `audits:read`. */
-  latestAudit?: AuditRunSummary
+  /** The newest audit's numbers, when the caller holds `audits:read` and there is one. */
+  latestAudit?: SecuritySummary
   /** Set when `repo.tests` says the repository has no tests by design. */
   noTests?: { reason?: string }
 }
@@ -2755,7 +2759,8 @@ export interface RepoOverview {
   /** Default branch as the forge last reported it. */
   defaultBranch?: string
   analyses: AnalysisSummary[]
-  audit?: AuditRunSummary
+  /** The newest audit's numbers; absent without `audits:read` or an `audit` record. */
+  audit?: SecuritySummary
   /** Direct dependencies in the newest `depgraph` record. */
   dependencies?: { direct: number; analysisId: string; createdAt: Timestamp }
   stack?: RepoStackView

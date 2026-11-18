@@ -265,15 +265,6 @@ export async function runVulnIndex(
         data: report,
         ...(metrics !== undefined && { metrics }),
       })
-      if (changed)
-        // oxlint-disable-next-line no-await-in-loop
-        await store.auditRuns.add({
-          repo: each.repo,
-          trigger: 'vuln-index',
-          startedAt: createdAt,
-          finishedAt: createdAt,
-          report,
-        })
       summary.written += 1
     }
 

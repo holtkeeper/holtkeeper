@@ -8,7 +8,7 @@ import { createCredentialService } from '@holtkeeper/credentials'
 import { type DepEdge, type DepNode, analyzeLayer } from '@holtkeeper/depgraph'
 import { type LicensedPackage, licensesMetrics } from '@holtkeeper/licenses'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { AnalysisStore, AuditRunStore, Store } from '@holtkeeper/store'
+import type { AnalysisStore, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 import type { Finding } from '@holtkeeper/vuln'
@@ -42,18 +42,6 @@ const counting = (analyses: AnalysisStore): AnalysisStore => ({
   latest: async (query) => {
     reads.push(`latest:${query?.kind ?? '*'}`)
     return analyses.latest(query)
-  },
-})
-
-const countingRuns = (auditRuns: AuditRunStore): AuditRunStore => ({
-  ...auditRuns,
-  list: async (query) => {
-    reads.push('list:audit-runs')
-    return auditRuns.list(query)
-  },
-  get: async (id) => {
-    reads.push('get:audit-run')
-    return auditRuns.get(id)
   },
 })
 
@@ -145,7 +133,6 @@ beforeEach(async () => {
     store: {
       ...store,
       analyses: counting(store.analyses),
-      auditRuns: countingRuns(store.auditRuns),
     },
     vault,
     credentials: createCredentialService({ credentials: store.credentials, vault }),
@@ -156,21 +143,6 @@ beforeEach(async () => {
 
   await ingestAudit('acme/shop', [finding('GHSA-1', 'some-lib'), finding('GHSA-2', 'other-lib')])
   await ingestAudit('acme/admin', [finding('GHSA-1', 'some-lib')])
-  await store.auditRuns.add({
-    repo: { forge: 'work', path: 'acme/shop' },
-    trigger: 'cli',
-    startedAt: at,
-    finishedAt: at,
-    report: {
-      scanner: 'osv-scanner',
-      findings: [finding('GHSA-9', 'some-lib')],
-      ignored: [],
-      expired: [],
-      fixes: [],
-      resolved: [],
-      changedFiles: [],
-    },
-  })
   await ingestLicenses('acme/shop', [licensed('some-lib', 'allowed')])
   await ingestLicenses('acme/admin', [licensed('some-lib', 'allowed'), licensed('gizmo', 'denied')])
   await ingestDepgraph(

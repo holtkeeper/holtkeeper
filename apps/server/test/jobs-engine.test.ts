@@ -159,7 +159,7 @@ describe('server jobs', () => {
     expect(lines.some((l) => l.startsWith('jobs:'))).toBeTrue()
   })
 
-  test('audit jobs get the audit settings and repository traits and store an audit run', async () => {
+  test('audit jobs get the audit settings and repository traits and store an audit record', async () => {
     const store = memoryStore()
     const config = parseConfig({
       ...base,
@@ -241,47 +241,7 @@ describe('server jobs', () => {
     await engine?.stop()
 
     expect(seen).toMatchObject({ fix: true, upgrade: 'minor', traits: { ssr: true } })
-    const [run] = await store.auditRuns.list({})
-    expect(run).toMatchObject({
-      repo: { forge: 'work', path: 'games/a' },
-      trigger: 'manual',
-      actor: 'jane',
-      report,
-    })
-  })
-
-  test('an audit job the freshness sweeper queued is stored with the freshness trigger', async () => {
-    const store = memoryStore()
-    const config = parseConfig({ ...base, jobs: {} })
-    const report = {
-      scanner: 'osv-scanner',
-      findings: [],
-      ignored: [],
-      expired: [],
-      fixes: [],
-      resolved: [],
-      changedFiles: [],
-    }
-    const audit: AnyAnalyzer = {
-      kind: 'audit',
-      analysis: { kind: 'audit', label: 'Audit' } as AnyAnalyzer['analysis'],
-      scope: 'repo',
-      needs: {},
-      options: z.object({}).loose(),
-      run: async () => ({ data: report }),
-    }
-    const job = await store.jobs.enqueue({
-      analyzer: 'audit',
-      repo: { forge: 'work', path: 'games/a' },
-      trigger: 'freshness',
-      createdAt: now().toISOString(),
-    })
-    const engine = await startJobs({ config, store, analyzers: [audit], now, log: () => {} })
-    for (let i = 0; i < 50 && (await store.jobs.get(job.id))?.status !== 'succeeded'; i++)
-      await Bun.sleep(10)
-    await engine?.stop()
-
-    const [run] = await store.auditRuns.list({})
-    expect(run?.trigger).toBe('freshness')
+    const [record] = await store.analyses.list({ kind: 'audit' })
+    expect(record).toMatchObject({ repo: { forge: 'work', path: 'games/a' }, data: report })
   })
 })

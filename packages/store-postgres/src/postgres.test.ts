@@ -443,15 +443,14 @@ describe.skipIf(!url || !admin)('postgres store', () => {
 
   test('timestamps come back in the contract form, whatever offset they were written with', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema() })
-    const stored = await store.auditRuns.add({
+    const stored = await store.analyses.add({
       repo: { forge: 'work', path: 'games/a' },
-      trigger: 'manual',
-      startedAt: '2026-10-01T02:00:00+02:00',
-      finishedAt: '2026-10-01T02:30:00+02:00',
-      report: { findings: [], scanned: [], errors: [] } as never,
+      kind: 'audit',
+      createdAt: '2026-10-01T02:30:00+02:00',
+      data: {},
     })
-    expect(stored.finishedAt).toBe('2026-10-01T00:30:00.000Z')
-    expect((await store.auditRuns.list())[0]?.finishedAt).toBe('2026-10-01T00:30:00.000Z')
+    expect(stored.createdAt).toBe('2026-10-01T00:30:00.000Z')
+    expect((await store.analyses.list())[0]?.createdAt).toBe('2026-10-01T00:30:00.000Z')
     await store.close()
   })
 

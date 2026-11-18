@@ -1281,12 +1281,11 @@ describe('evaluate_dependency', () => {
       createdAt: '2026-10-20T00:00:00.000Z',
       data: { packages: [moment], files: 10, types: { status: 'used', projects: [], sites: 0 } },
     })
-    await store.auditRuns.add({
+    await store.analyses.add({
       repo: { forge: 'work', path: 'games/a' },
-      trigger: 'schedule',
-      startedAt: '2026-10-20T00:00:00.000Z',
-      finishedAt: '2026-10-20T00:01:00.000Z',
-      report: {
+      kind: 'audit',
+      createdAt: '2026-10-20T00:01:00.000Z',
+      data: {
         scanner: 'osv-scanner',
         findings: [
           {

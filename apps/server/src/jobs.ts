@@ -15,8 +15,7 @@ import {
   toolchainSetting,
 } from '@holtkeeper/jobs'
 import { type SettingDefinition, repoAnalyzersSetting, resolveSetting } from '@holtkeeper/settings'
-import type { AnalysisRecord, AuditTrigger, Job, Store } from '@holtkeeper/store'
-import { auditReportSchema } from '@holtkeeper/vuln'
+import type { AnalysisRecord, Job, Store } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { assetsPolicyFor } from './assets.ts'
@@ -331,28 +330,6 @@ export async function automaticJobReady(
   return (await automaticJobBlocker(config, store, analyzer, request)) === undefined
 }
 
-const auditTriggers: Partial<Record<Job['trigger'], AuditTrigger>> = {
-  manual: 'manual',
-  schedule: 'schedule',
-  freshness: 'freshness',
-  'vuln-index': 'vuln-index',
-}
-
-/** Stores a finished `audit` job's report as an audit run, so it shows up next to CLI uploads. */
-async function recordAuditRun(store: Store, job: Job, record: AnalysisRecord) {
-  if (job.analyzer !== 'audit' || record.kind !== 'audit') return
-  const parsed = auditReportSchema.safeParse(record.data)
-  if (!parsed.success) return
-  await store.auditRuns.add({
-    repo: job.repo,
-    trigger: auditTriggers[job.trigger] ?? 'webhook',
-    ...(job.actor !== undefined && { actor: job.actor }),
-    startedAt: job.startedAt ?? job.createdAt,
-    finishedAt: job.finishedAt ?? record.createdAt,
-    report: parsed.data,
-  })
-}
-
 /**
  * A `persistArtifacts` hook storing run artifacts in `store`, tagged `{ repo, kind, analysis }`.
  * Ids are checked against the content hash the store computes.
@@ -418,10 +395,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
     ...(options.admission && { admission: options.admission }),
     cancelReason: reviewCancelReason(store, config),
     ...(options.worker && { worker: options.worker }),
-    async onFinished(job, record) {
-      if (record) await recordAuditRun(store, job, record)
-      await options.onFinished?.(job, record)
-    },
+    ...(options.onFinished && { onFinished: options.onFinished }),
     ...(options.onCanceled && { onCanceled: options.onCanceled }),
   })
   const run = options.run ?? { worker: true, scheduler: true }

@@ -192,7 +192,7 @@ describe('review analyzer', () => {
       forge,
       agent,
       runner: createFakeRunner(() => ({ stdout: `${HEAD}\n` })).runner,
-      history: { analyses: store.analyses, auditRuns: store.auditRuns },
+      history: { analyses: store.analyses },
       options: reviewOptionsSchema.parse({ mergeRequest: 7 }),
     })
     expect(result.ref).toBe('!7')

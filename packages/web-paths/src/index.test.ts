@@ -9,6 +9,9 @@ describe('webPaths', () => {
     expect(webPaths.tasks()).toBe('/ops/tasks')
     expect(webPaths.automation()).toBe('/ops/automation')
     expect(webPaths.security()).toBe('/supply/security')
+    expect(webPaths.security({ repo: 'work:games/a' })).toBe(
+      '/supply/security?repo=work%3Agames%2Fa',
+    )
     expect(webPaths.security({ urgent: 'only', finding: 'GHSA-1:some-lib' })).toBe(
       '/supply/security?urgent=only&finding=GHSA-1%3Asome-lib',
     )
@@ -43,7 +46,6 @@ describe('webPaths', () => {
   })
 
   test('path parameters are encoded as single segments', () => {
-    expect(webPaths.securityRun('run 1')).toBe('/supply/security/runs/run%201')
     expect(webPaths.secretReports()).toBe('/supply/secret-reports')
     expect(webPaths.secretReports('r 1')).toBe('/supply/secret-reports?report=r+1')
   })

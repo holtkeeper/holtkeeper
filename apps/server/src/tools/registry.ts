@@ -190,7 +190,7 @@ export const storedStackTools = (
 export interface AgentCatalogOptions {
   catalog: ApiCatalog
   usages: UsageIndex
-  store: Pick<Store, 'analyses' | 'auditRuns' | 'knowledge' | 'libraries'> &
+  store: Pick<Store, 'analyses' | 'knowledge' | 'libraries'> &
     Partial<Pick<Store, 'audit' | 'kv' | 'settings'>>
   /** The repository the task works on. */
   repo: RepoTarget

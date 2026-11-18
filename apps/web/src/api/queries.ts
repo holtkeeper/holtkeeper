@@ -95,10 +95,9 @@ export const keys = {
   repos: ['repos'] as const,
   repoUpdates: (repo: RepoRef) => ['repos', 'updates', repoKey(repo)] as const,
   fleetListing: (forge: string) => ['repos', 'updates', 'fleet', forge] as const,
-  auditRuns: (repo?: RepoRef, limit?: number) =>
-    ['audit-runs', 'list', repo ? repoKey(repo) : '*', limit ?? 0] as const,
-  auditRun: (runId: string) => ['audit-runs', 'detail', runId] as const,
-  findings: (repo?: RepoRef) => ['audit-runs', 'findings', repo ? repoKey(repo) : '*'] as const,
+  findings: (repo?: RepoRef) => ['findings', 'list', repo ? repoKey(repo) : '*'] as const,
+  auditFixes: (ids: readonly string[], repos: readonly string[]) =>
+    ['findings', 'fixes', ids.join(','), repos.join(',')] as const,
   licenses: ['licenses'] as const,
   analyses: (kind: string, repo?: RepoRef) =>
     ['analyses', 'list', kind, repo ? repoKey(repo) : '*'] as const,
@@ -273,7 +272,7 @@ const areaKeys: Record<InboxItem['kind'], readonly (readonly string[])[]> = {
   learning: [keys.learnings, keys.guide, keys.knowledgeCounts],
   guide: [keys.guide, keys.knowledgeCounts],
   release: [keys.releases],
-  allowlist: [keys.settings, ['audit-runs']],
+  allowlist: [keys.settings, ['findings']],
   budget: [keys.ai],
 }
 
@@ -355,30 +354,12 @@ export function useKnownTeams(): string[] {
   return [...new Set([...Object.keys(me.data?.teamTitles ?? {}), ...owners])].toSorted()
 }
 
-/** Audit run summaries, newest first; all repositories when `repo` is omitted. */
-export const useAuditRuns = (repo?: RepoRef, limit = 100, enabled = true) =>
+/** Fix attempts the newest audit of each of `repos` made for any of `ids` (an advisory and its aliases). */
+export const useAuditFixes = (ids: readonly string[], repos: readonly string[]) =>
   useQuery({
-    queryKey: keys.auditRuns(repo, limit),
-    queryFn: () => api.auditRuns({ ...(repo ? { repo } : {}), limit }),
-    placeholderData: keepPreviousData,
-    enabled,
-  })
-
-/** Each audit run's detail, in order; one query per run id. */
-export const useAuditRunDetails = (runIds: readonly string[]) =>
-  useQueries({
-    queries: runIds.map((runId) => ({
-      queryKey: keys.auditRun(runId),
-      queryFn: () => api.auditRun(runId),
-      staleTime: Infinity,
-    })),
-  })
-
-export const useAuditRun = (runId: string) =>
-  useQuery({
-    queryKey: keys.auditRun(runId),
-    queryFn: () => api.auditRun(runId),
-    staleTime: Infinity,
+    queryKey: keys.auditFixes(ids, repos),
+    queryFn: () => api.auditFixes(ids, repos),
+    enabled: ids.length > 0 && repos.length > 0,
   })
 
 /** Open, fixing and allowlisted findings grouped by advisory and package; all repositories when `repo` is omitted. */

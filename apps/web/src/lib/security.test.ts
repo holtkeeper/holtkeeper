@@ -1,13 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { AuditRunSummary, FindingGroup, FindingRepo, SettingView } from '@holtkeeper/api'
+import type { FindingGroup, FindingRepo, SettingView } from '@holtkeeper/api'
 
 import {
   allowlistRows,
   allowlistState,
   allowlistTargets,
   filterFindings,
-  filterRuns,
   findingCounts,
   findingEcosystems,
   findingKey,
@@ -59,17 +58,12 @@ const setting = (id: string, scope: SettingView['scope'], value: unknown): Setti
 
 const ids = (list: FindingGroup[]) => list.map((g) => g.advisory)
 
-const run = (id: string, trigger: AuditRunSummary['trigger'], active: number) =>
-  ({ id, trigger, active }) as AuditRunSummary
-
 test('parseSecuritySearch keeps known values and drops defaults', () => {
   expect(
     parseSecuritySearch({
-      view: 'runs',
+      view: 'allowlist',
       repo: 'gitlab:acme/storefront',
       runs: 'all',
-      trigger: 'schedule',
-      findings: 'open',
       severity: 'high,critical,nope',
       status: ['open', 'fixing'],
       ecosystem: 'npm,Go',
@@ -79,11 +73,8 @@ test('parseSecuritySearch keeps known values and drops defaults', () => {
       tab: 'repos',
     }),
   ).toEqual({
-    view: 'runs',
+    view: 'allowlist',
     repo: 'gitlab:acme/storefront',
-    runs: 'all',
-    trigger: 'schedule',
-    findings: 'open',
     severity: ['high', 'critical'],
     status: ['open', 'fixing'],
     ecosystem: ['npm', 'Go'],
@@ -241,13 +232,6 @@ describe('findings', () => {
     })
     expect(fixSource(group({ fixedIn: [] }))).toBeUndefined()
   })
-})
-
-test('filterRuns keeps trigger and findings matches', () => {
-  const runs = [run('a', 'schedule', 2), run('b', 'manual', 0), run('c', 'schedule', 0)]
-  expect(filterRuns(runs, { trigger: 'schedule' }).map((r) => r.id)).toEqual(['a', 'c'])
-  expect(filterRuns(runs, { findings: 'clean' }).map((r) => r.id)).toEqual(['b', 'c'])
-  expect(filterRuns(runs, { findings: 'open', trigger: 'manual' })).toEqual([])
 })
 
 describe('allowlist', () => {

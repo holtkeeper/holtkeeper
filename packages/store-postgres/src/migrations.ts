@@ -760,6 +760,12 @@ export const migrations: readonly Migration[] = [
       DELETE FROM settings WHERE key = 'slack.reviews';
     `,
   },
+  {
+    version: 32,
+    sql: `
+      DROP TABLE audit_runs;
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

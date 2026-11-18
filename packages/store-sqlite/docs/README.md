@@ -26,7 +26,6 @@ Columns that are queried or filtered are real columns; nested data is JSON text.
 
 | Table                          | Real columns                                                                                                                                       | JSON columns                                                                                       |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `audit_runs`                   | `id`, `repo_forge`, `repo_path`, `trigger`, `actor`, `started_at`, `finished_at`                                                                   | `report`                                                                                           |
 | `credentials`                  | `id`, `name`, `kind`, `url`, `secret`, `expires_at`, `last_rotated_at`, `last_error`, `last_used_at` (v27), timestamps                             | `scope`, `rotation`, `options` (v5), `capabilities` (v17)                                          |
 | `settings`                     | `id`, `key`, `secret`, `updated_at`, `updated_by`                                                                                                  | `scope`, `value`                                                                                   |
 | `users`                        | `id`, `name`, `email`, `email_lower`, `disabled`, `session_version`, `created_*`, `last_seen_at` (v27)                                             | `grants`                                                                                           |
@@ -61,7 +60,7 @@ Columns that are queried or filtered are real columns; nested data is JSON text.
 | `slack_replies` (v29)          | `(channel, ts)`, `created_at` (index)                                                                                                              | `data` (the whole status reply)                                                                    |
 | `agent_tasks` (v21)            | `id`, `group_id`, `repo`, `status`, `updated_at` (indexes on `group_id` and `repo, updated_at`)                                                    | `data` (the whole task)                                                                            |
 
-Indexes: audit runs by `finished_at` and by `(repo_forge, repo_path, finished_at)`, settings by `key`, users by `email_lower`, and `user_id` on the child tables. Timestamps are ISO 8601 strings, which sort correctly as text. Every table also has an internal `seq` (or natural key) that keeps insertion order stable for ties.
+Indexes: settings by `key`, users by `email_lower`, and `user_id` on the child tables. Timestamps are ISO 8601 strings, which sort correctly as text. Every table also has an internal `seq` (or natural key) that keeps insertion order stable for ties.
 
 ## Knowledge search
 

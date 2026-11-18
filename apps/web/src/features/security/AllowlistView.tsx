@@ -47,7 +47,7 @@ function useRenew() {
     onSuccess: () =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.settings }),
-        client.invalidateQueries({ queryKey: ['audit-runs'] }),
+        client.invalidateQueries({ queryKey: ['findings'] }),
         client.invalidateQueries({ queryKey: keys.inbox }),
       ]),
   })

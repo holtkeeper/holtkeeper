@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
-import type { AuditReport } from '@holtkeeper/vuln'
-
 import { ExternalAccountConflictError } from './accounts.ts'
 import { AUDIT_GENESIS_HASH, auditHash } from './audit.ts'
 import { chatStoreTests } from './chat-contract.ts'
@@ -12,7 +10,6 @@ import { slackMessageStoreTests } from './slack-contract.ts'
 import { taskStoreTests } from './tasks-contract.ts'
 import type {
   AuditEventInput,
-  AuditRun,
   CiJobRecord,
   ExternalAccount,
   KnowledgeEntryInput,
@@ -29,24 +26,6 @@ import type {
   StoredCredential,
   User,
 } from './types.ts'
-
-const emptyReport: AuditReport = {
-  scanner: 'test',
-  findings: [],
-  ignored: [],
-  expired: [],
-  fixes: [],
-  resolved: [],
-  changedFiles: [],
-}
-
-const run = (path: string, finishedAt: string): Omit<AuditRun, 'id'> => ({
-  repo: { forge: 'work', path },
-  trigger: 'cli',
-  startedAt: finishedAt,
-  finishedAt,
-  report: emptyReport,
-})
 
 const record = (kind: string, path: string, createdAt: string, ref?: string) => ({
   repo: { forge: 'work', path },
@@ -247,50 +226,6 @@ export function describeStoreContract(name: string, create: () => Store | Promis
     chatStoreTests(() => store)
     taskStoreTests(() => store)
     slackMessageStoreTests(() => store)
-
-    test('audit runs: add, get, list newest first with filters and limit', async () => {
-      const a = await store.auditRuns.add(run('games/a', '2026-10-01T00:00:00.000Z'))
-      await store.auditRuns.add(run('games/b', '2026-10-03T00:00:00.000Z'))
-      await store.auditRuns.add(run('games/a', '2026-10-02T00:00:00.000Z'))
-
-      expect(a.id).toBeString()
-      expect(await store.auditRuns.get(a.id)).toEqual(a)
-      expect(await store.auditRuns.get('missing')).toBeUndefined()
-      const all = await store.auditRuns.list()
-      expect(all.map((r) => r.finishedAt.slice(8, 10))).toEqual(['03', '02', '01'])
-      const filtered = await store.auditRuns.list({
-        repo: { forge: 'work', path: 'games/a' },
-        limit: 1,
-      })
-      expect(filtered.map((r) => r.finishedAt.slice(8, 10))).toEqual(['02'])
-      const older = await store.auditRuns.list({
-        before: '2026-10-02T00:00:00.000Z',
-      })
-      expect(older.map((r) => r.finishedAt.slice(8, 10))).toEqual(['01'])
-    })
-
-    test('audit runs: reports round-trip intact', async () => {
-      const report: AuditReport = {
-        ...emptyReport,
-        findings: [
-          {
-            id: 'GHSA-1',
-            aliases: ['CVE-1'],
-            summary: 's',
-            severity: 'high',
-            url: 'u',
-            package: { name: 'lodash', version: '4.17.15', ecosystem: 'npm' },
-            source: 'package-lock.json',
-            fixedVersions: ['4.17.21'],
-          },
-        ],
-      }
-      const stored = await store.auditRuns.add({
-        ...run('games/a', '2026-10-01T00:00:00.000Z'),
-        report,
-      })
-      expect((await store.auditRuns.get(stored.id))?.report).toEqual(report)
-    })
 
     test('analyses: add, get, list newest first by repo, kind and time', async () => {
       const first = await store.analyses.add(

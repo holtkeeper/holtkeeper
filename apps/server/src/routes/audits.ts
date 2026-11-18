@@ -1,25 +1,28 @@
 import type { Principal } from '@holtkeeper/access'
-import type { AuditRunDetail, AuditRunList, FindingsResponse, SettingView } from '@holtkeeper/api'
-import { summarizeRun } from '@holtkeeper/api'
-import { allowlistSchema } from '@holtkeeper/vuln'
+import type {
+  AuditFixesResponse,
+  AuditRepoFixes,
+  FindingsResponse,
+  SettingView,
+} from '@holtkeeper/api'
+import { analyzerOff, repoAnalyzersKey } from '@holtkeeper/settings'
+import { allowlistSchema, auditReportSchema } from '@holtkeeper/vuln'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
+import { mainLineHeads } from '../analyses.ts'
 import { diffChanges } from '../audit.ts'
 import {
   type Env,
   type ServerDeps,
   authorize,
-  authorizeRecord,
-  limitParam,
   parseRepo,
   principalOf,
   readBody,
   repoKey,
   repoTarget,
 } from '../context.ts'
-import { ingestAuditRunSchema } from '../schemas.ts'
 import { allowlistEntryProblem, allowlistPolicyFor } from '../setting-rules.ts'
 import type { SupplyToolsAccess } from '../tools/repos.ts'
 import { canSee } from '../visibility.ts'
@@ -32,9 +35,18 @@ const renewSchema = z.object({
   reason: z.string().trim().min(1).max(1000).optional(),
 })
 
+/** Distinct non-empty items of a comma-separated query value. */
+const commaSet = (value: string | undefined) =>
+  new Set(
+    (value ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean),
+  )
+
 /**
- * Audit runs (list, read, ingest), `GET /api/audits/findings` (`supplyFor(caller).findings`,
- * optionally one `repo`) and `POST /api/audits/allowlist/renew`, which moves the expiry of one
+ * `GET /api/audits/findings` (`supplyFor(caller).findings`,
+ * optionally one `repo`), `GET /api/audits/fixes` (`AuditFixesResponse`) and `POST /api/audits/allowlist/renew`, which moves the expiry of one
  * `audit.allowlist` entry (and replaces its reason when one is given): `settings:write` on the
  * setting's scope, the `audit.allowlistPolicy` covering that scope (`maxDays`, `requireReason`),
  * last write wins, audited as `allowlist.renew`.
@@ -54,43 +66,38 @@ export function auditRoutes(
     return c.json<FindingsResponse>(findings)
   })
 
-  app.get('/audit-runs', async (c) => {
+  app.get('/audits/fixes', async (c) => {
     const principal = principalOf(c)
-    const repo = parseRepo(c.req.query('repo'))
-    const runs = await store.auditRuns.list({
-      ...(repo ? { repo } : {}),
-      ...(c.req.query('before') ? { before: c.req.query('before') } : {}),
-      limit: limitParam(c.req.query('limit')),
+    const ids = commaSet(c.req.query('ids'))
+    const wanted = commaSet(c.req.query('repos'))
+    if (!ids.size) throw new HTTPException(400, { message: 'ids is required' })
+    const [heads, switches] = await Promise.all([
+      mainLineHeads(store.analyses, { kind: 'audit' }),
+      store.settings.list(repoAnalyzersKey),
+    ])
+    const readable = heads.filter((head) => {
+      const target = repoTarget(config, head.repo)
+      return (
+        (!wanted.size || wanted.has(repoKey(head.repo))) &&
+        canSee(principal, 'audits:read', target) &&
+        !analyzerOff(switches, target, 'audit')
+      )
     })
-    const visible = runs.filter((run) =>
-      canSee(principal, 'audits:read', repoTarget(config, run.repo)),
+    const repos = await Promise.all(
+      readable.map(async (head): Promise<AuditRepoFixes[]> => {
+        const record = await store.analyses.get(head.id)
+        const report = auditReportSchema.safeParse(record?.data).data
+        const fixes = (report?.fixes ?? []).filter((fix) =>
+          fix.requested.some((requested) => ids.has(requested)),
+        )
+        return fixes.length
+          ? [{ repo: repoKey(head.repo), analysisId: head.id, createdAt: head.createdAt, fixes }]
+          : []
+      }),
     )
-    return c.json<AuditRunList>({ runs: visible.map(summarizeRun) })
-  })
-
-  app.get('/audit-runs/:id', async (c) => {
-    const run = await store.auditRuns.get(c.req.param('id'))
-    if (!run) throw new HTTPException(404, { message: 'audit run not found' })
-    authorizeRecord(c, 'audits:read', { kind: 'repo', repo: repoTarget(config, run.repo) })
-    return c.json<AuditRunDetail>({ run, summary: summarizeRun(run) })
-  })
-
-  app.post('/audit-runs', async (c) => {
-    const input = await readBody(c, ingestAuditRunSchema)
-    const principal = authorize(c, 'audits:run', {
-      kind: 'repo',
-      repo: repoTarget(config, input.repo),
+    return c.json<AuditFixesResponse>({
+      repos: repos.flat().toSorted((a, b) => a.repo.localeCompare(b.repo)),
     })
-    const run = await store.auditRuns.add({ ...input, actor: principal.id })
-    c.set('audit', {
-      action: 'audit_run.ingest',
-      target: { type: 'audit_run', id: run.id, repo: `${run.repo.forge}:${run.repo.path}` },
-      details: {
-        active: run.report.findings.length,
-        resolved: run.report.resolved.length,
-      },
-    })
-    return c.json<AuditRunDetail>({ run, summary: summarizeRun(run) }, 201)
   })
 
   app.post('/audits/allowlist/renew', async (c) => {

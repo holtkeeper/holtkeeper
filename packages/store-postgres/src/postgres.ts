@@ -17,7 +17,6 @@ import { postgresLibraries } from './libraries.ts'
 import { checkSchemaName, migrate } from './migrations.ts'
 import {
   type AnalysisRow,
-  type AuditRunRow,
   type CredentialRow,
   type IdentityRow,
   type LinkTokenRow,
@@ -25,7 +24,6 @@ import {
   type SettingRow,
   type UserRow,
   toAnalysis,
-  toAuditRun,
   toCredential,
   toIdentity,
   toLinkToken,
@@ -143,7 +141,7 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
   }
 }
 
-type CoreStores = Pick<Store, 'auditRuns' | 'analyses' | 'credentials' | 'settings' | 'users'>
+type CoreStores = Pick<Store, 'analyses' | 'credentials' | 'settings' | 'users'>
 
 /** The row an `INSERT ... RETURNING` produced; throws when the server returned none. */
 function inserted<T>(row: T | undefined): T {
@@ -155,32 +153,6 @@ const orNull = <T>(value: T | undefined) => value ?? null
 
 function coreStores(db: () => Promise<Db>): CoreStores {
   return {
-    auditRuns: {
-      async add(run) {
-        const { sql, t } = await db()
-        const [row]: AuditRunRow[] = await sql`
-          INSERT INTO ${t.auditRuns} (id, repo_forge, repo_path, trigger, actor, started_at, finished_at, report)
-          VALUES (${crypto.randomUUID()}, ${run.repo.forge}, ${run.repo.path}, ${run.trigger}, ${orNull(run.actor)},
-            ${run.startedAt}, ${run.finishedAt}, ${sql.json(run.report)})
-          RETURNING *`
-        return toAuditRun(inserted(row))
-      },
-      async get(id) {
-        const { sql, t } = await db()
-        const [row]: AuditRunRow[] = await sql`SELECT * FROM ${t.auditRuns} WHERE id = ${id}`
-        return row ? toAuditRun(row) : undefined
-      },
-      async list({ repo, before, limit = 50 } = {}) {
-        const { sql, t } = await db()
-        const rows: AuditRunRow[] = await sql`
-          SELECT * FROM ${t.auditRuns}
-          WHERE (${orNull(repo?.forge)}::text IS NULL
-              OR (repo_forge = ${orNull(repo?.forge)}::text AND repo_path = ${orNull(repo?.path)}::text))
-            AND (${orNull(before)}::timestamptz IS NULL OR finished_at < ${orNull(before)}::timestamptz)
-          ORDER BY finished_at DESC, seq DESC LIMIT ${limit}`
-        return rows.map(toAuditRun)
-      },
-    },
     analyses: {
       async add(record) {
         const { sql, t } = await db()

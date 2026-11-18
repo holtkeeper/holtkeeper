@@ -12,9 +12,8 @@ import { useConfigure } from '../settings/SettingsSheet.tsx'
 import { useSession } from '../shell/session.ts'
 import { AllowlistView } from './AllowlistView.tsx'
 import { FindingsBody } from './Findings.tsx'
-import { RunsView } from './RunsView.tsx'
 
-type View = 'findings' | 'runs' | 'allowlist'
+type View = 'findings' | 'allowlist'
 
 function ExpiredNotice({ onReview }: { onReview: () => void }) {
   const { can } = useSession()
@@ -77,7 +76,6 @@ function Views({
             label: 'Findings',
             ...(total !== undefined ? { badge: total } : {}),
           },
-          { id: 'runs', label: 'Runs' },
           {
             id: 'allowlist',
             label: 'Allowlist',
@@ -87,7 +85,7 @@ function Views({
         selected={view}
         onSelect={(id) =>
           update({
-            view: id === 'runs' || id === 'allowlist' ? id : undefined,
+            view: id === 'allowlist' ? id : undefined,
             finding: undefined,
             tab: undefined,
           })
@@ -103,8 +101,6 @@ function Views({
             pickRepo={notice === true}
           />
         </>
-      ) : view === 'runs' ? (
-        <RunsView {...(repo ? { repo } : {})} search={search} update={update} />
       ) : (
         <AllowlistView {...(repo ? { repo } : {})} />
       )}
@@ -113,9 +109,9 @@ function Views({
 }
 
 /**
- * Supply › Security: findings of the newest audit of every readable repository grouped by
- * advisory and package, audit runs and the allowlist, as views kept in `?view=`. `?repo=`
- * narrows every view to one repository.
+ * Supply › Security: the current state from the newest audit of every readable repository —
+ * findings grouped by advisory and package — and the allowlist, as views kept in `?view=`.
+ * `?repo=` narrows every view to one repository.
  */
 export function SecurityPage() {
   const search = useSearch({ from: '/app/supply/security' })
@@ -137,7 +133,7 @@ export function SecurityPage() {
       crumbs={[{ label: 'Security' }]}
       description={
         repo
-          ? `Findings, audit runs and allowlist of ${repoKey(repo)}`
+          ? `Findings and allowlist of ${repoKey(repo)}`
           : 'Findings of the newest audit of every repository you can see'
       }
       search={{

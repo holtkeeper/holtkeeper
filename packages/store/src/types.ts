@@ -1,41 +1,9 @@
 import type { Grant, Scope, TeamMember } from '@holtkeeper/access'
 import type { Card } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { AuditReport } from '@holtkeeper/vuln'
 
 /** ISO 8601 timestamp, e.g. `2026-10-29T12:00:00.000Z`. */
 export type Timestamp = string
-
-/** What started an audit run; `freshness` is the server's sweeper keeping results current. */
-/** `vuln-index`: the fleet vulnerability index wrote the run without a checkout. */
-export type AuditTrigger = 'cli' | 'schedule' | 'freshness' | 'manual' | 'webhook' | 'vuln-index'
-
-/** One finished audit of one repository. */
-export interface AuditRun {
-  id: string
-  repo: RepoRef
-  trigger: AuditTrigger
-  /** Principal id that started the run, when a person did. */
-  actor?: string
-  startedAt: Timestamp
-  finishedAt: Timestamp
-  report: AuditReport
-}
-
-export interface AuditRunQuery {
-  repo?: RepoRef
-  /** Only runs that finished before this time; used for paging. */
-  before?: Timestamp
-  /** Default 50. */
-  limit?: number
-}
-
-/** Audit runs, newest first. */
-export interface AuditRunStore {
-  add(run: Omit<AuditRun, 'id'>): Promise<AuditRun>
-  get(id: string): Promise<AuditRun | undefined>
-  list(query?: AuditRunQuery): Promise<AuditRun[]>
-}
 
 export interface RotationPolicy {
   enabled: boolean
@@ -2521,7 +2489,6 @@ export interface AgentTaskStore {
 
 /** Everything Holtkeeper persists. Implementations: in-memory, SQLite, Postgres. */
 export interface Store {
-  auditRuns: AuditRunStore
   analyses: AnalysisStore
   credentials: CredentialStore
   settings: SettingStore

@@ -754,6 +754,12 @@ export const migrations: readonly Migration[] = [
       DELETE FROM settings WHERE key = 'slack.reviews';
     `,
   },
+  {
+    version: 33,
+    sql: `
+      DROP TABLE audit_runs;
+    `,
+  },
 ]
 
 /**

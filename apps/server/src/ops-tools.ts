@@ -124,7 +124,6 @@ function opsToolsAccess(deps: OpsDeps, options: OpsToolsAccessOptions): OpsTools
           repo,
           jobRepos: access('analyses:read') ? [repo] : [],
           ...(releaseCards && access('releases:read') && { releases: releaseCards }),
-          audits: access('audits:read'),
           ...(known.size && { known: (kind: string) => known.has(kind) }),
         },
       )

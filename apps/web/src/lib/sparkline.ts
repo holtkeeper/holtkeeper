@@ -1,5 +1,3 @@
-import type { AuditRunSummary } from '@holtkeeper/api'
-
 export interface SparkPaths {
   /** SVG path of the line; consecutive values only, `null` breaks it. */
   line: string
@@ -55,11 +53,3 @@ export function sparkPaths(
     ...(last ? { last: { x: fixed(last.x), y: fixed(last.y) } } : {}),
   }
 }
-
-/** Active findings of runs in chronological order, for sparklines. */
-export const auditSparkline = (
-  runs: readonly AuditRunSummary[],
-): { at: string; active: number }[] =>
-  runs
-    .toSorted((a, b) => a.finishedAt.localeCompare(b.finishedAt))
-    .map((run) => ({ at: run.finishedAt, active: run.active }))

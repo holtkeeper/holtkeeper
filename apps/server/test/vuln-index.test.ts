@@ -156,9 +156,9 @@ describe('runVulnIndex', () => {
     })
     expect(record?.metrics).toMatchObject({ findings: 1, severities: { unknown: 1 } })
     expect(await store.analyses.latest({ repo: gamma, kind: 'audit' })).toEqual([])
-    expect((await store.auditRuns.list()).map((each) => each.trigger)).toEqual([
-      'vuln-index',
-      'vuln-index',
+    expect((await store.analyses.list({ kind: 'audit' })).map((each) => each.actor)).toEqual([
+      VULN_INDEX_ACTOR,
+      VULN_INDEX_ACTOR,
     ])
 
     const jobs = await store.jobs.list({ analyzer: 'audit' })
@@ -202,11 +202,11 @@ describe('runVulnIndex', () => {
     })
     tick(3_600_000)
     expect(await run()).toMatchObject({ written: 1, queued: 1 })
-    expect((await store.auditRuns.list({ repo: alpha })).length).toBe(2)
+    expect(await store.analyses.list({ repo: alpha, kind: 'audit' })).toHaveLength(2)
 
     tick(86_400_000)
     expect(await run()).toMatchObject({ written: 2, queued: 0 })
-    expect((await store.auditRuns.list({ repo: alpha })).length).toBe(2)
+    expect(await store.analyses.list({ repo: alpha, kind: 'audit' })).toHaveLength(3)
   })
 
   test('an OSV failure throws and leaves the state for the next run', async () => {

@@ -12,7 +12,7 @@ import { Hono } from 'hono'
 
 import { type Env, type ServerDeps, principalOf, repoKey, repoTarget } from '../context.ts'
 import { releaseServiceFor } from '../releases.ts'
-import { indexSources, readHealthSources, repoHealth } from '../repo-health.ts'
+import { indexSources, readHealthSources, repoHealth, securitySummary } from '../repo-health.ts'
 import { listedRepos, repoUpdatesSummaries } from '../updates.ts'
 import { canSee } from '../visibility.ts'
 
@@ -56,7 +56,7 @@ export interface FleetReader {
 /**
  * Every fleet repository (from the stored listings plus exact include paths) that
  * `reader` holds a listing permission on, sorted by `forge:path`, with the health cells, freshness,
- * updates and newest audit run it may read; whatever it may not read is absent. Repositories
+ * updates and newest audit numbers it may read; whatever it may not read is absent. Repositories
  * without any record are listed as `not-analysed`; `noTests` marks those `repo.tests` turns off.
  * A repository whose audit `repo.analyzers` turns off has no `latestAudit`.
  */
@@ -78,7 +78,6 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
     {
       jobRepos: reads('analyses:read').map(({ forge, path }) => ({ forge, path })),
       ...(releases && { releases }),
-      audits: audited.size > 0,
       ...(labels.size && { known: (kind: string) => labels.has(kind) }),
     },
   )
@@ -95,9 +94,9 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
       (action) =>
         reader.can(action, target) && (action !== 'releases:read' || releases !== undefined),
     )
-    const run =
+    const audit =
       audited.has(key) && !analyzerOff(sources.settings, target, 'audit')
-        ? indexed.audits.get(key)
+        ? securitySummary(indexed.heads.get(key)?.get('audit'))
         : undefined
     const updated = updates?.get(key)
     const tests = resolveRepoTests(sources.settings, target)
@@ -107,7 +106,7 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
       ...(reader.can('settings:write', target) && { configurable: true as const }),
       ...health,
       ...(updated && { updates: updated }),
-      ...(run && { latestAudit: run }),
+      ...(audit && { latestAudit: audit }),
       ...(!tests.expected && {
         noTests: tests.reason === undefined ? {} : { reason: tests.reason },
       }),

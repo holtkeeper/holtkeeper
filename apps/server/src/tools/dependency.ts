@@ -7,12 +7,7 @@ import {
   sameVersion,
 } from '@holtkeeper/libraries'
 import { evaluatePackages } from '@holtkeeper/licenses'
-import type {
-  AnalysisStore,
-  AuditRunStore,
-  LibraryEcosystem,
-  LibraryStore,
-} from '@holtkeeper/store'
+import type { AnalysisStore, LibraryEcosystem, LibraryStore } from '@holtkeeper/store'
 
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import type { UsageIndex } from '../api-surface/usages.ts'
@@ -31,7 +26,6 @@ import { type KnowledgeToolsContext, searchKnowledge } from './knowledge.ts'
 /** What `evaluateDependency` reads, limited to what one caller may see. */
 export interface DependencyContext {
   analyses: AnalysisStore
-  auditRuns: Pick<AuditRunStore, 'list'>
   catalog: ApiCatalog
   usages: UsageIndex
   canRead: RepoFilter
@@ -39,7 +33,7 @@ export interface DependencyContext {
   canReadAnalyses: RepoFilter
   /** Repositories whose audits the caller may read. */
   canReadAudits: RepoFilter
-  /** Repositories whose audit `repo.analyzers` turns off; their audit runs are left out. */
+  /** Repositories whose audit `repo.analyzers` turns off; their audits are left out. */
   auditOff?: () => Promise<RepoFilter>
   /** Repositories whose `bundle` analyzer `repo.analyzers` turns off; their bundles are left out. */
   bundleOff?: () => Promise<RepoFilter>
@@ -172,7 +166,7 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
 async function vulnerabilitySection(context: DependencyContext, query: Resolved) {
   const off = (await context.auditOff?.()) ?? (() => false)
   const findings = await newestAuditFindings(
-    context.auditRuns,
+    context.analyses,
     (repo) => context.canReadAudits(repo) && !off(repo),
   )
   const advisories =

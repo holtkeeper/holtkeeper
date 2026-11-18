@@ -1,7 +1,5 @@
 import type {
   AgentTaskSource,
-  AuditRunSummary,
-  AuditTrigger,
   FindingGroup,
   FindingRepo,
   FindingStatus,
@@ -19,20 +17,12 @@ import { searchEntry, searchEnum, searchList, searchText } from './search-params
 import { severities, severityRank } from './severity.ts'
 
 /** Views of Supply › Security; `findings` is the default and is left out of the URL. */
-type SecurityView = 'findings' | 'runs' | 'allowlist'
+type SecurityView = 'findings' | 'allowlist'
 
 /** Sort orders of the findings table; `severity` is the default. */
 export type FindingsSort = 'severity' | 'repos' | 'seen' | 'package'
 
-const views: readonly SecurityView[] = ['findings', 'runs', 'allowlist']
-const triggers: readonly AuditTrigger[] = [
-  'cli',
-  'schedule',
-  'freshness',
-  'manual',
-  'webhook',
-  'vuln-index',
-]
+const views: readonly SecurityView[] = ['findings', 'allowlist']
 const statuses: readonly FindingStatus[] = ['open', 'fixing', 'allowlisted']
 const sorts: readonly FindingsSort[] = ['severity', 'repos', 'seen', 'package']
 
@@ -41,12 +31,6 @@ export interface SecuritySearch {
   view?: Exclude<SecurityView, 'findings'>
   /** `forge:path` the page narrows to. */
   repo?: string
-  /** Runs view: every run instead of the latest per repository. */
-  runs?: 'all'
-  /** Runs started by this trigger only. */
-  trigger?: AuditTrigger
-  /** Runs view: `open` keeps runs with active findings, `clean` runs without. */
-  findings?: 'open' | 'clean'
   severity?: Severity[]
   status?: FindingStatus[]
   ecosystem?: string[]
@@ -67,9 +51,6 @@ export function parseSecuritySearch(search: Record<string, unknown>): SecuritySe
   return {
     ...searchEntry('view', view === 'findings' ? undefined : view),
     ...searchEntry('repo', searchText(search.repo)),
-    ...searchEntry('runs', searchEnum(search.runs, ['all'] as const)),
-    ...searchEntry('trigger', searchEnum(search.trigger, triggers)),
-    ...searchEntry('findings', searchEnum(search.findings, ['open', 'clean'] as const)),
     ...searchEntry('severity', searchList(search.severity, severities)),
     ...searchEntry('status', searchList(search.status, statuses)),
     ...searchEntry('ecosystem', searchList(search.ecosystem)),
@@ -79,16 +60,6 @@ export function parseSecuritySearch(search: Record<string, unknown>): SecuritySe
     ...searchEntry('finding', searchText(search.finding)),
     ...searchEntry('tab', searchText(search.tab)),
   }
-}
-
-/** Display name of what started a run. */
-export const triggerLabel: Record<AuditTrigger, string> = {
-  cli: 'CLI',
-  schedule: 'Schedule',
-  freshness: 'Freshness',
-  manual: 'Manual',
-  webhook: 'Webhook',
-  'vuln-index': 'Vulnerability index',
 }
 
 /** Words for a finding's status, as tables and the sheet print it. */
@@ -267,18 +238,6 @@ export function fixPrompt(group: FindingGroup): string {
   ]
     .filter(Boolean)
     .join('\n\n')
-}
-
-/** Runs matching the runs view's trigger and findings filters. */
-export function filterRuns(
-  runs: readonly AuditRunSummary[],
-  search: Pick<SecuritySearch, 'trigger' | 'findings'>,
-): AuditRunSummary[] {
-  return runs.filter(
-    (run) =>
-      (!search.trigger || run.trigger === search.trigger) &&
-      (!search.findings || (search.findings === 'open') === run.active > 0),
-  )
 }
 
 /** One `audit.allowlist` entry as stored in a setting value. */

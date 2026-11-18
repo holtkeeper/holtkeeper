@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { Discussion, GitForge } from '@holtkeeper/forge'
 import { memoryMessageStore } from '@holtkeeper/messages'
-import type { AnalysisStore, AuditRunStore } from '@holtkeeper/store'
+import type { AnalysisStore } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { addedFile, fakeAgent, fakeForge } from '../test/fakes.ts'
@@ -166,7 +166,7 @@ const run = async (
   options: Record<string, unknown> = {},
   deps: Parameters<typeof createReviewAnalyzer>[0] = {},
   agentOutputs: Record<string, unknown[]> = {},
-  history?: { analyses: AnalysisStore; auditRuns: AuditRunStore },
+  history?: { analyses: AnalysisStore },
 ) => {
   const { agent, tasks } = fakeAgent(agentOutputs)
   const analyzer = createReviewAnalyzer(deps)
@@ -199,7 +199,7 @@ describe('review analyzer texts', () => {
 
   test('by default only the first review of a merge request gets the note', async () => {
     const store = memoryStore()
-    const history = { analyses: store.analyses, auditRuns: store.auditRuns }
+    const history = { analyses: store.analyses }
     const first = noteForge()
     const { result } = await run(first.forge, {}, {}, {}, history)
     expect(first.events[0]).toBe('post')

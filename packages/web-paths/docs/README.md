@@ -22,21 +22,20 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 
 ## Paths
 
-| Builder                                                                       | Path                                                                     |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `inbox({ item?, kind?, tab? })`                                               | `/inbox?item=&kind=&tab=` (`tab`: `snoozed`)                             |
-| `repos()`                                                                     | `/repos`                                                                 |
-| `repo(repo, { tab?, section?, file?, ref? })`                                 | `/repos/<forge>/<path>?tab=&section=&file=&ref=` (hub)                   |
-| `teams()`                                                                     | `/repos/teams`                                                           |
-| `security({ urgent?, finding? })`                                             | `/supply/security?urgent=only&finding=<advisory>:<package>`              |
-| `securityRun(runId)`                                                          | `/supply/security/runs/<runId>`                                          |
-| `secretReports(report?)`                                                      | `/supply/secret-reports[?report=<id>]`                                   |
-| `releaseTimeline(repo)`                                                       | `/releases/timeline?repo=`                                               |
-| `knowledge(tab, { space?, section?, note? })`                                 | `/knowledge/guide\|notes\|learnings?space=&section=&note=`               |
-| `chat(thread?)`                                                               | `/chat?thread=`                                                          |
-| `runs({ repo?, status?, analyzer?, trigger?, schedule?, signature?, view? })` | `/ops/runs`                                                              |
-| `tasks({ group?, task?, filter? })`                                           | `/ops/tasks`                                                             |
-| `automation(job?)`                                                            | `/ops/automation?job=`                                                   |
-| `settings(section)`                                                           | `/settings/people\|ai\|integrations\|analyzers\|policies\|system\|audit` |
+| Builder                                                                       | Path                                                                            |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `inbox({ item?, kind?, tab? })`                                               | `/inbox?item=&kind=&tab=` (`tab`: `snoozed`)                                    |
+| `repos()`                                                                     | `/repos`                                                                        |
+| `repo(repo, { tab?, section?, file?, ref? })`                                 | `/repos/<forge>/<path>?tab=&section=&file=&ref=` (hub)                          |
+| `teams()`                                                                     | `/repos/teams`                                                                  |
+| `security({ repo?, urgent?, finding? })`                                      | `/supply/security?repo=<forge>:<path>&urgent=only&finding=<advisory>:<package>` |
+| `secretReports(report?)`                                                      | `/supply/secret-reports[?report=<id>]`                                          |
+| `releaseTimeline(repo)`                                                       | `/releases/timeline?repo=`                                                      |
+| `knowledge(tab, { space?, section?, note? })`                                 | `/knowledge/guide\|notes\|learnings?space=&section=&note=`                      |
+| `chat(thread?)`                                                               | `/chat?thread=`                                                                 |
+| `runs({ repo?, status?, analyzer?, trigger?, schedule?, signature?, view? })` | `/ops/runs`                                                                     |
+| `tasks({ group?, task?, filter? })`                                           | `/ops/tasks`                                                                    |
+| `automation(job?)`                                                            | `/ops/automation?job=`                                                          |
+| `settings(section)`                                                           | `/settings/people\|ai\|integrations\|analyzers\|policies\|system\|audit`        |
 
 Builders exist only for pages something outside `apps/web` links to; a module that starts linking to another page adds its builder here. The web app's router must serve each of these paths. A renamed page changes its builder here, and links already posted (merge request comments, reports) stop working: there are no redirects.

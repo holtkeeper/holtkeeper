@@ -1,6 +1,6 @@
 # @holtkeeper/vuln
 
-Language-independent contracts and orchestration for vulnerability audits: what a finding is, what scanners and fixers do, how the allowlist works, and how an audit run combines them. It has no knowledge of any tool or ecosystem; implementations live in their own packages.
+Language-independent contracts and orchestration for vulnerability audits: what a finding is, what scanners and fixers do, how the allowlist works, and how an audit combines them. It has no knowledge of any tool or ecosystem; implementations live in their own packages.
 
 | Package                                                     | Implements                                                                                    |
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
