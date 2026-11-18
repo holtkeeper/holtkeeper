@@ -4,7 +4,7 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
 
 ## Public API
 
-- `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout` and `history` (for [internal packages](#internal-packages) and the [dev-only fallback](#dev-only-packages)), runs `after: ['depgraph']`. Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
+- `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout` and `history` (for [internal packages](#internal-packages) and the [dev-only fallback](#dev-only-packages)), runs `after: ['depgraph']`, keeps the newest 2 records of a repository (`keepRecords`) and has no `refresh`: the server's [license index](#license-index) judges npm and Go repositories from their dependency graphs, the analyzer runs when people start or schedule it. Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
   - `allow: string[]` — SPDX ids, `*` patterns or whole expressions. Default `defaultAllow`: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, BlueOak-1.0.0, MIT-0, BSD-1-Clause, Zlib, BSL-1.0, PSF-2.0, X11, Unicode-3.0, Unicode-DFS-2016, CC-BY-3.0, CC-BY-4.0. LGPL and other weak copyleft stay off it: neither allowed nor denied, they show up as not allowed for review.
   - `deny: string[]` — same forms. Default `defaultDeny`: `GPL-*`, `AGPL-*`, `SSPL-*`.
   - `ignore: string[]` — package names (`*` allowed, e.g. `@company/*`) whose licenses are not judged.
@@ -22,7 +22,7 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
 - `analyzeLicenses` also takes `today` (`YYYY-MM-DD`, default today in UTC): exceptions that expired before it are left out of the run's policy.
 - `evaluatePackages(packages, policy, internal?)`, `resolvePolicy(options, today?)` — pure policy application; `internal: (ecosystem, name) => 'forge:path' | undefined` names the repository that defines a package. With `today`, `resolvePolicy` drops expired exceptions.
 - `licenseExceptionSchema`, `LicenseException` — one exception as the options and the stored policy carry it.
-- `projectLicenseFiles(dir)` — names of license files at the root of `dir` (`LICENSE`, `LICENCE`, `COPYING`, `UNLICENSE`, with any `.`/`-`/`_` suffix such as `LICENSE.md` or `LICENSE-MIT`).
+- `projectLicenseFiles(dir)` — names of license files at the root of `dir`, sorted; `projectLicenseFile(name)` says whether one name is a license file (`LICENSE`, `LICENCE`, `COPYING`, `UNLICENSE`, with any `.`/`-`/`_` suffix such as `LICENSE.md` or `LICENSE-MIT`).
 - `parseLicense(text)`, `formatLicense(node)`, `licenseEvaluator(policy)`, `evaluateLicenses(licenses, policy)` — the SPDX expression engine.
 - Helpers: `isViolation`, `packageKey`, `licenseText`.
 
@@ -42,7 +42,7 @@ osv-scanner names `yarn.lock` entries resolved from a registry it does not know 
 
 A package is dev-only when every dependency group is `dev` or `optional` and at least one is `dev` (`['dev', 'optional']` is dev-only, `['optional']` is not). Groups come from osv-scanner's `dependency_groups`, which `yarn.lock`, `bun.lock` and some `package-lock.json` files do not carry. For packages without groups the analyzer falls back to the repository's own newest `depgraph` record: a package that record reaches only through dev edges (`devOnlyPackages` of [@holtkeeper/depgraph](../../depgraph/docs/README.md#inventory-across-repositories), same ecosystem, name and version) gets `groups: ['dev']`. The record may lag the checkout by one run; packages it does not know stay without groups and are checked. The analyzer runs `after` `depgraph` jobs of the same repository queued ahead of it. The report's dev flag on flagged packages uses the same rule.
 
-**Network:** license data comes from deps.dev; with `--offline` (through `args`) every package comes back unknown.
+**Network:** license data comes from deps.dev; with `--offline` (through `args`) every package comes back unknown. Without `--offline`, a scan of 20 or more packages where not one got a license fails instead of storing an all-unknown result: osv-scanner can exit 0 that way when deps.dev becomes unreachable mid-scan.
 
 ## Internal packages
 
@@ -135,6 +135,16 @@ Every license gets one of four verdicts, ordered from best to worst: `allowed` >
 - **Exceptions** (only when some package is `excepted`): package, version, license and the exception's reason; an `excepted` metric counts them.
 - **Packages**: every package with version, ecosystem, license, verdict (toned), kind (tags) and source. Clients filter and sort tables; it is capped at 2000 rows.
 
+## License index
+
+What the server's license index needs to judge a repository from its dependency graph instead of a checkout:
+
+- `depsDevClient({ fetch?, baseUrl?, timeoutMs? }): DepsDevClient` — `licenses({ ecosystem, name, version })` asks the deps.dev v3 API (`/v3/systems/{npm|go}/packages/{name}/versions/{version}`; Go versions without `v`, as the graphs and OSV spell them) for one version's SPDX expressions. A 404 or a version without licenses answers `[]`; any other failure throws, so a failed lookup never reads as "no license". Ecosystems other than `DEPSDEV_ECOSYSTEMS` (`npm`, `Go`) answer `[]` without a request.
+- `lookupLicenses({ client, cache, packages, now, concurrency?, signal? }): Promise<LicenseLookup>` — the licenses of every distinct version by `versionKey` (`<ecosystem>:<name>@<version>`), asked once per run with `concurrency` (default 16) requests at once. A `LicenseCache` answer is reused while fresh: `LICENSE_TTL_MS` (30 days) when it had a license, `NO_LICENSE_TTL_MS` (a day) when not, so a version deps.dev ingests late is asked again. New answers are written back and stale entries dropped; a failure throws before the cache is written. `queried` and `fetched` count the versions asked for and the ones that needed a request.
+- `kvLicenseCache(kv, key?)` — a `LicenseCache` keeping every entry under one key-value key (default `license-index:licenses`).
+- `inventoryLicenses({ packages, licenses, policy?, internal?, devOnly?, licenseFiles?, today }): LicensesData` — the record from resolved `{ ecosystem, name, version, source }` entries: one package per version with every source, licenses from the lookup (`UNKNOWN` dropped), judged by `evaluatePackages` with the dev fallback as `analyzeLicenses` judges osv-scanner's output; `tool.name` is `INDEX_TOOL` (`deps.dev`), `project` is set only when `licenseFiles` is known. Packages are sorted, so equal inputs give equal data.
+- `sameLicensesState(a, b)` — whether two records have the same policy, project license files and packages with the same licenses, sources and verdicts, in any order and whatever the tool, so a caller skips writing a record that changes nothing, also against one osv-scanner made.
+
 ## Metrics
 
 `licensesMetrics(data)` is the kind's `metrics`, stored with every record as `LicensesMetrics`: `packages`, `verdicts` (packages per verdict, every verdict present with zero when none has it; records stored before `excepted` existed lack it, and readers count it as zero), `violations` (denied or not allowed), `missingProjectLicense` (the policy asked for a repository license file and there is none), `licenseFile` (`present`, `missing` or `not-required` when the policy does not ask), `licenses` (third-party packages per license expression, internal ones left out, `UNKNOWN` for none), `allowedLicenses` (the expressions of allowed packages) `flagged` (sorted `ecosystem:name` keys of the `denied`, `unlisted` and `unknown` packages), `flaggedDetails` (a `FlaggedPackage` per flagged key: name, ecosystem, flagged versions, declared licenses, worst verdict, culprits and whether every flagged version is dev-only by `isDevOnly`) and `byPackage` (`PackageLicenses` per `ecosystem:name`: its license expressions over all versions, sorted, and its worst verdict; absent on older records), which the fleet Libraries table reads instead of data. Fleet views add these up across repositories, list violations from `flaggedDetails` and compare `flagged` with an older record without reading data; `compareVerdict` orders verdicts worst first (denied, unlisted, unknown, excepted, allowed, internal, ignored) for every consumer; records stored before a field existed have their metrics computed from data when read.
@@ -144,4 +154,5 @@ Every license gets one of four verdicts, ordered from best to worst: `allowed` >
 - `src/spdx.test.ts` — evaluation table for the default policy (OR/AND/WITH/`+`/unknowns/invalid text) and custom policies.
 - `src/parse.test.ts` — parser on `test/osv-npm.json`, captured from osv-scanner 2.7.0 over a copy of `fixtures/npm` with one package marked `dev` (vulnerability details removed); tarball URL names and their merge with registry entries.
 - `test/osv-scanner.test.ts` — `analyzeLicenses` on a temp copy of `fixtures/npm`, replaying the captured output, since the real scan needs deps.dev.
+- `src/depsdev.test.ts`, `src/inventory.test.ts` — deps.dev requests, cached lookups and their expiry, failures that keep the cache, records from resolved packages and their comparison.
 - `src/analyze.test.ts`, `src/report.test.ts` — command line, options (review list, dev-only dependencies and the depgraph fallback, exceptions and their expiry, applied end to end through `analyzeLicenses`), verdicts, metrics with deltas, new and resolved violations, sections.

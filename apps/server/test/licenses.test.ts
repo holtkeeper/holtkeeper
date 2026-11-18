@@ -74,11 +74,6 @@ const circleNow = scan(
     project: { licenseFiles: [] },
   },
 )
-const circleBefore = scan([
-  pkg('widget-core', 'allowed', ['MIT']),
-  pkg('sprocket', 'unlisted', ['MPL-2.0']),
-  pkg('cog', 'unknown', []),
-])
 const redNow = scan([
   pkg('widget-core', 'allowed', ['MIT'], { version: '1.2.0' }),
   pkg('gizmo', 'denied', ['GPL-3.0-only'], { version: '2.0.0' }),
@@ -236,22 +231,6 @@ test('totals, mix, violations, rows and the organization policy', async () => {
     updatedAt: twoDaysAgo,
     updatedBy: 'jane',
   })
-  expect(overview.deltas).toBeUndefined()
-})
-
-test('deltas compare flagged packages with the scan about a week older', async () => {
-  await add('shapes/circle', eightDaysAgo, circleBefore)
-  await add('shapes/circle', twoDaysAgo, circleBefore)
-  await add('shapes/circle', at, circleNow)
-  await add('colors/red', at, redNow)
-
-  const { deltas } = await get(asAdmin)
-  expect(deltas).toEqual({
-    since: eightDaysAgo,
-    denied: { added: 1, resolved: 0 },
-    review: { added: 0, resolved: 0 },
-    unknown: { added: 0, resolved: 1 },
-  })
 })
 
 test('a narrow grant sees only its own repositories and not the organization policy', async () => {
@@ -281,7 +260,7 @@ test('a narrow grant sees only its own repositories and not the organization pol
   expect((await get(asAdmin)).policy?.updatedBy).toBe('jane')
 })
 
-test('rows, totals, violations and deltas come from metrics without reading data', async () => {
+test('rows, totals and violations come from metrics without reading data', async () => {
   const clean = scan([pkg('widget-core', 'allowed', ['MIT'])])
   await add('shapes/circle', eightDaysAgo, clean)
   await add('shapes/circle', at, clean)
@@ -290,7 +269,6 @@ test('rows, totals, violations and deltas come from metrics without reading data
   const overview = await get(asAdmin)
   expect(overview.repos).toHaveLength(2)
   expect(overview.violations.map((violation) => violation.package)).toEqual(['gizmo', 'doohickey'])
-  expect(overview.deltas?.since).toBe(eightDaysAgo)
   expect(dataReads).toEqual([])
 })
 

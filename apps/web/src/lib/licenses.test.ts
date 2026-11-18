@@ -8,7 +8,6 @@ import type {
 } from '@holtkeeper/api'
 
 import {
-  deltaText,
   exceptedCount,
   filterLicenseRepos,
   filterViolations,
@@ -189,13 +188,6 @@ test('mixParts keeps the largest licenses and folds the rest', () => {
   ])
   expect(mixParts(mix.slice(0, 1))).toEqual([{ license: 'MIT', packages: 60, percent: 100 }])
   expect(mixParts([])).toEqual([])
-})
-
-test('deltaText', () => {
-  expect(deltaText({ added: 2, resolved: 1 })).toBe('+2 · 1 resolved')
-  expect(deltaText({ added: 3, resolved: 0 })).toBe('+3')
-  expect(deltaText({ added: 0, resolved: 0 })).toBe('')
-  expect(deltaText(undefined)).toBe('')
 })
 
 test('licenseKpis for the fleet and for one repository', () => {

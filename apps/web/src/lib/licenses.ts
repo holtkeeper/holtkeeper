@@ -1,5 +1,4 @@
 import type {
-  LicenseDelta,
   LicensePolicySummary,
   LicenseVerdictName,
   LicensesOverview,
@@ -206,15 +205,7 @@ export function mixParts(mix: LicensesOverview['mix'], top = 5): MixPart[] {
   return [...head, { license: `${rest.length} others`, packages, percent: percent(packages) }]
 }
 
-/** "+2 · 1 resolved" for a weekly delta; empty when nothing moved. */
-export function deltaText(delta: LicenseDelta | undefined): string {
-  if (!delta || (!delta.added && !delta.resolved)) return ''
-  return [delta.added ? `+${delta.added}` : '', delta.resolved ? `${delta.resolved} resolved` : '']
-    .filter(Boolean)
-    .join(' · ')
-}
-
-/** The figures of the KPI strip, as numbers; captions carry weekly deltas when known. */
+/** The figures of the KPI strip, as numbers. */
 export interface LicenseKpis {
   packages: number
   repos: number

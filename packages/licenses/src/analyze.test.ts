@@ -80,6 +80,36 @@ test('fails when osv-scanner fails', async () => {
   expect(String(error)).toContain('boom')
 })
 
+test('fails instead of reporting everything unknown when no package got a license', async () => {
+  const dir = await realpath(tmpdir())
+  const output = (licenses?: string[]) =>
+    JSON.stringify({
+      results: [
+        {
+          source: { path: join(dir, 'package-lock.json'), type: 'lockfile' },
+          packages: Array.from({ length: 25 }, (_, index) => ({
+            package: { name: `widget-${index}`, version: '1.0.0', ecosystem: 'npm' },
+            ...(licenses ? { licenses } : {}),
+          })),
+        },
+      ],
+    })
+  const errors = await Promise.all(
+    [undefined, ['UNKNOWN']].map((licenses) => {
+      const { runner } = createFakeRunner((command) =>
+        command[1] === 'scan' ? { stdout: output(licenses) } : {},
+      )
+      return analyzeLicenses({ dir, runner }).catch((caught: unknown) => caught)
+    }),
+  )
+  for (const error of errors) expect(String(error)).toContain('no license for any of 25 packages')
+  const { runner } = createFakeRunner((command) =>
+    command[1] === 'scan' ? { stdout: output(['UNKNOWN']) } : {},
+  )
+  const offline = await analyzeLicenses({ dir, runner, args: ['--offline'] })
+  expect(offline.packages.every((pkg) => pkg.verdict === 'unknown')).toBe(true)
+})
+
 test('options take lists or comma-separated flags and default to the permissive policy', () => {
   expect(licensesOptionsSchema.parse({})).toEqual({
     ...resolvePolicy(),

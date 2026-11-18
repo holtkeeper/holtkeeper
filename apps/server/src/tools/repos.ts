@@ -117,9 +117,6 @@ function renderFindings(
   ].join('\n')
 }
 
-const delta = (name: string, value: { added: number; resolved: number }) =>
-  `${name} +${value.added}/-${value.resolved}`
-
 function renderPolicy(policy: LicensePolicySummary): string {
   const exceptions = policy.exceptions
   return `Policy${policy.preset ? ` (${policy.preset})` : ''}: allow ${list(policy.allow) || 'nothing'}; deny ${list(policy.deny) || 'nothing'}${policy.review.length ? `; needs review ${list(policy.review)}` : ''}${policy.ignore.length ? `; ignore ${list(policy.ignore)}` : ''}; unknown licenses ${policy.unknown === 'violation' ? 'are violations' : 'warn'}${policy.devDependencies === 'ignore' ? '; dev-only dependencies are not judged' : ''}${policy.requireProjectLicense ? '; a project license file is required' : ''}${policy.overrides ? `; ${policy.overrides} narrower override${policy.overrides === 1 ? '' : 's'}` : ''}.${exceptions.length ? `\nExceptions: ${exceptions.map((exception) => `${exception.package}${exception.version ? `@${exception.version}` : ''}${exception.license ? ` (${exception.license})` : ''}: ${exception.reason}${exception.expires ? `, until ${exception.expires}` : ''}`).join('; ')}.` : ''}`
@@ -140,18 +137,13 @@ function renderLicenses(
     return repo
       ? `No license scan of \`${repo}\` you may read.`
       : 'No license scan of a repository you may read.'
-  const { kpi, policy, deltas } = overview
+  const { kpi, policy } = overview
   const header = repo
     ? `# Licenses of \`${repo}\``
     : `# Licenses across ${kpi.repos} repositories: ${kpi.packages} packages, ${kpi.denied} denied, ${kpi.review} need review, ${kpi.unknown} unknown, ${kpi.licenses} licenses (${kpi.allowedLicenses} allowed), ${kpi.internal} internal, ${kpi.missingLicenseFile} missing a license file`
   return [
     header,
     ...(policy ? [renderPolicy(policy)] : []),
-    ...(deltas && !repo
-      ? [
-          `Since ${day(deltas.since)}: ${delta('denied', deltas.denied)}, ${delta('review', deltas.review)}, ${delta('unknown', deltas.unknown)}.`,
-        ]
-      : []),
     '',
     '## Violations',
     ...(violations.length

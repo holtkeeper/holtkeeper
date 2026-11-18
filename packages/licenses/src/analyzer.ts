@@ -1,4 +1,4 @@
-import { type AnalyzerPreset, defineAnalyzer, dependencyPaths } from '@holtkeeper/analyzer'
+import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
 import { devOnlyPackages, latestDepgraphs, packageCatalog } from '@holtkeeper/depgraph'
 import { z } from 'zod'
 
@@ -133,7 +133,9 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
   kind: 'licenses',
   analysis: licensesAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '12h', paths: dependencyPaths },
+  // No `refresh`: the server's license index judges npm and Go repositories from their dependency
+  // graphs without a checkout. The record before the newest feeds "compared with the previous".
+  keepRecords: 2,
   needs: { checkout: true, history: true },
   after: ['depgraph'],
   options: licensesOptionsSchema,

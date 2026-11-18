@@ -12,7 +12,6 @@ import {
   type LicensesSearch,
   type LicensesSort,
   type ViolationRow,
-  deltaText,
   filterLicenseRepos,
   filterViolations,
   licenseFileLabel,
@@ -62,16 +61,8 @@ const sortOptions: { id: LicensesSort; label: string }[] = [
   { id: 'repos', label: 'Sort: Repositories' },
 ]
 
-function kpiCells(
-  kpi: LicenseKpis,
-  overview: LicensesOverview,
-  mode: 'fleet' | 'mine' | 'repo',
-  suffix = '',
-): StripCell[] {
+function kpiCells(kpi: LicenseKpis, mode: 'fleet' | 'mine' | 'repo', suffix = ''): StripCell[] {
   const narrowed = mode === 'repo'
-  const deltas = mode === 'fleet' ? overview.deltas : undefined
-  const since = deltas ? ` since ${formatDate(deltas.since)}` : ''
-  const caption = (text: string) => (text ? `${text}${since}` : undefined)
   return [
     {
       value: kpi.packages.toLocaleString('en'),
@@ -86,25 +77,16 @@ function kpiCells(
       value: kpi.denied,
       label: 'denied',
       tone: kpi.denied ? 'danger' : 'none',
-      ...(caption(deltaText(deltas?.denied))
-        ? { caption: caption(deltaText(deltas?.denied)) }
-        : {}),
     },
     {
       value: kpi.review,
       label: 'need review',
       tone: kpi.review ? 'warning' : 'none',
-      ...(caption(deltaText(deltas?.review))
-        ? { caption: caption(deltaText(deltas?.review)) }
-        : {}),
     },
     {
       value: kpi.unknown,
       label: 'unknown license',
       tone: kpi.unknown ? 'warning' : 'none',
-      ...(caption(deltaText(deltas?.unknown))
-        ? { caption: caption(deltaText(deltas?.unknown)) }
-        : {}),
     },
     {
       value: kpi.licenses,
@@ -434,7 +416,7 @@ function PolicySummary({
 
 /**
  * The Licenses body over `GET /api/licenses`, or one repository's part of it with `repo`: KPI
- * strip with weekly deltas, license mix, violations with filters, sort and a side sheet, a row per
+ * strip, license mix, violations with filters, sort and a side sheet, a row per
  * repository and the policy summary. `search` holds the filters and the open violation.
  */
 function LicensesBody({
@@ -505,12 +487,7 @@ function LicensesBody({
       <div className="overflow-hidden rounded-xl border border-line bg-panel">
         <Strip
           label="License totals"
-          cells={kpiCells(
-            kpi,
-            overview,
-            key ? 'repo' : mine ? 'mine' : 'fleet',
-            scopeSuffix(view, titleOf),
-          )}
+          cells={kpiCells(kpi, key ? 'repo' : mine ? 'mine' : 'fleet', scopeSuffix(view, titleOf))}
           className="border-b-0"
         />
       </div>

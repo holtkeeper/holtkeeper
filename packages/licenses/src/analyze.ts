@@ -57,11 +57,14 @@ export function resolvePolicy(
 
 const licenseFilePattern = /^(?:licen[cs]e|copying|unlicense)(?:[-._].*)?$/i
 
-/** License files at the root of `dir`: `LICENSE`, `LICENSE.md`, `LICENSE-MIT`, `COPYING`, ... */
+/** Whether a file name reads as a license file: `LICENSE`, `LICENSE.md`, `LICENSE-MIT`, `COPYING`, ... */
+export const projectLicenseFile = (name: string) => licenseFilePattern.test(name)
+
+/** License files at the root of `dir`, sorted (see `projectLicenseFile`). */
 export async function projectLicenseFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true })
   return entries
-    .filter((entry) => entry.isFile() && licenseFilePattern.test(entry.name))
+    .filter((entry) => entry.isFile() && projectLicenseFile(entry.name))
     .map((entry) => entry.name)
     .toSorted()
 }
@@ -177,6 +180,10 @@ export interface AnalyzeLicensesOptions {
 /** osv-scanner exits 1 when it found vulnerabilities; that is still a complete run. */
 const VULNERABILITIES_FOUND = 1
 
+// osv-scanner can exit 0 with every license UNKNOWN when deps.dev is unreachable mid-scan (seen
+// during a proxy restart); a real checkout this size always has some public package deps.dev knows.
+const MIN_PACKAGES_FOR_LOOKUP_CHECK = 20
+
 async function versionOf(runner: CommandRunner, binary: string, cwd: string, signal?: AbortSignal) {
   try {
     const { stdout } = await runner.run([binary, '--version'], {
@@ -230,6 +237,14 @@ export async function analyzeLicenses({
   )
   const resolved = resolvePolicy(policy, today)
   const scanned = parseOsvLicenses(stdout.trim() ? JSON.parse(stdout) : {}, root)
+  if (
+    !args.includes('--offline') &&
+    scanned.length >= MIN_PACKAGES_FOR_LOOKUP_CHECK &&
+    scanned.every((pkg) => pkg.licenses.length === 0)
+  )
+    throw new Error(
+      `osv-scanner returned no license for any of ${scanned.length} packages; deps.dev lookups failed`,
+    )
   return {
     tool: { name: 'osv-scanner', ...(version ? { version } : {}) },
     policy: resolved,

@@ -1,7 +1,6 @@
 import { type RepoTarget, scopeCoversRepo } from '@holtkeeper/access'
 import { analysisMetrics } from '@holtkeeper/analyzer'
 import type {
-  LicenseDelta,
   LicensePolicySummary,
   LicenseVerdictName,
   LicenseViolation,
@@ -20,15 +19,13 @@ import {
 import type { AnalysisKind } from '@holtkeeper/report'
 import type { AnalysisHead, AnalysisStore, SettingEntry, SettingStore } from '@holtkeeper/store'
 
-import { LINE_SCAN, latestHeadsWithMetrics, mainLineRecords } from './analyses.ts'
+import { latestHeadsWithMetrics } from './analyses.ts'
 import { repoKey } from './context.ts'
 import type { FleetCache } from './fleet-cache.ts'
 import { orgEntry } from './setting-rules.ts'
 
 const KIND = 'licenses'
 const SETTING = `analyzers.${KIND}`
-const WEEK = 7 * 86_400_000
-const SLACK = 3_600_000
 
 /** Where a licenses overview reads from. */
 export interface LicensesSource {
@@ -60,23 +57,6 @@ async function metricsOf(
   const record = await source.analyses.get(head.id)
   const computed = record && analysisMetrics(source.kinds.get(KIND), record.data)
   return isCurrent(computed) ? computed : undefined
-}
-
-async function weekOld(
-  source: LicensesSource,
-  head: AnalysisHead,
-): Promise<AnalysisHead | undefined> {
-  const before = new Date(Date.parse(head.createdAt) - WEEK + SLACK).toISOString()
-  const line = await source.analyses.heads({
-    repo: head.repo,
-    kind: KIND,
-    before,
-    limit: LINE_SCAN,
-  })
-  return mainLineRecords(
-    line.filter((candidate) => candidate.ref === head.ref),
-    1,
-  )[0]
 }
 
 const sameSet = (a: readonly string[], b: readonly string[]) =>
@@ -165,34 +145,6 @@ function unionFlagged(all: readonly FlaggedPackages[]): Record<FlaggedVerdict, S
   return sets
 }
 
-const delta = (now: Set<string>, before: Set<string>): LicenseDelta => ({
-  added: [...now].filter((key) => !before.has(key)).length,
-  resolved: [...before].filter((key) => !now.has(key)).length,
-})
-
-async function weeklyDeltas(
-  source: LicensesSource,
-  scans: readonly Scan[],
-): Promise<LicensesOverview['deltas']> {
-  const pairs = await Promise.all(
-    scans.map(async (scan) => {
-      const older = await weekOld(source, scan.head)
-      const metrics = older && (await metricsOf(source, older))
-      return older && metrics ? { scan, older, metrics } : undefined
-    }),
-  )
-  const compared = pairs.filter((pair) => pair !== undefined)
-  if (!compared.length) return undefined
-  const now = unionFlagged(compared.map((pair) => pair.scan.metrics.flagged))
-  const before = unionFlagged(compared.map((pair) => pair.metrics.flagged))
-  return {
-    since: compared.map((pair) => pair.older.createdAt).toSorted()[0] ?? '',
-    denied: delta(now.denied, before.denied),
-    review: delta(now.unlisted, before.unlisted),
-    unknown: delta(now.unknown, before.unknown),
-  }
-}
-
 interface ViolationDraft {
   package: string
   ecosystem: string
@@ -264,7 +216,6 @@ async function buildOverview(
 ): Promise<LicensesOverview> {
   const scans = await scansOf(source, heads)
   const violations = violationsOf(scans)
-  const deltas = await weeklyDeltas(source, scans)
   const rows = scans
     .map(repoRow)
     .toSorted(
@@ -305,16 +256,13 @@ async function buildOverview(
         scans.map((scan) => scan.target),
       ),
     }),
-    ...(deltas ? { deltas } : {}),
   }
 }
 
 /**
  * The newest license scan of every repository `canRead` allows (the caller's `analyses:read`):
- * totals, license mix, violations, a row per repository, the organization's license policy (only
- * when `canReadPolicy`, the caller's `settings:read` on the organization scope) and changes over
- * the past week against each repository's main-line scan at least about seven days older than its
- * newest. Everything is read from stored metrics; only records stored before a metrics field
+ * totals, license mix, violations, a row per repository and the organization's license policy
+ * (only when `canReadPolicy`, the caller's `settings:read` on the organization scope). Everything is read from stored metrics; only records stored before a metrics field
  * existed have their data read. Packages and the mix count each repository's packages, so a
  * package two repositories use counts twice; denied, review and unknown count distinct packages.
  * With `source.cache`, answers are kept while the newest records, the readable repositories, the

@@ -1,5 +1,7 @@
 export * from './analyze.ts'
 export * from './analyzer.ts'
+export * from './depsdev.ts'
+export * from './inventory.ts'
 export * from './model.ts'
 export * from './parse.ts'
 export * from './report.ts'

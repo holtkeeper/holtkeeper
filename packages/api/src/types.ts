@@ -380,14 +380,6 @@ export type LicenseVerdictName =
   | 'internal'
   | 'excepted'
 
-/** Changes of one count since the week-old comparison point. */
-export interface LicenseDelta {
-  /** Packages that newly reached the verdict. */
-  added: number
-  /** Packages that left it. */
-  resolved: number
-}
-
 /** One package whose license a policy denies or wants reviewed, across readable repositories. */
 export interface LicenseViolation {
   package: string
@@ -490,13 +482,6 @@ export interface LicensesOverview {
   repos: LicensesRepoRow[]
   /** Only for callers who may read the organization's `analyzers.licenses` entry (`settings:read`). */
   policy?: LicensePolicySummary
-  /** Against each repository's newest scan at least a week old; absent when there is none. */
-  deltas?: {
-    since: Timestamp
-    denied: LicenseDelta
-    review: LicenseDelta
-    unknown: LicenseDelta
-  }
 }
 
 /** Tone of a health cell: `none` when there is nothing to judge (no record, not set up). */

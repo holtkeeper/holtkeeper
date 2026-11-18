@@ -99,6 +99,7 @@ import {
   privateGoModules,
   startLibraryIndex,
 } from './libraries.ts'
+import { licenseIndexDuty } from './license-index.ts'
 import { limiterOptionsFor } from './limiter-state.ts'
 import { serverLimits } from './limits.ts'
 import { startManagedConfig } from './managed.ts'
@@ -609,6 +610,7 @@ export async function startServer(
       }),
       () => startLibraryIndex(deps, log),
       vulnIndexDuty(deps, { log }),
+      licenseIndexDuty(deps, { log }),
       repoCleanupDuty(deps, log),
       () => startDatabaseSnapshots(store, { log }),
       periodicDuty(
