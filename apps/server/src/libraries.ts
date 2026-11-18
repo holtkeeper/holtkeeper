@@ -12,7 +12,7 @@ import {
   latestDepgraphs,
   ownPackages,
 } from '@holtkeeper/depgraph'
-import type { RepoRef } from '@holtkeeper/forge'
+import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import {
   type GitHubClient,
   type GitHubEvent,
@@ -693,6 +693,8 @@ export interface ServerLibraryDocsOptions {
   summarize?: (repo: string | undefined) => Promise<Summarize | undefined>
   /** The organization package a name belongs to (`ownPackageOf`); such names get a pointer to the catalog. */
   ownPackage?: (name: string) => Promise<string | undefined>
+  /** Source of organization packages (`ownPackageSource`); without it they point to the catalog. */
+  ownSource?: LibraryDocs['source']
   /** Serves Go module zips for source snapshots; default the public module proxy. */
   goRegistry?: Pick<LibraryRegistry, 'source'>
 }
@@ -713,6 +715,108 @@ export function ownPackageOf(
   }
 }
 
+/** Lines of one file `ownPackageSource` returns when no `end` is given. */
+const OWN_SOURCE_LINES = 400
+
+/**
+ * `LibraryDocs.source` for organization packages: the package folder in its own repository, read
+ * through the forge at the commit the catalog recorded for the version (`version` as
+ * `get_package_api` takes it, default the newest release; the default branch for `head`). A path
+ * is relative to the package folder; a file comes back as numbered lines, a folder as a listing.
+ * Answers with a short explanation instead of throwing.
+ */
+export function ownPackageSource(options: {
+  catalog: Pick<ApiCatalog, 'resolve'>
+  filter: RepoFilter
+  forgeOf: (forge: string) => GitForge | undefined
+  maxChars?: number
+}): LibraryDocs['source'] {
+  const maxChars = options.maxChars ?? 20_000
+  const clip = (text: string) =>
+    text.length > maxChars
+      ? `${text.slice(0, maxChars)}\n… clipped, pass start/end or a narrower path`
+      : text
+  return async (input) => {
+    const found = await options.catalog.resolve(
+      options.filter,
+      input.package,
+      input.version ? { version: input.version } : {},
+    )
+    if (!found)
+      return `${input.package}${input.version ? `@${input.version}` : ''} is not in the catalog.`
+    const { record, package: pkg, version } = found
+    const repo = `${record.repo.forge}:${record.repo.path}`
+    const forge = options.forgeOf(record.repo.forge)
+    if (!forge)
+      return `The forge of ${repo} is not configured, so the source of ${pkg.name} cannot be read.`
+    const label = `${pkg.name}@${version.head ? 'head' : version.version}`
+    const others = found.versions
+      .filter((other) => other.analysisId !== version.analysisId)
+      .slice(0, 8)
+      .map((other) => (other.head ? 'head' : other.version))
+    const origin = `${label} (${repo}, folder \`${pkg.dir}\`${record.ref ? ` at ${record.ref.slice(0, 12)}` : ', default branch'})`
+    const footer = others.length
+      ? `Other versions: ${others.join(', ')}; pass \`version\` with the one the repository depends on.`
+      : ''
+    const root = pkg.dir === '.' ? '' : pkg.dir.replace(/\/+$/, '')
+    const relative = (input.path ?? '').replace(/^\.?\/+|\/+$/g, '')
+    if (relative.split('/').includes('..')) return 'The path must stay inside the package folder.'
+    const target = [root, relative].filter(Boolean).join('/')
+    try {
+      const content = relative
+        ? await forge.readFile(record.repo.path, target, record.ref)
+        : undefined
+      if (content !== undefined) {
+        const lines = content.split('\n')
+        const start = Math.max(1, input.start ?? 1)
+        const end = Math.min(lines.length, input.end ?? start + OWN_SOURCE_LINES - 1)
+        const numbered = lines
+          .slice(start - 1, end)
+          .map((line, index) => `${String(start + index).padStart(5)} ${line}`)
+          .join('\n')
+        return clip(
+          [
+            `# ${relative} of ${origin} (lines ${start}-${end} of ${lines.length})`,
+            `\`\`\`\n${numbered}\n\`\`\``,
+            end < lines.length ? `… ${lines.length - end} more lines, pass start=${end + 1}` : '',
+            footer,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        )
+      }
+      if (!forge.listFiles)
+        return `The forge of ${repo} cannot list files, so pass the path of a file.`
+      const entries = await forge.listFiles(record.repo.path, {
+        ...(target ? { path: target } : {}),
+        ...(record.ref ? { ref: record.ref } : {}),
+      })
+      if (!entries.length) return `${origin} has no file or folder \`${relative || '.'}\`.`
+      const prefix = target ? `${target}/` : ''
+      const listing = entries
+        .toSorted(
+          (a, b) =>
+            Number(b.type === 'dir') - Number(a.type === 'dir') || a.path.localeCompare(b.path),
+        )
+        .map(
+          (entry) =>
+            `- ${entry.path.startsWith(prefix) ? entry.path.slice(prefix.length) : entry.path}${entry.type === 'dir' ? '/' : ''}`,
+        )
+      return clip(
+        [
+          `# ${relative || '/'} of ${origin} (${entries.length} entries)`,
+          listing.join('\n'),
+          footer,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      )
+    } catch (error) {
+      return `Reading the source of ${label} from ${repo} failed: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+}
+
 /**
  * `libraryDocs` for the MCP endpoint and agents: issue search with live GitHub search (cached in
  * `kv`) and optional digests, and source snapshots made on demand (Go from the module zip, else
@@ -727,6 +831,7 @@ export function serverLibraryDocs(options: ServerLibraryDocsOptions): LibraryDoc
     store,
     artifacts,
     ...(options.ownPackage ? { ownPackage: options.ownPackage } : {}),
+    ...(options.ownSource ? { ownSource: options.ownSource } : {}),
     async issues(input, caller) {
       const summarize = await options.summarize?.(caller?.repo)
       return libraryIssues({

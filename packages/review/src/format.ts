@@ -207,8 +207,8 @@ export function summaryNote(
   }
 
   const resolved = data.threads.filter((thread) => thread.action === 'resolved').length
-  const replied = data.threads.filter((thread) => thread.action === 'replied').length
-  if (resolved || replied) lines.push(t('threads.earlier', { resolved, replied }))
+  const open = data.threads.length - resolved
+  if (resolved || open) lines.push(t('threads.earlier', { resolved, open }))
 
   const notReviewed: string[] = data.skipped
     .filter((s) => s.reason !== 'unchanged')

@@ -82,10 +82,58 @@ export const SIMILAR = 0.45
 /** How many lines apart two comments may be and still be the same. */
 export const LINE_TOLERANCE = 2
 
-const textOf = (candidate: Candidate) => `${candidate.title}\n${candidate.body}`
+/** How many lines apart two comments about the same code (`sameCode`) may be and still be the same. */
+export const CODE_LINE_TOLERANCE = 15
+
+const codeSpansOf = (text: string) =>
+  new Set(
+    [...text.replace(/```[\s\S]*?```/g, ' ').matchAll(/`([^`\n]+)`/g)]
+      .map((match) => match[1]?.trim() ?? '')
+      .filter((span) => span.length >= 2),
+  )
+
+/**
+ * Whether two comments name mostly the same code: at least three shared inline code spans, making
+ * up at least half of the shorter comment's spans. Rephrasings in an inflected language share few
+ * words but keep the identifiers.
+ */
+export function sameCode(a: string, b: string): boolean {
+  const left = codeSpansOf(a)
+  const right = codeSpansOf(b)
+  let shared = 0
+  for (const span of left) if (right.has(span)) shared++
+  return shared >= 3 && shared / Math.min(left.size, right.size) >= 0.5
+}
+
+const textOf = (candidate: Pick<Candidate, 'title' | 'body'>) =>
+  `${candidate.title}\n${candidate.body}`
 
 const near = (a: { path: string; line: number }, b: { path: string; line: number }) =>
   a.path === b.path && Math.abs(a.line - b.line) <= LINE_TOLERANCE
+
+const nearSameCode = (
+  a: { path: string; line: number },
+  b: { path: string; line: number },
+  textA: string,
+  textB: string,
+) => a.path === b.path && Math.abs(a.line - b.line) <= CODE_LINE_TOLERANCE && sameCode(textA, textB)
+
+/**
+ * Whether two findings report the same problem: near (`LINE_TOLERANCE`) and on the same line with
+ * the same category or with a similar text, or within `CODE_LINE_TOLERANCE` lines and about the
+ * same code (`sameCode`).
+ */
+export function sameFinding(
+  a: Pick<Candidate, 'path' | 'line' | 'category' | 'title' | 'body'>,
+  b: Pick<Candidate, 'path' | 'line' | 'category' | 'title' | 'body'>,
+): boolean {
+  return (
+    (near(a, b) &&
+      ((a.line === b.line && a.category === b.category) ||
+        similarity(textOf(a), textOf(b)) >= SIMILAR)) ||
+    nearSameCode(a, b, textOf(a), textOf(b))
+  )
+}
 
 export interface DedupeResult {
   kept: Candidate[]
@@ -96,9 +144,9 @@ export interface DedupeResult {
 }
 
 /**
- * Drops agent findings that repeat an open thread (same path, line within `LINE_TOLERANCE`,
- * similar text), a deterministic finding (near and similar, or on the same line with the same
- * category) or an earlier candidate. Deterministic findings are kept over agent ones.
+ * Drops agent findings that repeat an open thread (same path, line within `LINE_TOLERANCE` and a
+ * similar text, or within `CODE_LINE_TOLERANCE` and about the same code), a deterministic finding
+ * or an earlier candidate (`sameFinding`). Deterministic findings are kept over agent ones.
  */
 export function dedupe(
   candidates: readonly Candidate[],
@@ -107,19 +155,17 @@ export function dedupe(
   const result: DedupeResult = { kept: [], repeats: [], duplicates: [] }
   const accepted: Candidate[] = [...context.deterministic]
   for (const candidate of candidates) {
+    const text = textOf(candidate)
     const thread = context.threads.find(
-      (t) => near(t, candidate) && similarity(t.text, textOf(candidate)) >= SIMILAR,
+      (t) =>
+        (near(t, candidate) && similarity(t.text, text) >= SIMILAR) ||
+        nearSameCode(t, candidate, t.text, text),
     )
     if (thread) {
       result.repeats.push({ candidate, thread })
       continue
     }
-    const duplicate = accepted.some(
-      (other) =>
-        near(other, candidate) &&
-        ((other.line === candidate.line && other.category === candidate.category) ||
-          similarity(textOf(other), textOf(candidate)) >= SIMILAR),
-    )
+    const duplicate = accepted.some((other) => sameFinding(other, candidate))
     if (duplicate) result.duplicates.push(candidate)
     else {
       result.kept.push(candidate)

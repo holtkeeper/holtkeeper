@@ -20,6 +20,7 @@ import {
   type AgentProgress,
   type RecheckVerdict,
   localizeFindings,
+  reviseSummary,
   recheckThreads,
   reviewPromptVersion,
   runAgentReview,
@@ -72,7 +73,13 @@ import {
   sizedFiles,
 } from './size.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
-import { type Verification, dropUnverified, existingEvidence, verifyFindings } from './verify.ts'
+import {
+  type RefutedFinding,
+  type Verification,
+  dropUnverified,
+  existingEvidence,
+  verifyFindings,
+} from './verify.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
 export interface ReviewOptions {
@@ -337,6 +344,16 @@ export interface ReviewSteps {
     candidates: readonly Candidate[],
     usage: ReviewUsage,
   ): Promise<Verification>
+  /**
+   * The agent's `summary` without the claims of `refuted` findings; unchanged without an agent or
+   * when the edit fails.
+   */
+  reviseSummary(
+    run: ReviewRun,
+    summary: string,
+    refuted: readonly RefutedFinding[],
+    usage: ReviewUsage,
+  ): Promise<string>
   post(run: ReviewRun, loaded: LoadedReview, data: ReviewData): Promise<ReviewData>
 }
 
@@ -679,6 +696,20 @@ const verify: ReviewSteps['verify'] = async (run, loaded, candidates, usage) => 
   return result
 }
 
+const revise: ReviewSteps['reviseSummary'] = async (run, summary, refuted, usage) => {
+  if (!run.agent || !run.dir) return summary
+  return reviseSummary({
+    agent: run.agent,
+    dir: run.dir,
+    summary,
+    dropped: refuted
+      .filter(({ candidate }) => candidate.source === 'agent')
+      .map(({ candidate, reason }) => ({ title: candidate.title, reason })),
+    usage,
+    ...(run.signal ? { signal: run.signal } : {}),
+  })
+}
+
 const media: ReviewSteps['media'] = async (run, loaded, usage) => {
   if (!run.options.media) return undefined
   const outcome = await reviewMedia({
@@ -705,26 +736,27 @@ const media: ReviewSteps['media'] = async (run, loaded, usage) => {
 export const MAX_RECHECKS = 10
 
 /**
- * Our open threads worth re-checking: those whose file changed since the last review (every one
- * after a force push), plus those whose file left the diff, which count as `gone`.
+ * Our open threads worth re-checking, at most `MAX_RECHECKS`: after new commits every open thread
+ * whose file is still in the diff, those whose file changed first, since a fix may land in another
+ * file (a test, a caller); with no previous review none; and those whose file left the diff, which
+ * count as `gone`. `changed` lists the files changed since the last review, when known.
  */
 export function threadsToRecheck(
-  loaded: LoadedReview,
-  planned: ReviewPlan,
-): { recheck: OpenThread[]; gone: OpenThread[] } {
+  loaded: Pick<LoadedReview, 'diff' | 'threads' | 'previous'>,
+  planned: Pick<ReviewPlan, 'since'>,
+): { recheck: OpenThread[]; gone: OpenThread[]; changed?: string[] } {
   const inDiff = new Set(
     loaded.diff.files.filter((f) => f.status !== 'deleted').map((f) => f.newPath),
   )
-  const changed = planned.since ? new Set(planned.since.map((f) => f.newPath)) : undefined
+  const changed = planned.since ? [...new Set(planned.since.map((f) => f.newPath))] : undefined
   const ours = loaded.threads.filter((t) => t.ours)
+  const open = ours.filter((t) => inDiff.has(t.path))
+  const due = changed ? (changed.length ? open : []) : loaded.previous ? open : []
+  const touched = (t: OpenThread) => changed?.includes(t.path) ?? true
   return {
     gone: ours.filter((t) => !inDiff.has(t.path)),
-    recheck: ours
-      .filter(
-        (t) =>
-          inDiff.has(t.path) && (changed ? changed.has(t.path) : loaded.previous !== undefined),
-      )
-      .slice(0, MAX_RECHECKS),
+    recheck: [...due.filter(touched), ...due.filter((t) => !touched(t))].slice(0, MAX_RECHECKS),
+    ...(changed ? { changed } : {}),
   }
 }
 
@@ -741,7 +773,7 @@ async function excerpt(dir: string, path: string, line: number, context = 8): Pr
 }
 
 const recheck: ReviewSteps['recheck'] = async (run, loaded, planned, usage) => {
-  const { recheck: threads, gone } = threadsToRecheck(loaded, planned)
+  const { recheck: threads, gone, changed } = threadsToRecheck(loaded, planned)
   const verdicts = new Map<string, RecheckVerdict | 'gone'>(
     gone.map((t) => [t.discussionId, 'gone' as const]),
   )
@@ -754,6 +786,7 @@ const recheck: ReviewSteps['recheck'] = async (run, loaded, planned, usage) => {
     agent: run.agent,
     dir,
     threads: items,
+    ...(changed ? { changed } : {}),
     usage,
     ...(run.options.language ? { language: run.options.language } : {}),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
@@ -923,6 +956,7 @@ export const defaultSteps: ReviewSteps = {
   media,
   recheck,
   verify,
+  reviseSummary: revise,
   post,
 }
 
@@ -1119,12 +1153,17 @@ async function reviewOnce(run: ReviewRun, started: number): Promise<ReviewData> 
   const agentVerdict = refutedSerious ? undefined : agentOutcome?.verdict
   const verdict = serious || agentVerdict === 'needs-changes' ? 'needs-changes' : 'looks-good'
 
+  const agentSummary =
+    agentOutcome?.summary && verification.refuted.length
+      ? await steps.reviseSummary(run, agentOutcome.summary, verification.refuted, usage)
+      : agentOutcome?.summary
+
   const data: ReviewData = {
     ...baseData(loaded, planned),
     mode: planned.mode,
     verdict,
     summary: [
-      agentOutcome?.summary ?? (comments.length ? '' : 'No problems found on the changed lines.'),
+      agentSummary ?? (comments.length ? '' : 'No problems found on the changed lines.'),
       mediaOutcome?.summary ? `#### Images\n\n${mediaOutcome.summary}` : '',
     ]
       .filter(Boolean)

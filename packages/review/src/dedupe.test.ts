@@ -2,7 +2,15 @@ import { describe, expect, test } from 'bun:test'
 
 import type { Discussion } from '@holtkeeper/forge'
 
-import { dedupe, findingMarker, markerOf, openThreads, rankAndCap, similarity } from './dedupe.ts'
+import {
+  dedupe,
+  findingMarker,
+  markerOf,
+  openThreads,
+  rankAndCap,
+  sameCode,
+  similarity,
+} from './dedupe.ts'
 import type { Candidate } from './validate.ts'
 
 const candidate = (extra: Partial<Candidate>): Candidate => ({
@@ -95,6 +103,38 @@ describe('dedupe', () => {
     expect(result.duplicates.map((c) => c.line)).toEqual([30, 51])
     expect(result.kept.map((c) => c.line)).toEqual([50])
   })
+
+  test('folds rephrasings a few lines apart that name the same code', () => {
+    const first = candidate({
+      line: 40,
+      category: 'maintainability',
+      title: '`renderBadge` has an unreachable branch',
+      body: 'Only `MissingColorError` sets `hint`, so the `WIDE`/`TALL` branch never runs and would pass a size of 0.',
+    })
+    const second = candidate({
+      line: 46,
+      category: 'maintainability',
+      title: 'Dead fallback with a fake size',
+      body: 'Nothing throws with `WIDE` or `TALL`; `MissingColorError` is the only error that sets `hint`.',
+    })
+    const elsewhere = candidate({
+      line: 70,
+      category: 'maintainability',
+      title: 'Same names, far away',
+      body: '`WIDE`, `TALL` and `hint` again, but in another function.',
+    })
+    const result = dedupe([first, second, elsewhere], { threads: [], deterministic: [] })
+    expect(result.duplicates.map((c) => c.line)).toEqual([46])
+    expect(result.kept.map((c) => c.line)).toEqual([40, 70])
+  })
+})
+
+test('sameCode needs several shared code spans, most of the shorter comment', () => {
+  expect(sameCode('`aa` `bb` `cc` `dd`', 'Uses `aa`, `bb` and `cc`.')).toBe(true)
+  expect(sameCode('`a` `bb`', 'Uses `a` and `bb`.')).toBe(false)
+  expect(sameCode('`a` `bb` `cc` `d1` `d2` `d3` `d4`', '`a` `bb` `cc` `e1` `e2` `e3` `e4`')).toBe(
+    false,
+  )
 })
 
 test('rankAndCap filters by severity, sorts and caps', () => {

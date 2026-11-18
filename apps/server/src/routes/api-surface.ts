@@ -56,6 +56,7 @@ import {
   librariesConfigOf,
   libraryReader,
   ownPackageOf,
+  ownPackageSource,
   serverLibraryDocs,
   visibleLibraries,
 } from '../libraries.ts'
@@ -229,6 +230,11 @@ export function createApiSurface(deps: ServerDeps) {
         return agent ? agentSummarize(agent) : undefined
       },
       ownPackage: ownPackageOf(catalog, canRead),
+      ownSource: ownPackageSource({
+        catalog,
+        filter: canRead,
+        forgeOf: (name) => config.forges[name]?.create(),
+      }),
     })
     return { docs, api: libraryApi({ store: libraries, artifacts }), store: libraries }
   }

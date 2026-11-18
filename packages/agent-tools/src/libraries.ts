@@ -171,7 +171,7 @@ export function libraryTools(options: LibraryToolsOptions): Toolset {
       defineTool({
         name: 'libraries.source',
         description:
-          'Browse the source of a third-party library at the version this repository uses unless `version` is given: a file listing (under `path` when it is a directory) or numbered lines of one file. Prefer it over reading node_modules or the module cache when the docs do not answer.',
+          'Browse the source of a third-party library at the version this repository uses unless `version` is given, or of an organization package from its own repository (path relative to the package folder; pass `version` with the one this repository depends on): a file listing (under `path` when it is a directory) or numbered lines of one file. Prefer it over reading node_modules or the module cache when the docs do not answer.',
         input: z.object({
           package: packageName,
           ecosystem,

@@ -31,6 +31,11 @@ export interface LibraryDocsOptions {
    * to the catalog tools instead of "not indexed".
    */
   ownPackage?: (name: string) => Promise<string | undefined>
+  /**
+   * Serves `source` for an organization package (`ownPackage` names it) from its own repository;
+   * without it such packages get the pointer to the catalog tools.
+   */
+  ownSource?: LibraryDocs['source']
 }
 
 const sourceOrder: LibraryChunk['source'][] = ['archive', 'repository', 'releases', 'site']
@@ -505,7 +510,12 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
 
     async source(input, caller) {
       const found = await findLibrary(input)
-      if (typeof found === 'string') return found
+      if (typeof found === 'string') {
+        const own = options.ownSource && (await options.ownPackage?.(input.package.trim()))
+        return own && options.ownSource
+          ? options.ownSource({ ...input, package: own }, caller)
+          : found
+      }
       const picked = pickVersion(found.library, found.versions, input.version, caller)
       if (typeof picked === 'string') return picked
       const ref = { ecosystem: found.library.ecosystem, name: found.library.name }

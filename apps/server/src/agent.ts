@@ -72,6 +72,7 @@ import {
   githubClientFor,
   librariesConfigFrom,
   ownPackageOf,
+  ownPackageSource,
   serverLibraryDocs,
 } from './libraries.ts'
 import { type RulesResolver, createRulesResolver, readForgeRuleFiles } from './rules.ts'
@@ -709,6 +710,11 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
             summarize: async () =>
               librariesConfig?.digests && self ? agentSummarize(self) : undefined,
             ownPackage: ownPackageOf(apiCatalog, catalogContext.canRead),
+            ownSource: ownPackageSource({
+              catalog: apiCatalog,
+              filter: catalogContext.canRead,
+              forgeOf: (name) => config.forges[name]?.create(),
+            }),
           })
         : undefined
 

@@ -130,6 +130,26 @@ describe('libraryDocs', () => {
     expect(await docs.versions({ package: 'lib' })).toContain('# lib (npm)')
   })
 
+  test('source of an organization package goes to ownSource with the package name', async () => {
+    const asked: unknown[] = []
+    const docs = libraryDocs({
+      store: await seed(),
+      artifacts: memoryArtifactStore(),
+      ownPackage: async (name) => (name.startsWith('@acme/widgets') ? '@acme/widgets' : undefined),
+      ownSource: async (input, caller) => {
+        asked.push({ input, caller })
+        return 'own code'
+      },
+    })
+    expect(
+      await docs.source({ package: '@acme/widgets/lib/round', path: 'src/a.ts' }, { repo: 'gl:b' }),
+    ).toBe('own code')
+    expect(asked).toEqual([
+      { input: { package: '@acme/widgets', path: 'src/a.ts' }, caller: { repo: 'gl:b' } },
+    ])
+    expect(await docs.source({ package: 'nope' })).toContain('nope (npm) is not indexed')
+  })
+
   test('search defaults to the caller repository version and marks third-party text', async () => {
     const docs = libraryDocs({ store: await seed(), artifacts: memoryArtifactStore() })
     const text = await docs.search({ package: 'lib', query: 'add numbers' }, { repo: 'gl:b' })

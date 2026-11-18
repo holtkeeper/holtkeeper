@@ -118,6 +118,36 @@ test('summaryNote takes fixed texts from the messages and ends reviews with the 
   )
 })
 
+const thread = (discussionId: string, action: 'resolved' | 'replied' | 'kept') => ({
+  discussionId,
+  action,
+  reason: 'x',
+})
+
+test('summaryNote counts earlier threads that stay without a reply as still open', () => {
+  const note = summaryNote({
+    head: 'c'.repeat(40),
+    mode: 'incremental' as const,
+    verdict: 'looks-good' as const,
+    summary: 'The gizmo is fine.',
+    comments: [],
+    threads: [
+      thread('1', 'resolved'),
+      thread('2', 'kept'),
+      thread('3', 'kept'),
+      thread('4', 'replied'),
+    ],
+    skipped: [],
+    stats: {
+      files: 1,
+      changedLines: 3,
+      dropped: { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0 },
+    },
+    checks: [],
+  })
+  expect(note).toContain('Earlier threads: 1 resolved, 3 still open.')
+})
+
 test('summaryNote gives the review time in the review language, for the whole merge request when incremental', () => {
   const data = {
     head: 'b'.repeat(40),

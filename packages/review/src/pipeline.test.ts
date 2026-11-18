@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createFakeRunner } from '@holtkeeper/exec/testing'
-import type { Discussion } from '@holtkeeper/forge'
+import type { DiffFile, Discussion } from '@holtkeeper/forge'
 import type { QualityCheck } from '@holtkeeper/quality'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { HEAD, addedFile, fakeAgent, fakeForge } from '../test/fakes.ts'
-import { findingMarker, openThreads } from './dedupe.ts'
+import { type OpenThread, findingMarker, openThreads } from './dedupe.ts'
 import { summaryMarker } from './format.ts'
 import type { MediaReviewer } from './media.ts'
 import {
@@ -18,6 +18,7 @@ import {
   requireReviewForge,
   reviewMergeRequest,
   summaryThreads,
+  threadsToRecheck,
 } from './pipeline.ts'
 import type { AgentReview, ReviewData } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
@@ -440,6 +441,7 @@ describe('reviewMergeRequest', () => {
         { findings: [{ id: 0, verdict: 'refuted', reason: 'Reset in src/price.ts:9.' }] },
         { findings: [{ id: 1, verdict: 'confirmed', reason: 'Holds.' }] },
       ],
+      triage: [{ summary: 'Pricing is fine; the tax rule lacks docs.' }],
     })
     const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
     expect(tasks.filter((t) => t.taskKind === 'review-verify').map((t) => t.tier)).toEqual([
@@ -460,6 +462,10 @@ describe('reviewMergeRequest', () => {
     ])
     expect(data.stats.dropped.refuted).toBe(1)
     expect(data.verdict).toBe('looks-good')
+    const revision = tasks.find((t) => t.taskKind === 'triage')
+    expect(revision?.prompt).toContain('Flag never reset')
+    expect(revision?.prompt).not.toContain('Tax not documented')
+    expect(data.summary).toBe('Pricing is fine; the tax rule lacks docs.')
   })
 
   test('findings over the comment limit fill the places of refuted ones', async () => {
@@ -855,7 +861,7 @@ describe('reviewMergeRequest', () => {
     // The repeat is answered in its thread; line 2 was reviewed before.
     expect(data.comments).toEqual([])
     expect(data.stats.dropped).toMatchObject({ duplicates: 1, invalid: 1 })
-    expect(submissions[0]?.summary).toContain('2 resolved, 1 still relevant')
+    expect(submissions[0]?.summary).toContain('2 resolved, 1 still open')
   })
 
   test('falls back to a full review after a force push', async () => {
@@ -1434,5 +1440,44 @@ describe('review size', () => {
     expect(data.size?.level).toBe('too-large')
     expect(submissions[0]?.summary).toContain('more than the limit of 2')
     expect(submissions[0]?.summary).toContain('more than a person can review thoroughly')
+  })
+})
+
+const file = (path: string, status: DiffFile['status'] = 'modified'): DiffFile => ({
+  oldPath: path,
+  newPath: path,
+  status,
+  diff: '',
+})
+
+const open = (discussionId: string, path: string): OpenThread => ({
+  discussionId,
+  path,
+  line: 1,
+  text: 'x',
+  ours: true,
+})
+
+describe('threadsToRecheck', () => {
+  const diff = {
+    refs: { baseSha: 'b', startSha: 's', headSha: 'h' },
+    files: [file('src/widget.ts'), file('src/widget.test.ts')],
+  }
+  const threads = [
+    open('untouched', 'src/widget.ts'),
+    open('touched', 'src/widget.test.ts'),
+    open('left', 'src/gone.ts'),
+    { ...open('theirs', 'src/widget.ts'), ours: false },
+  ]
+
+  test('after new commits rechecks every open thread, the changed files first', () => {
+    const result = threadsToRecheck({ diff, threads }, { since: [file('src/widget.test.ts')] })
+    expect(result.recheck.map((t) => t.discussionId)).toEqual(['touched', 'untouched'])
+    expect(result.gone.map((t) => t.discussionId)).toEqual(['left'])
+    expect(result.changed).toEqual(['src/widget.test.ts'])
+  })
+
+  test('rechecks nothing when no file changed since the last review', () => {
+    expect(threadsToRecheck({ diff, threads }, { since: [] }).recheck).toEqual([])
   })
 })

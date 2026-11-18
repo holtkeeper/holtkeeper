@@ -14,6 +14,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { type DepEdge, type DepNode, analyzeLayer } from '@holtkeeper/depgraph'
+import type { GitForge } from '@holtkeeper/forge'
 import type { LibraryRegistry } from '@holtkeeper/libraries'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { LibraryStore, Store } from '@holtkeeper/store'
@@ -22,6 +23,7 @@ import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
 
 import { builtinAnalyses } from '../src/analyses.ts'
+import type { ApiCatalog } from '../src/api-surface/catalog.ts'
 import { createApp } from '../src/app.ts'
 import { githubUsageFor } from '../src/github-usage.ts'
 import { goPrivatePatterns } from '../src/go-private.ts'
@@ -34,6 +36,7 @@ import {
   lastLibraryRun,
   noteLibraryUses,
   ownPackageOf,
+  ownPackageSource,
   requestLibraryIndex,
   runLibraryIndex,
   startLibraryIndex,
@@ -1273,5 +1276,77 @@ describe('ownPackageOf', () => {
   test('does not reveal packages of repositories the filter rejects', async () => {
     expect(await ownPackageOf(catalog, visibleRepo)('@other/hidden/lib/x')).toBeUndefined()
     expect(await ownPackageOf(catalog, () => true)('@other/hidden/lib/x')).toBe('@other/hidden')
+  })
+})
+
+const version = (value: string, analysisId: string) => ({
+  version: value,
+  head: false,
+  analysisId,
+  analyzedAt: '',
+  exports: 1,
+})
+
+describe('ownPackageSource', () => {
+  const files: Record<string, string> = {
+    'stores/gauge/package.json': '{"name":"@acme/gauge"}',
+    'stores/gauge/src/index.ts': 'export const one = 1\nexport const two = 2\n',
+  }
+  const reads: { file: string; ref?: string }[] = []
+  const forge = {
+    readFile: async (_repo: string, file: string, ref?: string) => {
+      reads.push({ file, ...(ref ? { ref } : {}) })
+      return files[file]
+    },
+    listFiles: async (_repo: string, options?: { path?: string }) =>
+      Object.keys(files)
+        .filter((file) => file.startsWith(`${options?.path ?? ''}/`))
+        .map((file) => ({ path: file, type: 'file' as const })),
+  } as unknown as GitForge
+  const catalog = {
+    resolve: async (_filter: unknown, name: string, query: { version?: string } = {}) =>
+      name === '@acme/gauge' && query.version !== '9.9.9'
+        ? ({
+            record: {
+              id: 'a2',
+              repo: { forge: 'work', path: 'libs/stores' },
+              ref: 'c0ffee12',
+              createdAt: '',
+              packages: [],
+            },
+            package: { name: '@acme/gauge', dir: 'stores/gauge', private: false, entries: [] },
+            version: version('2.0.0', 'a2'),
+            versions: [version('2.0.0', 'a2'), version('1.0.0', 'a1')],
+            alsoIn: [],
+          } as unknown as Awaited<ReturnType<ApiCatalog['resolve']>>)
+        : undefined,
+  }
+  const source = ownPackageSource({
+    catalog,
+    filter: () => true,
+    forgeOf: (name) => (name === 'work' ? forge : undefined),
+  })
+
+  test('reads a file of the package folder at the recorded commit', async () => {
+    const text = await source({ package: '@acme/gauge', path: 'src/index.ts', start: 2 })
+    expect(reads.at(-1)).toEqual({ file: 'stores/gauge/src/index.ts', ref: 'c0ffee12' })
+    expect(text).toContain(
+      '# src/index.ts of @acme/gauge@2.0.0 (work:libs/stores, folder `stores/gauge` at c0ffee12)',
+    )
+    expect(text).toContain('    2 export const two = 2')
+    expect(text).not.toContain('export const one')
+    expect(text).toContain('Other versions: 1.0.0')
+  })
+
+  test('lists the package folder and explains what it cannot read', async () => {
+    const listing = await source({ package: '@acme/gauge' })
+    expect(listing).toContain('- package.json')
+    expect(listing).toContain('- src/index.ts')
+    expect(await source({ package: '@acme/gauge', path: '../secret' })).toContain(
+      'inside the package folder',
+    )
+    expect(await source({ package: '@acme/gauge', version: '9.9.9' })).toContain(
+      'is not in the catalog',
+    )
   })
 })

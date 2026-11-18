@@ -104,8 +104,8 @@ export const reviewMessageCatalog = defineCatalog({
       note: 'Column next to "Severity" in the table of findings per severity.',
     },
     'threads.earlier': {
-      text: 'Earlier threads: {resolved} resolved, {replied} still relevant.',
-      note: 'Review comments from earlier runs.',
+      text: 'Earlier threads: {resolved} resolved, {open} still open.',
+      note: 'Review comments from earlier runs; {open} counts the ones that still apply.',
     },
     'notReviewed.title': { text: 'Not reviewed', note: 'Collapsed list of what was skipped.' },
     'notReviewed.ignored': { text: 'ignored path', note: 'Why a file was not reviewed.' },

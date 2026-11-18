@@ -3,7 +3,7 @@ import { lockfileTools } from '@holtkeeper/agent-tools'
 import type { IssueDetails } from '@holtkeeper/issues'
 import { z } from 'zod'
 
-import { LINE_TOLERANCE, type OpenThread, SIMILAR, severityRank, similarity } from './dedupe.ts'
+import { type OpenThread, sameFinding, severityRank } from './dedupe.ts'
 import { changedLineCount, renderNumberedDiff } from './diff.ts'
 import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } from './schema.ts'
 import type { FileScope } from './scope.ts'
@@ -161,7 +161,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
     tests || requestedTests ? categories : categories.filter((name) => name !== 'tests')
   const parts = [
     `You review merge request !${input.mergeRequest.id} of ${input.repo}. The checkout is at the merge request head; use the read and search tools to look at surrounding code${tests ? ', callers and tests' : ' and callers'} instead of guessing.`,
-    `Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages are in the API catalog (search_symbols by export name, then get_symbol or get_package_api, passing \`version\` = the version this repository depends on, from ${dependencySources(input)} or repo_packages), third-party libraries in the library tools. Packages defined in this checkout: read their source here; the catalog shows indexed versions, not this merge request.`,
+    `Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages are in the API catalog (search_symbols by export name, then get_symbol or get_package_api, passing \`version\` = the version this repository depends on, from ${dependencySources(input)} or repo_packages), third-party libraries in the library tools; library_source reads the code of both, so read the implementation when the behavior matters, not only the declaration. Packages defined in this checkout: read their source here; the catalog shows indexed versions, not this merge request.`,
     [
       'Rules:',
       '- Report only real problems the change introduces or exposes. No praise, no restating the diff, no nitpicks a formatter or linter would catch.',
@@ -736,12 +736,9 @@ export function riskyParts(
     .toSorted((a, b) => a - b)
 }
 
-const findingText = (candidate: Candidate) => `${candidate.title}\n${candidate.body}`
-
 /**
- * The findings of a second pass over the same part joined to the first pass's: a finding near one
- * of `first` (same file, lines within `LINE_TOLERANCE`) on the same line and category or with a
- * similar text is folded into it, which takes the higher severity, stays a suspicion only when
+ * The findings of a second pass over the same part joined to the first pass's: a finding that
+ * reports the same problem as one of `first` (`sameFinding`) is folded into it, which takes the higher severity, stays a suspicion only when
  * both were, and keeps its own evidence or else the other's; the rest are added.
  */
 export function mergePassFindings(
@@ -751,12 +748,7 @@ export function mergePassFindings(
   const merged = [...first]
   for (const candidate of second) {
     const at = merged.findIndex(
-      (other, index) =>
-        index < first.length &&
-        other.path === candidate.path &&
-        Math.abs(other.line - candidate.line) <= LINE_TOLERANCE &&
-        ((other.line === candidate.line && other.category === candidate.category) ||
-          similarity(findingText(other), findingText(candidate)) >= SIMILAR),
+      (other, index) => index < first.length && sameFinding(other, candidate),
     )
     const target = merged[at]
     if (!target) {
@@ -1188,12 +1180,14 @@ export type RecheckVerdict = z.infer<typeof recheckSchema>['threads'][number]
 
 /**
  * Asks the cheaper triage model whether each of our earlier comments still applies to the code at
- * the current head. Threads the answer leaves out count as `unclear`.
+ * the current head. `changed` names the files changed since the last review, where a fix outside
+ * the thread's own file may be. Threads the answer leaves out count as `unclear`.
  */
 export async function recheckThreads(options: {
   agent: Agent
   dir: string
   threads: readonly { thread: OpenThread; code: string }[]
+  changed?: readonly string[]
   usage: ReviewUsage
   language?: string
   toolsets?: readonly Toolset[]
@@ -1209,11 +1203,18 @@ export async function recheckThreads(options: {
     {
       dir: options.dir,
       system: [
-        'You check whether earlier code review comments were addressed. For each thread answer `fixed` when the problem is gone from the current code, `still-relevant` when it remains, `unclear` when you cannot tell. Read the files when the excerpt is not enough.',
+        'You check whether earlier code review comments were addressed. For each thread answer `fixed` when the problem is gone from the current code, `still-relevant` when it remains, `unclear` when you cannot tell. Read the files when the excerpt is not enough: a comment about a missing test is fixed by a test file, one about a caller by that caller.',
         'note: one short sentence for the author explaining your answer.',
         `${options.language ? `Write notes in ${options.language}.` : 'Write notes in the language of the comment.'} ${KEEP_ENGLISH}`,
       ].join('\n'),
-      prompt: items.join('\n\n'),
+      prompt: [
+        ...(options.changed?.length
+          ? [
+              `Files changed since the last review (a fix may be in one of them, not only in the commented file):\n${options.changed.map((path) => `- ${path}`).join('\n')}`,
+            ]
+          : []),
+        ...items,
+      ].join('\n\n'),
       capabilities: ['read', 'search'],
       output: recheckSchema,
       taskKind: 'triage',
@@ -1277,5 +1278,51 @@ export async function localizeFindings(options: {
     })
   } catch {
     return [...candidates]
+  }
+}
+
+const revisedSummarySchema = z.object({ summary: z.string() })
+
+/**
+ * `summary` without the claims of the `dropped` findings, which the verification refuted, by one
+ * `fast` call without tools; the rest of the text, its language and Markdown stay. Returns
+ * `summary` unchanged when nothing was dropped and when the call fails or answers an empty text.
+ */
+export async function reviseSummary(options: {
+  agent: Agent
+  dir: string
+  summary: string
+  dropped: readonly { title: string; reason: string }[]
+  usage: ReviewUsage
+  signal?: AbortSignal
+}): Promise<string> {
+  const { summary, dropped } = options
+  if (!summary.trim() || dropped.length === 0) return summary
+  try {
+    const result = await runTracked(
+      options.agent,
+      {
+        dir: options.dir,
+        system: [
+          'You edit the summary of a code review. A second reviewer refuted some of the findings, so they are not posted: remove every claim of the summary that rests on them, and fix sentences that count the problems or call them already reported.',
+          'Change nothing else: keep the language, the wording, the Markdown and the other findings. Do not mention the removed findings or that the summary was edited.',
+          'Answer with the whole revised summary.',
+        ].join('\n'),
+        prompt: JSON.stringify({
+          summary,
+          refuted: dropped.map(({ title, reason }) => ({ title, reason })),
+        }),
+        capabilities: [],
+        output: revisedSummarySchema,
+        taskKind: 'triage',
+        tier: 'fast',
+        maxTurns: 1,
+        ...(options.signal ? { signal: options.signal } : {}),
+      },
+      options.usage,
+    )
+    return result.output?.summary.trim() || summary
+  } catch {
+    return summary
   }
 }

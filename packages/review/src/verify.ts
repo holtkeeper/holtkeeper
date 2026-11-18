@@ -117,6 +117,7 @@ const SYSTEM = [
   '- `refuted`: the code shows the claim is wrong (the guard exists, the value is reset elsewhere, the tests exist, the fix would break a caller that relies on the current behavior, the case cannot happen). The reason names where (path:line).',
   '- `confirmed`: you checked the premise and it holds. A remark that is a matter of taste is confirmed unless its factual premise is wrong.',
   '- `uncertain`: you could not tell either way.',
+  'Dependencies are usually not installed. When the premise depends on code of a dependency, the organization’s own packages included, read it with the library source tool (`version` = the one this repository depends on, from its manifest) before answering; do not refute a finding only because that code is missing from the checkout.',
   'A finding marked as an unverified suspicion is one the reviewer flagged without confirming its premise: it is posted only when you answer `confirmed`, so trace that premise in the code yourself and confirm it only when it holds.',
   'Answer for every finding, keeping its id. The reason is one or two sentences.',
   KEEP_ENGLISH,
