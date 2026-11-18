@@ -1,34 +1,39 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import {
-  ignoredInReviewMd,
-  pathInstructionsInReviewMd,
-  readGuidelines,
-  trimText,
-} from './guidelines.ts'
+import { createFakeRunner } from '@holtkeeper/exec/testing'
+
+import { ignoredInReviewMd, pathInstructionsInReviewMd, readCheckoutRules } from './guidelines.ts'
 
 let dir: string | undefined
 afterEach(async () => {
   if (dir) await rm(dir, { recursive: true, force: true })
 })
 
-test('reads guideline files in order within the budget', async () => {
-  dir = await mkdtemp(join(tmpdir(), 'review-guidelines-'))
+test('reads the rules files git tracks, nested ones included', async () => {
+  dir = await mkdtemp(join(tmpdir(), 'review-rules-'))
+  await mkdir(join(dir, 'pkg/widgets'), { recursive: true })
   await writeFile(join(dir, 'REVIEW.md'), '# Review\n\nCheck money math.')
-  await writeFile(join(dir, 'AGENTS.md'), 'rule line\n'.repeat(2000))
-  const found = await readGuidelines(dir, { perFile: 1000, total: 1500 })
-  expect(found.map((g) => [g.file, g.truncated])).toEqual([
-    ['REVIEW.md', false],
-    ['AGENTS.md', true],
+  await writeFile(join(dir, 'pkg/widgets/AGENTS.md'), 'Keep widget sizes in WidgetSize.')
+  await writeFile(join(dir, 'untracked.md'), 'x')
+  const { runner } = createFakeRunner(() => ({
+    stdout: 'REVIEW.md\npkg/widgets/AGENTS.md\nsrc/a.ts\n',
+  }))
+  const found = await readCheckoutRules(runner, dir)
+  expect(found.map((file) => [file.path, file.kind, file.globs])).toEqual([
+    ['REVIEW.md', 'always', []],
+    ['pkg/widgets/AGENTS.md', 'files', ['pkg/widgets/**']],
   ])
-  expect(found[1]?.text.endsWith('[...]')).toBe(true)
 })
 
-test('trimText cuts at a line break', () => {
-  expect(trimText('aaaa\nbbbb\ncccc', 11)).toEqual({ text: 'aaaa\nbbbb\n[...]', truncated: true })
+test('falls back to root rules files when git cannot list', async () => {
+  dir = await mkdtemp(join(tmpdir(), 'review-rules-'))
+  await writeFile(join(dir, 'AGENTS.md'), 'Use tabs.')
+  const { runner } = createFakeRunner(() => ({ exitCode: 128 }))
+  const found = await readCheckoutRules(runner, dir)
+  expect(found.map((file) => file.path)).toEqual(['AGENTS.md'])
 })
 
 test('ignoredInReviewMd reads globs under an Ignore heading', () => {

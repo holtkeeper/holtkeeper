@@ -8,8 +8,8 @@ export interface DefaultTrigger {
 
 /**
  * Triggers an install starts with: every new or moved tag gets a snapshot of the public API of its
- * packages; every new repository gets every analyzer that only reads, the Guide generator and
- * starter knowledge included (once, on the default branch); `/holtkeeper review` in a merge
+ * packages; every new repository gets every analyzer that only reads, the rule miner included
+ * (once, on the default branch); `/holtkeeper review` in a merge
  * request runs the review, the command its notes suggest after a failed run.
  */
 export const defaultTriggers: DefaultTrigger[] = [
@@ -31,12 +31,12 @@ interface DefaultTriggerAddition {
 }
 
 /**
- * Additions to the default triggers: the public API snapshot on every tag, and starter knowledge
+ * Additions to the default triggers: the public API snapshot on every tag, and the rule miner
  * for new repositories on installs whose new-repository trigger lists its analyzers.
  */
 const defaultTriggerAdditions: DefaultTriggerAddition[] = [
   { id: 'tag+api-surface', trigger: 'tag', analyzers: ['api-surface'] },
-  { id: 'new-repo+knowledge-bootstrap', trigger: 'new-repo', analyzers: ['knowledge-bootstrap'] },
+  { id: 'new-repo+rule-miner', trigger: 'new-repo', analyzers: ['rule-miner'] },
 ]
 
 /** Key in `Store.kv` marking that one default trigger was considered; never expires. */

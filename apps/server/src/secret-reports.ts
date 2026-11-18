@@ -1,6 +1,8 @@
 import type { Principal } from '@holtkeeper/access'
+import { globMatches } from '@holtkeeper/access/paths'
 import type { SecretReportingMode } from '@holtkeeper/api'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import { type HoltkeeperConfig, fleetPatterns } from '@holtkeeper/core'
+import type { RepoRef } from '@holtkeeper/forge'
 import {
   type SecretReport,
   type SecretReportInput,
@@ -16,10 +18,19 @@ import { webPaths, webUrl } from '@holtkeeper/web-paths'
 
 import { appendAudit } from './audit.ts'
 import { type ServerDeps, parseRepo, repoTarget } from './context.ts'
-import { inFleet } from './neighbours.ts'
 import { slackWebPoster } from './slack/client.ts'
 import { slackConnection } from './slack/connection.ts'
 import { canSee } from './visibility.ts'
+
+/** Whether `repo` is in the fleet: a configured forge and inside its include and exclude patterns. */
+function inFleet(config: HoltkeeperConfig, repo: RepoRef): boolean {
+  if (!config.forges[repo.forge]) return false
+  const { include, exclude } = fleetPatterns(config, repo.forge)
+  return (
+    include.some((pattern) => globMatches(pattern, repo.path)) &&
+    !exclude.some((pattern) => globMatches(pattern, repo.path))
+  )
+}
 
 /** Whether this deployment runs secret reports (`server.secretReports`, default on). */
 export const secretReportsEnabled = (config: Pick<HoltkeeperConfig, 'server'>) =>

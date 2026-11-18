@@ -286,9 +286,9 @@ export function VersionFields({ draft, onChange, sourceOf, errors }: FlowFormPro
         onChange={(excludeTypes) => setChangelog({ excludeTypes })}
       />
       <p className="text-xs text-dim">
-        The release notes style is a Guide rule (section Releases), not a field here.{' '}
-        <Link to="/knowledge/guide" className="underline">
-          Open the Guide
+        The release notes style is a rule for Release notes in Knowledge, not a field here.{' '}
+        <Link to="/knowledge/rules" className="underline">
+          Open the rules
         </Link>
       </p>
     </div>

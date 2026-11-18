@@ -1,147 +1,157 @@
-import {
-  AUTO_ACCEPT_ACTOR,
-  type AcceptLearningsResult,
-  type GuideScopeKey,
-  type GuideSectionName,
-  type LearningCandidateView,
-  type LearningSourceKind,
-  type ReactionTotals,
+import type {
+  LearningCreateBody,
+  LearningOrigin,
+  LearningPatch,
+  LearningSource,
+  LearningStatus,
+  LearningView,
+  ReactionTotals,
+  RuleAgent,
+  Scope,
 } from '@holtkeeper/api'
 
-import { type Space, candidatesInSpace } from './guide.ts'
-import { repoKey } from './repo.ts'
+import { daysUntil } from './format.ts'
 
-export const sourceKindLabel: Record<LearningSourceKind, string> = {
-  'review-reply': 'Review reply',
-  mcp: 'Over MCP',
-  merged: 'Merged',
-}
-
-export const learningSourceKinds: readonly LearningSourceKind[] = ['review-reply', 'merged', 'mcp']
-
-/** Confidence in words: 1–2 Low, 3 Medium, 4–5 High. */
-export const confidenceLabel = (confidence: number): 'Low' | 'Medium' | 'High' =>
-  confidence >= 4 ? 'High' : confidence === 3 ? 'Medium' : 'Low'
-
-/** What a screen reader hears for the confidence bars, e.g. "Confidence high, 4 of 5". */
-export const confidenceAria = (confidence: number): string =>
-  `Confidence ${confidenceLabel(confidence).toLowerCase()}, ${confidence} of 5`
-
-/** Filter choices for confidence, in the order the filter lists them. */
-export const confidenceLevels = ['High', 'Medium', 'Low'] as const
-export type ConfidenceLevel = (typeof confidenceLevels)[number]
-
-/** Replies and a direct proposal that back a candidate. */
-export const evidenceOf = (candidate: Pick<LearningCandidateView, 'sources' | 'proposal'>) =>
-  candidate.sources.length + (candidate.proposal ? 1 : 0)
-
-/**
- * Candidates of the space: every one for *All*, else those whose repository is among `repos`
- * (the `forge:path` keys the space covers); a repository space also keeps its own repository.
- */
-export function learningsInSpace<T extends Pick<LearningCandidateView, 'repo'>>(
-  candidates: readonly T[],
-  space: Space,
-  repos: readonly string[],
-): T[] {
-  if (space.kind === 'all') return candidatesInSpace(candidates, undefined)
-  return candidatesInSpace(
-    candidates,
-    new Set(space.kind === 'repo' ? [...repos, repoKey(space.repo)] : repos),
-  )
-}
-
-/** What narrows the Learnings table. */
-export interface LearningQuery {
-  source?: LearningSourceKind
-  sections: readonly GuideSectionName[]
-  confidence: readonly ConfidenceLevel[]
-}
-
-export type LearningSort = 'evidence' | 'confidence' | 'newest'
-
-export const learningSorts: readonly { id: LearningSort; label: string }[] = [
-  { id: 'evidence', label: 'Evidence' },
-  { id: 'confidence', label: 'Confidence' },
-  { id: 'newest', label: 'Newest' },
+/** Every status in display order, with its label and tag tone. */
+export const learningStatuses: readonly {
+  id: LearningStatus
+  label: string
+  tone: 'warning' | 'success' | 'default' | 'danger'
+}[] = [
+  { id: 'pending', label: 'Pending', tone: 'warning' },
+  { id: 'active', label: 'Active', tone: 'success' },
+  { id: 'expired', label: 'Expired', tone: 'default' },
+  { id: 'rejected', label: 'Rejected', tone: 'danger' },
 ]
 
-/** Candidates matching the source, section and confidence choices, in `sort` order. */
-export function filterLearnings<T extends LearningCandidateView>(
-  candidates: readonly T[],
-  query: LearningQuery,
-  sort: LearningSort = 'evidence',
-): T[] {
-  const newest = (a: T, b: T) => b.updatedAt.localeCompare(a.updatedAt)
-  const order: Record<LearningSort, (a: T, b: T) => number> = {
-    evidence: (a, b) =>
-      evidenceOf(b) - evidenceOf(a) || b.confidence - a.confidence || newest(a, b),
-    confidence: (a, b) =>
-      b.confidence - a.confidence || evidenceOf(b) - evidenceOf(a) || newest(a, b),
-    newest,
-  }
-  return candidates
-    .filter(
-      (candidate) =>
-        (!query.source || candidate.sourceKind === query.source) &&
-        (!query.sections.length || query.sections.includes(candidate.section)) &&
-        (!query.confidence.length ||
-          query.confidence.includes(confidenceLabel(candidate.confidence))),
-    )
-    .toSorted(order[sort])
-}
+/** What the Learnings tab lists before anyone touches the status filter. */
+export const defaultLearningStatuses: readonly LearningStatus[] = ['pending', 'active']
 
-/** Candidates per source kind, plus `all`, for the source tabs. */
-export function sourceCounts(
-  candidates: readonly Pick<LearningCandidateView, 'sourceKind'>[],
-): Record<LearningSourceKind | 'all', number> {
-  const counts = { all: candidates.length, 'review-reply': 0, mcp: 0, merged: 0 }
-  for (const candidate of candidates) counts[candidate.sourceKind] += 1
-  return counts
-}
+export const isLearningStatus = (value: unknown): value is LearningStatus =>
+  learningStatuses.some((status) => status.id === value)
 
-/** Ids a batch accept may take: proposed candidates the caller may decide. */
-export const selectableIds = (
-  candidates: readonly Pick<LearningCandidateView, 'id' | 'status' | 'canDecide'>[],
-): string[] =>
-  candidates
-    .filter((candidate) => candidate.status === 'proposed' && candidate.canDecide)
-    .map((candidate) => candidate.id)
+export const learningStatusOf = (status: LearningStatus) =>
+  learningStatuses.find((each) => each.id === status) ?? learningStatuses[0]!
 
-/** The selection after a batch accept: only the candidates that failed stay selected. */
-export const selectionAfter = (result: AcceptLearningsResult): Set<string> =>
-  new Set(result.failed.map((failure) => failure.id))
+/** Every origin in display order, with its label. */
+export const learningOrigins: readonly { id: LearningOrigin; label: string }[] = [
+  { id: 'reply', label: 'Review reply' },
+  { id: 'miner', label: 'Rule miner' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'person', label: 'Person' },
+]
+
+export const isLearningOrigin = (value: unknown): value is LearningOrigin =>
+  learningOrigins.some((origin) => origin.id === value)
+
+export const originLabel = (origin: LearningOrigin): string =>
+  learningOrigins.find((each) => each.id === origin)?.label ?? origin
+
+const inDays = (days: number): string =>
+  days <= 0 ? 'today' : days === 1 ? 'in 1 day' : `in ${days} days`
 
 /**
- * The scope a candidate's proposal points at among those the caller may pick: its `targetScope`,
- * else the first of its `suggestedScope` kind, else the first.
+ * When a learning changes state by itself, in words: `Activates in 2 days` for a pending one,
+ * `Expires in 71 days` for an active one; nothing for the rest or without a date.
  */
-export const suggestedScopeOf = (
-  candidate: Pick<LearningCandidateView, 'scopes' | 'suggestedScope' | 'targetScope'>,
-): GuideScopeKey | undefined =>
-  candidate.scopes.find((key) => key === candidate.targetScope) ??
-  candidate.scopes.find((key) => key.startsWith(`${candidate.suggestedScope}:`)) ??
-  candidate.scopes[0]
-
-/** Accepted by the `learnings.autoAccept` policy and not confirmed by a person since. */
-export const isAutoAccepted = (
-  candidate: Pick<LearningCandidateView, 'status' | 'decidedBy'>,
-): boolean => candidate.status === 'accepted' && candidate.decidedBy === AUTO_ACCEPT_ACTOR.id
-
-/** Accepted candidates per Guide section, in the order of `sections`; empty sections left out. */
-export function acceptedBySection(
-  candidates: readonly Pick<LearningCandidateView, 'status' | 'section'>[],
-  sections: readonly GuideSectionName[],
-): { section: GuideSectionName; count: number }[] {
-  return sections
-    .map((section) => ({
-      section,
-      count: candidates.filter((c) => c.status === 'accepted' && c.section === section).length,
-    }))
-    .filter((row) => row.count > 0)
+export function learningTiming(
+  learning: Pick<LearningView, 'status' | 'activeAt' | 'expiresAt'>,
+  now: Date = new Date(),
+): { label: string; soon: boolean } | undefined {
+  if (learning.status === 'pending') {
+    const days = Math.max(0, daysUntil(learning.activeAt, now))
+    return { label: `Activates ${inDays(days)}`, soon: days <= 1 }
+  }
+  if (learning.status === 'active' && learning.expiresAt) {
+    const days = Math.max(0, daysUntil(learning.expiresAt, now))
+    return { label: `Expires ${inDays(days)}`, soon: days < 14 }
+  }
+  return undefined
 }
 
-/** Share of 👍 among 👍 and 👎 in whole percent; `undefined` without reactions. */
+/** Counts for the summary strip: pending, active, and active ones expiring within 14 days. */
+export function learningTotals(
+  learnings: readonly Pick<LearningView, 'status' | 'activeAt' | 'expiresAt'>[],
+  now: Date = new Date(),
+): { pending: number; active: number; expiringSoon: number } {
+  let pending = 0
+  let active = 0
+  let expiringSoon = 0
+  for (const learning of learnings) {
+    if (learning.status === 'pending') pending += 1
+    if (learning.status !== 'active') continue
+    active += 1
+    if (learningTiming(learning, now)?.soon) expiringSoon += 1
+  }
+  return { pending, active, expiringSoon }
+}
+
+/** `!318 acme/round/web`, the repository alone, or `Direct proposal` for a source without one. */
+export function sourceLabel(source: LearningSource): string {
+  const repo = source.repo ? source.repo.slice(source.repo.indexOf(':') + 1) : undefined
+  if (source.mergeRequest !== undefined)
+    return repo ? `!${source.mergeRequest} ${repo}` : `!${source.mergeRequest}`
+  return repo ?? 'Direct proposal'
+}
+
+/** What the learning editor holds. */
+export interface LearningDraft {
+  text: string
+  reason: string
+  scope: Scope
+  files: string[]
+  agents: RuleAgent[]
+}
+
+export const emptyLearningDraft = (scope: Scope = { all: true }): LearningDraft => ({
+  text: '',
+  reason: '',
+  scope,
+  files: [],
+  agents: [],
+})
+
+export const learningDraftOf = (learning: LearningView): LearningDraft => ({
+  text: learning.text,
+  reason: learning.reason ?? '',
+  scope: learning.scope,
+  files: [...(learning.files ?? [])],
+  agents: [...(learning.agents ?? [])],
+})
+
+/** What keeps a draft from saving, in words; empty when it may be saved. */
+export function learningDraftProblems(draft: LearningDraft): string[] {
+  const scope = draft.scope
+  return [
+    ...(draft.text.trim() ? [] : ['Write the learning']),
+    ...(!scope.all && !scope.teams?.length && !scope.repos?.length ? ['Pick a scope'] : []),
+  ]
+}
+
+export function learningCreateOf(draft: LearningDraft): LearningCreateBody {
+  const reason = draft.reason.trim()
+  return {
+    text: draft.text.trim(),
+    scope: draft.scope,
+    ...(reason ? { reason } : {}),
+    ...(draft.files.length ? { files: draft.files } : {}),
+    ...(draft.agents.length ? { agents: draft.agents } : {}),
+  }
+}
+
+/** The full edit of a learning: cleared fields go as `null` so the server drops them. */
+export function learningPatchOf(draft: LearningDraft): LearningPatch {
+  const reason = draft.reason.trim()
+  return {
+    text: draft.text.trim(),
+    scope: draft.scope,
+    reason: reason || null,
+    files: draft.files.length ? draft.files : null,
+    agents: draft.agents.length ? draft.agents : null,
+  }
+}
+
+/** Share of 👍 among reactions, in percent; undefined without reactions. */
 export const helpfulShare = (row: Pick<ReactionTotals, 'up' | 'down'>): number | undefined =>
   row.up + row.down ? Math.round((row.up / (row.up + row.down)) * 100) : undefined
 

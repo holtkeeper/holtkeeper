@@ -11,14 +11,7 @@ import type {
   SecuritySummary,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import type {
-  AnalysisHead,
-  AuditEvent,
-  Job,
-  KnowledgeEntry,
-  LearningCandidate,
-  SettingEntry,
-} from '@holtkeeper/store'
+import type { AnalysisHead, AuditEvent, Job, Learning, SettingEntry } from '@holtkeeper/store'
 import { webPaths } from '@holtkeeper/web-paths'
 
 import { parseRepo } from './context.ts'
@@ -63,10 +56,8 @@ export interface HomeSources {
   /** Finding groups judged urgent that some repository has not allowlisted; none when absent. */
   urgentFindings?: readonly FindingGroup[]
   releases: readonly ReleaseCard[]
-  /** Proposed learned rules the caller may decide. */
-  learnings: readonly LearningCandidate[]
-  /** Proposed knowledge entries the caller may decide. */
-  knowledge: readonly KnowledgeEntry[]
+  /** Pending learnings the caller may decide. */
+  learnings: readonly Learning[]
   /**
    * The newest record head per repository and kind, of analyzers that still exist, with metrics
    * (computed at read time for records stored without).
@@ -333,46 +324,41 @@ const newestUpdate = (list: readonly { updatedAt: string }[]) =>
     .toSorted()
     .at(-1)!
 
+/** The one repository a learning's scope names exactly, `forge:path`; `undefined` for wider scopes. */
+const learningRepoKey = (learning: Learning): string | undefined => {
+  const { scope } = learning
+  if (scope.all || scope.teams?.length || scope.repos?.length !== 1) return undefined
+  const only = scope.repos[0] ?? ''
+  return /[*?[\]{}]/.test(only) || !parseRepo(only) ? undefined : only
+}
+
 /**
- * Proposed learned rules per repository, and proposed knowledge entries as one item; each opens
- * the oldest of its proposals in the Inbox.
+ * Pending learnings per repository they are scoped to, and those of wider scopes as one item;
+ * each opens the oldest of its learnings in the Inbox.
  */
 function reviewItems(sources: HomeSources): HomeAttentionItem[] {
-  const byRepo = new Map<string, LearningCandidate[]>()
-  for (const candidate of sources.learnings)
-    byRepo.set(candidate.repo, [...(byRepo.get(candidate.repo) ?? []), candidate])
-  const items = [...byRepo.entries()].map(([repo, candidates]): HomeAttentionItem => {
+  const groups = new Map<string, Learning[]>()
+  for (const learning of sources.learnings) {
+    const key = learningRepoKey(learning) ?? ''
+    groups.set(key, [...(groups.get(key) ?? []), learning])
+  }
+  return [...groups.entries()].map(([repo, learnings]): HomeAttentionItem => {
     const href = webPaths.inbox({
-      item: `learning:${oldestOf(candidates).id}`,
+      item: `learning:${oldestOf(learnings).id}`,
       kind: 'learning',
     })
     return {
-      id: `learnings:${repo}`,
+      id: repo ? `learnings:${repo}` : 'learnings',
       kind: 'learnings',
       severity: 'low',
-      title: `${plural(candidates.length, 'learned rule')} ${candidates.length === 1 ? 'waits' : 'wait'} for review`,
-      repos: [repoRef(sources, repo)],
-      count: candidates.length,
-      at: newestUpdate(candidates),
+      title: `${plural(learnings.length, 'learned rule')} ${learnings.length === 1 ? 'waits' : 'wait'} for review`,
+      repos: repo ? [repoRef(sources, repo)] : [],
+      count: learnings.length,
+      at: newestUpdate(learnings),
       href,
       action: review(href),
     }
   })
-  if (sources.knowledge.length) {
-    const href = webPaths.inbox({ item: `note:${oldestOf(sources.knowledge).id}`, kind: 'note' })
-    items.push({
-      id: 'knowledge',
-      kind: 'knowledge',
-      severity: 'low',
-      title: `${plural(sources.knowledge.length, 'knowledge proposal')} ${sources.knowledge.length === 1 ? 'waits' : 'wait'} for review`,
-      repos: [],
-      count: sources.knowledge.length,
-      at: newestUpdate(sources.knowledge),
-      href,
-      action: review(href),
-    })
-  }
-  return items
 }
 
 const targetOf = (sources: Pick<HomeSources, 'teamsOf'>, repo: string): RepoTarget => ({
@@ -496,13 +482,16 @@ const forRepo = (path: string | undefined) => (path ? ` for ${path}` : '')
 const releaseHref = (event: AuditEvent) =>
   event.target.repo ? webPaths.releaseTimeline(event.target.repo) : webPaths.settings('audit')
 
-const guideHref = (event: AuditEvent) =>
-  webPaths.knowledge('guide', event.target.repo ? { space: `repo:${event.target.repo}` } : {})
-
-const knowledgeVerbs: Record<string, string> = {
+const ruleVerbs: Record<string, string> = {
   create: 'Added',
   update: 'Edited',
   delete: 'Deleted',
+}
+
+const learningTexts: Record<string, string> = {
+  create: 'Wrote a learned rule',
+  approve: 'Approved a learned rule',
+  reject: 'Rejected a learned rule',
 }
 
 const credentialVerbs: Record<string, string> = {
@@ -510,12 +499,6 @@ const credentialVerbs: Record<string, string> = {
   update: 'Changed',
   delete: 'Deleted',
   rotate: 'Rotated',
-}
-
-const guideTexts: Record<string, string> = {
-  update: 'Edited the Guide',
-  accept: 'Accepted generated Guide text',
-  restore: 'Restored a Guide version',
 }
 
 const accessTexts: Record<string, string> = {
@@ -612,40 +595,21 @@ const changeRules: ChangeRule[] = [
   },
   {
     kind: 'knowledge',
-    ...exactly('knowledge.create', 'knowledge.update', 'knowledge.delete'),
+    ...exactly('rule.create', 'rule.update', 'rule.delete'),
     line: (event) => ({
-      text: `${knowledgeVerbs[verb(event)]!} a knowledge note`,
+      text: `${ruleVerbs[verb(event)]!} a team rule`,
       href: webPaths.knowledge(
-        'notes',
-        verb(event) !== 'delete' && event.target.id ? { note: event.target.id } : {},
+        'rules',
+        verb(event) !== 'delete' && event.target.id ? { rule: event.target.id } : {},
       ),
     }),
   },
   {
     kind: 'knowledge',
-    ...exactly('learning.accept'),
+    ...exactly('learning.create', 'learning.approve', 'learning.reject'),
     line: (event, path) => ({
-      text: `Accepted a learned rule${forRepo(path)}`,
-      href: webPaths.knowledge(
-        'learnings',
-        event.target.repo ? { space: `repo:${event.target.repo}` } : {},
-      ),
-    }),
-  },
-  {
-    kind: 'guide',
-    ...exactly('guide.update', 'guide.accept', 'guide.restore'),
-    line: (event, path) => ({
-      text: `${guideTexts[verb(event)]!}${forRepo(path)}`,
-      href: guideHref(event),
-    }),
-  },
-  {
-    kind: 'guide',
-    ...exactly('guide.reject'),
-    line: (event, path) => ({
-      text: `Rejected generated Guide text${forRepo(path)}`,
-      href: guideHref(event),
+      text: `${learningTexts[verb(event)]!}${forRepo(path)}`,
+      href: webPaths.knowledge('learnings', event.target.id ? { learning: event.target.id } : {}),
     }),
   },
   {
@@ -694,7 +658,7 @@ export const changeActionPrefixes = [...new Set(changeRules.flatMap((rule) => ru
 
 /**
  * One change per audit log event, newest first, at most `limit`: only the high-signal actions
- * (releases, deploys, settings, the allowlist, knowledge, the Guide, new repositories,
+ * (releases, deploys, settings, the allowlist, rules and learnings, new repositories,
  * credentials, access, rejected agent tasks) that succeeded. Deterministic: the same events give the same sentences.
  */
 export function summarizeChanges(

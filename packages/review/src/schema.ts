@@ -201,8 +201,8 @@ export const reviewDataSchema = z.object({
       model: z.string().optional(),
     })
     .optional(),
-  /** Guide scopes whose rules reached the agent, broad to narrow, e.g. `all`, `team:web`. */
-  guideScopes: z.array(z.string()).optional(),
+  /** Where the rules that reached the agent come from, in prompt order, e.g. `All repositories`, `AGENTS.md`. */
+  ruleSources: z.array(z.string()).optional(),
   /** `reviewPromptVersion()` of the run that asked the agent; absent without an agent review. */
   promptVersion: z.string().optional(),
   /** Wall time of the run, posting included. */

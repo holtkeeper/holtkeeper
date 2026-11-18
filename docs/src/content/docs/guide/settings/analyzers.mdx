@@ -48,16 +48,16 @@ See every analyzer with where and when it runs, how its last week went and which
   />
   <Scroll>
 
-| Analyzer                                       | State                                    | Scope · runs when                            | Last 7 days                          | Overrides |
-| ---------------------------------------------- | ---------------------------------------- | -------------------------------------------- | ------------------------------------ | --------- |
-| **Supply chain**                               |                                          |                                              |                                      |           |
-| **Dependency graph** · `depgraph`              | <Tag tone="ok">On</Tag>                  | Every repository · on change, 30m            | 312 runs, all fine                   | —         |
-| **Vulnerability audit** · `audit`              | <Tag tone="ok">On</Tag>                  | Every repository · every 12h · Nightly audit | <Tag tone="bad">7 of 14 failed</Tag> | 1         |
-| **Quality**                                    |                                          |                                              |                                      |           |
-| **Bundle size** · `bundle`                     | <Tag tone="warn">Some repositories</Tag> | Widgets · Bundle backfill                    | 4 runs, all fine                     | 2         |
-| **Review** · `review` <Tag tone="acc">AI</Tag> | <Tag tone="ok">On</Tag>                  | Every repository · Merge request opened      | 2 stopped by budget                  | 1         |
-| **Releases and knowledge**                     |                                          |                                              |                                      |           |
-| **Guide** · `guide` <Tag tone="acc">AI</Tag>   | <Tag>Off</Tag>                           | Only when started                            | No runs                              | —         |
+| Analyzer                                               | State                                    | Scope · runs when                            | Last 7 days                          | Overrides |
+| ------------------------------------------------------ | ---------------------------------------- | -------------------------------------------- | ------------------------------------ | --------- |
+| **Supply chain**                                       |                                          |                                              |                                      |           |
+| **Dependency graph** · `depgraph`                      | <Tag tone="ok">On</Tag>                  | Every repository · on change, 30m            | 312 runs, all fine                   | —         |
+| **Vulnerability audit** · `audit`                      | <Tag tone="ok">On</Tag>                  | Every repository · every 12h · Nightly audit | <Tag tone="bad">7 of 14 failed</Tag> | 1         |
+| **Quality**                                            |                                          |                                              |                                      |           |
+| **Bundle size** · `bundle`                             | <Tag tone="warn">Some repositories</Tag> | Widgets · Bundle backfill                    | 4 runs, all fine                     | 2         |
+| **Review** · `review` <Tag tone="acc">AI</Tag>         | <Tag tone="ok">On</Tag>                  | Every repository · Merge request opened      | 2 stopped by budget                  | 1         |
+| **Releases and knowledge**                             |                                          |                                              |                                      |           |
+| **Rule miner** · `rule-miner` <Tag tone="acc">AI</Tag> | <Tag tone="ok">On</Tag>                  | Every repository · on change, 14d            | 9 runs, all fine                     | —         |
 
   </Scroll>
 </Screen>
@@ -125,7 +125,7 @@ Click a row, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows the state
 2. Edit the organization's entry, or add one for some teams, folders or repositories. Settings with presets offer a **Preset** picker above the value.
 3. Save. The next run uses it.
 
-Run-only analyzers such as the Guide have no options and say so. <Ui>Show runs</Ui> in the ⋯ menu opens Ops › Runs filtered to the analyzer.
+Run-only analyzers have no options and say so. <Ui>Show runs</Ui> in the ⋯ menu opens Ops › Runs filtered to the analyzer.
 
 :::tip
 An option key the analyzer no longer reads shows a warning under the entry, naming where a moved key lives now.

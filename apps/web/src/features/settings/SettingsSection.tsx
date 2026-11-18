@@ -5,7 +5,6 @@ import { useSettings } from '../../api/queries.ts'
 import {
   type SettingsSectionId,
   advancedSettingKeys,
-  blockSettingKeys,
   sectionDefinitions,
   settingAnchor,
 } from '../../lib/settings-sections.ts'
@@ -82,9 +81,7 @@ export function SectionSettings({
         <ErrorState error={settings.error} />
       </SettingsSection>
     )
-  const definitions = sectionDefinitions(settings.data.definitions, section).filter(
-    (d) => !blockSettingKeys.has(d.key),
-  )
+  const definitions = sectionDefinitions(settings.data.definitions, section)
   if (!definitions.length) return null
   const main = definitions.filter((d) => !advancedSettingKeys.has(d.key))
   const advanced = definitions.filter((d) => advancedSettingKeys.has(d.key))

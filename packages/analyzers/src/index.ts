@@ -8,18 +8,13 @@ import { coverageAnalyzer } from '@holtkeeper/coverage'
 import { analyzeDependencies, depgraphAnalysis } from '@holtkeeper/depgraph'
 import { goSource } from '@holtkeeper/depgraph-go'
 import { jsSources } from '@holtkeeper/depgraph-js'
-import { createGuideAnalyzer } from '@holtkeeper/guide-generator'
 import { i18nAnalyzer } from '@holtkeeper/i18n'
-import {
-  createKnowledgeBootstrapAnalyzer,
-  createKnowledgeHarvestAnalyzer,
-  createKnowledgeVerifyAnalyzer,
-} from '@holtkeeper/knowledge-bootstrap'
 import { licensesAnalyzer } from '@holtkeeper/licenses'
 import { propagateAnalyzer } from '@holtkeeper/propagate'
 import { secretsCheck } from '@holtkeeper/quality-secrets'
 import { renovateAnalyzer } from '@holtkeeper/renovate'
 import { createReviewAnalyzer } from '@holtkeeper/review'
+import { createRuleMinerAnalyzer } from '@holtkeeper/rule-miner'
 import { stackAnalyzer } from '@holtkeeper/stack'
 import { type TestIdOverrides, testIdsAnalyzer, testIdsCheck } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
@@ -88,10 +83,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   i18nAnalyzer,
   propagateAnalyzer,
   createReviewAnalyzer({ checks: reviewChecks() }),
-  createGuideAnalyzer(),
-  createKnowledgeBootstrapAnalyzer(),
-  createKnowledgeHarvestAnalyzer(),
-  createKnowledgeVerifyAnalyzer(),
+  createRuleMinerAnalyzer(),
   trackerAnalyzer,
   browserslistAnalyzer,
   renovateAnalyzer,

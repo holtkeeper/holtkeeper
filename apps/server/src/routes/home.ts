@@ -23,6 +23,7 @@ import {
 } from '../home.ts'
 import { releaseServiceFor } from '../releases.ts'
 import { principalHealthAccess, securitySummary } from '../repo-health.ts'
+import { liveLearnings } from '../rules.ts'
 import { snoozedIds } from '../snoozes.ts'
 import { canSee } from '../visibility.ts'
 import { aiReadScopes, canReadAiScope } from './ai.ts'
@@ -162,7 +163,6 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     recentJobs,
     cards,
     learnings,
-    knowledge,
     heads,
     allowlists,
     switches,
@@ -172,8 +172,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     store.jobs.list({ status: 'blocked', ...scoped, limit: 100 }),
     store.jobs.list({ ...scoped, limit: 500 }),
     releases.snapshot(principal),
-    store.learnings.list({ status: ['proposed'] }),
-    store.knowledge.list({ status: 'proposed' }),
+    liveLearnings({ store, config, now: () => now }),
     latestHeadsWithMetrics(store.analyses, kinds),
     store.settings.list('audit.allowlist'),
     store.settings.list(repoAnalyzersKey),
@@ -236,12 +235,10 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
       (group) => group.urgency?.urgent && group.status !== 'allowlisted',
     ),
     releases: cards,
-    learnings: learnings.filter((candidate) => {
-      const repo = parseRepo(candidate.repo)
-      return repo !== undefined && sees('knowledge:read', repo) && sees('knowledge:write', repo)
-    }),
-    knowledge: knowledge.filter((entry) =>
-      onScope(entry.scope, 'knowledge:read', 'knowledge:write'),
+    learnings: learnings.filter(
+      (learning) =>
+        learning.status === 'pending' &&
+        onScope(learning.scope, 'knowledge:read', 'knowledge:write'),
     ),
     analyses,
     allowlists: allowlists.filter((entry) =>

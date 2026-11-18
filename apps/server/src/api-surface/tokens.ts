@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 /**
  * What a token may do, whatever its owner may: read the API catalog, audits, release state and
- * the knowledge base (and propose to it over MCP), nothing else. Cross-team catalog reach follows
+ * rules and learnings (and propose learnings over MCP), nothing else. Cross-team catalog reach follows
  * the `access.crossTeam` policy at request time, like the owner's.
  */
 const tokenActions: readonly Action[] = [

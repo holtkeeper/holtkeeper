@@ -299,7 +299,7 @@ export function TeamsPage() {
         }
       >
         {deleting
-          ? `${plural(teamRows(all, [deleting], titleOf)[0]?.repos.length ?? 0, 'repository', 'repositories')} lose this owner. Grants, settings and notes naming the team stop matching.`
+          ? `${plural(teamRows(all, [deleting], titleOf)[0]?.repos.length ?? 0, 'repository', 'repositories')} lose this owner. Grants, settings and rules naming the team stop matching.`
           : null}
       </ConfirmDialog>
     </Page>

@@ -18,7 +18,7 @@ Holtkeeper gives coding agents (Claude Code, Cursor or any MCP client) what a de
 | Usage across the fleet   | Who uses a package, which exports, props and members, the code of those uses and what an upgrade would break.     |
 | Third-party libraries    | Version-exact docs, changelogs, migration notes, known issues and source of the npm and Go libraries in use.      |
 | Dependencies and stack   | What the organization knows about a dependency before adding it, and the runtimes and images a repository runs.   |
-| Team rules and knowledge | The repository's Guide, commit and release conventions, test ids, asset limits and the knowledge base.            |
+| Team rules and knowledge | The repository's rules and rules files, learnings, commit and release conventions, test ids and asset limits.     |
 | Reviews                  | Holtkeeper's review of a merge request: what to fix, which threads are open, whether a new review is coming.      |
 
 ## How it fits together
@@ -26,10 +26,10 @@ Holtkeeper gives coding agents (Claude Code, Cursor or any MCP client) what a de
 1. **A person creates a token** in **Account › Connect agents**. The token acts as that person, cut down to reading: it never sees more than its owner may.
 2. **The agent reads over MCP.** Before it edits a repository it calls `repo_rules`; before it adds a dependency, `evaluate_dependency`; before it commits, `commit_conventions`. The server tells clients when to use which tool, so most agents pick the right one without prompting.
 3. **Changes go through tasks, started by people.** A task group opens one draft merge request per repository on a shared branch. People start it from a Chat task card, **Roll out** in **Supply chain › Libraries** or **Ops › Tasks**; the agent can follow a task's merge request with `review_status` on its branch. No MCP tool starts a task or runs a release step.
-4. **Lessons come back as proposals.** Agents propose knowledge entries and Guide rules; people review them in **Knowledge** before any agent relies on them.
+4. **Lessons come back as proposals.** Agents propose learnings; they wait in **Knowledge › Learnings** for the approval delay, and people may reject them before any agent relies on them.
 
 :::note
-Nothing an agent does over MCP is a decision on behalf of a person. No tool starts or approves a task group, runs a release step, accepts a note or a learning, or renews an allowlist entry; those stay in the panel and in Chat.
+Nothing an agent does over MCP is a decision on behalf of a person. No tool starts or approves a task group, runs a release step, approves a learning, or renews an allowlist entry; those stay in the panel and in Chat.
 :::
 
 ## Pages
@@ -48,7 +48,7 @@ Nothing an agent does over MCP is a decision on behalf of a person. No tool star
     Where tasks start, how they are approved, and following their merge requests.
   </Card>
   <Card title="Rules and knowledge" href="/agents/rules-and-knowledge/" icon="knowledge">
-    The Guide, commit conventions, test ids, asset policy and the knowledge base.
+    Rules, learnings, commit conventions, test ids and the asset policy.
   </Card>
   <Card title="The review agent" href="/agents/review-agent/" icon="quality">
     How Holtkeeper reviews merge requests, answers in its threads, and how your agent reads the

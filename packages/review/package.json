@@ -20,6 +20,7 @@
     "@holtkeeper/messages": "workspace:*",
     "@holtkeeper/quality": "workspace:*",
     "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/rules": "workspace:*",
     "@holtkeeper/store": "workspace:*",
     "zod": "^4.6.7"
   }

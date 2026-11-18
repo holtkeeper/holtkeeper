@@ -58,7 +58,7 @@ When your agent finds that a change belongs in many repositories, let it do the 
   with `tone` (same values). Do not touch other components.
 ```
 
-Write the plan so the worker agent can follow it without your conversation: it sees the repository, its Guide and the checks, not your chat.
+Write the plan so the worker agent can follow it without your conversation: it sees the repository, its rules and the checks, not your chat.
 
 :::tip
 Ask the agent to call `commit_conventions` for each repository and to check the title with `check_commit_message`. The commit message is chosen from the title and the worker agent's suggestions, and the first candidate the repository's conventions accept wins.

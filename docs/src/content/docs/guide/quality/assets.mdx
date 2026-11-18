@@ -158,7 +158,7 @@ The **Asset policy** card under the table shows the fleet's policy and how many 
 | Mode            | `comment`                                | With `suggest-mr`, reviews also offer a merge request with the variants from the panel.                  |
 
 :::tip
-The policy holds numbers and formats only. Write prose rules, such as which component renders images or where files go, in the Guide's **Assets** section. Agents read both: the Guide adds the policy to that section as plain facts.
+The policy holds numbers and formats only. Write prose rules, such as which component renders images or where files go, in the repository's `AGENTS.md` or a panel [rule](/guide/knowledge/rules/). Agents read both: the policy is added to their rules as plain facts.
 :::
 
 <Ui>Configure</Ui> on the page edits the analyzer's own options (`analyzers.assets`): which folders
@@ -225,6 +225,6 @@ The repository hub's **Quality › Assets** shows the same table for one reposit
 
 - [Bundles](/guide/quality/bundles/) — JavaScript and CSS size per app and package.
 - [Reviews](/guide/quality/reviews/) — reviews comment on images a merge request adds or changes.
-- [Team guide](/guide/knowledge/guide/) — the Assets section with your prose rules.
+- [Rules](/guide/knowledge/rules/) — where prose rules about assets go.
 - [Settings › Policies](/guide/settings/policies/) — scoped settings such as the asset policy.
 - [Assets analyzer](/modules/assets/) and [media engine](/modules/media/) — how files are found, checked and encoded.

@@ -27,16 +27,16 @@ describe('webPaths', () => {
     expect(webPaths.automation('nightly')).toBe('/ops/automation?job=nightly')
   })
 
-  test('knowledge tabs take an optional space, section and note', () => {
-    expect(webPaths.knowledge('notes')).toBe('/knowledge/notes')
-    expect(webPaths.knowledge('learnings', { space: 'repo:gitlab:acme/widget-kit' })).toBe(
-      '/knowledge/learnings?space=repo%3Agitlab%3Aacme%2Fwidget-kit',
+  test('knowledge tabs take an optional repository, team, rule and learning', () => {
+    expect(webPaths.knowledge('rules')).toBe('/knowledge/rules')
+    expect(webPaths.knowledge('learnings', { repo: 'gitlab:acme/widget-kit' })).toBe(
+      '/knowledge/learnings?repo=gitlab%3Aacme%2Fwidget-kit',
     )
-    expect(webPaths.knowledge('guide', { space: 'team:widgets', section: 'testing' })).toBe(
-      '/knowledge/guide?space=team%3Awidgets&section=testing',
+    expect(webPaths.knowledge('rules', { team: 'widgets', rule: 'r-1' })).toBe(
+      '/knowledge/rules?team=widgets&rule=r-1',
     )
-    expect(webPaths.knowledge('notes', { note: 'n-1', space: '' })).toBe(
-      '/knowledge/notes?note=n-1',
+    expect(webPaths.knowledge('learnings', { learning: 'l-1', repo: '' })).toBe(
+      '/knowledge/learnings?learning=l-1',
     )
   })
 

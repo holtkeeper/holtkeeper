@@ -43,7 +43,7 @@ export interface ReplyToThreadOptions {
   usage?: ReviewUsage
   /** Mounted for the agent when there is a checkout, e.g. code navigation tools. */
   toolsets?: readonly Toolset[]
-  /** The repository's Guide, passed as the task's stable `context`. */
+  /** The repository's resolved rules, passed as the task's stable `context`. */
   context?: string
   signal?: AbortSignal
 }

@@ -36,8 +36,8 @@ export interface ReleaseToolsAccess {
   /** The repository named `forge:path` when the caller may read its releases; else `undefined`. */
   repoOf(value: string): RepoRef | undefined
   settings(repo: RepoRef): Promise<ReleaseSettings>
-  /** The repository's Guide for release notes (its `releases` and `commits` sections); empty when none. */
-  guide(repo: RepoRef): Promise<string>
+  /** The repository's resolved rules for release notes; empty when none. */
+  rules(repo: RepoRef): Promise<string>
   status(repo: RepoRef): Promise<ReleaseRepoView>
   changes(repo: RepoRef, range: { from?: string; to?: string }): Promise<ReleaseChanges>
   /** Say only how changes were accepted, never by whom (internal agents). */
@@ -136,7 +136,7 @@ const acceptance: Record<ReleaseSettings['acceptance'], string> = {
 }
 
 /** The release flow of a repository in plain language. */
-function renderReleaseRules(repo: string, settings: ReleaseSettings, guide: string): string {
+function renderReleaseRules(repo: string, settings: ReleaseSettings, rules: string): string {
   const { flow, version, deploy, gates } = settings
   const target = flow.target ?? 'the default branch'
   const lines = [
@@ -181,7 +181,7 @@ function renderReleaseRules(repo: string, settings: ReleaseSettings, guide: stri
   ]
   return [
     lines.join('\n'),
-    guide ? `## Team notes on releases\n\n${guide}` : 'No team notes on releases yet.',
+    rules ? `## Team rules for release notes\n\n${rules}` : 'No team rules for release notes yet.',
   ].join('\n\n')
 }
 
@@ -274,25 +274,25 @@ const renderPreview = (preview: ReleaseStepPreview, confirm: string | undefined)
       : `Nothing has changed yet. To run it, call release_step again with the same arguments and confirm: "${confirm}" (valid 10 minutes, once). Ask the user first.`,
   ].join('\n')
 
-/** What `release_rules` reads: a readable repository, its release settings and its Guide. */
-export type ReleaseRulesAccess = Pick<ReleaseToolsAccess, 'repoOf' | 'settings' | 'guide'>
+/** What `release_rules` reads: a readable repository, its release settings and its rules. */
+export type ReleaseRulesAccess = Pick<ReleaseToolsAccess, 'repoOf' | 'settings' | 'rules'>
 
 /**
  * `release_rules`: how a repository the caller may read releases, from its release settings and
- * the Guide's `releases` and `commits` sections. The `releases` toolset carries it, and the MCP
+ * the rules it resolves for release notes. The `releases` toolset carries it, and the MCP
  * `rules` toolset too.
  */
 export function releaseRulesTool(access: ReleaseRulesAccess): RegistryTool {
   return defineTool({
     name: 'release_rules',
     description:
-      "How a repository releases, in plain language: branches, merge request or trunk flow, tag format and version scheme, how the bump is derived from commit conventions, acceptance, gates, environments in order, and the team's notes on releases from its Guide.",
+      "How a repository releases, in plain language: branches, merge request or trunk flow, tag format and version scheme, how the bump is derived from commit conventions, acceptance, gates, environments in order, and the team's rules for release notes.",
     input: z.object({ repo: repoArg }),
     run: async ({ repo }) => {
       const target = access.repoOf(repo)
       if (!target) throw noRepo(repo)
-      const [settings, guide] = await Promise.all([access.settings(target), access.guide(target)])
-      return renderReleaseRules(repo, settings, guide)
+      const [settings, rules] = await Promise.all([access.settings(target), access.rules(target)])
+      return renderReleaseRules(repo, settings, rules)
     },
     subject: ({ repo }) => repo,
   })

@@ -21,7 +21,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { KnowledgeEntry, Store } from '@holtkeeper/store'
+import type { RuleInput, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
@@ -598,10 +598,9 @@ describe('MCP endpoint', () => {
       'who_uses',
       'repo_stack',
       'search_knowledge',
-      'get_knowledge',
-      'propose_knowledge',
+      'propose_learning',
       'repo_rules',
-      'propose_rule_change',
+      'get_rule',
       'commit_conventions',
       'check_commit_message',
       'test_ids',
@@ -1002,18 +1001,12 @@ describe('usage routes and tools', () => {
   })
 })
 
-const entry = (id: string, fields: Partial<KnowledgeEntry>) =>
-  store.knowledge.put({
+const entry = (id: string, fields: Partial<RuleInput>) =>
+  store.rules.put({
     id,
-    title: `Entry ${id}`,
+    title: `Rule ${id}`,
     body: 'Body.',
-    kind: 'decision',
     scope: { all: true },
-    topics: [],
-    appliesTo: ['*'],
-    status: 'accepted',
-    evidence: [],
-    source: 'human',
     author: 'header:jane',
     createdAt: '2026-10-01T00:00:00.000Z',
     updatedAt: '2026-10-01T00:00:00.000Z',
@@ -1026,64 +1019,73 @@ describe('knowledge tools', () => {
       title: 'Use date-fns instead of moment',
       body: 'moment is frozen; new code formats dates with date-fns.',
       scope: { teams: ['games'] },
-      packages: [{ ecosystem: 'npm', name: 'moment' }],
     })
     await entry('tokens', {
-      title: 'Design tokens come from @acme/ui',
+      title: 'Design tokens instead of moment colors',
       body: 'Never hardcode colors.',
       scope: { repos: ['work:libs/ui'] },
     })
-    await entry('draft', { title: 'Maybe drop moment', status: 'proposed' })
   })
 
-  test('search accepted entries, by repository and in full', async () => {
+  test('search rules and active learnings, by repository', async () => {
     const found = await callTool('search_knowledge', { query: 'moment' }, asAdmin)
-    expect(found.content[0]?.text).toContain('### [kb:dates] Use date-fns instead of moment')
-    expect(found.content[0]?.text).not.toContain('Maybe drop moment')
+    expect(found.content[0]?.text).toContain('### [rule:dates] Use date-fns instead of moment')
+    expect(found.content[0]?.text).toContain('[rule:tokens]')
 
-    const forUi = await callTool('search_knowledge', { repo: 'work:libs/ui' }, asAdmin)
-    expect(forUi.content[0]?.text).toContain('[kb:tokens]')
-    expect(forUi.content[0]?.text).not.toContain('[kb:dates]')
+    const forGames = await callTool(
+      'search_knowledge',
+      { query: 'moment', repo: 'work:games/a' },
+      asAdmin,
+    )
+    expect(forGames.content[0]?.text).toContain('[rule:dates]')
+    expect(forGames.content[0]?.text).not.toContain('[rule:tokens]')
 
-    const draft = await callTool('get_knowledge', { id: '[kb:draft]' }, asAdmin)
-    expect(draft.content[0]?.text).toContain('status: proposed (not reviewed yet')
+    const reader = await callTool('search_knowledge', { query: 'moment' }, asReader)
+    expect(reader.content[0]?.text).toContain('[rule:dates]')
+    expect(reader.content[0]?.text).not.toContain('[rule:tokens]')
 
-    const denied = await callTool('search_knowledge', { repo: 'work:games/a' }, asGames)
+    const denied = await callTool(
+      'search_knowledge',
+      { query: 'moment', repo: 'work:games/a' },
+      asGames,
+    )
     expect(denied.isError).toBe(true)
-    expect((await callTool('get_knowledge', { id: 'dates' }, asGames)).isError).toBe(true)
   })
 
-  test('proposals wait for review and duplicates are not added', async () => {
+  test('proposed learnings wait for the approval delay, are audited and repeats merge', async () => {
     const proposed = await callTool(
-      'propose_knowledge',
+      'propose_learning',
       {
-        title: 'Scenes unload their textures',
-        body: 'Call scene.dispose() before switching levels, or textures leak.',
+        text: 'Scenes unload their textures before switching levels.',
+        reason: 'Textures leaked in two merge requests.',
         repo: 'work:games/a',
-        evidence: [{ label: 'MR', url: 'https://gitlab.test/games/a/-/merge_requests/7' }],
       },
       asAdmin,
     )
     expect(proposed.content[0]?.text).toContain('for `work:games/a`')
-    const stored = (await store.knowledge.list({ status: 'proposed' })).find((item) =>
-      item.title.startsWith('Scenes'),
-    )
+    const [stored] = await store.learnings.list()
     expect(stored).toMatchObject({
-      source: 'agent',
-      author: 'header:jane',
+      origin: 'agent',
+      status: 'pending',
       scope: { repos: ['work:games/a'] },
+      sources: [{ repo: 'work:games/a', author: 'header:jane' }],
     })
+    const events = await store.audit.list({ action: 'learning.create' })
+    expect(events.events.map((event) => [event.target.id, event.target.repo])).toEqual([
+      [stored?.id, 'work:games/a'],
+    ])
 
     const again = await callTool(
-      'propose_knowledge',
-      { title: 'Scenes unload their textures', body: 'Other words.', repo: 'work:games/a' },
-      asAdmin,
+      'propose_learning',
+      { text: 'Scenes unload their textures before switching levels', repo: 'work:games/a' },
+      asReader,
     )
-    expect(again.content[0]?.text).toStartWith(`Not added: [kb:${stored?.id}] (proposed)`)
+    expect(again.content[0]?.text).toStartWith(`Not added: [learn:${stored?.id}] (pending)`)
+    expect(await store.learnings.list()).toHaveLength(1)
 
     const denied = await callTool(
-      'propose_knowledge',
-      { title: 'Anything', body: 'Anything.', repo: 'work:games/a' },
+      'propose_learning',
+      { text: 'Anything goes.', repo: 'work:games/a' },
       asGames,
     )
     expect(denied.isError).toBe(true)
@@ -1091,176 +1093,17 @@ describe('knowledge tools', () => {
 })
 
 describe('rules tools', () => {
-  test('repo_rules resolves the Guide and propose_rule_change leaves an audited candidate', async () => {
-    await store.guides.put({
-      scope: 'team:games',
-      section: 'general',
-      rules: 'Scenes own their assets.',
-      steering: '',
-      learnings: [],
+  test('repo_rules resolves panel rules and get_rule reads one', async () => {
+    await entry('assets', {
+      title: 'Scene assets',
+      body: 'Scenes own their assets.',
+      scope: { teams: ['games'] },
     })
     const rules = await callTool('repo_rules', { repo: 'work:games/a' }, asAdmin)
     expect(rules.content[0]?.text).toContain('Scenes own their assets.')
-
-    const proposed = await callTool(
-      'propose_rule_change',
-      {
-        repo: 'work:games/a',
-        section: 'general',
-        rule: 'Unload scene textures on exit.',
-        reason: 'Leaks in two merge requests.',
-        scope: 'team',
-      },
-      asAdmin,
-    )
-    expect(proposed.content[0]?.text).toStartWith('Proposed "Unload scene textures on exit."')
-    const [candidate] = await store.learnings.list()
-    expect(candidate).toMatchObject({
-      repo: 'work:games/a',
-      suggestedScope: 'team',
-      proposal: { by: 'header:jane', reason: 'Leaks in two merge requests.' },
-    })
-    const events = await store.audit.list({ action: 'learning.propose' })
-    expect(events.events.map((event) => [event.target.id, event.target.repo])).toEqual([
-      [candidate?.id, 'work:games/a'],
-    ])
-
-    const targeted = await callTool(
-      'propose_rule_change',
-      {
-        repo: 'work:games/a',
-        section: 'general',
-        rule: 'Preload scene audio.',
-        reason: 'Stutters on first play.',
-        scope: 'team:games',
-      },
-      asAdmin,
-    )
-    expect(targeted.content[0]?.text).toContain('into team:games.')
-    const foreign = await callTool(
-      'propose_rule_change',
-      {
-        repo: 'work:games/a',
-        section: 'general',
-        rule: 'Bake scene lights.',
-        reason: 'Slow loads.',
-        scope: 'team:elsewhere',
-      },
-      asAdmin,
-    )
-    expect(foreign.isError).toBe(true)
-    expect(
-      (await store.learnings.list())
-        .map((each) => [each.rule, each.targetScope])
-        .toSorted(([a], [b]) => String(a).localeCompare(String(b))),
-    ).toEqual([
-      ['Preload scene audio.', 'team:games'],
-      ['Unload scene textures on exit.', undefined],
-    ])
-  })
-})
-
-const autoAccept = (
-  value: unknown,
-  scope: { all: true } | { teams: string[] } | { repos: string[] } = { all: true },
-) =>
-  store.settings.put({
-    id: `learnings.autoAccept:${JSON.stringify(scope)}`,
-    key: 'learnings.autoAccept',
-    scope,
-    value,
-    secret: false,
-    updatedAt: '2026-10-01T00:00:00.000Z',
-  })
-const propose = (rule: string, scope?: string, headers = asAdmin) =>
-  callTool(
-    'propose_rule_change',
-    {
-      repo: 'work:games/a',
-      section: 'general',
-      rule,
-      reason: 'Seen twice.',
-      ...(scope && { scope }),
-    },
-    headers,
-  )
-
-describe('learnings auto-accept', () => {
-  test('stays proposed while the policy is off or leaves MCP out', async () => {
-    await autoAccept({ sources: ['review-reply'], scope: 'suggested' })
-    const result = await propose('Unload scene textures on exit.', 'team')
-    expect(result.content[0]?.text).toStartWith('Proposed ')
-    const [candidate] = await store.learnings.list()
-    expect(candidate?.status).toBe('proposed')
-    expect((await store.guides.list()).flatMap((row) => row.learnings)).toEqual([])
-    expect((await store.audit.list({ action: 'learning.accept' })).events).toEqual([])
-  })
-
-  test('accepts into the suggested scope, audited as auto-accept and still rejectable', async () => {
-    await autoAccept({ sources: ['mcp'], scope: 'suggested' })
-    const result = await propose('Unload scene textures on exit.', 'team:games')
-    expect(result.content[0]?.text).toStartWith('Accepted "Unload scene textures on exit."')
-    expect(result.content[0]?.text).toContain('into team:games')
-    const [candidate] = await store.learnings.list()
-    expect(candidate).toMatchObject({
-      status: 'accepted',
-      acceptedScope: 'team:games',
-      decidedBy: 'auto-accept',
-    })
-    const row = await store.guides.get('team:games', 'general')
-    expect(row?.learnings).toMatchObject([
-      { id: candidate?.id, rule: 'Unload scene textures on exit.', acceptedBy: 'auto-accept' },
-    ])
-    const events = await store.audit.list({ action: 'learning.accept' })
-    expect(events.events).toMatchObject([
-      {
-        actor: { id: 'auto-accept', provider: 'system' },
-        target: { type: 'learning', id: candidate?.id, repo: 'work:games/a' },
-        details: {
-          auto: true,
-          origin: 'mcp',
-          scope: 'team:games',
-          proposedBy: candidate?.proposal?.by,
-        },
-      },
-    ])
-  })
-
-  test('a proposal of someone who may only read the repository stays proposed', async () => {
-    await autoAccept({ sources: ['mcp'], scope: 'suggested' })
-    const result = await propose('Unload scene textures on exit.', 'team:games', asReader)
-    expect(result.content[0]?.text).toStartWith('Proposed ')
-    expect((await store.learnings.list())[0]?.status).toBe('proposed')
-    expect((await store.guides.list()).flatMap((row) => row.learnings)).toEqual([])
-  })
-
-  test('a repository entry never accepts into its team', async () => {
-    await autoAccept({ sources: ['mcp'], scope: 'suggested' }, { repos: ['work:games/a'] })
-    await propose('Preload scene audio.', 'team:games')
-    expect((await store.learnings.list())[0]).toMatchObject({
-      status: 'accepted',
-      acceptedScope: 'repo:work:games/a',
-    })
-    expect((await store.guides.get('team:games', 'general'))?.learnings ?? []).toEqual([])
-  })
-
-  test('the repo option keeps auto-accepted rules in the repository', async () => {
-    await autoAccept({ sources: ['mcp'], scope: 'repo' })
-    await propose('Preload scene audio.', 'team')
-    const [candidate] = await store.learnings.list()
-    expect(candidate).toMatchObject({
-      status: 'accepted',
-      acceptedScope: 'repo:work:games/a',
-      suggestedScope: 'team',
-    })
-    expect((await store.guides.get('team:games', 'general'))?.learnings ?? []).toEqual([])
-  })
-
-  test('the entry that applies to the repository decides', async () => {
-    await autoAccept({ sources: ['mcp'], scope: 'suggested' })
-    await autoAccept({ sources: [], scope: 'suggested' }, { teams: ['games'] })
-    await propose('Bake scene lights.')
-    expect((await store.learnings.list())[0]?.status).toBe('proposed')
+    const rule = await callTool('get_rule', { id: 'rule:assets' }, asReader)
+    expect(rule.content[0]?.text).toContain('# [rule:assets] Scene assets')
+    expect((await callTool('repo_rules', { repo: 'work:games/a' }, asGames)).isError).toBe(true)
   })
 })
 
@@ -1364,13 +1207,10 @@ describe('evaluate_dependency', () => {
         unmapped: 0,
       },
     })
-    await entry('dates', {
-      title: 'Use date-fns instead of moment',
-      packages: [{ ecosystem: 'npm', name: 'moment' }],
-    })
+    await entry('dates', { title: 'Use date-fns instead of moment' })
   })
 
-  test('joins uses, advisories, licenses, bundles and knowledge', async () => {
+  test('joins uses, advisories, licenses, bundles and team rules', async () => {
     const result = await callTool(
       'evaluate_dependency',
       { package: 'moment', version: '2.29.1', repo: 'work:libs/ui' },
@@ -1384,7 +1224,7 @@ describe('evaluate_dependency', () => {
     expect(text).toContain('- 2.29.1: MIT — allowed in `work:games/a`')
     expect(text).toContain('- Under the license policy of `work:libs/ui`: denied (MIT).')
     expect(text).toContain('- `work:games/a` build `app`: 0.4 kB gzip (25.0% of 1.6 kB), 2.29.1')
-    expect(text).toContain('[kb:dates] Use date-fns instead of moment')
+    expect(text).toContain('[rule:dates] Use date-fns instead of moment')
   })
 
   test('advisories need audits:read', async () => {

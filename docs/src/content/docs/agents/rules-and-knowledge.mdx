@@ -1,101 +1,74 @@
 ---
 title: Rules and knowledge
-description: The team rules, commit conventions, test ids, asset limits and knowledge base agents read before they change code, and how they propose new ones.
-panel: Knowledge › Guide
-route: /knowledge/guide
+description: The rules, commit conventions, test ids, asset limits and learnings agents read before they change code, and how they propose new learnings.
+panel: Knowledge › Rules
+route: /knowledge/rules
 permission: knowledge:read
 sidebar:
   order: 5
 ---
 
-import { Button, Rows, Row, Screen, Tabs, Tag, Toolbar } from '@ui'
-
-A repository's conventions live in several places: rules people wrote in the panel, forge push rules, a commitlint config, what recent history does, the team's knowledge base. Holtkeeper puts them together per repository and hands them to agents through a few tools. An agent that calls them before it writes code produces changes that look like the team wrote them, and when it learns something lasting it proposes it back for people to review.
+A repository's conventions live in several places: its own rules files (`AGENTS.md`, Copilot and Cursor rules), rules people wrote in the panel, forge push rules, a commitlint config, what recent history does, and what Holtkeeper learned from review replies. Holtkeeper puts them together per repository and hands them to agents through a few tools. An agent that calls them before it writes code produces changes that look like the team wrote them, and when it learns something lasting it proposes it back as a learning.
 
 ## Call order
 
 | Before the agent…                             | It calls                                                 |
 | --------------------------------------------- | -------------------------------------------------------- |
 | changes code in a repository                  | `repo_rules`                                             |
-| solves a problem the team may have solved     | `search_knowledge`, then `get_knowledge`                 |
+| solves a problem the team may have solved     | `search_knowledge`, then `get_rule`                      |
 | writes a commit message, branch or MR title   | `commit_conventions`, then `check_commit_message`        |
 | writes end-to-end tests or new UI             | `test_ids`, `suggest_test_ids`                           |
 | adds or changes images, fonts, audio or video | `asset_policy`; `repo_assets` for what already breaks it |
 
 The server tells MCP clients this order in its instructions, so agents usually follow it unprompted. A line in your own `CLAUDE.md` or `AGENTS.md` such as "call `repo_rules` before editing" makes it certain.
 
-## The Guide: repo_rules
+## Rules: repo_rules
 
-`repo_rules` returns the repository's **Guide**: the rules an agent must follow there, layered from broad to narrow.
+`repo_rules` returns the rules an agent must follow in a repository, the same block a review or agent task gets (see [effective prompt](/guide/knowledge/rules/#check-the-effective-prompt)):
 
-1. Team rules written in **Knowledge › Guide** for the whole organization, the repository's owner teams, its folders, its family and the repository itself.
-2. Learned rules: candidates people accepted from review replies and agent proposals.
-3. Policies turned into sentences, such as commit conventions, test ids and the asset policy.
-4. Generated text from the Guide generator, marked lower priority. Human rules always win over it.
-5. Relevant knowledge notes.
+1. Rules written in **Knowledge › Rules** for all repositories, the repository's teams and repository patterns.
+2. The repository's root rules files, read from the default branch.
+3. File-scoped rules and nested rules files that match `files`.
+4. Policies turned into sentences, such as commit conventions, test ids and the asset policy.
+5. Learned rules: active learnings, labelled and ranked below everything above.
 
-The repository's own rules files (`AGENTS.md`, `CLAUDE.md`, …) are not included; the agent reads them from its checkout.
+Rules that only have a description are listed by title and description at the end; the agent reads one with `get_rule` when it fits the task.
 
-| Argument  | Meaning                                                                                                      |
-| --------- | ------------------------------------------------------------------------------------------------------------ |
-| `repo`    | The repository as `forge:path`.                                                                              |
-| `task`    | What the agent is doing: `agent` (writing code, the default), `review`, `chat` or `release-notes`.           |
-| `section` | The topic besides general rules: `general`, `review`, `testing`, `testids`, `assets`, `commits`, `releases`. |
-| `only`    | Read just this section with its layers, as **Knowledge › Guide** shows it; overrides `task` and `section`.   |
-
-```text
-● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", section: "testing")
-  ⎿ # Guide for gitlab:acme/checkout-web (agent, testing)
-    ## General
-    - Money is integer cents; never use floats for prices. (team rule, team widgets)
-    - Run `pnpm check` before committing. (team rule, repository)
-    ## Testing
-    - Use the test renderer from `src/test/render.tsx`, never render without providers. (learned)
-    - Generated, lower priority: tests live next to the code as `*.test.tsx`.
-    ## Notes
-    - [kb:k3d9] Checkout e2e tests need the mock payment provider (quirk)
-```
-
-<Screen
-  title="Knowledge › Guide"
-  caption="Each section shows its layers; the effective prompt preview shows what an agent receives."
->
-  <Toolbar title="Guide" crumbs={['Knowledge']}>
-    <Tag mono>gitlab:acme/checkout-web</Tag>
-    <Button>Effective prompt</Button>
-  </Toolbar>
-  <Tabs
-    items={['General', 'Review', 'Testing', 'Test ids', 'Assets', 'Commits', 'Releases']}
-    active={2}
-  />
-  <Rows>
-    <Row
-      title="Use the test renderer from src/test/render.tsx"
-      sub="Learned · repository · from a review reply on !412"
-    >
-      <Tag tone="ok">Accepted</Tag>
-    </Row>
-    <Row title="Tests live next to the code as *.test.tsx" sub="Generated · lower priority">
-      <Tag>Generated</Tag>
-    </Row>
-  </Rows>
-</Screen>
-
-### Proposing a rule: propose_rule_change
-
-When an agent notices a lasting convention that is missing or wrong, `propose_rule_change` suggests one imperative sentence for a Guide section, with the reason and the evidence it saw. It never edits team rules. The proposal waits in **Knowledge › Learnings** for a person, unless the team auto-accepts proposals from agents (`learnings.autoAccept` with source `mcp`, honored only for proposers with `knowledge:write` on the repository).
+| Argument | Meaning                                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------- |
+| `repo`   | The repository as `forge:path`.                                                                       |
+| `files`  | Optional repository-relative paths the agent is about to touch; file-scoped rules apply only to them. |
+| `agent`  | What the agent is doing: `task` (writing code, the default), `review`, `chat` or `release`.           |
 
 ```text
-● holtkeeper - propose_rule_change
-    repo:    "gitlab:acme/checkout-web"
-    section: "testing"
-    rule:    "Mock the payment provider with createPaymentMock in every checkout e2e test."
-    reason:  "Three e2e tests in src/checkout/ do this; the one that did not failed in CI (!398)."
-    scope:   "repo"
-  ⎿ Proposed for review in Knowledge › Learnings.
+● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", files: ["src/cart/total.ts"])
+  ⎿ # Rules for gitlab:acme/checkout-web
+    ## Money is integers in minor units [rule:r3k1]
+    - Never use floats for prices.
+    ## AGENTS.md
+    - Run `pnpm check` before committing.
+    ## src/cart/AGENTS.md (applies under src/cart/)
+    - Totals go through `sumLines`; never add prices inline.
+    ## Learned rules (follow unless contradicted above)
+    - [learn:l9d2] Snapshot tests need a fixed seed.
+    ## On request
+    - [rule:r7p0] Migrating to @acme/widget-kit 5: read when touching widget-kit imports.
 ```
 
-`scope` says where it should apply once accepted: `repo` (default), `family`, `path` (the repository's folder), `team` (its first owner team), or an exact scope such as `path:<forge>:<folder>`, `team:<key>`, `family:<id>` or `repo:<forge:path>`. Use `propose_knowledge` for one-off facts, not rules.
+`get_rule` reads one rule in full by its id or citation (`[rule:<id>]`). Agents cite what they followed as `[rule:<id>]` and `[learn:<id>]`.
+
+### Proposing a learning: propose_learning
+
+When an agent notices a lasting convention that is missing, `propose_learning` proposes one imperative sentence with an optional reason and the files it is about. It never edits rules. The learning waits in **Knowledge › Learnings** for the approval delay (`learnings.approvalDelayDays`, default 3 days) and then reaches prompts by itself, unless a person rejects it first. A proposal that repeats an existing learning adds a source to it instead.
+
+```text
+● holtkeeper - propose_learning
+    repo:   "gitlab:acme/checkout-web"
+    text:   "Mock the payment provider with createPaymentMock in every checkout e2e test."
+    reason: "Three e2e tests in src/checkout/ do this; the one that did not failed in CI (!398)."
+    files:  ["e2e/checkout/**"]
+  ⎿ Proposed learn:l4c8, active in 3 days unless rejected.
+```
 
 ## Commit conventions
 
@@ -117,7 +90,7 @@ When an agent notices a lasting convention that is missing or wrong, `propose_ru
     branch: warning ticket — recent branches carry a key
 ```
 
-Errors break configured or enforced rules; warnings only differ from what recent history does. Teams set conventions in **Settings › Policies** or the Guide's **Commits** section.
+Errors break configured or enforced rules; warnings only differ from what recent history does. Teams set conventions in **Settings › Policies**.
 
 ## Test ids
 
@@ -133,7 +106,7 @@ For end-to-end tests and new UI, `test_ids` returns the repository's test id con
     - line 24 <input name="quantity"> → data-qa="cart-row-quantity-input"
 ```
 
-Teams set the attribute and which elements need ids in the `analyzers.testids` setting, edited in the Guide's **Test ids** section.
+Teams set the attribute and which elements need ids in the `analyzers.testids` setting, edited in **Settings › Policies**.
 
 ## Asset policy
 
@@ -147,40 +120,22 @@ Teams set the attribute and which elements need ids in the `analyzers.testids` s
     - not allowed as PNG: ship public/hero.webp
 ```
 
-The policy is the `assets.policy` setting; prose rules such as which image component to use are in the Guide's **Assets** section.
+The policy is the `assets.policy` setting; prose rules such as which image component to use belong in a [rule](/guide/knowledge/rules/) or the repository's `AGENTS.md`.
 
-## The knowledge base
+## Search: search_knowledge
 
-The knowledge base holds what the team decided and learned: decisions, conventions, migration notes, quirks and how-tos, each scoped to repositories, folders or teams. Agents read only accepted entries, plus other teams' entries marked shared.
-
-`search_knowledge` searches them best match first. With `repo`, only entries that apply there; filter with `kind`, `package`, `subject` (`npm:react`, `tool:node`) or `topic`. `get_knowledge` reads one entry in full. Agents cite entries as `[kb:<id>]`, and the panel shows the same ids, so a reader can follow the citation.
+`search_knowledge` searches rules and active learnings by their words, best match first. With `repo`, only those that apply there.
 
 ```text
 ● holtkeeper - search_knowledge (query: "date library", repo: "gitlab:acme/checkout-web")
-  ⎿ 1. [kb:k7f2] Use date-fns, not moment, in web apps — decision, shared by team platform
-       moment is in maintenance mode and costs 70 kB gzip in checkout-web…
+  ⎿ 1. [rule:r2f7] Dates in web apps — rule, team widgets
+       Use date-fns, not moment; moment costs 70 kB gzip in checkout-web…
+    2. [learn:l1b3] Format dates with formatDay from @acme/widget-kit. — learning, active
 ```
-
-### Proposing knowledge: propose_knowledge
-
-`propose_knowledge` proposes an entry for one repository: a short, reusable lesson with a Markdown body and an example, optional topics, packages (with version ranges for migrations) and evidence links. It is attributed to you and waits in **Knowledge › Notes** for review; a proposal that repeats an existing entry is not added, and its evidence is merged into that entry instead.
-
-```text
-● holtkeeper - propose_knowledge
-    title:    "Upgrading @acme/forms 3 → 4 needs the resolver moved to useForm options"
-    body:     "In 4.0 `resolver` moved from <Form> to `useForm({ resolver })`. …"
-    repo:     "gitlab:acme/checkout-web"
-    kind:     "migration"
-    packages: [{ ecosystem: "npm", name: "@acme/forms", from: ">=3 <4", to: ">=4 <5" }]
-  ⎿ Proposed kb:k9a1, waiting for review.
-```
-
-Some kinds can be accepted without review: the `knowledge.autoAccept` setting lists them (`quirk` and `howto` on a fresh install). Search first; a duplicate never becomes a new entry.
 
 ## Related
 
-- [Guide](/guide/knowledge/guide/) — write and review team rules.
-- [Notes](/guide/knowledge/notes/) — accept or reject proposed knowledge.
-- [Learnings](/guide/knowledge/learnings/) — rule candidates from review replies and agents.
-- [Settings › Policies](/guide/settings/policies/) — commit conventions, asset policy and auto-accept.
+- [Rules](/guide/knowledge/rules/) — write rules, rules files and the effective prompt.
+- [Learnings](/guide/knowledge/learnings/) — learned rules, their sources and lifecycle.
+- [Settings › Policies](/guide/settings/policies/) — commit conventions, asset policy and learning delays.
 - [Setting keys](/reference/setting-keys/) — `commits.conventions`, `assets.policy`, `analyzers.testids`.

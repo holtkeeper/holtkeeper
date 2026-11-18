@@ -1,0 +1,210 @@
+---
+title: Rules
+description: Write the rules every agent run follows, for all repositories, for teams or for repository patterns, see the rules files your repositories already carry, and check the exact block a review or task gets.
+panel: Knowledge › Rules
+route: /knowledge/rules
+permission: knowledge:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Meter,
+  Row,
+  Rows,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Write the rules every agent run follows, for all repositories, for teams or for repository patterns, see the rules files your repositories already carry, and check the exact block a review or task gets.
+
+Reviews, replies in review threads, agent tasks, chat, release notes and coding agents over MCP all read the same rules. They come from three places, strongest first: **rules** people write here, the repository's own **rules files**, and **learnings** Holtkeeper picked up from review replies (see [Learnings](/guide/knowledge/learnings/)). Your [policies](/guide/settings/policies/) are added as plain facts.
+
+The design follows the conventions of `AGENTS.md`, GitHub Copilot instructions and Cursor rules: Markdown rules, scoped by paths, with the same activation modes. A team that already keeps those files gets them read as they are.
+
+<Screen title="Knowledge › Rules">
+  <Toolbar crumbs={['Knowledge']} title="Rules">
+    <Segmented slot="start" items={['Rules:9', 'Learnings:4']} />
+    <Tag>Team: Widgets</Tag>
+    <Tag>Repository: any</Tag>
+    <Button>Effective prompt</Button>
+    <Button primary>New rule</Button>
+  </Toolbar>
+  <Scroll>
+
+| Rule                             | Scope            | Applies                             | Agents       | Version | Last edit            |
+| -------------------------------- | ---------------- | ----------------------------------- | ------------ | ------- | -------------------- |
+| Money is integers in minor units | All repositories | <Tag>Always</Tag>                   | all          | 3       | Mira K. · 3 days ago |
+| How Widgets reviews              | Team Widgets     | <Tag>Always</Tag>                   | review       | 7       | Ivo P. · 1 week ago  |
+| Release notes for players        | Team Widgets     | <Tag>Always</Tag>                   | release      | 2       | Mira K. · 1 month    |
+| Contract tests for API routes    | `acme/round/*`   | <Tag mono>{'src/routes/\*\*'}</Tag> | review, task | 1       | Ivo P. · 2 weeks ago |
+| Migrating to @acme/widget-kit 5  | `acme/*/web`     | <Tag tone="info">On request</Tag>   | task, chat   | 4       | Sam L. · 5 days ago  |
+
+  </Scroll>
+</Screen>
+
+## Repository rules files
+
+Holtkeeper reads these files from the repository: from the review's checkout, or from the default branch for chat, release notes and the effective prompt. They are read-only here; edit them in the repository.
+
+| File                                          | Applies                                                                                            |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `REVIEW.md`, `AGENTS.md`, `CLAUDE.md` (root)  | Always.                                                                                            |
+| `.github/copilot-instructions.md`             | Always.                                                                                            |
+| `CONTRIBUTING.md`                             | Always.                                                                                            |
+| `AGENTS.md`, `CLAUDE.md` in a folder          | To files under that folder.                                                                        |
+| `.github/instructions/*.instructions.md`      | `applyTo` globs; `excludeAgent: code-review` keeps it out of reviews, `coding-agent` out of tasks. |
+| `.cursor/rules/*.mdc`, `.continue/rules/*.md` | `alwaysApply`, `globs`, or only a `description` (offered on request).                              |
+| `.claude/rules/*.md`                          | `paths` globs, otherwise always.                                                                   |
+| `.windsurf/rules/*.md`                        | `trigger`: `always_on`, `glob`, `model_decision` (on request); `manual` is skipped.                |
+
+Files under `node_modules`, `vendor`, `dist` and `build` are ignored. Root files share at most 4,800 characters; a longer one is cut at a line break with a pointer to the file. `REVIEW.md` keeps its `## Paths` and `## Ignore` sections for reviews, see [Reviews](/guide/quality/reviews/).
+
+```md title=".github/instructions/routes.instructions.md"
+---
+applyTo: 'src/routes/**'
+---
+
+- Every new route needs a contract test in `test/contract/`.
+- Return errors through `problem()`, never a bare `Response`.
+```
+
+:::tip
+Rules that hold for one repository belong in its own files, where they are versioned with the code. Use panel rules for what spans repositories: the whole organization, a team, or alike repositories such as `acme/*/web`.
+:::
+
+## Write a rule
+
+<Ui>New rule</Ui> (with `knowledge:write` over the scope) opens the editor.
+
+<Screen title="Knowledge › Rules › Contract tests for API routes">
+  <Sheet title="Contract tests for API routes">
+    <Tag slot="tags">Version 1</Tag>
+    <Button slot="actions" ghost>
+      History
+    </Button>
+    <Fields>
+      <Field label="Title" value="Contract tests for API routes" wide />
+      <Field
+        label="Rule"
+        value="- New API routes need a contract test in test/contract/. Flag a route without one."
+        wide
+      />
+      <Field label="Scope" value="Repositories acme/round/*" mono />
+      <Field label="Files" value="src/routes/**" mono />
+      <Field label="Agents" value="Review, Agent task" />
+      <Field label="Description" placeholder="Only for rules agents ask for" />
+      <Field label="Always apply" toggle={false} />
+    </Fields>
+    <div>
+      <Button ghost>Cancel</Button> <Button primary>Save</Button>
+    </div>
+  </Sheet>
+</Screen>
+
+| Field       | Meaning                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rule        | Markdown. Write short imperative lines an agent can follow, and say why when it is not obvious.                                                               |
+| Scope       | _All repositories_, one or more _teams_ (a team is its set of repositories, see [Teams](/guide/repos/teams/)), or _repository patterns_ such as `acme/*/web`. |
+| Files       | Optional path globs. The rule applies only when the task touches a matching file.                                                                             |
+| Agents      | Optional. Limit the rule to **Review**, **Agent task**, **Chat** or **Release notes**; empty means all of them.                                               |
+| Description | Optional. A rule with only a description is not injected: agents see it listed and read it when it fits the task. **Always apply** keeps it injected.         |
+
+So a rule reaches a prompt in one of three ways, as in Cursor: **always**, **when a touched file matches**, or **on request** by its description.
+
+:::caution
+Saving checks the version you started from. If someone saved the rule in the meantime, your save is refused; reload, merge and save again.
+:::
+
+**History** lists earlier versions with who saved them, each with <Ui>Restore</Ui>.
+
+## Policies
+
+Some facts are settings, not prose, and reach agents as plain lines next to the rules: a repository with **no tests by design**, the test id convention and the [asset policy](/guide/quality/assets/) (reviews and tasks), and commit conventions (release notes, tasks and chat). Edit them in [Settings › Policies](/guide/settings/policies/).
+
+## Check the effective prompt
+
+<Ui>Effective prompt</Ui> shows exactly what one run on a repository gets, block by block.
+
+<Screen title="Knowledge › Rules › Effective prompt">
+  <Toolbar title="Effective prompt">
+    <Tag slot="start">acme/round/web</Tag>
+    <Segmented slot="start" items={['Review', 'Agent task', 'Chat', 'Release notes']} />
+    <Button>Copy text</Button>
+  </Toolbar>
+  <Stack>
+    <Facts items={[['Touched files', 'src/routes/cart.ts · src/cart/total.ts']]} />
+    <Meter value={64} tone="neutral" label="7,690 of 12,000 characters" />
+    <Tabs items={['Blocks', 'Full text', 'Warnings:1']} />
+    <Rows>
+      <Row title="Money is integers in minor units" sub="Rule · all repositories">
+        <Tag>310</Tag>
+      </Row>
+      <Row title="How Widgets reviews" sub="Rule · team Widgets">
+        <Tag>1,120</Tag>
+      </Row>
+      <Row title="REVIEW.md" sub="Rules file">
+        <Tag>2,100</Tag>
+      </Row>
+      <Row title="AGENTS.md" sub="Rules file">
+        <Tag tone="warn">2,700 · cut</Tag>
+      </Row>
+      <Row title="Contract tests for API routes" sub="Rule · matches src/routes/cart.ts">
+        <Tag>140</Tag>
+      </Row>
+      <Row title="src/cart/AGENTS.md" sub="Rules file · applies under src/cart/">
+        <Tag>460</Tag>
+      </Row>
+      <Row title="Test ids" sub="Policy">
+        <Tag>120</Tag>
+      </Row>
+      <Row title="Assets" sub="Policy">
+        <Tag>100</Tag>
+      </Row>
+      <Row title="Learned rules" sub="4 of 6 active learnings">
+        <Tag>640</Tag>
+      </Row>
+    </Rows>
+    <div class="hk-dim">On request: Migrating to @acme/widget-kit 5</div>
+  </Stack>
+</Screen>
+
+1. Pick the repository, the run (**Review**, **Agent task**, **Chat** or **Release notes**) and, optionally, the touched files.
+2. Read **Blocks**, **Full text** (the block as sent) or **Warnings** (what was cut and why).
+
+Blocks come in this order:
+
+1. Panel rules that always apply, broadest first: all repositories, teams, repository patterns.
+2. Root rules files.
+3. File-scoped panel rules, then nested and file-scoped rules files, that match the touched files. Without touched files, all of them, each titled with the paths it covers.
+4. Policies.
+5. **Learned rules**, under their own heading, best ranked first. Agents follow them unless a rule above says otherwise.
+
+Everything shares **12,000 characters**. Rules files get at most 4,800 together and are cut with a pointer; learned rules get at most 3,000 and are dropped whole, lowest ranked first. Each block shows its size and **cut** when the budget shortened it. Rules offered on request are listed separately under the blocks.
+
+Agents cite what they followed: `[rule:<id>]` for a rule, `[learn:<id>]` for a learning. A review comment that cites a learning counts as a use of it.
+
+<Ui>Copy text</Ui> copies the block as sent.
+
+## In a repository or team
+
+The repository hub's **Knowledge** tab shows the repository's effective prompt and the rules and learnings that apply to it. The team page's **Knowledge** tab lists the rules scoped to the team.
+
+## Related
+
+- [Learnings](/guide/knowledge/learnings/) — rules Holtkeeper learns from review replies and merged merge requests.
+- [Reviews](/guide/quality/reviews/) — the run that reads the most rules.
+- [Settings › Policies](/guide/settings/policies/) — test ids, asset policy and commit conventions.
+- [Rules and knowledge for agents](/agents/rules-and-knowledge/) — `repo_rules`, `get_rule` and `search_knowledge` over MCP.
+- [Rules](/modules/rules/) — how rules resolve, the budget and the rules file formats.

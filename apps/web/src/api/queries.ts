@@ -1,21 +1,14 @@
 import type {
+  LearningCreateBody,
+  LearningPatch,
+  RuleAgent,
+  RuleInputBody,
   QaTaskView,
-  AcceptLearningInput,
-  AcceptLearningsInput,
   AllowlistRenewInput,
   AssetsQuery,
   CiFleetJobSort,
   InboxItem,
   AgentTaskStatus,
-  EditLearningInput,
-  FamilyInput,
-  GuideScopeKey,
-  GuideSectionName,
-  GuideSectionRejectInput,
-  GuideTask,
-  LearningStatus,
-  PutGuideSectionInput,
-  RegenerateGuideInput,
   AnalysisBackfillInput,
   ChatMessageList,
   ChatPostInput,
@@ -42,10 +35,8 @@ import type {
   MediaApplyInput,
   MediaVariantsInput,
   CreateCredentialInput,
-  CreateKnowledgeInput,
   ForgeSshKeyInput,
   InviteUserInput,
-  KnowledgeStatus,
   PutConfigInput,
   PutSettingInput,
   RepoRef,
@@ -53,7 +44,6 @@ import type {
   ReviewQuery,
   Scope,
   UpdateCredentialInput,
-  UpdateKnowledgeInput,
   UpdateUserInput,
   UserPreferencesInput,
 } from '@holtkeeper/api'
@@ -80,8 +70,10 @@ import {
   type ConfigCollections,
   type HistoryQuery,
   type JobQuery,
+  type LearningQuery,
   type PublicApiSearchQuery,
   type PublicApiSymbolQuery,
+  type RuleQuery,
   api,
 } from './endpoints.ts'
 
@@ -111,20 +103,10 @@ export const keys = {
       'resolve',
       focus.kind === 'repo' ? repoKey(focus.repo) : `team:${focus.team}`,
     ] as const,
-  knowledge: ['knowledge'] as const,
-  knowledgeCounts: ['knowledge', 'counts'] as const,
-  guide: ['guide'] as const,
-  guideScope: (scope: GuideScopeKey) => ['guide', 'scope', scope] as const,
-  guideSection: (scope: GuideScopeKey, section: GuideSectionName) =>
-    ['guide', 'section', scope, section] as const,
-  guidePreview: (repo: RepoRef, task: GuideTask) =>
-    ['guide', 'preview', repoKey(repo), task] as const,
-  guideChain: (repo: RepoRef, section?: GuideSectionName) =>
-    ['guide', 'chain', repoKey(repo), section ?? '*'] as const,
-  guideRepoFiles: (repo: RepoRef) => ['guide', 'repo-files', repoKey(repo)] as const,
-  guideGeneratedHistory: (scope: GuideScopeKey, section: GuideSectionName) =>
-    ['guide', 'generated', scope, section] as const,
-  families: ['families'] as const,
+  rules: ['rules'] as const,
+  rule: (ruleId: string) => ['rules', 'detail', ruleId] as const,
+  effectiveRules: (repo: RepoRef, agent: RuleAgent, files: readonly string[]) =>
+    ['rules', 'effective', repoKey(repo), agent, files.join(',')] as const,
   learnings: ['learnings'] as const,
   config: ['config'] as const,
   jobs: ['jobs'] as const,
@@ -211,12 +193,8 @@ export function useSnoozeMutations() {
 /** A decision on an Inbox item: the positive one (approve, accept, renew) or reject. */
 export type InboxDecision = 'approve' | 'reject'
 
-/**
- * Optional parts of a decision: the learning scope (else its `targetScope`, else where
- * `suggestedScope` points), the renewal date and a reason that replaces the allowlist entry's.
- */
+/** Optional parts of a decision: the renewal date and a reason that replaces the allowlist entry's. */
 export interface InboxDecisionOptions {
-  scope?: GuideScopeKey
   expires?: string
   reason?: string
 }
@@ -231,20 +209,8 @@ export function decideInbox(
   switch (item.kind) {
     case 'task':
       return approve ? api.approveTaskGroup(item.groupId) : api.rejectTaskGroup(item.groupId)
-    case 'note':
-      return api.reviewKnowledge(item.entryId, approve ? 'accept' : 'reject')
     case 'learning':
-      return approve
-        ? api.acceptLearning(item.learningId, options.scope ? { scope: options.scope } : {})
-        : api.rejectLearning(item.learningId)
-    case 'guide':
-      return approve
-        ? api.acceptGuideSection(item.guideScope, item.section, { inputHash: item.inputHash })
-        : api.rejectGuideSection({
-            scope: item.guideScope,
-            section: item.section,
-            inputHash: item.inputHash,
-          })
+      return api.decideLearning(item.learningId, decision)
     case 'release':
       return approve
         ? api.acceptRelease({ repo: item.repo })
@@ -268,9 +234,7 @@ export function decideInbox(
 
 const areaKeys: Record<InboxItem['kind'], readonly (readonly string[])[]> = {
   task: [['tasks'], ['chat', 'poll']],
-  note: [keys.knowledge],
-  learning: [keys.learnings, keys.guide, keys.knowledgeCounts],
-  guide: [keys.guide, keys.knowledgeCounts],
+  learning: [keys.learnings, keys.rules],
   release: [keys.releases],
   allowlist: [keys.settings, ['findings']],
   budget: [keys.ai],
@@ -285,7 +249,7 @@ export const decisionQueryKeys = (kinds: readonly InboxItem['kind'][]): (readonl
 /**
  * Decisions on Inbox items, one at a time or in bulk. Bulk runs the rows one after another on
  * the client and reports errors per row. Every decision refreshes Inbox, Home and the queries of
- * the item's own area (tasks, knowledge, learnings, Guide, releases, settings).
+ * the item's own area (tasks, learnings, rules, releases, settings).
  */
 export function useInboxDecisions() {
   const client = useQueryClient()
@@ -725,236 +689,67 @@ export function useSettingMutations() {
   }
 }
 
-/** Knowledge entries the caller may read, most recently updated first; `repo` keeps entries covering it. */
-export const useKnowledge = (
-  query: { status?: readonly KnowledgeStatus[]; repo?: RepoRef },
-  enabled = true,
-) =>
+/** Panel rules the caller may read, sorted by title; filtered by team, repository and text. */
+export const useRules = (query: RuleQuery = {}, enabled = true) =>
   useQuery({
     queryKey: [
-      ...keys.knowledge,
-      (query.status ?? []).join(','),
+      ...keys.rules,
+      'list',
+      query.team ?? '*',
       query.repo ? repoKey(query.repo) : '*',
+      query.text?.trim() ?? '',
     ],
-    queryFn: () => api.knowledge(query),
+    queryFn: () => api.rules(query),
     placeholderData: keepPreviousData,
     enabled,
   })
 
-/** The handbook: accepted knowledge as chapters with links; refreshed with every knowledge list. */
-export const useHandbook = (query: { repo?: string; team?: string }, enabled = true) =>
+/** One rule with its previous versions; off while `ruleId` is unknown. */
+export const useRule = (ruleId: string | undefined) =>
   useQuery({
-    queryKey: [...keys.knowledge, 'handbook', query.repo ?? '*', query.team ?? '*'],
-    queryFn: () => api.handbook(query),
+    queryKey: keys.rule(ruleId ?? ''),
+    queryFn: () => api.rule(ruleId!),
+    enabled: ruleId !== undefined,
+  })
+
+/** The rules block an `agent` run on `repo` gets, touching `files`; off without `repo`. */
+export const useEffectiveRules = (
+  repo: RepoRef | undefined,
+  agent: RuleAgent,
+  files: readonly string[] = [],
+) =>
+  useQuery({
+    queryKey: repo ? keys.effectiveRules(repo, agent, files) : ['rules', 'effective', 'none'],
+    queryFn: () => api.effectiveRules(repo!, agent, files),
     placeholderData: keepPreviousData,
-    enabled,
+    enabled: repo !== undefined,
   })
 
-/** Guide, Notes and Learnings totals per Knowledge space the caller may read, for the sidebar. */
-export const useKnowledgeCounts = (enabled = true) =>
-  useQuery({ queryKey: keys.knowledgeCounts, queryFn: api.knowledgeCounts, enabled })
-
-/** One knowledge entry with its history; off while `entryId` is unknown. */
-export const useKnowledgeEntry = (entryId: string | undefined) =>
-  useQuery({
-    queryKey: [...keys.knowledge, 'entry', entryId ?? ''],
-    queryFn: () => api.knowledgeEntry(entryId!),
-    enabled: entryId !== undefined,
-  })
-
-/**
- * Posted review comments that cited one knowledge entry and how they ended; off while `entryId`
- * is unknown.
- */
-export const useKnowledgeCitations = (entryId: string | undefined) =>
-  useQuery({
-    queryKey: [...keys.knowledge, 'citations', entryId ?? ''],
-    queryFn: () => api.knowledgeCitations(entryId!),
-    enabled: entryId !== undefined,
-  })
-
-/**
- * Create, edit, review and delete knowledge entries; each refreshes every knowledge list, and a
- * review also Inbox and Home.
- */
-export function useKnowledgeMutations() {
+/** Create, edit and delete rules; each refreshes every rules query, effective prompts included. */
+export function useRuleMutations() {
   const client = useQueryClient()
-  const onSuccess = () => client.invalidateQueries({ queryKey: keys.knowledge })
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.rules })
   return {
-    create: useMutation({
-      mutationFn: (input: CreateKnowledgeInput) => api.createKnowledge(input),
-      onSuccess,
-    }),
+    create: useMutation({ mutationFn: (input: RuleInputBody) => api.createRule(input), onSuccess }),
     update: useMutation({
-      mutationFn: ({ id, input }: { id: string; input: UpdateKnowledgeInput }) =>
-        api.updateKnowledge(id, input),
+      mutationFn: ({ id, input }: { id: string; input: RuleInputBody }) =>
+        api.updateRule(id, input),
       onSuccess,
     }),
-    review: useMutation({
-      mutationFn: ({ id, action }: { id: string; action: 'accept' | 'reject' | 'archive' }) =>
-        api.reviewKnowledge(id, action),
-      onSuccess: () => Promise.all([onSuccess(), refreshDecisions(client)]),
-    }),
-    remove: useMutation({ mutationFn: (id: string) => api.deleteKnowledge(id), onSuccess }),
+    remove: useMutation({ mutationFn: (id: string) => api.deleteRule(id), onSuccess }),
   }
 }
 
-/** One scope's Guide: every section with its layers, whether the caller may edit it, and people. */
-export const useGuide = (scope: GuideScopeKey | undefined) =>
-  useQuery({
-    queryKey: scope ? keys.guideScope(scope) : ['guide', 'scope', 'none'],
-    queryFn: () => api.guide(scope!),
-    enabled: scope !== undefined,
-  })
-
-/** A section with the revisions of its human layer, loaded while the history sheet is open. */
-export const useGuideSection = (scope: GuideScopeKey, section: GuideSectionName | undefined) =>
-  useQuery({
-    queryKey: section ? keys.guideSection(scope, section) : ['guide', 'section', 'none'],
-    queryFn: () => api.guideSection(scope, section!),
-    enabled: section !== undefined,
-  })
-
-/** The effective Guide a task of `repo` gets, with its budget and warnings. */
-export const useGuidePreview = (repo: RepoRef | undefined, task: GuideTask) =>
-  useQuery({
-    queryKey: repo ? keys.guidePreview(repo, task) : ['guide', 'preview', 'none'],
-    queryFn: () => api.guidePreview(repo!, task),
-    enabled: repo !== undefined,
-  })
-
-/** The layered Guide chain of `repo` (one section, or all), with the budget; off without `repo`. */
-export const useGuideChain = (repo: RepoRef | undefined, section?: GuideSectionName) =>
-  useQuery({
-    queryKey: repo ? keys.guideChain(repo, section) : ['guide', 'chain', 'none'],
-    queryFn: () => api.guideChain(repo!, section),
-    enabled: repo !== undefined,
-  })
-
-/** The repository's own rules files the chain reads first; off without `repo`. */
-export const useGuideRepoFiles = (repo: RepoRef | undefined) =>
-  useQuery({
-    queryKey: repo ? keys.guideRepoFiles(repo) : ['guide', 'repo-files', 'none'],
-    queryFn: () => api.guideRepoFiles(repo!),
-    enabled: repo !== undefined,
-  })
-
-/** Every generated text a section stored, newest version first; off until `section` is given. */
-export const useGuideGeneratedHistory = (
-  scope: GuideScopeKey,
-  section: GuideSectionName | undefined,
-) =>
-  useQuery({
-    queryKey: section ? keys.guideGeneratedHistory(scope, section) : ['guide', 'generated', 'none'],
-    queryFn: () => api.guideGeneratedHistory(scope, section!),
-    enabled: section !== undefined,
-  })
-
-/**
- * Edit, restore and accept Guide sections, and queue regeneration; each refreshes every Guide
- * query, and accepting also Inbox and Home.
- */
-export function useGuideMutations() {
-  const client = useQueryClient()
-  const onSuccess = () =>
-    Promise.all([
-      client.invalidateQueries({ queryKey: keys.guide }),
-      client.invalidateQueries({ queryKey: keys.knowledgeCounts }),
-    ])
-  return {
-    save: useMutation({
-      mutationFn: ({
-        scope,
-        section,
-        input,
-      }: {
-        scope: GuideScopeKey
-        section: GuideSectionName
-        input: PutGuideSectionInput
-      }) => api.putGuideSection(scope, section, input),
-      onSuccess,
-    }),
-    restore: useMutation({
-      mutationFn: ({
-        scope,
-        section,
-        version,
-      }: {
-        scope: GuideScopeKey
-        section: GuideSectionName
-        version: number
-      }) => api.restoreGuideSection(scope, section, version),
-      onSuccess,
-    }),
-    accept: useMutation({
-      mutationFn: ({
-        scope,
-        section,
-        inputHash,
-      }: {
-        scope: GuideScopeKey
-        section: GuideSectionName
-        inputHash?: string
-      }) => api.acceptGuideSection(scope, section, inputHash ? { inputHash } : {}),
-      onSuccess: () => Promise.all([onSuccess(), refreshDecisions(client)]),
-    }),
-    reject: useMutation({
-      mutationFn: (input: GuideSectionRejectInput) => api.rejectGuideSection(input),
-      onSuccess: () => Promise.all([onSuccess(), refreshDecisions(client)]),
-    }),
-    regenerate: useMutation({
-      mutationFn: ({ repo, input }: { repo: RepoRef; input: RegenerateGuideInput }) =>
-        api.regenerateGuide(repo, input),
-      onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs }),
-    }),
-  }
-}
-
-/** Confirmed families the caller can see a member of. */
-export const useFamilies = (enabled = true) =>
-  useQuery({ queryKey: keys.families, queryFn: api.families, enabled })
-
-/** Suggested families the caller could confirm. */
-export const useFamilySuggestions = (enabled = true) =>
-  useQuery({
-    queryKey: [...keys.families, 'suggestions'],
-    queryFn: api.familySuggestions,
-    enabled,
-  })
-
-/** Create, edit and delete families; each refreshes families and every Guide. */
-export function useFamilyMutations() {
-  const client = useQueryClient()
-  const onSuccess = () =>
-    Promise.all([
-      client.invalidateQueries({ queryKey: keys.families }),
-      client.invalidateQueries({ queryKey: keys.guide }),
-    ])
-  return {
-    create: useMutation({ mutationFn: (input: FamilyInput) => api.createFamily(input), onSuccess }),
-    update: useMutation({
-      mutationFn: ({ id, input }: { id: string; input: FamilyInput }) =>
-        api.updateFamily(id, input),
-      onSuccess,
-    }),
-    remove: useMutation({ mutationFn: (id: string) => api.deleteFamily(id), onSuccess }),
-    dismiss: useMutation({
-      mutationFn: (members: string[]) => api.dismissFamilySuggestion({ members }),
-      onSuccess: () => client.invalidateQueries({ queryKey: [...keys.families, 'suggestions'] }),
-    }),
-  }
-}
-
-/** Learning candidates the caller may read; `repo` keeps one repository's. */
-export const useLearnings = (
-  query: { repo?: RepoRef; status?: readonly LearningStatus[] },
-  enabled = true,
-) =>
+/** Learnings the caller may read, most recently updated first. */
+export const useLearnings = (query: LearningQuery = {}, enabled = true) =>
   useQuery({
     queryKey: [
       ...keys.learnings,
-      query.repo ? repoKey(query.repo) : '*',
+      'list',
       (query.status ?? []).join(','),
+      (query.origin ?? []).join(','),
+      query.repo ? repoKey(query.repo) : '*',
+      query.text?.trim() ?? '',
     ],
     queryFn: () => api.learnings(query),
     placeholderData: keepPreviousData,
@@ -970,46 +765,35 @@ export const useReactionTotals = (repo: RepoRef | undefined, enabled = true) =>
     retry: false,
   })
 
-const refreshLearnings = (client: ReturnType<typeof useQueryClient>) =>
-  Promise.all([
-    client.invalidateQueries({ queryKey: keys.learnings }),
-    client.invalidateQueries({ queryKey: keys.guide }),
-    client.invalidateQueries({ queryKey: keys.knowledgeCounts }),
-    refreshDecisions(client),
-  ])
-
 /**
- * Accept, edit and reject learning candidates; each refreshes learnings, every Guide, the
- * Knowledge counts, Inbox and Home.
+ * Create, edit, approve, reject and delete learnings; each refreshes learnings, effective
+ * prompts, Inbox and Home.
  */
 export function useLearningMutations() {
   const client = useQueryClient()
-  const onSuccess = () => refreshLearnings(client)
+  const onSuccess = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: keys.learnings }),
+      client.invalidateQueries({ queryKey: keys.rules }),
+      refreshDecisions(client),
+    ])
   return {
-    accept: useMutation({
-      mutationFn: ({ id, input }: { id: string; input: AcceptLearningInput }) =>
-        api.acceptLearning(id, input),
+    create: useMutation({
+      mutationFn: (input: LearningCreateBody) => api.createLearning(input),
       onSuccess,
     }),
     edit: useMutation({
-      mutationFn: ({ id, input }: { id: string; input: EditLearningInput }) =>
+      mutationFn: ({ id, input }: { id: string; input: LearningPatch }) =>
         api.editLearning(id, input),
       onSuccess,
     }),
-    reject: useMutation({ mutationFn: (id: string) => api.rejectLearning(id), onSuccess }),
+    decide: useMutation({
+      mutationFn: ({ id, decision }: { id: string; decision: 'approve' | 'reject' }) =>
+        api.decideLearning(id, decision),
+      onSuccess,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.deleteLearning(id), onSuccess }),
   }
-}
-
-/**
- * Accepts several learning candidates in one request; answers which were accepted and which
- * failed, and refreshes like a single accept (also after a partial failure).
- */
-export function useAcceptLearnings() {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: (input: AcceptLearningsInput) => api.acceptLearnings(input),
-    onSettled: () => refreshLearnings(client),
-  })
 }
 
 /** Forges of the effective config; needs global `settings:read`. */

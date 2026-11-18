@@ -1,10 +1,8 @@
 import type { InboxFeed, InboxItem, InboxKind } from '@holtkeeper/api'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import {
-  BookOpen,
   Check,
   Clock,
-  FileText,
   Gauge,
   Inbox,
   Lightbulb,
@@ -72,9 +70,7 @@ import { InboxSheetBody, sheetTabs } from './InboxSheetBody.tsx'
 
 const kindIcons: Record<InboxKind, LucideIcon> = {
   task: Pencil,
-  note: BookOpen,
   learning: Lightbulb,
-  guide: FileText,
   release: Rocket,
   allowlist: Clock,
   budget: Gauge,
@@ -243,7 +239,7 @@ function InboxSheet({
   const Icon = kindIcons[item.kind]
   const shortId = shortItemId(item.id)
   const [tab, setTab] = useState(tabs[0]!.id)
-  const formOwnsApproval = item.kind === 'learning' || item.kind === 'allowlist'
+  const formOwnsApproval = item.kind === 'allowlist'
   const quiet = [
     ...(canApprove(item) && !formOwnsApproval
       ? [{ label: approveLabel(item), icon: Check, onPress: () => decide(item, 'approve') }]
@@ -642,7 +638,7 @@ export function InboxPage() {
             description={
               tab === 'snoozed'
                 ? 'Snoozed items come back on their own when the snooze ends.'
-                : 'Task proposals, notes, learnings, Guide text, releases and expiring allowlist entries show up here.'
+                : 'Task proposals, pending learnings, releases and expiring allowlist entries show up here.'
             }
           />
         ) : (
@@ -687,8 +683,8 @@ export function InboxPage() {
         )}
         <footer className="flex flex-wrap items-center gap-2 border-t border-line px-3.5 py-2.5 text-xs text-muted">
           <span>
-            {kpis ? `${kpis.total} open` : ''} · decisions made here also show in Tasks, Notes,
-            Learnings, Guide, Releases and Security
+            {kpis ? `${kpis.total} open` : ''} · decisions made here also show in Tasks, Learnings,
+            Releases and Security
           </span>
           <span className="flex-1" />
           <span className="flex items-center gap-1.5">

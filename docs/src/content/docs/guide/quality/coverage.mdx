@@ -207,7 +207,7 @@ Some repositories have nothing to test: a brand asset bundle, a config repositor
 1. Open the repository's sheet, then <Ui>⋯</Ui> › <Ui>Mark as no tests by design…</Ui>. The empty state and the hub section offer the same action.
 2. Give the reason and confirm.
 
-The row then reads **No tests by design** (the reason shows as a tooltip), never counts as below target and sorts last. The sheet shows a notice with the reason and the scope that set it instead of <Ui>Run coverage</Ui>. Agents get the same signal: reviews stop asking for tests there, and the Guide's Testing section is skipped.
+The row then reads **No tests by design** (the reason shows as a tooltip), never counts as below target and sorts last. The sheet shows a notice with the reason and the scope that set it instead of <Ui>Run coverage</Ui>. Agents get the same signal: reviews stop asking for tests there, and their rules state it as a policy.
 
 To undo it, click <Ui>Expect tests again</Ui> in the notice. When a team or folder entry marked the repository, the button names the broader scope it overrides.
 
@@ -231,5 +231,5 @@ The repository hub's **Quality › Coverage** shows the headline, the trend, <Ui
 
 - [Analysis record](/guide/quality/analysis-record/) — the full coverage report with its folder treemap and version history.
 - [Settings › Analyzers](/guide/settings/analyzers/) — switch analyzers per scope and set their options.
-- [Team guide](/guide/knowledge/guide/) — the Testing section agents follow.
+- [Rules](/guide/knowledge/rules/) — the testing rules agents follow.
 - [Coverage analyzer](/modules/coverage/) — how tests are run and reports are read.

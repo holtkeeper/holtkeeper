@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
+import type { Scope } from '@holtkeeper/access'
 import type { RepoOverview } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
@@ -577,52 +578,40 @@ describe('repository hub overview', () => {
       updatedAt: at,
     })
 
-    const section = (scope: 'repo:work:shapes/circle' | 'team:shapes' | 'team:colors') =>
-      store.guides.put({
+    const rule = (id: string, scope: Scope) =>
+      store.rules.put({
+        id,
+        title: `Rule ${id}`,
+        body: 'Use widgets.',
         scope,
-        section: 'general',
-        rules: 'Use widgets.',
-        steering: '',
-        learnings: [],
+        author: 'header:jane',
+        createdAt: at,
+        updatedAt: at,
       })
-    await section('repo:work:shapes/circle')
-    await section('team:shapes')
-    await store.guides.put({
-      scope: 'repo:work:shapes/circle',
-      section: 'testing',
-      rules: '',
-      steering: '',
-      learnings: [],
-    })
-    await store.knowledge.put({
-      id: 'n1',
-      title: 'Widgets',
-      body: 'Body.',
-      kind: 'decision',
-      scope: { repos: ['work:shapes/circle'] },
-      topics: [],
-      appliesTo: ['*'],
-      status: 'accepted',
-      evidence: [],
-      source: 'human',
-      author: 'header:jane',
-      createdAt: at,
-      updatedAt: at,
-    })
-    await store.learnings.put({
-      id: 'l1',
-      repo: 'work:shapes/circle',
-      rule: 'Name widgets clearly.',
-      key: 'name widgets clearly',
-      section: 'general',
-      suggestedScope: 'repo',
-      status: 'proposed',
-      sources: [],
-      model: 'claude',
-      costUsd: 0,
-      createdAt: at,
-      updatedAt: at,
-    })
+    await rule('r1', { repos: ['work:shapes/circle'] })
+    await rule('r2', { teams: ['shapes'] })
+    await rule('r3', { teams: ['colors'] })
+    const learning = (id: string, status: 'pending' | 'active' | 'rejected') =>
+      store.learnings.put({
+        id,
+        text: `Name widgets clearly (${id}).`,
+        key: id,
+        scope: { repos: ['work:shapes/circle'] },
+        origin: 'reply',
+        status,
+        sources: [],
+        createdAt: at,
+        updatedAt: at,
+        activeAt: at,
+        lastReinforcedAt: at,
+        uses: 0,
+        actedOn: 0,
+        votesUp: 0,
+        votesDown: 0,
+      })
+    await learning('l1', 'pending')
+    await learning('l2', 'active')
+    await learning('l3', 'rejected')
     await store.settings.put({
       id: 'ro',
       key: 'repo.freeze',
@@ -642,12 +631,7 @@ describe('repository hub overview', () => {
       costUsd: 0.25,
     })
     expect(overview.work).toEqual({ runs: 2, failed: 1, awaitingApproval: 1, costUsd: 0.4 })
-    expect(overview.knowledge).toEqual({
-      sections: 1,
-      notes: 1,
-      proposed: 1,
-      inherits: ['team shapes'],
-    })
+    expect(overview.knowledge).toEqual({ rules: 2, learnings: 1, pending: 1 })
     expect(overview.defaultBranch).toBe('main')
     expect(overview.access).toEqual({
       readOnly: true,

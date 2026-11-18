@@ -23,3 +23,10 @@ describe('router', () => {
     expect(matched('/repos/gitlab/acme/widget-kit')).toBe('/repos/$')
   })
 })
+
+test('Knowledge opens Rules and Learnings, and every other Knowledge path falls to the redirect', () => {
+  expect(matched('/knowledge/rules')).toBe('/knowledge/rules')
+  expect(matched('/knowledge/learnings')).toBe('/knowledge/learnings')
+  for (const old of ['/knowledge', '/knowledge/guide', '/knowledge/notes', '/knowledge/handbook'])
+    expect(matched(old)).toBe('/knowledge/$')
+})

@@ -25,7 +25,7 @@ import {
   Ui,
 } from '@ui'
 
-Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP client, watch your own usage and browse the tools your agents get. Every signed-in person can connect agents; a token acts as you, reads, and can propose knowledge and rules for review.
+Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP client, watch your own usage and browse the tools your agents get. Every signed-in person can connect agents; a token acts as you, reads, and can propose learnings.
 
 <Screen title="Account › Connect agents" caption="Create a token, add the server to your client, ask about your code.">
   <Toolbar title="Connect agents" crumbs={['Account']}>
@@ -78,7 +78,7 @@ Use one token per machine or agent, so you can revoke one without breaking the o
   </Sheet>
 </Screen>
 
-A token acts as you with read access to repositories, analyses, audits, knowledge and releases, and can propose knowledge entries and Guide rules that people review. It cannot start tasks or run release steps: those start in Chat, **Ops › Tasks**, **Roll out** in Supply chain › Libraries and the Releases screen. It never gets more than your own grants. The **Allows** column shows **Read** for every token, including older ones issued with the former release or task scopes, which now work as read tokens. With Holtkeeper's own accounts it follows your current grants, and disabling your account or signing out everywhere revokes it.
+A token acts as you with read access to repositories, analyses, audits, knowledge and releases, and can propose learnings, which people may reject before they activate. It cannot start tasks or run release steps: those start in Chat, **Ops › Tasks**, **Roll out** in Supply chain › Libraries and the Releases screen. It never gets more than your own grants. The **Allows** column shows **Read** for every token, including older ones issued with the former release or task scopes, which now work as read tokens. With Holtkeeper's own accounts it follows your current grants, and disabling your account or signing out everywhere revokes it.
 
 :::caution
 A token authenticates only the MCP endpoint and the read-only catalog API. It cannot issue or revoke tokens. Revoke a token you no longer use from its row.
@@ -207,14 +207,14 @@ A daily chart shows answered over failed calls. Tool calls do not call a model, 
           'evaluate_dependency',
           'What the organization knows about a dependency before adding or upgrading it',
         ],
-        ['search_knowledge', 'Decisions, conventions and migration notes of the knowledge base'],
+        ['search_knowledge', 'Search rules and learnings · query, repo'],
       ]}
     />
   </Stack>
 </Screen>
 
 :::note
-Agents can propose knowledge and rule changes, but people review them in Knowledge. No MCP tool starts or approves tasks, runs release steps or makes other [Inbox](/guide/home/inbox/) decisions. Agents can read Holtkeeper's review of a merge request, a task's included, with `review_status`.
+Agents can propose learnings, and people may reject them in Knowledge › Learnings before they activate. No MCP tool starts or approves tasks, runs release steps or makes other [Inbox](/guide/home/inbox/) decisions. Agents can read Holtkeeper's review of a merge request, a task's included, with `review_status`.
 :::
 
 ## Related

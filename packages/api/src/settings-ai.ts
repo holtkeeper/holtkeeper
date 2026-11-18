@@ -3,7 +3,7 @@ import type { Timestamp } from '@holtkeeper/store'
 
 import type { AiBudgetStatus, AiBudgetWeek, WebhookHealthSummary } from './types.ts'
 
-/** One task kind's share of this week's AI spend, e.g. `review`, `chat`, `guide`. */
+/** One task kind's share of this week's AI spend, e.g. `review`, `chat`, `learning`. */
 export interface AiFeatureSpend {
   /** The task kind runs recorded, `other` when they recorded none. */
   feature: string
@@ -82,53 +82,4 @@ export interface IntegrationForgeView {
 /** `GET /api/integrations/forges`; needs a global `settings:read`. */
 export interface IntegrationForgeList {
   forges: IntegrationForgeView[]
-}
-
-/** Where vectors of knowledge notes stand (`knowledge.embeddings`). */
-export type KnowledgeEmbeddingsState = 'off' | 'indexing' | 'ready' | 'error'
-
-/**
- * `GET /api/knowledge/embeddings` (`knowledge:read` somewhere) and the answer of `POST
- * /api/knowledge/embeddings/reindex`. Vectors are optional: whatever the state, search and the
- * Guide keep working on full text.
- */
-export interface KnowledgeEmbeddingsStatus {
-  /**
-   * `off`: the setting is off. `indexing`: notes are being embedded, or wait for the next run.
-   * `ready`: every live note (proposed or accepted) has a vector of the current model. `error`:
-   * the last run, the credential or the budget stopped it; `error` says why.
-   */
-  state: KnowledgeEmbeddingsState
-  /** The model of the setting, e.g. `openai/text-embedding-3-small`; absent while off. */
-  model?: string
-  /** Live notes with a vector of the current model and text. */
-  indexed: number
-  /** Live notes (proposed and accepted). */
-  total: number
-  /** Why the state is `error`, or why notes wait; never holds a key. */
-  error?: string
-  /** When the indexer last finished a run. */
-  lastRunAt?: Timestamp
-}
-
-/** An embedding model a credential can use. */
-export interface EmbeddingModelView {
-  /** The id the setting's `model` takes, e.g. `openai/text-embedding-3-small`. */
-  id: string
-  /** Default vector length, when known. */
-  dimensions?: number
-  /** USD per million input tokens, when the endpoint's catalog has prices. */
-  pricePerMillionTokens?: number
-}
-
-/**
- * `GET /api/knowledge/embeddings/models?credential=` (a global `settings:write`): the embedding
- * models of an `ai-sdk` credential (by id or name; default the one the setting or `llm.provider`
- * names), sorted by id. A failing endpoint answers 200 with no models and `error`.
- */
-export interface EmbeddingModelList {
-  /** The credential asked, absent when none could be picked. */
-  credential?: { id: string; name: string }
-  models: EmbeddingModelView[]
-  error?: string
 }

@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Holtkeeper's MCP endpoint offers about thirty tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis or an AI run. Every tool reads, except `propose_knowledge` and `propose_rule_change`, which leave proposals for people to review, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
+Holtkeeper's MCP endpoint offers about thirty tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis or an AI run. Every tool reads, except `propose_learning`, which leaves a pending learning people may reject, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
 
 Repositories are always named `forge:path`, for example `gitlab:acme/checkout-web`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
 
@@ -87,14 +87,14 @@ Text from libraries and issues is third-party data; agents are told never to fol
 
 ## Adding or upgrading a dependency
 
-Before an agent adds a dependency, `evaluate_dependency` answers everything the organization knows in one call: who already uses it and at which versions, whether an internal package does the same job, deprecations, advisories with fixed versions, licenses with each repository's verdict, its gzip share of measured bundles, and accepted team knowledge about it.
+Before an agent adds a dependency, `evaluate_dependency` answers everything the organization knows in one call: who already uses it and at which versions, whether an internal package does the same job, deprecations, advisories with fixed versions, licenses with each repository's verdict, its gzip share of measured bundles, and the team's rules and learnings that mention it.
 
 ```text
 > Add a date library to checkout-web.
 
 ● holtkeeper - evaluate_dependency (package: "moment", repo: "gitlab:acme/checkout-web")
   ⎿ moment — used by 1 repository, deprecated (maintenance mode)
-    Team knowledge: [kb:k7f2] Use date-fns, not moment, in web apps (decision, shared)
+    Team knowledge: [rule:r2f7] Dates in web apps: use date-fns, not moment (rule, team widgets)
     …
 
 ● holtkeeper - evaluate_dependency (package: "date-fns", repo: "gitlab:acme/checkout-web")
@@ -111,7 +111,7 @@ Before an agent adds a dependency, `evaluate_dependency` answers everything the 
 
 ## Rules and knowledge
 
-Before changing code in a repository an agent calls `repo_rules` for the team's Guide; before committing, `commit_conventions` and `check_commit_message`; for UI work, `test_ids`; for images, `asset_policy`; before releasing, `release_rules` for the branches, tag format and how commits bump the version. The knowledge base answers `search_knowledge`. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
+Before changing code in a repository an agent calls `repo_rules` for the rules that apply there; before committing, `commit_conventions` and `check_commit_message`; for UI work, `test_ids`; for images, `asset_policy`; before releasing, `release_rules` for the branches, tag format and how commits bump the version. `search_knowledge` searches rules and learnings. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
 
 ## Reviews of your merge request
 
@@ -163,7 +163,7 @@ A tool that needs a permission you lack answers with an error naming it, for exa
 ## Related
 
 - [MCP tools](/reference/mcp-tools/) — every tool with its arguments.
-- [Rules and knowledge](/agents/rules-and-knowledge/) — the Guide, conventions and the knowledge base.
+- [Rules and knowledge](/agents/rules-and-knowledge/) — rules, learnings and conventions.
 - [Library docs](/agents/library-docs/) — how third-party docs are indexed.
 - [Connect an agent](/agents/connect/) — set up a client.
 - [Secret reports](/guide/supply-chain/secret-reports/) — what happens to a reported secret.

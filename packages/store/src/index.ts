@@ -8,13 +8,8 @@ export {
   matchesJobSearch,
   STALE_JOB_ERROR,
 } from './jobs.ts'
-export { knowledgeWords, matchesKnowledgeFilter } from './knowledge.ts'
-export {
-  FamilyConflictError,
-  assertNoFamilyConflict,
-  matchesGuideFilter,
-  nextGuideSection,
-} from './guides.ts'
+export { searchWords } from './search.ts'
+export { RuleVersionConflictError, ruleContent } from './rules.ts'
 export {
   byLearningUpdate,
   matchesLearningFilter,

@@ -15,18 +15,16 @@ test('default triggers only name analyzers the server ships', () => {
   expect(newRepo?.on).toBe('newRepo')
   if (newRepo?.on === 'newRepo')
     expect(newRepoAnalyzers(newRepo, builtinAnalyzers)).toEqual(
-      expect.arrayContaining(['guide', 'knowledge-bootstrap']),
+      expect.arrayContaining(['rule-miner']),
     )
-  expect(named).not.toContain('guide')
 })
 
-test('every shipped analyzer declares freshness except review, starter knowledge, i18n, audit (queued by the vulnerability index) and those that write to repositories', () => {
+test('every shipped analyzer declares freshness except review, i18n, audit (queued by the vulnerability index) and those that write to repositories', () => {
   const manual = builtinAnalyzers.filter((analyzer) => !analyzer.refresh).map((a) => a.kind)
   expect(manual.toSorted()).toEqual([
     'audit',
     'browserslist',
     'i18n',
-    'knowledge-bootstrap',
     'propagate',
     'review',
     'write-task',
@@ -34,6 +32,6 @@ test('every shipped analyzer declares freshness except review, starter knowledge
   for (const analyzer of builtinAnalyzers) {
     if (analyzer.scope === 'group' && analyzer.refresh) expect(analyzer.refresh.on).toBe('time')
     if (analyzer.needs.agent && analyzer.refresh?.on === 'change')
-      expect(['1d', '7d']).toContain(analyzer.refresh.minInterval)
+      expect(['1d', '7d', '14d']).toContain(analyzer.refresh.minInterval)
   }
 })

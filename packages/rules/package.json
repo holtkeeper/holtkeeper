@@ -1,0 +1,17 @@
+{
+  "name": "@holtkeeper/rules",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/assets": "workspace:*",
+    "@holtkeeper/commit-conventions": "workspace:*",
+    "@holtkeeper/settings": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/testids": "workspace:*"
+  }
+}

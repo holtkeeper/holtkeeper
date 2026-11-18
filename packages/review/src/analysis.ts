@@ -185,8 +185,8 @@ export const reviewMetricsSchema = z.object({
   /** Model of the main agent run, as `ReviewData.usage.model`. */
   model: z.string().optional(),
   durationMs: z.number().optional(),
-  /** As `ReviewData.guideScopes`; absent when the run named none. */
-  guideScopes: z.array(z.string()).optional(),
+  /** As `ReviewData.ruleSources`; absent when the run named none. */
+  ruleSources: z.array(z.string()).optional(),
   /** As `ReviewData.promptVersion`. */
   promptVersion: z.string().optional(),
   /** As `ReviewData.size.minutes`: estimated human review time of the whole merge request. */
@@ -217,7 +217,7 @@ export function reviewMetrics(data: ReviewData): ReviewMetrics {
     ...(data.usage?.costUsd === undefined ? {} : { costUsd: data.usage.costUsd }),
     ...(data.usage?.model ? { model: data.usage.model } : {}),
     ...(data.durationMs === undefined ? {} : { durationMs: data.durationMs }),
-    ...(data.guideScopes?.length ? { guideScopes: data.guideScopes } : {}),
+    ...(data.ruleSources?.length ? { ruleSources: data.ruleSources } : {}),
     ...(data.promptVersion ? { promptVersion: data.promptVersion } : {}),
     ...(data.size?.minutes ? { reviewMinutes: data.size.minutes } : {}),
   }

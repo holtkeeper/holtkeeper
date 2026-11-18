@@ -107,14 +107,14 @@ Read-only history of the task checkout, so a review can answer "check commit 7d6
 - `api`: an outline of the `.d.ts` entry (`types`, `typings` or `exports['.'].types`) and of the files it re-exports from (one level); `heading` filters by name.
 - Go (needs a `CommandRunner`): `api` runs `go doc -short <pkg>` or `go doc <pkg> <heading>`; other views locate the module with `go list -m -f {{.Dir}}|{{.Version}}` and read its Markdown files the same way.
 
-### `knowledge` — `knowledgeTools({ access, repo, taskKind, actor, packages?, budget? })`
+### `knowledge` — `knowledgeTools({ access, repo, taskKind, actor, budget? })`
 
-`KnowledgeAccess` is injected (implemented elsewhere):
+Rules people wrote and rules Holtkeeper learned, for one repository. `KnowledgeAccess` is injected (implemented by the server over its rules and learnings):
 
-- `search(query, { repo, taskKind, limit? })` → `{ id, title, kind, body, score }[]`
-- `propose(input, { actor, repo, taskKind, packages? })` → `{ id, status, duplicateOf? }`
+- `search(query, { repo, taskKind, limit? })` → `{ id, title, body, score }[]`, `id` in citation form (`rule:<id>`, `learn:<id>`)
+- `propose({ text, reason?, files? }, { actor, repo, taskKind })` → `{ id, status, duplicateOf? }`
 
-`knowledge.search { query, limit? (default 5) }` prints `[id] kind: title (score)` with each body trimmed to its share of the budget. `knowledge.propose { title, body, kind?, topics?, packages? }` returns `proposed <id> (<status>)` or the duplicate it matched.
+`search_knowledge { query, limit? (default 5) }` (`SEARCH_KNOWLEDGE_TOOL`) prints `[rule:<id>] title (score)` or `[learn:<id>] …` with each body trimmed to its share of the budget. `propose_learning { text, reason?, files? }` (`PROPOSE_LEARNING_TOOL`) returns `proposed [learn:<id>] (<status>)` or the learning it repeats. The MCP endpoint serves tools of the same names.
 
 ### `libraries` — `libraryTools({ access, repo?, budget? })`
 

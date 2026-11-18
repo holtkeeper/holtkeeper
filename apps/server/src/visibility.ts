@@ -2,7 +2,7 @@ import { type Action, type Principal, type RepoTarget, type Scope, can } from '@
 import { isExactPattern, splitPattern } from '@holtkeeper/access/paths'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type CrossTeamCatalog, crossTeamLevels, defaultCrossTeam } from '@holtkeeper/settings'
-import type { KnowledgeEntry, SettingEntry, SettingStore } from '@holtkeeper/store'
+import type { SettingEntry, SettingStore } from '@holtkeeper/store'
 
 /** Whether a listed repository-bound item is visible; lists filter instead of failing. */
 export const canSee = (principal: Principal, action: Action, repo: RepoTarget) =>
@@ -34,7 +34,7 @@ const readsSomething = (principal: Principal): boolean =>
 
 /**
  * Whether the principal may read the catalog facts of `repo` (package inventory, public API,
- * usages, stack, shared notes): its own `catalog:read` (implied by `analyses:read`), or any read
+ * usages, stack): its own `catalog:read` (implied by `analyses:read`), or any read
  * grant at all while `policy` is not `off`. Never covers findings, audits, jobs or releases.
  */
 export const canSeeCatalog = (
@@ -83,13 +83,9 @@ export const catalogReach =
   async (principal: Principal): Promise<CatalogReach> =>
     reachOf(principal, await crossTeamPolicy(settings), targetOf)
 
-/** Whether a knowledge entry is in the cross-team catalog: accepted and marked `shared`. */
-export const isSharedEntry = (entry: Pick<KnowledgeEntry, 'visibility' | 'status'>): boolean =>
-  entry.visibility === 'shared' && entry.status === 'accepted'
-
 /**
- * Whether the principal may read a `shared` knowledge entry of `scope`: `catalog:read` over the
- * scope, or any read grant while `policy` is not `off`.
+ * Whether the principal may read catalog facts shared across teams for `scope`: `catalog:read`
+ * over the scope, or any read grant while `policy` is not `off`.
  */
 export const canReadShared = (
   principal: Principal,
@@ -100,7 +96,7 @@ export const canReadShared = (
   (policy !== 'off' && readsSomething(principal))
 
 /**
- * The teams an entry of `scope` belongs to: the teams it names, plus the owner teams of the exact
+ * The teams something of `scope` belongs to: the teams it names, plus the owner teams of the exact
  * repositories it names (`forge:path`). Empty for scopes covering everything.
  */
 export function scopeOwner(scope: Scope, teamsOf: (repo: RepoRef) => string[]): string[] {

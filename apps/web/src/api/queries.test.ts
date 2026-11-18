@@ -13,31 +13,29 @@ afterEach(() => {
 
 test('every decision refreshes Inbox, Home and its own area', () => {
   expect(decisionQueryKeys(['task'])).toEqual([keys.inbox, keys.home, ['tasks'], ['chat', 'poll']])
-  expect(decisionQueryKeys(['learning', 'guide'])).toEqual([
+  expect(decisionQueryKeys(['learning', 'learning'])).toEqual([
     keys.inbox,
     keys.home,
     keys.learnings,
-    keys.guide,
-    keys.knowledgeCounts,
+    keys.rules,
   ])
   expect(decisionQueryKeys(['release', 'release'])).toEqual([keys.inbox, keys.home, keys.releases])
-  for (const kind of ['note', 'allowlist'] as const)
+  for (const kind of ['budget', 'allowlist'] as const)
     expect(decisionQueryKeys([kind]).slice(0, 2)).toEqual([keys.inbox, keys.home])
   expect(decisionQueryKeys(['allowlist'])).toContainEqual(keys.settings)
 })
 
-test('phase-19 queries live under the prefixes their mutations refresh', () => {
+test('rule and effective prompt queries live under the prefix rule mutations refresh', () => {
   const repo = { forge: 'gl', path: 'acme/widget-kit' }
-  expect(keys.knowledgeCounts[0]).toBe(keys.knowledge[0])
-  expect(keys.knowledge).toEqual(['knowledge'])
-  for (const key of [
-    keys.guideChain(repo, 'testing'),
-    keys.guideChain(repo),
-    keys.guideRepoFiles(repo),
-    keys.guideGeneratedHistory('repo:gl:acme/widget-kit', 'testing'),
+  for (const key of [keys.rule('r-1'), keys.effectiveRules(repo, 'review', ['src/a.ts'])])
+    expect(key[0]).toBe(keys.rules[0])
+  expect(keys.effectiveRules(repo, 'task', ['a.ts', 'b.ts'])).toEqual([
+    'rules',
+    'effective',
+    'gl:acme/widget-kit',
+    'task',
+    'a.ts,b.ts',
   ])
-    expect(key[0]).toBe(keys.guide[0])
-  expect(keys.guideChain(repo)).toEqual(['guide', 'chain', 'gl:acme/widget-kit', '*'])
   expect(keys.chatContext('t-1')).toEqual([...keys.chat, 'context', 't-1'])
 })
 
@@ -52,11 +50,17 @@ test('chat threads send q only when it has text, and the export link names the t
   )
   await api.chatThreads(true, '  widget ')
   await api.chatThreads(false, '   ')
-  await api.acceptLearnings({ ids: ['l-1', 'l-2'] })
+  await api.decideLearning('l-1', 'approve')
+  await api.rules({ team: 'widgets', text: '  money ' })
+  await api.learnings({ status: ['pending', 'active'], text: ' ' })
+  await api.effectiveRules({ forge: 'gl', path: 'acme/widget-kit' }, 'review', ['a.ts', 'b.ts'])
   expect(calls).toEqual([
     '/api/chat/threads?archived=true&q=widget',
     '/api/chat/threads',
-    '/api/learnings/accept',
+    '/api/learnings/l-1/approve',
+    '/api/rules?team=widgets&text=money',
+    '/api/learnings?status=pending%2Cactive',
+    '/api/rules/effective?repo=gl%3Aacme%2Fwidget-kit&agent=review&files=a.ts%2Cb.ts',
   ])
   expect(api.chatExportUrl('t 1')).toBe('/api/chat/threads/t%201/export')
 })

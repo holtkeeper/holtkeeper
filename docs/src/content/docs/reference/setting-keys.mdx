@@ -25,22 +25,20 @@ This page follows the current definitions in the code, which are still moving. T
 
 ## Knowledge
 
-| Key                    | Section   | Value                                                                                                                                                                                                 | Default                                                      | Edited in           |
-| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------- |
-| `knowledge.autoAccept` | Knowledge | Knowledge kinds agent proposals are accepted for without review: `decision`, `convention`, `migration`, `quirk`, `howto`.                                                                             | none (`quirk`, `howto` on a fresh install)                   | Settings › Policies |
-| `knowledge.embeddings` | Knowledge | Global. `{ enabled, credential?, model, dimensions? }`: vectors of knowledge notes for search, Guide ranking and duplicate checks; `credential` is an `ai-sdk` credential, default the AI provider's. | `{ enabled: false, model: 'openai/text-embedding-3-small' }` | Settings › AI       |
-| `learnings.autoAccept` | Knowledge | `{ sources, scope }`: rule candidates accepted into the Guide without review when they come from `mcp` or `review-reply`; `scope` is `suggested` or `repo`.                                           | `{ sources: [], scope: 'suggested' }`                        | Settings › Policies |
-| `guide.autoAccept`     | Knowledge | Guide sections whose generated text agents use without review: `general`, `testing`, `testids`, `commits`, ….                                                                                         | none                                                         | Settings › Policies |
+| Key                           | Section   | Value                                                                                                                          | Default | Edited in           |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------ | ------- | ------------------- |
+| `learnings.approvalDelayDays` | Knowledge | Days a new learning stays pending before agents use it; people may approve or reject it earlier. `0` activates at once.        | `3`     | Settings › Policies |
+| `learnings.expiryDays`        | Knowledge | Days an active learning lives without being confirmed (a fixed citation, a 👍, the same rule learned again) before it expires. | `90`    | Settings › Policies |
 
 ## Repositories
 
-| Key                   | Section      | Value                                                                                                                                           | Default                                                                     | Edited in                                        |
-| --------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
-| `repo.freeze`         | Repositories | `{ frozen, reason, until? }`: only analyze; never comment, review, open merge requests or push. A `frozen: false` entry lifts a broader freeze. | none: writable                                                              | Settings › People & access                       |
-| `repo.tests`          | Repositories | `{ expected, reason? }`: off marks repositories with no tests by design.                                                                        | `{ expected: true }`                                                        | Quality › Coverage, Settings › Policies          |
-| `repo.analyzers`      | Repositories | `{ off, reason? }`: analyzer kinds that never run automatically here.                                                                           | `{ off: [] }`                                                               | Settings › Policies                              |
-| `commits.conventions` | Repositories | Rules for commit messages and branch names on top of history. Presets `conventional`, `ticket`.                                                 | `{ history: true }`                                                         | Knowledge › Guide (Commits), Settings › Policies |
-| `assets.policy`       | Repositories | Formats, size and dimension limits, ignored globs, budgets and `mode`. Presets `web`, `game`.                                                   | WebP for raster, optimized SVG, warn 500 kB, error 1 MB, 2560 px, `comment` | Knowledge › Guide (Assets), Settings › Policies  |
+| Key                   | Section      | Value                                                                                                                                           | Default                                                                     | Edited in                               |
+| --------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------- |
+| `repo.freeze`         | Repositories | `{ frozen, reason, until? }`: only analyze; never comment, review, open merge requests or push. A `frozen: false` entry lifts a broader freeze. | none: writable                                                              | Settings › People & access              |
+| `repo.tests`          | Repositories | `{ expected, reason? }`: off marks repositories with no tests by design.                                                                        | `{ expected: true }`                                                        | Quality › Coverage, Settings › Policies |
+| `repo.analyzers`      | Repositories | `{ off, reason? }`: analyzer kinds that never run automatically here.                                                                           | `{ off: [] }`                                                               | Settings › Policies                     |
+| `commits.conventions` | Repositories | Rules for commit messages and branch names on top of history. Presets `conventional`, `ticket`.                                                 | `{ history: true }`                                                         | Settings › Policies                     |
+| `assets.policy`       | Repositories | Formats, size and dimension limits, ignored globs, budgets and `mode`. Presets `web`, `game`.                                                   | WebP for raster, optimized SVG, warn 500 kB, error 1 MB, 2560 px, `comment` | Settings › Policies                     |
 
 ## Merge requests
 
@@ -83,33 +81,33 @@ This page follows the current definitions in the code, which are still moving. T
 
 Every analyzer with options has a key `analyzers.<kind>` (section Analyzers): a partial options object, validated field by field and stored without defaults. **Configure** on the page that owns the analyzer opens it; **Settings › Analyzers** lists them all.
 
-| Key                             | Analyzer              | Presets                                                                | Edited in                                                                    |
-| ------------------------------- | --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `analyzers.bundle`              | Bundle size           |                                                                        | Quality › Bundles                                                            |
-| `analyzers.coverage`            | Test coverage         |                                                                        | Quality › Coverage                                                           |
-| `analyzers.branches`            | Branches              |                                                                        | Quality › Branches                                                           |
-| `analyzers.ci-jobs`             | CI jobs               |                                                                        | Quality › CI                                                                 |
-| `analyzers.review`              | Code review           |                                                                        | Quality › Reviews                                                            |
-| `analyzers.depgraph`            | Dependencies          |                                                                        | Supply › Libraries                                                           |
-| `analyzers.renovate`            | Renovate              | `report`, `calm`, `fresh`, `security`                                  | Supply › Libraries                                                           |
-| `analyzers.api-surface`         | Public API            |                                                                        | Supply › Public API                                                          |
-| `analyzers.usages`              | Package usage         |                                                                        | Supply › Public API                                                          |
-| `analyzers.stack`               | Tech stack            |                                                                        | Supply › Stack                                                               |
-| `analyzers.browserslist`        | Browserslist database |                                                                        | Supply › Stack                                                               |
-| `analyzers.audit`               | Vulnerability audit   |                                                                        | Supply › Security                                                            |
-| `analyzers.licenses`            | Licenses              | `commercial`, `no-copyleft`, `open-source`, `internal`, `flag-missing` | Supply › Licenses, Settings › Policies                                       |
-| `analyzers.assets`              | Asset budgets         |                                                                        | Repository › Assets                                                          |
-| `analyzers.testids`             | Test ids              | `testing-library`, `cypress`, `react-native`                           | Knowledge › Guide (Test ids), Settings › Policies                            |
-| `analyzers.tracker`             | Tracker               |                                                                        | Settings › Integrations                                                      |
-| `analyzers.i18n`                | Translations          |                                                                        | Settings › Analyzers                                                         |
-| `analyzers.propagate`           | Package rollout       |                                                                        | Settings › Analyzers                                                         |
-| `analyzers.knowledge-bootstrap` | Starter knowledge     |                                                                        | Settings › Analyzers, see [Notes](/guide/knowledge/notes/#starter-knowledge) |
+| Key                      | Analyzer              | Presets                                                                | Edited in                                                          |
+| ------------------------ | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `analyzers.bundle`       | Bundle size           |                                                                        | Quality › Bundles                                                  |
+| `analyzers.coverage`     | Test coverage         |                                                                        | Quality › Coverage                                                 |
+| `analyzers.branches`     | Branches              |                                                                        | Quality › Branches                                                 |
+| `analyzers.ci-jobs`      | CI jobs               |                                                                        | Quality › CI                                                       |
+| `analyzers.review`       | Code review           |                                                                        | Quality › Reviews                                                  |
+| `analyzers.depgraph`     | Dependencies          |                                                                        | Supply › Libraries                                                 |
+| `analyzers.renovate`     | Renovate              | `report`, `calm`, `fresh`, `security`                                  | Supply › Libraries                                                 |
+| `analyzers.api-surface`  | Public API            |                                                                        | Supply › Public API                                                |
+| `analyzers.usages`       | Package usage         |                                                                        | Supply › Public API                                                |
+| `analyzers.stack`        | Tech stack            |                                                                        | Supply › Stack                                                     |
+| `analyzers.browserslist` | Browserslist database |                                                                        | Supply › Stack                                                     |
+| `analyzers.audit`        | Vulnerability audit   |                                                                        | Supply › Security                                                  |
+| `analyzers.licenses`     | Licenses              | `commercial`, `no-copyleft`, `open-source`, `internal`, `flag-missing` | Supply › Licenses, Settings › Policies                             |
+| `analyzers.assets`       | Asset budgets         |                                                                        | Repository › Assets                                                |
+| `analyzers.testids`      | Test ids              | `testing-library`, `cypress`, `react-native`                           | Settings › Policies                                                |
+| `analyzers.tracker`      | Tracker               |                                                                        | Settings › Integrations                                            |
+| `analyzers.i18n`         | Translations          |                                                                        | Settings › Analyzers                                               |
+| `analyzers.propagate`    | Package rollout       |                                                                        | Settings › Analyzers                                               |
+| `analyzers.rule-miner`   | Rule miner            |                                                                        | Settings › Analyzers, see [Learnings](/guide/knowledge/learnings/) |
 
 The defaults of each analyzer's options are in its module docs. The review options are listed on [The review agent](/agents/review-agent/#configure-it).
 
 ## Retired keys
 
-Holtkeeper no longer reads these keys; the panel hides stored entries and refuses new values: `llm.model`, `llm.models`, `review.instructions`, `agent.instructions` (team rules now live in the Guide), `repo.readOnly` (replaced by `repo.freeze`; set freezes again), `slack.reviews` (the Slack app now marks merge request links in every channel it is in; stored entries were deleted), and the options of removed analyzers `analyzers.changelog`, `analyzers.delivery`, `analyzers.fleet`, `analyzers.port`, `analyzers.quality`, `analyzers.release-risk`, `analyzers.warmup`.
+Holtkeeper no longer reads these keys; the panel hides stored entries and refuses new values: `llm.model`, `llm.models`, `review.instructions`, `agent.instructions` (team rules now live in Knowledge › Rules), `knowledge.autoAccept`, `knowledge.embeddings`, `learnings.autoAccept` and `guide.autoAccept` (the knowledge base was replaced by rules and learnings), `repo.readOnly` (replaced by `repo.freeze`; set freezes again), `slack.reviews` (the Slack app now marks merge request links in every channel it is in; stored entries were deleted), and the options of removed analyzers `analyzers.changelog`, `analyzers.delivery`, `analyzers.fleet`, `analyzers.port`, `analyzers.quality`, `analyzers.release-risk`, `analyzers.warmup`.
 
 ## Related
 

@@ -13,6 +13,7 @@ import type {
 } from '@holtkeeper/forge'
 import { type IssueDetails, issueKeysIn } from '@holtkeeper/issues'
 import type { QualityCheck } from '@holtkeeper/quality'
+import { type RepoRuleFile, type ResolvedRules, resolveRules } from '@holtkeeper/rules'
 import type { AnalysisStore } from '@holtkeeper/store'
 
 import {
@@ -37,11 +38,10 @@ import { commentBody, isSummaryNote, summaryNote, threadNote } from './format.ts
 import { changedGoModules, goGuidelinesSection } from './go-guidelines/prompt.ts'
 import type { GoGuidelineSet } from './go-guidelines/schema.ts'
 import {
-  type Guideline,
   type PathInstruction,
   ignoredInReviewMd,
   pathInstructionsInReviewMd,
-  readGuidelines,
+  readCheckoutRules,
 } from './guidelines.ts'
 import { impactSection } from './impact.ts'
 import { type MediaReviewer, noopMediaReviewer, reviewMedia } from './media.ts'
@@ -168,17 +168,27 @@ export function requireReviewForge(forge: GitForge): ReviewForge {
   )
 }
 
-/** A resolved Guide: its text and the Guide scopes whose rules it carries, broad to narrow. */
+/** The rules a review follows: the resolved text and where its included blocks come from, in order. */
 export interface ReviewGuide {
   text: string
-  scopes: string[]
+  sources: string[]
+}
+
+/** A `ReviewGuide` from resolved rules: their text and the sources of the blocks that made it in. */
+export function reviewGuideOf(resolved: Pick<ResolvedRules, 'text' | 'blocks'>): ReviewGuide {
+  return {
+    text: resolved.text,
+    sources: [
+      ...new Set(resolved.blocks.filter((block) => block.text).map((block) => block.source)),
+    ],
+  }
 }
 
 /** Everything one review run uses. */
 export interface ReviewRun {
   repo: RepoRef
   forge: ReviewForge
-  /** Checkout at the merge request head. Without it there are no checks, guidelines or agent. */
+  /** Checkout at the merge request head. Without it there are no checks, rules files or agent. */
   dir?: string
   runner: CommandRunner
   agent?: Agent
@@ -186,13 +196,12 @@ export interface ReviewRun {
   options: ReviewOptions
   checks?: Partial<Record<ReviewCheckName, QualityCheck>>
   /**
-   * Resolves the repository's Guide for the review from its rules files and the text notes are
-   * ranked by (title and files in scope) and the changed files in scope, which narrow notes bound
-   * to files (`match.files`); replaces the plain guidelines block in the context.
+   * Resolves the rules of the review from the checkout's rules files and the changed files in
+   * scope (panel rules, learnings and policies on top). Without it, or when it fails, the review
+   * follows the repository's rules files alone.
    */
   guide?: (
-    docs: readonly Guideline[],
-    query: string,
+    repoFiles: readonly RepoRuleFile[],
     files: readonly string[],
   ) => Promise<ReviewGuide | undefined>
   /** Passed to the agent as `toolsets`, e.g. code navigation and knowledge tools. */
@@ -266,7 +275,8 @@ export interface ReviewPlan {
   fullScope?: ReviewScope
   /** Files changed since `previousHead`, when incremental. */
   since?: DiffFile[]
-  guidelines: Guideline[]
+  /** The checkout's rules files. */
+  ruleFiles: RepoRuleFile[]
   /** Rules for paths from REVIEW.md's `## Paths` section. */
   pathInstructions?: PathInstruction[]
 }
@@ -279,8 +289,8 @@ export interface AgentOutcome {
   effort?: number
   /** The agent's estimate of a careful human review of the diff it saw, in minutes. */
   reviewMinutes?: number
-  /** Guide scopes whose rules reached the agent, broad to narrow. */
-  guideScopes?: string[]
+  /** Where the rules that reached the agent come from, in prompt order. */
+  ruleSources?: string[]
   /** `reviewPromptVersion()` of the prompts that were sent. */
   promptVersion?: string
   /** Whether the review ran on the `deep` tier. */
@@ -382,8 +392,8 @@ const load: ReviewSteps['load'] = async (run) => {
 }
 
 const plan: ReviewSteps['plan'] = async (run, loaded) => {
-  const guidelines = run.dir ? await readGuidelines(run.dir) : []
-  const reviewMd = guidelines.find((g) => g.file === 'REVIEW.md')
+  const ruleFiles = run.dir ? await readCheckoutRules(run.runner, run.dir, run.signal) : []
+  const reviewMd = ruleFiles.find((file) => file.path === 'REVIEW.md')
   const ignore = [...run.options.ignore, ...(reviewMd ? ignoredInReviewMd(reviewMd.text) : [])]
   const head = loaded.diff.refs.headSha
   const last = loaded.previous?.head
@@ -405,7 +415,7 @@ const plan: ReviewSteps['plan'] = async (run, loaded) => {
     ...(since && last ? { previousHead: last, since } : {}),
     scope: scopeDiff(loaded.diff.files, { ignore, ...(since ? { since } : {}) }),
     ...(since ? { fullScope: scopeDiff(loaded.diff.files, { ignore }) } : {}),
-    guidelines,
+    ruleFiles,
     ...(reviewMd ? { pathInstructions: pathInstructionsInReviewMd(reviewMd.text) } : {}),
   }
 }
@@ -536,23 +546,25 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
   const apiChanges = await apiChangesFor(run, loaded, planned.scope.files)
   const tickets = await ticketsFor(run, loaded)
   const instructions = run.options.instructions?.trim()
-  const guide = run.guide
-    ? await run
-        .guide(
-          planned.guidelines,
-          `${loaded.mr.title}\n${planned.scope.files
-            .slice(0, 30)
-            .map((f) => f.path)
-            .join('\n')}`,
-          planned.scope.files.map((f) => f.path),
-        )
-        .catch((error: unknown) => {
-          run.log?.(
-            `guide lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-          )
-          return undefined
-        })
+  const changedPaths = planned.scope.files.map((f) => f.path)
+  const resolved = run.guide
+    ? await run.guide(planned.ruleFiles, changedPaths).catch((error: unknown) => {
+        run.log?.(`rules lookup failed: ${error instanceof Error ? error.message : String(error)}`)
+        return undefined
+      })
     : undefined
+  const guide =
+    resolved ??
+    reviewGuideOf(
+      resolveRules({
+        repo: { forge: run.repo.forge, path: run.repo.path, teams: [] },
+        agent: 'review',
+        files: changedPaths,
+        rules: [],
+        repoFiles: planned.ruleFiles,
+        learnings: [],
+      }),
+    )
   const pathRules = (planned.pathInstructions ?? []).flatMap((rule) => {
     const files = planned.scope.files
       .map((f) => f.path)
@@ -584,9 +596,8 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       files: planned.scope.files,
       mode: planned.mode,
       ...(planned.previousHead ? { previousHead: planned.previousHead } : {}),
-      guidelines: planned.guidelines,
       ...(run.tests === false && { tests: false as const }),
-      ...(guide?.text ? { guide: guide.text } : {}),
+      ...(guide.text ? { guide: guide.text } : {}),
       ...(instructions ? { instructions } : {}),
       ...(pathRules.length ? { pathInstructions: pathRules } : {}),
       ...(requests?.length
@@ -624,8 +635,8 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
     promptVersion: reviewPromptVersion(),
     ...(depth.deep ? { deep: true } : {}),
   }
-  return guide?.text && guide.scopes.length
-    ? { ...versioned, guideScopes: guide.scopes }
+  return guide.text && guide.sources.length
+    ? { ...versioned, ruleSources: guide.sources }
     : versioned
 }
 
@@ -1121,7 +1132,7 @@ async function reviewOnce(run: ReviewRun, started: number): Promise<ReviewData> 
     ...(agentOutcome?.walkthrough ? { walkthrough: agentOutcome.walkthrough } : {}),
     ...(agentOutcome?.effort ? { effort: agentOutcome.effort } : {}),
     ...(size ? { size } : {}),
-    ...(agentOutcome?.guideScopes?.length ? { guideScopes: agentOutcome.guideScopes } : {}),
+    ...(agentOutcome?.ruleSources?.length ? { ruleSources: agentOutcome.ruleSources } : {}),
     ...(agentOutcome?.promptVersion ? { promptVersion: agentOutcome.promptVersion } : {}),
     comments,
     ...(verification.refuted.length

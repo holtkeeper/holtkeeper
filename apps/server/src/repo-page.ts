@@ -1,5 +1,4 @@
-import type { Action, RepoTarget } from '@holtkeeper/access'
-import { pathAncestors } from '@holtkeeper/access/paths'
+import { type Action, type RepoTarget, scopeCoversRepo } from '@holtkeeper/access'
 import { metricsOf } from '@holtkeeper/analyzer'
 import { auditAnalysis } from '@holtkeeper/analyzers'
 import type {
@@ -27,7 +26,6 @@ import { budgetFor, budgetVerdict, bundleAnalysis, bundleBudgetsSchema } from '@
 import { ciJobsAnalysis } from '@holtkeeper/ci-jobs'
 import { coverageAnalysis, coverageTargetOf } from '@holtkeeper/coverage'
 import type { RepoRef } from '@holtkeeper/forge'
-import { familyOf, guideScopeKey } from '@holtkeeper/guide'
 import { licensesAnalysis } from '@holtkeeper/licenses'
 import { renovateAnalysis } from '@holtkeeper/renovate'
 import { formatBytes } from '@holtkeeper/report'
@@ -277,59 +275,17 @@ async function workSummary(
   }
 }
 
-const hasContent = (section: {
-  rules: string
-  generated?: unknown
-  proposal?: unknown
-  learnings: unknown[]
-}) =>
-  section.rules.trim() !== '' ||
-  section.generated !== undefined ||
-  section.proposal !== undefined ||
-  section.learnings.length > 0
-
-async function knowledgeSummary(
-  store: Store,
-  repo: RepoTarget,
-  titleOf: (team: string) => string,
-): Promise<RepoKnowledgeSummary> {
-  const key = repoKey(repo)
-  const family = familyOf(await store.families.list(), key)
-  // Broad to narrow: owner teams, then the folders holding the repository, shallowest first.
-  const broader = [
-    ...repo.teams.map((team) => ({
-      label: `team ${titleOf(team)}`,
-      scope: guideScopeKey({ kind: 'team', team }),
-    })),
-    ...pathAncestors(repo.path)
-      .toReversed()
-      .map((folder) => ({
-        label: `path ${folder}`,
-        scope: guideScopeKey({ kind: 'path', forge: repo.forge, folder }),
-      })),
-  ]
-  const familyScope = family
-    ? [
-        {
-          label: `family ${family.name}`,
-          scope: guideScopeKey({ kind: 'family', family: family.id }),
-        },
-      ]
-    : []
-  const own = guideScopeKey({ kind: 'repo', forge: repo.forge, path: repo.path })
-  const [sections, notes, proposed] = await Promise.all([
-    store.guides.list({ scopes: [own, ...[...broader, ...familyScope].map((s) => s.scope)] }),
-    store.knowledge.list({ status: ['accepted', 'proposed'] }),
-    store.learnings.list({ repos: [key], status: ['proposed'] }),
+/** Panel rules, active and pending learnings whose scope covers the repository. */
+async function knowledgeSummary(store: Store, repo: RepoTarget): Promise<RepoKnowledgeSummary> {
+  const [rules, learnings] = await Promise.all([
+    store.rules.list(),
+    store.learnings.list({ status: ['pending', 'active'] }),
   ])
-  const filled = new Set(sections.filter(hasContent).map((section) => section.scope))
+  const covering = learnings.filter((learning) => scopeCoversRepo(learning.scope, repo))
   return {
-    sections: sections.filter((section) => section.scope === own && hasContent(section)).length,
-    notes: notes.filter((entry) => entry.scope.repos?.includes(key) === true).length,
-    proposed: proposed.length,
-    inherits: [...broader, ...familyScope]
-      .filter(({ scope }) => filled.has(scope))
-      .map(({ label }) => label),
+    rules: rules.filter((rule) => scopeCoversRepo(rule.scope, repo)).length,
+    learnings: covering.filter((learning) => learning.status === 'active').length,
+    pending: covering.filter((learning) => learning.status === 'pending').length,
   }
 }
 
@@ -893,8 +849,6 @@ export async function repoOverview(
     access: HealthAccess
     releases?: () => Promise<ReleaseCard[]>
     teamsOf: (repo: RepoRef) => string[]
-    /** What people see for a team key; default the key. */
-    teamTitle?: (team: string) => string
   },
 ): Promise<RepoOverview> {
   const { store } = deps
@@ -934,9 +888,7 @@ export async function repoOverview(
       tasks: may('repos:read'),
       spend: may('ai:read') || may('ai:admin'),
     }),
-    may('knowledge:read')
-      ? knowledgeSummary(store, repo, options.teamTitle ?? ((team) => team))
-      : undefined,
+    may('knowledge:read') ? knowledgeSummary(store, repo) : undefined,
     accessSummary(store, repo, now),
     may('audits:read') ? findingUrgencies(store.kv) : undefined,
   ])

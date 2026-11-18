@@ -111,13 +111,12 @@ function countParam(value: string | undefined, name: string): number | undefined
 
 /** Where jobs of each run-only analyzer are queued. */
 const RUN_ONLY_ENDPOINTS: Record<string, string> = {
-  guide: 'POST /api/guide/regenerate',
   'write-task': 'POST /api/task-groups',
 }
 
 /**
- * Analyzers whose options only their own endpoint sets for one run (`guide`: `/api/guide/regenerate`,
- * `write-task`: `/api/task-groups`), so they get no `analyzers.<kind>` setting and `POST /api/jobs`
+ * Analyzers whose options only their own endpoint sets for one run (`write-task`:
+ * `/api/task-groups`), so they get no `analyzers.<kind>` setting and `POST /api/jobs`
  * refuses them.
  */
 export const RUN_ONLY_ANALYZERS: ReadonlySet<string> = new Set(Object.keys(RUN_ONLY_ENDPOINTS))

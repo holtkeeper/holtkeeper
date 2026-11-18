@@ -4,8 +4,8 @@ import { SQL } from 'bun'
 
 import { coveredRepos, dimensionFlags, toBucket } from './ai-usage.ts'
 import { isUniqueViolation, statusList } from './jobs.ts'
-import { RANK_WEIGHTS, knowledgeFilterParams, knowledgeTags, searchTerms } from './knowledge.ts'
 import { checkSchemaName, migrationLockKey, migrations, pendingMigrations } from './migrations.ts'
+import { RANK_WEIGHTS, searchTerms } from './search.ts'
 
 describe('query building', () => {
   test('search terms are distinct lowercase words without operators or quotes', () => {
@@ -20,45 +20,11 @@ describe('query building', () => {
     expect(searchTerms('   ')).toEqual([])
   })
 
-  test('rank weights put title over tags over body', () => {
+  test('rank weights put A over B over C over D', () => {
     const [d, c, b, a] = RANK_WEIGHTS
     expect(a).toBeGreaterThan(b)
     expect(b).toBeGreaterThan(c)
     expect(c).toBeGreaterThan(d)
-  })
-
-  test('knowledge filters become list and package parameters', () => {
-    expect(knowledgeFilterParams()).toEqual({
-      statuses: null,
-      kinds: null,
-      topic: null,
-      scope: null,
-      packageName: null,
-      ecosystem: null,
-      subject: null,
-    })
-    expect(knowledgeFilterParams({ subject: 'npm:widget-kit' }).subject).toBe('npm:widget-kit')
-    expect(
-      knowledgeFilterParams({ status: 'accepted', kind: ['quirk', 'howto'], package: 'npm:react' }),
-    ).toMatchObject({
-      statuses: ['accepted'],
-      kinds: ['quirk', 'howto'],
-      packageName: 'react',
-      ecosystem: 'npm',
-    })
-    expect(knowledgeFilterParams({ package: 'react' })).toMatchObject({
-      packageName: 'react',
-      ecosystem: null,
-    })
-  })
-
-  test('knowledge tags join topics and package names', () => {
-    expect(
-      knowledgeTags({
-        topics: ['testing', 'i18n'],
-        packages: [{ ecosystem: 'npm', name: 'vitest' }],
-      } as Parameters<typeof knowledgeTags>[0]),
-    ).toBe('testing i18n vitest')
   })
 
   test('dimension flags mark only requested dimensions', () => {

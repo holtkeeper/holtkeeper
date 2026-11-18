@@ -158,7 +158,7 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     await store.close()
   })
 
-  test('migrations 24 and 25 add guide generated history and chat context; old rows read empty', async () => {
+  test('migration 25 adds chat context; old rows read empty', async () => {
     const schema = nextSchema()
     await migrate(
       admin!,
@@ -166,28 +166,6 @@ describe.skipIf(!url || !admin)('postgres store', () => {
       migrations.filter((step) => step.version <= 23),
     )
     const at = '2026-11-01T00:00:00.000Z'
-    const layer = {
-      body: '- Run `bun test`.',
-      inputHash: 'h1',
-      model: 'model-fast',
-      costUsd: 0,
-      status: 'proposed' as const,
-      generatedAt: at,
-    }
-    await admin!.unsafe(`INSERT INTO ${schema}.guides (scope, section, data) VALUES ($1, $2, $3)`, [
-      'repo:gl:acme/widget-kit',
-      'testing',
-      {
-        scope: 'repo:gl:acme/widget-kit',
-        section: 'testing',
-        rules: '',
-        steering: '',
-        version: 0,
-        generated: layer,
-        proposal: layer,
-        learnings: [],
-      },
-    ])
     await admin!.unsafe(
       `INSERT INTO ${schema}.chat_threads (id, updated_at, archived, data) VALUES ($1, $2, false, $3)`,
       [
@@ -228,11 +206,6 @@ describe.skipIf(!url || !admin)('postgres store', () => {
       migrations.filter((step) => step.version > 23).map((step) => step.version),
     )
     const store = postgresStore({ url: url!, schema })
-    expect(await store.guides.get('repo:gl:acme/widget-kit', 'testing')).toMatchObject({
-      generated: { ...layer, version: 0 },
-      proposal: { ...layer, version: 0 },
-    })
-    expect(await store.guides.generatedHistory('repo:gl:acme/widget-kit', 'testing')).toEqual([])
     expect((await store.chat.getThread('t1'))?.contextRepos).toEqual([])
     expect((await store.chat.getMessage('m1'))?.refs).toEqual([])
     expect(await store.chat.context('t1')).toMatchObject({ messageCount: 1, repos: [] })
@@ -350,7 +323,7 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     await store.close()
   })
 
-  test('migration 29 renames ai usage groups to teams and adds knowledge match', async () => {
+  test('migration 29 renames ai usage groups to teams', async () => {
     const schema = nextSchema()
     await migrate(
       admin!,
@@ -380,29 +353,47 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     await store.close()
   })
 
-  test('migration 30 adds embeddings stored as bytea', async () => {
+  test('migration 33 replaces notes, guides, families and embeddings with rules and learnings', async () => {
     const schema = nextSchema()
     await migrate(
       admin!,
       schema,
-      migrations.filter((step) => step.version <= 29),
+      migrations.filter((step) => step.version <= 32),
     )
-    expect(await migrate(admin!, schema)).toContain(30)
-    const [column] = (await admin!`
-      SELECT data_type FROM information_schema.columns
-      WHERE table_schema = ${schema} AND table_name = 'embeddings' AND column_name = 'vector'`) as {
-      data_type: string
+    const at = '2026-11-01T00:00:00.000Z'
+    await admin!.unsafe(
+      `INSERT INTO ${schema}.knowledge (id, title, body, kind, status, source, author, scope, topics,
+         applies_to, evidence, tags, created_at, updated_at, version)
+       VALUES ('k1', 'Round corners', 'Use the radius token.', 'convention', 'accepted', 'human',
+         'jane', '{"teams":["widgets"]}', '[]', '["*"]', '[]', '', $1, $1, 1)`,
+      [at],
+    )
+    await admin!.unsafe(
+      `INSERT INTO ${schema}.learning_claims (key, at) VALUES ('work:a!1#2', $1)`,
+      [at],
+    )
+    expect(await migrate(admin!, schema)).toContain(33)
+    const tables = (await admin!`
+      SELECT table_name FROM information_schema.tables WHERE table_schema = ${schema}`) as {
+      table_name: string
     }[]
-    expect(column?.data_type).toBe('bytea')
+    const names = tables.map((row) => row.table_name)
+    for (const gone of [
+      'knowledge',
+      'knowledge_history',
+      'guides',
+      'guide_history',
+      'guide_generated',
+      'families',
+      'embeddings',
+    ])
+      expect(names).not.toContain(gone)
+    expect(names).toEqual(
+      expect.arrayContaining(['rules', 'rule_history', 'learnings', 'learning_claims']),
+    )
     const store = postgresStore({ url: url!, schema })
-    const vector = Float32Array.of(0.5, -2, 1e-20)
-    await store.embeddings.put([{ subject: 'knowledge:k1', model: 'fake:m@3', hash: 'h', vector }])
-    const [bytes] = (await admin!.unsafe(
-      `SELECT encode(vector, 'hex') AS hex FROM ${schema}.embeddings`,
-    )) as { hex: string }[]
-    // Little-endian float32: 0.5 is 0x3f000000, stored low byte first.
-    expect(bytes?.hex.slice(0, 8)).toBe('0000003f')
-    expect((await store.embeddings.list({ model: 'fake:m@3' }))[0]?.vector).toEqual(vector)
+    expect(await store.learnings.claim('work:a!1#2', at)).toBe(false)
+    expect(await store.learnings.list()).toEqual([])
     await store.close()
   })
 
@@ -456,23 +447,36 @@ describe.skipIf(!url || !admin)('postgres store', () => {
 
   test('search folds accents and survives hostile input', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema() })
-    await store.knowledge.put({
+    const at = '2026-10-01T00:00:00.000Z'
+    await store.rules.put({
       id: 'k',
       title: 'Café menus',
       body: "Backslash \\ and quote ' are fine",
-      kind: 'quirk',
       scope: { all: true },
-      topics: [],
-      appliesTo: ['*'],
-      status: 'accepted',
-      evidence: [],
-      source: 'human',
       author: 'jane',
-      createdAt: '2026-10-01T00:00:00.000Z',
-      updatedAt: '2026-10-01T00:00:00.000Z',
+      createdAt: at,
+      updatedAt: at,
     })
-    expect((await store.knowledge.search('cafe')).map((hit) => hit.entry.id)).toEqual(['k'])
-    expect((await store.knowledge.search("\\ ' '' :* & | ! <->")).length).toBe(0)
+    expect((await store.rules.search('cafe')).map((hit) => hit.rule.id)).toEqual(['k'])
+    expect((await store.rules.search("\\ ' '' :* & | ! <->")).length).toBe(0)
+    await store.learnings.put({
+      id: 'l',
+      text: 'Déjà vu is fine.',
+      key: 'deja vu is fine',
+      scope: { all: true },
+      origin: 'person',
+      status: 'active',
+      sources: [],
+      createdAt: at,
+      updatedAt: at,
+      activeAt: at,
+      lastReinforcedAt: at,
+      uses: 0,
+      actedOn: 0,
+      votesUp: 0,
+      votesDown: 0,
+    })
+    expect((await store.learnings.search('deja')).map((hit) => hit.learning.id)).toEqual(['l'])
     await store.close()
   })
 })

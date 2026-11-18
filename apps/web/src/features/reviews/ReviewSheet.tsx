@@ -1,9 +1,4 @@
-import type {
-  LearningCandidateView,
-  ReviewDetail,
-  ReviewFindingView,
-  ReviewRow,
-} from '@holtkeeper/api'
+import type { LearningView, ReviewDetail, ReviewFindingView, ReviewRow } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ExternalLink, RotateCcw } from 'lucide-react'
 import { useState } from 'react'
@@ -11,6 +6,7 @@ import { useState } from 'react'
 import { useLearnings, useReview } from '../../api/queries.ts'
 import { formatUsd } from '../../lib/ai-usage.ts'
 import { formatDuration, formatRelative, shortSha } from '../../lib/format.ts'
+import { learningStatusOf } from '../../lib/learnings.ts'
 import { repoKey, repoSplat } from '../../lib/repo.ts'
 import {
   type ReviewSheetTab,
@@ -125,10 +121,10 @@ function RunFacts({ detail }: { detail: ReviewDetail }) {
             ),
           },
           {
-            label: 'Guide used',
-            value: review.guideScopes.length ? (
-              <Link to="/knowledge/guide" className="hover:underline">
-                {review.guideScopes.join(' › ')}
+            label: 'Rules used',
+            value: review.ruleSources.length ? (
+              <Link to="/knowledge/rules" className="hover:underline">
+                {review.ruleSources.join(' · ')}
               </Link>
             ) : (
               <span className="text-muted">None</span>
@@ -155,20 +151,13 @@ function RunFacts({ detail }: { detail: ReviewDetail }) {
   )
 }
 
-function ReviewLearnings({
-  repo,
-  candidates,
-}: {
-  repo: ReviewRow['repo']
-  candidates: readonly LearningCandidateView[]
-}) {
-  const link = { to: '/knowledge/learnings', search: { space: `repo:${repoKey(repo)}` } } as const
+function ReviewLearnings({ candidates }: { candidates: readonly LearningView[] }) {
   if (!candidates.length)
     return (
       <p className="text-xs text-muted">
-        No reply to this review became a learning candidate.{' '}
-        <Link {...link} className="text-foreground hover:underline">
-          Learnings of the repository
+        No reply to this review became a learning.{' '}
+        <Link to="/knowledge/learnings" className="text-foreground hover:underline">
+          Knowledge › Learnings
         </Link>
       </p>
     )
@@ -177,22 +166,23 @@ function ReviewLearnings({
       <ul className="flex flex-col divide-y divide-line rounded-[10px] border border-line">
         {candidates.map((candidate) => (
           <li key={candidate.id} className="flex items-start gap-2 px-3 py-2 text-[12.5px]">
-            <span className="min-w-0 flex-1">{candidate.rule}</span>
-            <Tag
-              tone={
-                candidate.status === 'accepted'
-                  ? 'success'
-                  : candidate.status === 'rejected'
-                    ? 'default'
-                    : 'warning'
-              }
+            <Link
+              to="/knowledge/learnings"
+              search={{ learning: candidate.id }}
+              className="min-w-0 flex-1 hover:underline"
             >
-              {candidate.status}
+              {candidate.text}
+            </Link>
+            <Tag tone={learningStatusOf(candidate.status).tone}>
+              {learningStatusOf(candidate.status).label}
             </Tag>
           </li>
         ))}
       </ul>
-      <Link {...link} className="self-start text-xs text-muted hover:text-foreground">
+      <Link
+        to="/knowledge/learnings"
+        className="self-start text-xs text-muted hover:text-foreground"
+      >
         Decide in Knowledge › Learnings
       </Link>
     </div>
@@ -224,7 +214,7 @@ function ReviewBody({ detail, tab }: { detail: ReviewDetail; tab: ReviewSheetTab
 
 /**
  * One review run in the side sheet: verdict, severities, findings with suggestions, summary and
- * the run's model, tokens, cost, duration and guide scopes. "Review again" needs `useCanReview`.
+ * the run's model, tokens, cost, duration and where its rules came from. "Review again" needs `useCanReview`.
  */
 export function ReviewSheet({
   row,
@@ -251,7 +241,7 @@ export function ReviewSheet({
   const [isAgain, setAgain] = useState(false)
   if (!row) return null
   const current = tab ?? 'findings'
-  const candidates = (learnings.data?.candidates ?? []).filter((candidate) =>
+  const candidates = (learnings.data?.learnings ?? []).filter((candidate) =>
     candidate.sources.some(
       (source) => source.repo === repoKey(row.repo) && source.mergeRequest === row.mergeRequest.iid,
     ),
@@ -335,7 +325,7 @@ export function ReviewSheet({
             ) : learnings.isError ? (
               <ErrorState error={learnings.error} />
             ) : (
-              <ReviewLearnings repo={row.repo} candidates={candidates} />
+              <ReviewLearnings candidates={candidates} />
             )
           ) : detail.isPending ? (
             <Placeholder className="h-64" />

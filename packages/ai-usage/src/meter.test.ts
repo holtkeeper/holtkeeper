@@ -194,10 +194,10 @@ describe('meteredAgent', () => {
       context,
       now: fixedNow,
     })
-    await agent.run({ dir: '/x', prompt: 'p', taskKind: 'knowledge-bootstrap', estimateUsd: 0.12 })
+    await agent.run({ dir: '/x', prompt: 'p', taskKind: 'rule-miner', estimateUsd: 0.12 })
     await agent.run({ dir: '/x', prompt: 'p' })
     expect(checks).toEqual([
-      { repo, taskKind: 'knowledge-bootstrap', estimateUsd: 0.12 },
+      { repo, taskKind: 'rule-miner', estimateUsd: 0.12 },
       { repo, taskKind: 'agent' },
     ])
   })

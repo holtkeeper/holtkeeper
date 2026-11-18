@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-The MCP endpoint (`POST /mcp`) serves the tools below, in this order. Every tool reads stored data only, unless marked **writes**. Arguments marked `?` are optional; repositories are always `forge:path` (`gitlab:acme/checkout-web`). Only `propose_knowledge` and `propose_rule_change` write, and both leave a proposal for people to review, plus `report_secret_exposure`, which files a [secret report](/guide/supply-chain/secret-reports/); no tool starts tasks, runs release steps or approves anything. Fleet-wide tools (security findings, licenses, stack usage), release state and job tools are not served over MCP; people find them in the panel and in [Chat](/guide/chat/threads/). Which tools a client sees depends on its owner's access; **Account › Connect agents › Tool reference** shows the live list with every argument's description.
+The MCP endpoint (`POST /mcp`) serves the tools below, in this order. Every tool reads stored data only, unless marked **writes**. Arguments marked `?` are optional; repositories are always `forge:path` (`gitlab:acme/checkout-web`). Only `propose_learning` writes, and it leaves a pending learning people may reject, plus `report_secret_exposure`, which files a [secret report](/guide/supply-chain/secret-reports/); no tool starts tasks, runs release steps or approves anything. Fleet-wide tools (security findings, licenses, stack usage), release state and job tools are not served over MCP; people find them in the panel and in [Chat](/guide/chat/threads/). Which tools a client sees depends on its owner's access; **Account › Connect agents › Tool reference** shows the live list with every argument's description.
 
 For a walkthrough with example calls, see [What agents can ask](/agents/tools/).
 
@@ -38,27 +38,26 @@ Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type
 
 ## Knowledge
 
-| Tool                | Description                                                                                      | Arguments                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `search_knowledge`  | Searches accepted knowledge entries, best match first; without `query`, every applicable entry.  | `query?`, `repo?`, `kind?`, `package?`, `subject?`, `topic?`, `limit?` (1–30, default 10) |
-| `get_knowledge`     | One entry in full: body, status, scope, packages, topics, evidence and the entry it supersedes.  | `id` (or its citation `[kb:<id>]`)                                                        |
-| `propose_knowledge` | **Writes.** Proposes an entry for one repository; it waits for review, duplicates are not added. | `title`, `body`, `repo`, `kind?`, `topics?`, `packages?`, `evidence?`                     |
+| Tool               | Description                                                                                                     | Arguments                            |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `search_knowledge` | Full-text search over rules and active learnings, best match first; with `repo`, only those that apply there.   | `query`, `repo?`                     |
+| `get_rule`         | One rule in full: body, scope, files, agents and description.                                                   | `id` (or its citation `[rule:<id>]`) |
+| `propose_learning` | **Writes.** Proposes a one-sentence learning; it activates after the approval delay unless a person rejects it. | `repo`, `text`, `reason?`, `files?`  |
 
-`kind` is `decision`, `convention`, `migration`, `quirk` or `howto`. A package in `packages` is `{ ecosystem, name, from?, to? }` with semver ranges; evidence is `{ label, url }`.
+A proposal that repeats an existing learning adds a source to it instead of a new learning.
 
 ## Rules
 
 | Tool                   | Description                                                                                                            | Arguments                                                               |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `repo_rules`           | The repository's Guide: team rules from every scope, learned rules, policies, generated text, then knowledge notes.    | `repo`, `task?`, `section?`, `only?`                                    |
-| `propose_rule_change`  | **Writes.** Proposes one imperative rule for a Guide section; people review it under Knowledge › Learnings.            | `repo`, `section`, `rule`, `reason`, `scope?`                           |
+| `repo_rules`           | The rules for a repository: panel rules, its rules files, policies, then learned rules; on-request rules listed last.  | `repo`, `files?`, `agent?`                                              |
 | `test_ids`             | The test id convention and existing test ids per component.                                                            | `repo`, `path?` (file, folder or component name), `limit?` (default 20) |
 | `suggest_test_ids`     | Interactive elements of one component file without a test id, each with a suggested id. Deterministic.                 | `repo`, `file`, `content` (the file's current text)                     |
 | `commit_conventions`   | How commit messages and branch names should look: template, rules with their source, real examples, team notes.        | `repo`, `commits?` (history to learn from, default 100)                 |
 | `check_commit_message` | Checks a commit message or merge request title and a branch name; errors break enforced rules, warnings history.       | `repo`, `message?`, `branch?`                                           |
 | `release_rules`        | How a repository releases, in plain language: branches, flow, tag format, bump rules, acceptance, gates, environments. | `repo`                                                                  |
 
-`release_rules` needs `releases:read` on the repository. `task` is `agent` (default), `review`, `chat` or `release-notes`. `section` and `only` are `general`, `review`, `testing`, `testids`, `assets`, `commits` or `releases`. `propose_rule_change` `scope` is `repo` (default), `family`, `path` (the repository's folder), `team` (its first owner team), or an exact scope such as `path:<forge>:<folder>`, `team:<key>`, `family:<id>` or `repo:<forge:path>`.
+`release_rules` needs `releases:read` on the repository. `repo_rules` `agent` is `task` (default), `review`, `chat` or `release`; `files` are repository-relative paths the agent is about to touch.
 
 ## Assets
 

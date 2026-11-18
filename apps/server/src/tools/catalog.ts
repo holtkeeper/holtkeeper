@@ -46,7 +46,7 @@ export interface CatalogToolsContext {
   usages: UsageIndex
   /** Stored analyses (audits included) that `evaluate_dependency` reads. */
   store: Pick<Store, 'analyses'>
-  /** The knowledge base `evaluate_dependency` quotes. */
+  /** Rules and learnings `evaluate_dependency` quotes. */
   knowledge: KnowledgeToolsContext
   /** Repositories whose API, usages and stored analyses the caller may read (catalog reach). */
   canRead: RepoFilter
@@ -788,7 +788,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       defineTool({
         name: 'evaluate_dependency',
         description:
-          'Everything the organization knows about a dependency before you add or upgrade it: which repositories use it at which versions (and whether it is an internal package), deprecations, advisories from the newest audits with fixed versions, licenses with each repository’s verdict (and the verdict under `repo`’s policy), its gzip share of measured bundles, and accepted team knowledge about it. Reads stored analyses only.',
+          'Everything the organization knows about a dependency before you add or upgrade it: which repositories use it at which versions (and whether it is an internal package), deprecations, advisories from the newest audits with fixed versions, licenses with each repository’s verdict (and the verdict under `repo`’s policy), its gzip share of measured bundles, and team rules and learned rules that mention it. Reads stored analyses only.',
         input: z.object({
           package: z
             .string()

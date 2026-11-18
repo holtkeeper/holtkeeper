@@ -265,6 +265,7 @@ const base = () => ({
   catalog: createApiCatalog({ analyses: store.analyses }),
   usages: createUsageIndex({ analyses: store.analyses }),
   store,
+  config,
 })
 
 const toolNames = (toolsets: ReturnType<typeof mcpToolsets>) =>
@@ -274,7 +275,14 @@ describe('registration', () => {
   test('the MCP catalog toolset never offers the fleet tables', () => {
     const context = {
       ...base(),
-      knowledge: { store, canReadScope: () => true, repoOf: () => undefined, actor: 'x', now },
+      knowledge: {
+        store,
+        config,
+        canReadScope: () => true,
+        repoOf: () => undefined,
+        actor: 'x',
+        now,
+      },
       canRead: () => true,
       canReadAnalyses: () => true,
       canReadAudits: () => true,

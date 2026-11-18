@@ -4,7 +4,7 @@ import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import type { GitForge, Repository } from '@holtkeeper/forge'
-import { createKnowledgeBootstrapAnalyzer } from '@holtkeeper/knowledge-bootstrap'
+import { createRuleMinerAnalyzer, minerMarker } from '@holtkeeper/rule-miner'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -123,31 +123,23 @@ describe('jobs.onNewRepo', () => {
     )
   })
 
-  test('starter knowledge is queued only for new repositories without entries of their own', async () => {
-    await store.knowledge.put({
-      id: 'k1',
-      title: 'Widgets are cached for a minute',
-      body: 'The cache lives in the widget client.',
-      kind: 'quirk',
-      scope: { repos: ['work:games/b'] },
-      topics: [],
-      appliesTo: ['*'],
-      status: 'accepted',
-      source: 'human',
-      author: 'jane',
-      evidence: [],
-      createdAt: '2026-10-01T00:00:00.000Z',
-      updatedAt: '2026-10-01T00:00:00.000Z',
+  test('the rule miner is queued only for new repositories it did not mine lately', async () => {
+    const at = '2026-11-02T10:00:00.000Z'
+    await store.kv!.set(minerMarker({ forge: 'work', path: 'games/b' }), {
+      at,
+      minedUntil: at,
+      runs: 1,
+      created: 0,
     })
     const p = poller(configWith({ onNewRepo: {} }), [
       analyzer('quality'),
-      createKnowledgeBootstrapAnalyzer({ store }),
+      createRuleMinerAnalyzer({ store, now: () => new Date(at) }),
     ])
     listed = ['games/a', 'games/b']
     await p.listFleet('work')
     expect(await queued()).toEqual([
-      'games/a knowledge-bootstrap new-repo',
       'games/a quality new-repo',
+      'games/a rule-miner new-repo',
       'games/b quality new-repo',
     ])
   })

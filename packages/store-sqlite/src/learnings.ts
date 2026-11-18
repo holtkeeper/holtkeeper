@@ -1,36 +1,56 @@
 import type { Database } from 'bun:sqlite'
 
-import type { LearningCandidate, LearningStore, ReactionSignal } from '@holtkeeper/store'
-import {
-  byLearningUpdate,
-  matchesLearningFilter,
-  reactionsOf,
-  sumReactions,
-} from '@holtkeeper/store'
+import type { Learning, LearningFilter, LearningStore, ReactionSignal } from '@holtkeeper/store'
+import { reactionsOf, sumReactions } from '@holtkeeper/store'
+
+import { ftsQuery } from './search.ts'
 
 interface DataRow {
   data: string
 }
 
-const toCandidate = (row: DataRow): LearningCandidate => JSON.parse(row.data)
+type FilterParams = [string | null, string | null]
+
+const toLearning = (row: DataRow): Learning => JSON.parse(row.data)
 const toSignal = (row: DataRow): ReactionSignal => JSON.parse(row.data)
 
+const filterParams = (filter: LearningFilter = {}): FilterParams => [
+  filter.status ? JSON.stringify(filter.status) : null,
+  filter.origin ? JSON.stringify(filter.origin) : null,
+]
+
+const filterSql = `
+  (?1 IS NULL OR l.status IN (SELECT value FROM json_each(?1)))
+  AND (?2 IS NULL OR l.origin IN (SELECT value FROM json_each(?2)))`
+
 /**
- * The SQLite `LearningStore`: one JSON row per candidate in `learnings`, handled sources in
- * `learning_claims`, reaction counts in `review_reactions`.
+ * The SQLite `LearningStore`: one JSON row per learning in `learnings` (status, origin, key and
+ * text also as columns, the text indexed by FTS5), handled sources in `learning_claims`, reaction
+ * counts in `review_reactions`.
  */
 export function sqliteLearnings(db: Database): LearningStore {
   const sql = {
     get: db.query<DataRow, [string]>('SELECT data FROM learnings WHERE id = ?'),
-    all: db.query<DataRow, []>('SELECT data FROM learnings'),
-    find: db.query<DataRow, [string, string]>(
-      'SELECT data FROM learnings WHERE repo = ? AND key = ? ORDER BY created_at, id LIMIT 1',
+    list: db.query<DataRow, FilterParams>(
+      `SELECT l.data FROM learnings l WHERE ${filterSql} ORDER BY l.updated_at DESC, l.id`,
+    ),
+    find: db.query<DataRow, [string]>(
+      'SELECT data FROM learnings WHERE key = ? ORDER BY created_at, id LIMIT 1',
+    ),
+    search: db.query<DataRow & { rank: number }, [...FilterParams, string, number]>(
+      `SELECT l.data, bm25(learnings_fts) AS rank
+       FROM learnings_fts JOIN learnings l ON l.seq = learnings_fts.rowid
+       WHERE learnings_fts MATCH ?3 AND ${filterSql}
+       ORDER BY rank, l.updated_at DESC, l.id LIMIT ?4`,
     ),
     upsert: db.prepare(
-      `INSERT INTO learnings (id, repo, key, created_at, data) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET repo = excluded.repo, key = excluded.key,
-         created_at = excluded.created_at, data = excluded.data`,
+      `INSERT INTO learnings (id, key, text, status, origin, created_at, updated_at, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET key = excluded.key, text = excluded.text,
+         status = excluded.status, origin = excluded.origin, created_at = excluded.created_at,
+         updated_at = excluded.updated_at, data = excluded.data`,
     ),
+    remove: db.prepare('DELETE FROM learnings WHERE id = ?'),
     claim: db.prepare('INSERT INTO learning_claims (key, at) VALUES (?, ?) ON CONFLICT DO NOTHING'),
     release: db.prepare('DELETE FROM learning_claims WHERE key = ?'),
     putReactions: db.prepare(
@@ -45,26 +65,34 @@ export function sqliteLearnings(db: Database): LearningStore {
   return {
     async get(id) {
       const row = sql.get.get(id)
-      return row ? toCandidate(row) : undefined
+      return row ? toLearning(row) : undefined
     },
-    list: async (filter) =>
-      sql.all
-        .all()
-        .map(toCandidate)
-        .filter((candidate) => matchesLearningFilter(candidate, filter))
-        .toSorted(byLearningUpdate),
-    async find(repo, key) {
-      const row = sql.find.get(repo, key)
-      return row ? toCandidate(row) : undefined
+    list: async (filter) => sql.list.all(...filterParams(filter)).map(toLearning),
+    async find(key) {
+      const row = sql.find.get(key)
+      return row ? toLearning(row) : undefined
     },
-    async put(candidate) {
+    async put(learning) {
       sql.upsert.run(
-        candidate.id,
-        candidate.repo,
-        candidate.key,
-        candidate.createdAt,
-        JSON.stringify(candidate),
+        learning.id,
+        learning.key,
+        learning.text,
+        learning.status,
+        learning.origin,
+        learning.createdAt,
+        learning.updatedAt,
+        JSON.stringify(learning),
       )
+    },
+    async remove(id) {
+      sql.remove.run(id)
+    },
+    async search(text, filter, limit = 20) {
+      const query = ftsQuery(text)
+      if (!query) return []
+      return sql.search
+        .all(...filterParams(filter), query, limit)
+        .map((row) => ({ learning: toLearning(row), score: -row.rank }))
     },
     claim: async (key, at) => sql.claim.run(key, at).changes > 0,
     async release(key) {

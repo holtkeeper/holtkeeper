@@ -291,9 +291,7 @@ describe('startServer roles', () => {
     try {
       expect((await fetch(`${running.url}/api/me`)).status).toBe(200)
       expect((await fetch(`${running.url}/readyz`)).status).toBe(200)
-      expect((await store.settings.get('default:agent.tools'))?.value).toEqual({
-        knowledgeTokens: 1500,
-      })
+      expect((await store.settings.get('default:audit.upgrade'))?.value).toBe('minor')
       expect(await (await fetch(`${running.url}/metrics`)).text()).toContain(
         'holtkeeper_jobs_queued',
       )

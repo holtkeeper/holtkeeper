@@ -63,9 +63,8 @@ const ANALYZERS_OFF = 'repo.analyzers'
 const MR_COMMENTS = 'mergeRequests.comments'
 const ALLOWLIST = 'audit.allowlist'
 const ALLOWLIST_RULES = 'audit.allowlistPolicy'
-const KNOWLEDGE = 'knowledge.autoAccept'
-const LEARNINGS = 'learnings.autoAccept'
-const GUIDE = 'guide.autoAccept'
+const LEARNING_DELAY = 'learnings.approvalDelayDays'
+const LEARNING_EXPIRY = 'learnings.expiryDays'
 
 /** What every policy card gets: the value at the focus and how to change it. */
 interface Bound {
@@ -621,127 +620,6 @@ function SchemaPolicy({ bound, resetKey }: { bound: Bound; resetKey: string }) {
   )
 }
 
-const knowledgeKinds = [
-  { id: 'quirk', label: 'Quirks' },
-  { id: 'howto', label: 'How-tos' },
-  { id: 'migration', label: 'Migrations' },
-  { id: 'convention', label: 'Conventions' },
-  { id: 'decision', label: 'Decisions' },
-] as const
-
-const learningSources = [
-  { id: 'mcp', label: 'Proposed over MCP' },
-  { id: 'review-reply', label: 'Review replies' },
-] as const
-
-const guideSectionOptions = [
-  { id: 'general', label: 'General' },
-  { id: 'testing', label: 'Testing' },
-  { id: 'testids', label: 'Test ids' },
-  { id: 'commits', label: 'Commits' },
-] as const
-
-const stringsOf = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item) => typeof item === 'string') : []
-
-const picked = <T extends string>(options: readonly { id: T }[], values: readonly string[]) =>
-  options.filter((option) => values.includes(option.id)).map((option) => option.id)
-
-function AutoAcceptRow({
-  id,
-  title,
-  hint,
-  children,
-}: {
-  id?: string
-  title: string
-  hint: string
-  children: ReactNode
-}) {
-  return (
-    <div id={id} className="flex scroll-mt-4 flex-col gap-1.5">
-      <div className="flex flex-wrap items-baseline gap-1.5 text-xs">
-        <span className="font-semibold">{title}</span>
-        <span className="text-muted">· {hint}</span>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function AgentKnowledgePolicy({
-  notes,
-  learnings,
-  guide,
-}: {
-  notes: Bound
-  learnings: Bound | undefined
-  guide: Bound | undefined
-}) {
-  const learningValue = recordOf(learnings?.value)
-  const sources = listOf(learnings?.value, 'sources')
-  const scope = learningValue.scope === 'repo' ? 'repo' : 'suggested'
-  return (
-    <div
-      className={`flex flex-col gap-4 ${notes.writable ? '' : 'opacity-70'}`}
-      inert={!notes.writable}
-    >
-      <AutoAcceptRow title="Notes" hint="kinds of knowledge notes agents add without review">
-        <MultiToggle
-          aria-label="Notes accepted without review"
-          options={knowledgeKinds}
-          value={picked(knowledgeKinds, stringsOf(notes.value))}
-          onChange={notes.onChange}
-        />
-      </AutoAcceptRow>
-      {learnings ? (
-        <AutoAcceptRow
-          id={settingAnchor(LEARNINGS)}
-          title="Learnings"
-          hint="rule candidates accepted into the Guide at once"
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <MultiToggle
-              aria-label="Learnings accepted without review"
-              options={learningSources}
-              value={picked(learningSources, sources)}
-              onChange={(next) => learnings.onChange({ sources: next, scope })}
-            />
-            <Segmented
-              aria-label="Accept learnings into"
-              options={[
-                { id: 'suggested', label: 'Suggested scope' },
-                { id: 'repo', label: 'Repository only' },
-              ]}
-              value={scope}
-              isDisabled={!sources.length}
-              onChange={(next) => learnings.onChange({ sources, scope: next })}
-            />
-          </div>
-        </AutoAcceptRow>
-      ) : null}
-      {guide ? (
-        <AutoAcceptRow
-          id={settingAnchor(GUIDE)}
-          title="Generated Guide"
-          hint="sections agents use as soon as the guide job writes them"
-        >
-          <MultiToggle
-            aria-label="Generated Guide sections accepted without review"
-            options={guideSectionOptions}
-            value={picked(guideSectionOptions, stringsOf(guide.value))}
-            onChange={guide.onChange}
-          />
-        </AutoAcceptRow>
-      ) : null}
-      <span className="text-xs text-muted">
-        Auto-accepted items show as accepted by Auto-accept in Knowledge and History; reject them
-        there to take them back out.
-      </span>
-    </div>
-  )
-}
-
 function RepoTestsPolicy({ bound }: { bound: Bound }) {
   const value = recordOf(bound.value)
   const expected = value.expected !== false
@@ -931,15 +809,15 @@ const cards = [
     page: { label: 'Reviews', to: '/quality/reviews' },
   },
   {
-    key: KNOWLEDGE,
-    title: 'Agent knowledge',
-    page: { label: 'Knowledge', to: '/knowledge/notes' },
+    key: LEARNING_DELAY,
+    title: 'Learnings',
+    page: { label: 'Knowledge', to: '/knowledge/learnings' },
   },
 ] as const
 
 const CARD_KEYS: Readonly<Record<string, readonly string[]>> = {
   [ALLOWLIST_RULES]: [ALLOWLIST_RULES, ALLOWLIST],
-  [KNOWLEDGE]: [KNOWLEDGE, LEARNINGS, GUIDE],
+  [LEARNING_DELAY]: [LEARNING_DELAY, LEARNING_EXPIRY],
   'audit.fix': ['audit.fix', 'audit.upgrade'],
 }
 
@@ -1105,19 +983,16 @@ function PoliciesBody({ data }: { data: SettingList }) {
             </PolicyCard>
           )
         }
-        if (card.key === KNOWLEDGE) {
-          const others = [definitionOf(LEARNINGS), definitionOf(GUIDE)].map((each) =>
-            each ? bind(each) : undefined,
-          )
-          const [learnings, guide] = others
-          const all = [bound, ...others.filter((each) => each !== undefined)]
+        if (card.key === LEARNING_DELAY) {
+          const expiryDefinition = definitionOf(LEARNING_EXPIRY)
+          const expiry = expiryDefinition ? bind(expiryDefinition) : undefined
           const combined = {
             ...bound,
-            edited: all.some((each) => each.edited),
-            inherited: all.every((each) => each.inherited),
+            edited: bound.edited || Boolean(expiry?.edited),
+            inherited: bound.inherited && (expiry?.inherited ?? true),
             onReset: () => {
               setDraft((current) =>
-                [KNOWLEDGE, LEARNINGS, GUIDE].reduce(
+                [LEARNING_DELAY, LEARNING_EXPIRY].reduce(
                   (next, key) => withReset(entries, next, key, focus),
                   current,
                 ),
@@ -1127,7 +1002,10 @@ function PoliciesBody({ data }: { data: SettingList }) {
           }
           return (
             <PolicyCard key={card.key} {...common} bound={combined}>
-              <AgentKnowledgePolicy notes={bound} learnings={learnings} guide={guide} />
+              <div className="flex flex-wrap gap-6">
+                <SchemaPolicy bound={bound} resetKey={resetKey} />
+                {expiry ? <SchemaPolicy bound={expiry} resetKey={resetKey} /> : null}
+              </div>
             </PolicyCard>
           )
         }
@@ -1199,10 +1077,9 @@ function PoliciesBody({ data }: { data: SettingList }) {
  * Settings › Policies: the rules analyzers check against (license policy, security allowlist and
  * its rules, vulnerability fixes, stack conventions, asset policy, commit conventions, whether
  * repositories have tests (`repo.tests`), analyzers turned off (`repo.analyzers`), merge request
- * reviews (`mergeRequests.comments`), test ids) and
- * which agent knowledge needs no review
- * (`knowledge.autoAccept`, `learnings.autoAccept`, `guide.autoAccept`, one card),
- * for the organization or one team. Edits gather into one draft over several keys, saved at once
+ * reviews (`mergeRequests.comments`), test ids) and how long learnings wait and live
+ * (`learnings.approvalDelayDays`, `learnings.expiryDays`, one card), for the organization or one
+ * team. Edits gather into one draft over several keys, saved at once
  * through `POST /api/settings/draft`; their pages keep editing the same entries.
  */
 export function PoliciesSection() {

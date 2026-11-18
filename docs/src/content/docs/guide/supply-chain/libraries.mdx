@@ -82,7 +82,7 @@ The segments above the table narrow it: **Third-party**, **Behind a major**, **A
 Under _My teams_ the versions and the behind figures are recomputed for your teams' repositories; other teams fold into one row at the end. <Ui>⋯</Ui> › <Ui>Export CSV</Ui> downloads the rows on screen.
 
 :::note
-Advisories show only for repositories you may read audits of (`audits:read`), and team decisions only with `knowledge:read`. Everything else follows your catalog reach.
+Advisories show only for repositories you may read audits of (`audits:read`), and the team's rules and learnings about it only with `knowledge:read`. Everything else follows your catalog reach.
 :::
 
 ## Inspect a library
@@ -107,12 +107,12 @@ Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. 
   </Sheet>
 </Screen>
 
-| Tab      | What it shows                                                                                                                                                                         |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Overview | Latest, ecosystem, license, links and description; team decisions; versions in use; advisories; licenses with their verdicts; bundle shares; indexed versions; update merge requests. |
-| Upgrade  | The badge counts repositories not on the target yet. Pick from and to versions and see the affected uses or API changes, and the changelog.                                           |
-| Used by  | The badge counts repositories using it. Who uses it, on which version, and which exports, props and members.                                                                          |
-| Docs     | A search over the library's indexed documentation.                                                                                                                                    |
+| Tab      | What it shows                                                                                                                                                                                              |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview | Latest, ecosystem, license, links and description; rules and learnings that mention it; versions in use; advisories; licenses with their verdicts; bundle shares; indexed versions; update merge requests. |
+| Upgrade  | The badge counts repositories not on the target yet. Pick from and to versions and see the affected uses or API changes, and the changelog.                                                                |
+| Used by  | The badge counts repositories using it. Who uses it, on which version, and which exports, props and members.                                                                                               |
+| Docs     | A search over the library's indexed documentation.                                                                                                                                                         |
 
 The header's quiet actions: <Ui>Plan upgrade</Ui> opens the Upgrade tab (needs `tasks:run`), <Ui>Copy as prompt</Ui> copies an upgrade prompt naming the target version and the repositories behind it, ready to paste into a coding agent. Internal packages also have <Ui>⋯</Ui> › <Ui>Public API</Ui>. <Ui>Open as page</Ui> opens the full library page.
 

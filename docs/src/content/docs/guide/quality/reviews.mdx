@@ -187,7 +187,7 @@ Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>.
         ['Model', 'claude-sonnet'],
         ['Tokens', '48.2k in · 3.1k out'],
         ['Cost', '$0.41 · 1m 52s'],
-        ['Guide', 'All repositories · Team storefront · This repository'],
+        ['Rules', '4 rules · REVIEW.md · AGENTS.md · 3 learned'],
         ['Record', 'Open as page'],
       ]}
     />
@@ -199,9 +199,9 @@ Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>.
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Findings  | One card per finding: `path:line` linking to the comment, category, severity, title, body, the suggested replacement as a diff, whether the forge accepted it and why not, and its source. |
 | Summary   | The summary as posted.                                                                                                                                                                     |
-| Learnings | Rule candidates drawn from replies on this merge request, with their status and a link to decide them in [Knowledge › Learnings](/guide/knowledge/learnings/).                             |
+| Learnings | Learnings drawn from replies on this merge request, with their status and a link to them in [Knowledge › Learnings](/guide/knowledge/learnings/).                                          |
 
-Under both Findings and Summary sit the run's facts: mode, reviewed commit, model, tokens, cost, duration, the [Guide](/guide/knowledge/guide/) scopes it read and the analysis record. The copy button next to the `!` number copies the merge request link. <Ui>Open as page</Ui> opens the [analysis record](/guide/quality/analysis-record/).
+Under both Findings and Summary sit the run's facts: mode, reviewed commit, model, tokens, cost, duration, the [rules](/guide/knowledge/rules/) it read (blocks and what was cut) and the analysis record. The copy button next to the `!` number copies the merge request link. <Ui>Open as page</Ui> opens the [analysis record](/guide/quality/analysis-record/).
 
 ## Request a review by hand
 
@@ -249,7 +249,7 @@ Under the table, **Reactions by finding category** counts 👍 and 👎 on revie
   </Scroll>
 </Screen>
 
-A category people keep turning down is a hint to add a rule. Replies to review comments become rule candidates in [Knowledge › Learnings](/guide/knowledge/learnings/), linked from the block. Across the fleet the block needs `knowledge:read` for every repository; narrowed to one repository it shows that repository's reactions. It stays hidden until there are reactions.
+A category people keep turning down is a hint to add a rule. Replies to review comments become learnings in [Knowledge › Learnings](/guide/knowledge/learnings/), linked from the block. Across the fleet the block needs `knowledge:read` for every repository; narrowed to one repository it shows that repository's reactions. It stays hidden until there are reactions.
 
 ## Review status in Slack
 
@@ -341,7 +341,7 @@ Nothing is posted when the repository has merge request reviews turned off or no
 | `ignore`          | lockfiles, generated, snapshots, build output | Path globs never reviewed.                                                                                                            |
 | `maxDiffLines`    | 3000                                          | Skip larger diffs.                                                                                                                    |
 | `language`        | the description's language                    | Language of comments, summary and replies.                                                                                            |
-| `instructions`    | —                                             | Extra rules appended after the Guide.                                                                                                 |
+| `instructions`    | —                                             | Extra rules appended after the rules block.                                                                                           |
 | `includeChecks`   | test ids                                      | Deterministic checks run alongside the AI: `secrets`, `testids`.                                                                      |
 | `media`           | on                                            | Review images the merge request adds or changes.                                                                                      |
 | `releaseBranches` | release and back-merge pairs                  | `source:target` branch globs that are not reviewed; an empty list reviews them all.                                                   |
@@ -357,7 +357,7 @@ Nothing is posted when the repository has merge request reviews turned off or no
 }
 ```
 
-Rules about what to flag belong in the [team guide](/guide/knowledge/guide/), which every review reads first: the Review, General, Testing, Test ids and Assets sections, and the repository's own `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`.
+Rules about what to flag belong in the repository's own `REVIEW.md` or `AGENTS.md`, or in a panel [rule](/guide/knowledge/rules/) limited to reviews; every review reads them first, see the [effective prompt](/guide/knowledge/rules/#check-the-effective-prompt).
 
 ### Modern Go guidelines
 
@@ -394,8 +394,8 @@ The repository hub's **Quality › Reviews** shows the same table, sheet and rea
 
 ## Related
 
-- [Knowledge › Learnings](/guide/knowledge/learnings/) — turn replies to review comments into rules.
-- [Team guide](/guide/knowledge/guide/) — the rules every review reads, and the effective prompt.
+- [Knowledge › Learnings](/guide/knowledge/learnings/) — rules learned from replies to review comments.
+- [Rules](/guide/knowledge/rules/) — the rules every review reads, and the effective prompt.
 - [Slack settings](/guide/settings/slack/) — the Slack app, channels and status emoji.
 - [AI spend](/guide/ops/ai-spend/) — what reviews cost against the weekly budget.
 - [Review analyzer](/modules/review/) — the review flow step by step.

@@ -1,5 +1,6 @@
+import { prefixScore, searchWords } from './search.ts'
 import type {
-  LearningCandidate,
+  Learning,
   LearningFilter,
   LearningStore,
   ReactionSignal,
@@ -8,15 +9,15 @@ import type {
 
 const clone = <T>(value: T): T => structuredClone(value)
 
-/** Whether `candidate` passes every field of `filter`. */
-export const matchesLearningFilter = (candidate: LearningCandidate, filter: LearningFilter = {}) =>
-  (!filter.repos || filter.repos.includes(candidate.repo)) &&
-  (!filter.status || filter.status.includes(candidate.status))
+/** Whether `learning` passes every field of `filter`. */
+export const matchesLearningFilter = (learning: Learning, filter: LearningFilter = {}) =>
+  (!filter.status || filter.status.includes(learning.status)) &&
+  (!filter.origin || filter.origin.includes(learning.origin))
 
 const binary = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 /** Newest `updatedAt` first, then by id. */
-export const byLearningUpdate = (a: LearningCandidate, b: LearningCandidate) =>
+export const byLearningUpdate = (a: Learning, b: Learning) =>
   binary(b.updatedAt, a.updatedAt) || binary(a.id, b.id)
 
 /** Sums `signals` per category, sorted by category; `repos` keeps only those repositories. */
@@ -65,26 +66,39 @@ export function reactionsOf(
 export const reactionKey = (signal: Pick<ReactionSignal, 'repo' | 'mergeRequest' | 'noteId'>) =>
   `${signal.repo}\u0000${signal.mergeRequest}\u0000${signal.noteId}`
 
-/** The in-memory `LearningStore`. */
+/** The in-memory `LearningStore`; search scores learnings by prefix matches of their words. */
 export function memoryLearnings(): LearningStore {
-  const candidates = new Map<string, LearningCandidate>()
+  const learnings = new Map<string, Learning>()
   const claims = new Map<string, string>()
   const reactions = new Map<string, ReactionSignal>()
+  const listed = (filter?: LearningFilter) =>
+    [...learnings.values()]
+      .filter((learning) => matchesLearningFilter(learning, filter))
+      .toSorted(byLearningUpdate)
   return {
-    get: async (id) => clone(candidates.get(id)),
-    list: async (filter) =>
-      [...candidates.values()]
-        .filter((candidate) => matchesLearningFilter(candidate, filter))
-        .toSorted(byLearningUpdate)
-        .map(clone),
-    find: async (repo, key) =>
+    get: async (id) => clone(learnings.get(id)),
+    list: async (filter) => listed(filter).map(clone),
+    find: async (key) =>
       clone(
-        [...candidates.values()]
-          .filter((candidate) => candidate.repo === repo && candidate.key === key)
+        [...learnings.values()]
+          .filter((learning) => learning.key === key)
           .toSorted((a, b) => binary(a.createdAt, b.createdAt) || binary(a.id, b.id))[0],
       ),
-    async put(candidate) {
-      candidates.set(candidate.id, clone(candidate))
+    async put(learning) {
+      learnings.set(learning.id, clone(learning))
+    },
+    async remove(id) {
+      learnings.delete(id)
+    },
+    async search(text, filter, limit = 20) {
+      const terms = [...new Set(searchWords(text))]
+      if (!terms.length) return []
+      return listed(filter)
+        .map((learning) => ({ learning, score: prefixScore(terms, [[1, learning.text]]) }))
+        .filter((hit) => hit.score > 0)
+        .toSorted((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map((hit) => ({ learning: clone(hit.learning), score: hit.score }))
     },
     async claim(key, at) {
       if (claims.has(key)) return false

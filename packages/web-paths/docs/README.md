@@ -17,7 +17,7 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 - Search parameters that are `undefined` or empty are left out; values are URL-encoded. Repository keys are `forge:path`.
 - Single path segments (ids) are encoded whole.
 - `repo` puts the `forge:path` key in the path, `/repos/<forge>/<path>`, encoding each segment on its own. `tab` is one of `overview`, `supply`, `quality`, `releases`, `activity`, `knowledge`, `settings`; `section` names an area of the tab (`assets` on Quality, `updates` on Settings).
-- `knowledge` takes the tab (`guide`, `notes`, `learnings`) and what to open in it: `space` is a Guide scope key (`all`, `team:<t>`, `path:<forge>:<folder>`, `family:<id>`, `repo:<forge>:<path>`), `section` a Guide section, `note` a note id.
+- `knowledge` takes the tab (`rules`, `learnings`, `effective`) and what to open in it: `repo` a `forge:path` key (the lists are filtered to it; the effective prompt is shown for it), `team` a team key filter, `rule` a rule id, `learning` a learning id.
 - `tasks` drops `task` without `group`, as the Tasks page only selects a task inside its group.
 
 ## Paths
@@ -31,7 +31,7 @@ webUrl('https://hk.acme.dev/', webPaths.tasks({ group: 'g-1', task: 't-2' })) //
 | `security({ repo?, urgent?, finding? })`                                      | `/supply/security?repo=<forge>:<path>&urgent=only&finding=<advisory>:<package>` |
 | `secretReports(report?)`                                                      | `/supply/secret-reports[?report=<id>]`                                          |
 | `releaseTimeline(repo)`                                                       | `/releases/timeline?repo=`                                                      |
-| `knowledge(tab, { space?, section?, note? })`                                 | `/knowledge/guide\|notes\|learnings?space=&section=&note=`                      |
+| `knowledge(tab, { repo?, team?, rule?, learning? })`                          | `/knowledge/rules\|learnings\|effective?repo=&team=&rule=&learning=`            |
 | `chat(thread?)`                                                               | `/chat?thread=`                                                                 |
 | `runs({ repo?, status?, analyzer?, trigger?, schedule?, signature?, view? })` | `/ops/runs`                                                                     |
 | `tasks({ group?, task?, filter? })`                                           | `/ops/tasks`                                                                    |

@@ -35,6 +35,7 @@ import {
   capToolsets,
   codeTools,
   docsTools,
+  SEARCH_KNOWLEDGE_TOOL,
   gitTools,
   knowledgeTools,
   libraryTools,
@@ -52,8 +53,6 @@ import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
 import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 import type { RepoRef } from '@holtkeeper/forge'
-import { type GuideRequest, createGuideResolver, familyOf, guideTaskOf } from '@holtkeeper/guide'
-import { embeddingText, knowledgeAccess } from '@holtkeeper/knowledge'
 import { type Limiter, limitAgent, limitPolicySchema, resolveLimitPolicy } from '@holtkeeper/limits'
 import {
   type LlmTiers,
@@ -61,14 +60,13 @@ import {
   resolveGlobalSetting,
   resolveSetting,
 } from '@holtkeeper/settings'
-import type { KnowledgeKind, SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
+import type { RuleAgent, SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
 import { z } from 'zod'
 
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
-import { repoKey, repoTarget, teamLabeler } from './context.ts'
-import { type KnowledgeSemantics, guideSemantic } from './embeddings.ts'
+import { repoTarget, teamLabeler } from './context.ts'
 import {
   agentSummarize,
   githubClientFor,
@@ -76,9 +74,10 @@ import {
   ownPackageOf,
   serverLibraryDocs,
 } from './libraries.ts'
-import { type NeighbourIndex, guideNeighbours } from './neighbours.ts'
+import { type RulesResolver, createRulesResolver, readForgeRuleFiles } from './rules.ts'
 import { type AssetToolsAccess, assetsToolset, storedAssetTools } from './tools/assets.ts'
 import { type CatalogToolsContext, catalogToolset } from './tools/catalog.ts'
+import { knowledgeAccessOf } from './tools/knowledge.ts'
 import { type OpsToolsAccess, opsToolset } from './tools/ops.ts'
 import { agentCatalogContext, agentRulesAccess, taskToolsets } from './tools/registry.ts'
 import { type ReleaseToolsAccess, releasesToolset } from './tools/releases.ts'
@@ -88,15 +87,15 @@ import { stackToolset } from './tools/stack.ts'
 import { storeTranscript } from './transcripts.ts'
 import { crossTeamOf } from './visibility.ts'
 
-/** Tokens of team knowledge a task's Guide may hold when `agent.tools.knowledgeTokens` is unset. */
-export const DEFAULT_KNOWLEDGE_TOKENS = 1500
-
-/** `taskKind` used for knowledge and reporting when a task sets none. */
+/** `taskKind` used for rules and reporting when a task sets none. */
 const DEFAULT_TASK_KIND = 'agent'
 
-/** `agent.tools` as the server reads it. */
-interface ServerToolSettings {
-  knowledgeTokens?: number
+/** The rule agent a task kind reads rules as: reviews, chat, release notes, or tasks. */
+function ruleAgentOf(taskKind: string): RuleAgent {
+  if (taskKind === 'review' || taskKind.startsWith('review-')) return 'review'
+  if (taskKind === 'chat' || taskKind.startsWith('chat-')) return 'chat'
+  if (taskKind === 'release-notes' || taskKind.startsWith('release')) return 'release'
+  return 'task'
 }
 
 /** Who and what runs of a wrapped agent are for, beyond the repository. */
@@ -137,26 +136,21 @@ type OnAgentRun = (info: AgentRunInfo) => void | Promise<void>
 
 export interface ServerDefaultsOptions {
   repo: RepoTarget
-  store: Pick<Store, 'knowledge' | 'guides' | 'families' | 'settings'> &
-    Partial<Pick<Store, 'audit'>>
+  store: Pick<Store, 'rules' | 'learnings' | 'settings'> & Partial<Pick<Store, 'audit' | 'kv'>>
+  config: HoltkeeperConfig
   now: () => Date
+  /** The rules resolver tasks without their own `context` get their rules from. Default: one over `store`. */
+  resolveRules?: RulesResolver
   /** Provider label for `onRun` when the result names none; default the provider kind. */
   provider?: string
   /** Provider kind for `onRun`; default the agent's. */
   providerKind?: string
-  /** Names team keys in Guide block titles; default the raw key. */
-  teamTitle?: (key: string) => string
-  /** The repository's confirmed family id, so knowledge narrowed to families applies to it. */
-  family?: string
   origin?: AgentRunOrigin
   /**
    * Runs `go list`/`go doc` for `docs.package` and git for the `git` toolset; the job's runner
    * when there is one. The `git` toolset falls back to `localRunner` without it.
    */
   runner?: CommandRunner
-  tools?: ServerToolSettings
-  /** Knowledge kinds the agent's proposals are accepted for without review. */
-  autoAccept?: readonly KnowledgeKind[]
   /** Third-party library docs; adds the `libraries` toolset with versions defaulting to `repo`'s. */
   libraries?: LibraryDocsAccess
   /** The organization's package catalog; adds the `catalog` toolset for task kinds that mount it. */
@@ -171,7 +165,7 @@ export interface ServerDefaultsOptions {
   assets?: AssetToolsAccess
   /**
    * The person the runs answer (team chat): knowledge tools are then search-only, and offered only
-   * with their `knowledge:read` on `repo`.
+   * with their `knowledge:read` on `repo`; rules and learnings found are those they may read.
    */
   requester?: Principal
   /**
@@ -184,37 +178,7 @@ export interface ServerDefaultsOptions {
   onRun?: OnAgentRun
   /** Receives errors thrown by `onRun`. */
   onRunError?: (error: unknown) => void
-  /**
-   * Knowledge vectors (`knowledge.embeddings`): rank the Guide's notes by meaning of the task's
-   * prompt, find notes by meaning in knowledge search and catch reworded duplicate proposals.
-   * Absent or answering `undefined`: full text only.
-   */
-  semantics?: KnowledgeSemantics
-  /**
-   * Knowledge of repositories like the task's for the Guide's lowest-priority block (`guideNeighbours`:
-   * the neighbours and which of their entries the task, and `requester` when given, may read).
-   * Absent or `undefined`: no such block.
-   */
-  neighbours?: (
-    repo: RepoTarget,
-    requester?: Principal,
-  ) => Promise<GuideRequest['neighbours'] | undefined>
 }
-
-/** Characters of a task's prompt its Guide notes are ranked against by meaning. */
-const GUIDE_QUERY_CHARS = 4000
-
-/**
- * The `knowledgeAccess` options vectors fill: search by meaning and the cosine a proposal is
- * deduped with (its `embeddingText`).
- */
-export const semanticAccess = (semantics: KnowledgeSemantics) => ({
-  semantic: (query: string) => semantics.semantic(query),
-  proposalSimilarity: (proposal: { title: string; body: string; topics?: string[] }) =>
-    semantics.similarity(
-      embeddingText({ title: proposal.title, body: proposal.body, topics: proposal.topics ?? [] }),
-    ),
-})
 
 const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
   const names = new Set(theirs.map((toolset) => toolset.name))
@@ -225,11 +189,9 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
  * `agent` with what server tasks get: the toolsets `taskToolsets` names for the task kind out of
  * `code`, `docs`, `knowledge`, `libraries` (when `libraries` is given), `catalog` (when
  * `catalog` is given), `rules` (when `rules` is given), `releases` (when `releases` is given), `ops` (when `ops` is given) and `assets` (when `assets` is given), then the task's own toolsets (one of the same name wins); every tool result
- * stays within `RESULT_CAPS`. A task without its own `context` gets the repository's Guide for
- * its task kind as `context` (`@holtkeeper/guide`: team rules, policies, generated text, then
- * notes within `tools.knowledgeTokens`, default `DEFAULT_KNOWLEDGE_TOKENS`); a task that brings a
- * `context` (the review, which resolves the Guide with the repository's rules files) keeps it as
- * is. No external MCP server is added. `budgets` may deny a run before it starts and caps the cost of the runs it allows
+ * stays within `RESULT_CAPS`. A task without its own `context` gets the repository's resolved
+ * rules for its task kind (`ruleAgentOf`) as `context`; a task that brings a `context` (the
+ * review, which resolves rules with the files of its checkout) keeps it as is. No external MCP server is added. `budgets` may deny a run before it starts and caps the cost of the runs it allows
  * (`maxCostUsd`). With `artifacts`, every run that reached the provider stores its JSONL
  * transcript there and reports it as `transcriptRef` (on the result and to `onRun`); a failing
  * store is reported to `onRunError` and never fails the run. `onRun` hears about every run:
@@ -239,19 +201,19 @@ export function withServerDefaults(
   agent: Agent | ProviderAgent | RoutedAgent,
   options: ServerDefaultsOptions,
 ): Agent {
-  const { repo, store, now, tools = {} } = options
-  const { semantics } = options
-  const access = knowledgeAccess({
+  const { repo, store, now, requester } = options
+  const access = knowledgeAccessOf({
     store,
+    config: options.config,
+    canReadScope: (scope) =>
+      scopeCoversRepo(scope, repo) &&
+      (!requester || can(requester, 'knowledge:read', { kind: 'scope', scope })),
+    repoOf: (value) => (value === `${repo.forge}:${repo.path}` ? repo : undefined),
+    actor: 'agent',
     now,
-    ...(options.autoAccept && { autoAccept: options.autoAccept }),
-    ...(semantics && semanticAccess(semantics)),
   })
-  const budgetTokens = tools.knowledgeTokens ?? DEFAULT_KNOWLEDGE_TOKENS
-  const resolveGuide = createGuideResolver({
-    store,
-    ...(options.teamTitle && { teamTitle: options.teamTitle }),
-  })
+  const resolveRules =
+    options.resolveRules ?? createRulesResolver({ store, config: options.config, now })
   const providerKind = options.providerKind ?? ('provider' in agent ? agent.provider : agent.name)
   const provider = options.provider ?? providerKind
   const modelOf = (task: AgentTask) => {
@@ -260,20 +222,15 @@ export function withServerDefaults(
   }
   const onRunError = options.onRunError ?? ((error: unknown) => console.error(error))
   const rules = options.rules && rulesToolset(options.rules)
-  const { requester } = options
-  // `knowledgeAccess` reads `family` from the repository it is handed; agent-tools only types the rest.
-  const knowledgeRepo = options.family === undefined ? repo : { ...repo, family: options.family }
   const knowledgeOf = (taskKind: string): Toolset[] => {
-    const knowledge = knowledgeTools({
-      access,
-      repo: knowledgeRepo,
-      taskKind,
-      actor: `agent:${taskKind}`,
-    })
+    const knowledge = knowledgeTools({ access, repo, taskKind, actor: `agent:${taskKind}` })
     if (!requester) return [knowledge]
     if (!can(requester, 'knowledge:read', { kind: 'repo', repo })) return []
     return [
-      { ...knowledge, tools: knowledge.tools.filter((tool) => tool.name === 'knowledge.search') },
+      {
+        ...knowledge,
+        tools: knowledge.tools.filter((tool) => tool.name === SEARCH_KNOWLEDGE_TOOL),
+      },
     ]
   }
 
@@ -335,29 +292,7 @@ export function withServerDefaults(
       let prepared: AgentTask<Output>
       try {
         const own = task.context?.trim()
-        const notes = !own && budgetTokens !== 0
-        const neighbours = notes ? await options.neighbours?.(repo, requester) : undefined
-        const semantic = notes
-          ? await guideSemantic(
-              semantics,
-              store,
-              repo,
-              task.prompt.slice(0, GUIDE_QUERY_CHARS),
-              neighbours?.repos.map((neighbour) => neighbour.repo),
-            )
-          : undefined
-        const context =
-          own ||
-          (
-            await resolveGuide({
-              repo,
-              ...guideTaskOf(taskKind),
-              taskKind,
-              notesChars: budgetTokens * 4,
-              ...(semantic && { semantic }),
-              ...(neighbours && { neighbours }),
-            })
-          ).text
+        const context = own || (await resolveRules({ repo, agent: ruleAgentOf(taskKind) })).text
         const available = [
           codeTools({ budget: { maxHits: RESULT_CAPS.maxSnippets } }),
           docsTools(options.runner ? { runner: options.runner } : {}),
@@ -402,29 +337,11 @@ export function withServerDefaults(
   }
 }
 
-const knowledgeKindSchema = z.array(
-  z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),
-)
-
-/** `knowledge.autoAccept` for a repository; empty when unset or invalid. */
-export function autoAcceptFrom(
-  entries: readonly SettingEntry[],
-  repo: RepoTarget,
-): KnowledgeKind[] {
-  const parsed = knowledgeKindSchema.safeParse(
-    resolveSetting(entries, 'knowledge.autoAccept', repo)?.value,
-  )
-  return parsed.success ? parsed.data : []
-}
-
 /** The credential reference of the global `llm.provider` setting; narrower entries are ignored. */
 export function providerReference(entries: readonly SettingEntry[]): string | undefined {
   const entry = resolveGlobalSetting(entries, 'llm.provider')
   return entry && !entry.secret && typeof entry.value === 'string' ? entry.value : undefined
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /**
  * The AI provider credential `llm.provider` names (by id first, then by name) among the
@@ -494,10 +411,6 @@ export interface SettingsAgentOptions {
   aiCatalog?: AiCatalog
   /** Providers `ai-sdk` credentials may name by `package` besides the shipped AI SDK packages. */
   aiProviders?: readonly AiProviderPlugin[]
-  /** Knowledge vectors for the Guide, knowledge search and proposals (see `ServerDefaultsOptions`). */
-  semantics?: KnowledgeSemantics
-  /** Repositories like each other, for the Guide's knowledge of similar repositories. */
-  neighbours?: NeighbourIndex
 }
 
 /** Tiers a tier without models borrows from, nearest first. */
@@ -565,8 +478,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
   const routeHealth: RouteHealth = new Map()
   const apiCatalog = createApiCatalog({ analyses: store.analyses })
   const usageIndex = createUsageIndex({ analyses: store.analyses })
-  const resolveGuide = createGuideResolver({ store, teamTitle: teamLabeler(config) })
-  const neighbourIndex = options.neighbours
+  const resolveRules = createRulesResolver({ store, config, now, log })
   const testIds = testIdsReader({ store })
   const configuredTarget = (value: string) => {
     const separator = value.indexOf(':')
@@ -763,6 +675,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       catalog: apiCatalog,
       usages: usageIndex,
       store,
+      config,
       repo: target,
       targetOf: (other) => repoTarget(config, other),
       teamLabel: teamLabeler(config),
@@ -799,11 +712,8 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
           })
         : undefined
 
-    const family = familyOf(await store.families.list(), repoKey(target))?.id
     const releases = options.releases?.(target, requester)
     const ops = options.ops?.(target, requester)
-    const tools = resolveSetting(entries, 'agent.tools', target)?.value
-    const autoAccept = autoAcceptFrom(entries, target)
     const origin: AgentRunOrigin = {
       ...(job?.actor !== undefined && { actor: job.actor }),
       ...(job?.analyzer !== undefined && { analyzer: job.analyzer }),
@@ -814,27 +724,20 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     const wrapped = withServerDefaults(agent, {
       repo: target,
       store,
+      config,
       now,
+      resolveRules,
       provider,
       providerKind: credential.kind,
-      teamTitle: teamLabeler(config),
-      ...(family && { family }),
       origin,
       onRun,
       ...(budgets && { budgets }),
       ...(options.artifacts && { artifacts: options.artifacts }),
       ...(runner && { runner }),
-      ...(isRecord(tools) && { tools }),
-      ...(autoAccept.length > 0 && { autoAccept }),
       ...(libraries && { libraries }),
       ...(releases && { releases }),
       ...(ops && { ops }),
       ...(requester && { requester }),
-      ...(options.semantics && { semantics: options.semantics }),
-      ...(neighbourIndex && {
-        neighbours: (near: RepoTarget, asker?: Principal) =>
-          guideNeighbours({ index: neighbourIndex, store, config, log }, near, asker),
-      }),
       assets: storedAssetTools(store, {
         targetOf: (other) => repoTarget(config, other),
         canRead: (other) =>
@@ -847,12 +750,23 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         teamLabel: teamLabeler(config),
       }),
       rules: agentRulesAccess({
+        store,
         repo: target,
         ...(requester && { requester }),
         targetOf: configuredTarget,
-        resolve: resolveGuide,
+        resolve: resolveRules,
+        repoFiles: async (other) => {
+          const forge = config.forges[other.forge]?.create()
+          return forge
+            ? readForgeRuleFiles({
+                forge,
+                forgeId: other.forge,
+                repo: other.path,
+                ...(store.kv && { kv: store.kv }),
+              })
+            : []
+        },
         testIds,
-        families: () => store.families.list(),
       }),
       catalog: catalogContext,
       onRunError: (error) =>

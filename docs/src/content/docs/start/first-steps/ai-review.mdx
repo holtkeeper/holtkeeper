@@ -112,7 +112,7 @@ Choose <Button ghost>Configure</Button> on **Quality › Reviews** to edit the `
 | Ignore           | generated files, lockfiles, ... | Add paths the reviewer should skip.                                 |
 | Language         | the merge request description's | Comments in another language; code and suggestions stay in English. |
 
-Rules for what to look for belong in the repository, not in options. A `REVIEW.md` at the root goes first into the reviewer's context; its `## Ignore` section lists globs to skip and its `## Paths` section gives rules for matching files. `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are read too, along with the team's Guide in Holtkeeper.
+Rules for what to look for belong in the repository, not in options. A `REVIEW.md` at the root goes first into the reviewer's context; its `## Ignore` section lists globs to skip and its `## Paths` section gives rules for matching files. `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `CONTRIBUTING.md`, nested `AGENTS.md` files and Copilot or Cursor rules scoped to the changed files are read too, along with the [rules](/guide/knowledge/rules/) written in Holtkeeper.
 
 ```md title="REVIEW.md"
 ## Paths

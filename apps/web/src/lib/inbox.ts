@@ -17,9 +17,7 @@ type SectionId = (typeof inboxSections)[number]['id']
 /** Kinds in segment order: plural label for the segment, singular for a row's tag. */
 export const inboxKinds: readonly { id: InboxKind; label: string; singular: string }[] = [
   { id: 'task', label: 'Task proposals', singular: 'Task proposal' },
-  { id: 'note', label: 'Notes', singular: 'Note' },
   { id: 'learning', label: 'Learnings', singular: 'Learning' },
-  { id: 'guide', label: 'Guide', singular: 'Guide text' },
   { id: 'release', label: 'Releases', singular: 'Release' },
   { id: 'allowlist', label: 'Allowlist', singular: 'Allowlist entry' },
   { id: 'budget', label: 'Budget', singular: 'Budget warning' },
@@ -43,7 +41,11 @@ export function shortItemId(id: string): string {
 
 /** What the positive decision is called for an item: Approve, Accept or Renew. */
 export const approveLabel = (item: InboxItem): string =>
-  item.kind === 'task' ? 'Approve' : item.kind === 'allowlist' ? 'Renew' : 'Accept'
+  item.kind === 'task' || item.kind === 'learning'
+    ? 'Approve'
+    : item.kind === 'allowlist'
+      ? 'Renew'
+      : 'Accept'
 
 /**
  * Whether the viewer can take the positive decision; a release offers Accept only with
@@ -164,9 +166,7 @@ export function kindCounts(feed: InboxFeed, tab: InboxTab): Record<InboxKindFilt
   return {
     all: items.length,
     task: count('task'),
-    note: count('note'),
     learning: count('learning'),
-    guide: count('guide'),
     release: count('release'),
     allowlist: count('allowlist'),
     budget: count('budget'),
@@ -261,40 +261,4 @@ export async function runBulk(
     }
   }
   return result
-}
-
-/** One line of a line diff: kept, added in `after` or removed from `before`. */
-export interface DiffLine {
-  kind: 'same' | 'add' | 'del'
-  text: string
-}
-
-/** A line diff of two texts by longest common subsequence, removals before additions. */
-export function lineDiff(before: string, after: string): DiffLine[] {
-  const a = before ? before.split('\n') : []
-  const b = after ? after.split('\n') : []
-  const lcs = Array.from({ length: a.length + 1 }, () =>
-    Array.from({ length: b.length + 1 }, () => 0),
-  )
-  for (let i = a.length - 1; i >= 0; i--)
-    for (let j = b.length - 1; j >= 0; j--)
-      lcs[i]![j] =
-        a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!)
-  const lines: DiffLine[] = []
-  let i = 0
-  let j = 0
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      lines.push({ kind: 'same', text: a[i]! })
-      i++
-      j++
-    } else if (j >= b.length || (i < a.length && lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) {
-      lines.push({ kind: 'del', text: a[i]! })
-      i++
-    } else {
-      lines.push({ kind: 'add', text: b[j]! })
-      j++
-    }
-  }
-  return lines
 }

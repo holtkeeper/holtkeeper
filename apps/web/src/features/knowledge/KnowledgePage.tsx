@@ -1,123 +1,77 @@
-import type { GuideSectionName } from '@holtkeeper/api'
+import type { Scope } from '@holtkeeper/api'
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router'
 import { Plus, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 
-import {
-  useFamilies,
-  useTeamTitles,
-  useKnowledgeCounts,
-  useRepos,
-  useHandbook,
-} from '../../api/queries.ts'
-import {
-  type KnowledgeTab,
-  type Space,
-  knowledgeSearch,
-  knowledgeTabOf,
-  parseSpace,
-  reposOfSpace,
-  spaceCounts,
-  spaceKey,
-  spaceTrail,
-} from '../../lib/guide.ts'
-import { handbookQuery } from '../../lib/handbook.ts'
-import { repoKey } from '../../lib/repo.ts'
-import { knowledgeSettingsLink } from '../../lib/settings-sections.ts'
+import { useLearnings, useRepos, useRules } from '../../api/queries.ts'
+import { parseRepoKey, repoKey } from '../../lib/repo.ts'
+import { knowledgeSearch } from '../../lib/rules.ts'
+import { pageSettingKeys } from '../../lib/settings-sections.ts'
 import { Button, Count, Page } from '../../ui/index.ts'
+import { useConfigure } from '../settings/SettingsSheet.tsx'
 import { useSession } from '../shell/session.ts'
 import { EffectivePromptPanel } from './EffectivePrompt.tsx'
-import { GuideTab } from './GuideTab.tsx'
-import { HandbookTab } from './HandbookTab.tsx'
-import { LearningsTable } from './LearningsTable.tsx'
-import { NotesTable } from './NotesTable.tsx'
-import { SpacesSidebar } from './SpacesSidebar.tsx'
+import { LearningsTab } from './LearningsTab.tsx'
+import { RulesTab } from './RulesTab.tsx'
 
-const tabPaths = {
-  handbook: '/knowledge/handbook',
-  guide: '/knowledge/guide',
-  notes: '/knowledge/notes',
-  learnings: '/knowledge/learnings',
-} as const satisfies Record<KnowledgeTab, string>
+const everything: Scope = { all: true }
 
 /**
- * The single place for rules agents follow: spaces (All, teams, families, repositories) on the
- * left, and for the chosen space its Guide, Notes or Learnings (`/knowledge/<tab>?space=`). The
- * crumbs are the space trail; the Guide's effective prompt opens inline and Notes' New note is the
- * header's primary action.
+ * Knowledge: the rules people write (`/knowledge/rules`) and the rules Holtkeeper learned
+ * (`/knowledge/learnings`) as two tabs. Rules carries the effective prompt of a repository
+ * (`?prompt=<forge:path>`) and New rule; Learnings carries New learning. A row opens its sheet
+ * (`?rule=<id>`, `?learning=<id>`).
  */
 export function KnowledgePage() {
   const { can } = useSession()
   const search = knowledgeSearch(useSearch({ strict: false }))
   const pathname = useLocation({ select: (location) => location.pathname })
   const navigate = useNavigate()
+  const tab = pathname.replace(/\/+$/, '').endsWith('/learnings') ? 'learnings' : 'rules'
+  const rules = useRules()
+  const pending = useLearnings({ status: ['pending'] })
   const repos = useRepos(can('repos:read'))
-  const families = useFamilies()
-  const counts = useKnowledgeCounts()
-  const titleOf = useTeamTitles()
-  const [prompt, setPrompt] = useState(false)
   const [creating, setCreating] = useState(false)
+  const { configure, sheet } = useConfigure('Knowledge settings', pageSettingKeys.knowledge)
+  const writable = can('knowledge:write')
+  const repoKeys = (repos.data?.repos ?? []).map((repo) => repoKey(repo.repo))
+  const ruleCount = rules.data?.rules.length ?? 0
+  const pendingCount = pending.data?.learnings.length ?? 0
+  const promptRepo = parseRepoKey(search.prompt || undefined)
 
-  const familyList = families.data?.families ?? []
-  const repoList = repos.data?.repos ?? []
-  const parsed = parseSpace(search.space)
-  const space: Space =
-    parsed?.kind === 'family' &&
-    families.isSuccess &&
-    !familyList.some((f) => f.id === parsed.family)
-      ? { kind: 'all' }
-      : (parsed ?? { kind: 'all' })
-  const tab = knowledgeTabOf(pathname)
-  const repoKeys = repoList.map((r) => repoKey(r.repo))
-  const covered = reposOfSpace(space, repoList, familyList)
-  const coveredRepos = repoKeys.filter((key) => !covered || covered.has(key))
-  const totals = spaceCounts(counts.data, space)
-  const handbook = useHandbook(handbookQuery(space))
-  const attention = handbook.data ? handbook.data.counts.suspect + handbook.data.counts.stale : 0
-
-  const pick = (next: Space) =>
-    void navigate({ to: tabPaths[tab], search: { space: spaceKey(next) }, replace: true })
-  const pickSection = (section: GuideSectionName | undefined) =>
+  const open = (key: 'rule' | 'learning') => (id: string | undefined) => {
+    const { [key]: _, ...rest } = search
     void navigate({
-      to: '/knowledge/guide',
-      search: { space: spaceKey(space), ...(section ? { section } : {}) },
+      to: key === 'rule' ? '/knowledge/rules' : '/knowledge/learnings',
+      search: id ? { ...rest, [key]: id } : rest,
       replace: true,
     })
+  }
+  const togglePrompt = () => {
+    const { prompt, ...rest } = search
+    void navigate({
+      to: '/knowledge/rules',
+      search: prompt === undefined ? { ...rest, prompt: '' } : rest,
+      replace: true,
+    })
+  }
 
   return (
     <Page
-      crumbs={spaceTrail(space, repoList, familyList, titleOf).map((step) => ({
-        label: step.label,
-        link: { to: tabPaths[tab], search: { space: spaceKey(step.space) } },
-      }))}
       title="Knowledge"
       tabs={[
         {
-          to: '/knowledge/handbook',
-          label: (
-            <>
-              Handbook{' '}
-              {attention > 0 ? (
-                <Count tone="warning" label={`${attention} need attention`}>
-                  {attention}
-                </Count>
-              ) : null}
-            </>
-          ),
-        },
-        { to: '/knowledge/guide', label: 'Guide' },
-        {
-          to: '/knowledge/notes',
-          label: <>Notes {totals.notes ? <Count>{totals.notes}</Count> : null}</>,
+          to: '/knowledge/rules',
+          label: <>Rules {ruleCount ? <Count>{ruleCount}</Count> : null}</>,
         },
         {
           to: '/knowledge/learnings',
           label: (
             <>
               Learnings{' '}
-              {totals.learnings ? (
-                <Count tone="warning" label={`${totals.learnings} waiting`}>
-                  {totals.learnings}
+              {pendingCount ? (
+                <Count tone="warning" label={`${pendingCount} pending`}>
+                  {pendingCount}
                 </Count>
               ) : null}
             </>
@@ -125,79 +79,59 @@ export function KnowledgePage() {
         },
       ]}
       tabsLabel="Knowledge sections"
-      configure={
-        can('settings:read') && tab !== 'handbook'
-          ? { link: knowledgeSettingsLink(tab) }
-          : undefined
-      }
-      {...(tab === 'guide' && {
+      {...(configure ? { configure } : {})}
+      {...(tab === 'rules' && {
         actions: (
           <Button
             variant="secondary"
             size="sm"
-            aria-expanded={prompt}
-            onPress={() => setPrompt((open) => !open)}
+            aria-expanded={search.prompt !== undefined}
+            onPress={togglePrompt}
           >
             <SquareTerminal className="size-3.5" />
             Effective prompt
           </Button>
         ),
       })}
-      {...(tab === 'notes' &&
-        can('knowledge:write') && {
+      {...(writable &&
+        (tab === 'rules' ? (rules.data?.canCreate ?? true) : true) && {
           primary: {
-            label: 'New note',
+            label: tab === 'rules' ? 'New rule' : 'New learning',
             icon: Plus,
-            onPress: () => {
-              void navigate({ to: '/knowledge/notes', search: { space: spaceKey(space) } })
-              setCreating(true)
-            },
+            onPress: () => setCreating(true),
           },
         })}
     >
-      <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto">
-          <SpacesSidebar
-            selected={space}
-            onSelect={pick}
-            repos={repoList}
-            families={familyList}
-            counts={counts.data}
-            canEditFamilies={can('settings:write')}
+      <div className="flex min-w-0 flex-col gap-4">
+        {tab === 'rules' && search.prompt !== undefined ? (
+          <EffectivePromptPanel
+            key={repoKeys.length ? 'repos' : 'loading'}
+            repos={
+              search.prompt && !repoKeys.includes(search.prompt)
+                ? [search.prompt, ...repoKeys]
+                : repoKeys
+            }
+            {...(promptRepo ? { repo: promptRepo } : {})}
+            onClose={togglePrompt}
           />
-        </aside>
-        <div className="flex min-w-0 flex-col gap-4">
-          {prompt && tab === 'guide' ? (
-            <EffectivePromptPanel
-              key={spaceKey(space)}
-              repos={coveredRepos}
-              {...(space.kind === 'repo' ? { initial: space.repo } : {})}
-              onClose={() => setPrompt(false)}
-            />
-          ) : null}
-          {tab === 'handbook' ? <HandbookTab space={space} families={familyList} /> : null}
-          {tab === 'guide' ? (
-            <GuideTab
-              space={space}
-              families={familyList}
-              repos={repoList}
-              section={search.section}
-              onSection={pickSection}
-            />
-          ) : null}
-          {tab === 'notes' ? (
-            <NotesTable
-              space={space}
-              families={familyList}
-              creating={creating}
-              onCreating={setCreating}
-            />
-          ) : null}
-          {tab === 'learnings' ? (
-            <LearningsTable space={space} families={familyList} repos={coveredRepos} />
-          ) : null}
-        </div>
+        ) : null}
+        {tab === 'rules' ? (
+          <RulesTab
+            selected={search.rule}
+            creating={creating ? everything : undefined}
+            onOpen={open('rule')}
+            onCloseCreating={() => setCreating(false)}
+          />
+        ) : (
+          <LearningsTab
+            selected={search.learning}
+            creating={creating ? everything : undefined}
+            onOpen={open('learning')}
+            onCloseCreating={() => setCreating(false)}
+          />
+        )}
       </div>
+      {sheet}
     </Page>
   )
 }

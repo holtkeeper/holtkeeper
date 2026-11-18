@@ -5,7 +5,6 @@ import { z } from 'zod'
 
 import { LINE_TOLERANCE, type OpenThread, SIMILAR, severityRank, similarity } from './dedupe.ts'
 import { changedLineCount, renderNumberedDiff } from './diff.ts'
-import type { Guideline } from './guidelines.ts'
 import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } from './schema.ts'
 import type { FileScope } from './scope.ts'
 import type { Candidate } from './validate.ts'
@@ -67,11 +66,7 @@ export interface ReviewPromptInput {
   files: readonly FileScope[]
   mode: 'full' | 'incremental'
   previousHead?: string
-  guidelines: readonly Guideline[]
-  /**
-   * The resolved Guide (repository rules files, team rules, policies, generated text, notes); it
-   * replaces the plain `guidelines` block when given.
-   */
+  /** The resolved rules (panel rules, repository rules files, policies, learnings). */
   guide?: string
   instructions?: string
   /** REVIEW.md path rules that match files in scope, with those files. */
@@ -222,17 +217,12 @@ function packageRules(input: ReviewPromptInput): string {
 }
 
 /**
- * The stable context block (the Guide, or the repository guidelines without one, then the run's
- * own instructions) passed as the task's `context`, so adapters can cache it across runs; empty
+ * The stable context block (the resolved rules, then the run's own instructions) passed as the task's `context`, so adapters can cache it across runs; empty
  * when there is nothing.
  */
 export function reviewContext(input: ReviewPromptInput): string {
   const parts: string[] = []
   if (input.guide?.trim()) parts.push(input.guide.trim())
-  else if (input.guidelines.length)
-    parts.push(
-      `Project guidelines from the repository:\n\n${input.guidelines.map((g) => `### ${g.file}\n\n${g.text}`).join('\n\n')}`,
-    )
   if (input.instructions?.trim())
     parts.push(`Review instructions for this run:\n\n${input.instructions.trim()}`)
   return parts.join('\n\n')
@@ -619,7 +609,6 @@ const sampleInput = (path: string, extra: Partial<ReviewPromptInput> = {}): Revi
   mergeRequest: { id: 1, title: 'Title', description: 'Description' },
   files: [sampleFile(path)],
   mode: 'full',
-  guidelines: [],
   threads: [],
   maxComments: 15,
   ...extra,
@@ -640,7 +629,7 @@ export function reviewPromptVersion(): string {
     const everything = sampleInput('src/a.ts', {
       mode: 'incremental',
       previousHead: 'abcdef0123456789',
-      guide: 'Guide',
+      guide: 'Rules',
       instructions: 'Instructions',
       pathInstructions: [{ glob: 'src/**', text: 'Rule', files: ['src/a.ts'] }],
       requests: [{ path: 'src/a.ts', line: 1, text: 'Request', category: 'tests' }],

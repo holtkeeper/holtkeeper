@@ -1,20 +1,21 @@
 ---
 title: Learnings
-description: Turn what people teach Holtkeeper in replies to review comments, and rules agents propose, into Guide rules — pick the scope, accept in batches and take back what auto-accept let through.
+description: See the one-sentence rules Holtkeeper learns from replies to its review comments, from merged merge requests and from agents, approve or reject them before they activate, and watch which ones earn their place.
 panel: Knowledge › Learnings
 route: /knowledge/learnings
 permission: knowledge:read
 sidebar:
-  order: 3
+  order: 2
 ---
 
 import {
   Button,
   Comment,
-  Kbd,
+  Facts,
   Screen,
   Scroll,
   Segmented,
+  Sheet,
   Stack,
   Strip,
   Tag,
@@ -22,49 +23,48 @@ import {
   Ui,
 } from '@ui'
 
-Turn what people teach Holtkeeper in replies to review comments, and rules agents propose, into Guide rules — pick the scope, accept in batches and take back what auto-accept let through.
+See the one-sentence rules Holtkeeper learns from replies to its review comments, from merged merge requests and from agents, approve or reject them before they activate, and watch which ones earn their place.
 
-<Screen title="Knowledge › Learnings" caption="Proposed candidates only; accepted rules live in the Guide.">
-  <Toolbar crumbs={['Knowledge', 'All']} title="storefront">
-    <Segmented slot="start" items={['Guide', 'Notes:12', 'Learnings:3']} active={2} />
-    <Button ghost>Configure</Button>
-  </Toolbar>
-  <Toolbar>
-    <Segmented slot="start" items={['All:3', 'Review reply:2', 'Merged:0', 'Over MCP:1']} />
-    <Tag>Section: any</Tag>
-    <Tag>Confidence: any</Tag>
-    <Tag>Sort: evidence</Tag>
-    <Button primary>Accept 2 selected</Button>
+A learning is a short imperative rule with its sources. Learnings are kept apart from the [rules](/guide/knowledge/rules/) people write: agents read them last, under a **Learned rules** heading, and follow them unless a written rule says otherwise. Approval is a delay, not a gate, and a learning nothing confirms expires.
+
+<Screen title="Knowledge › Learnings">
+  <Toolbar crumbs={['Knowledge']} title="Learnings">
+    <Segmented slot="start" items={['Rules:9', 'Learnings:4']} active={1} />
+    <Tag>Status: pending, active</Tag>
+    <Tag>Repository: any</Tag>
+    <Button primary>New learning</Button>
   </Toolbar>
   <Strip
     items={[
-      { value: 3, label: 'waiting for a person · also in Inbox', tone: 'warn' },
-      { value: 2, label: 'from review replies' },
-      { value: 1, label: 'over MCP' },
-      { value: 2, label: 'selected' },
+      { value: 2, label: 'pending · also in Inbox', tone: 'warn' },
+      { value: 14, label: 'active' },
+      { value: 1, label: 'expires within 14 days' },
     ]}
   />
   <Scroll>
 
-|     | Rule                                                                                             | Section | Evidence | Source                  | Confidence   | Promote to                   |                                                                                   |
-| --- | ------------------------------------------------------------------------------------------------ | ------- | -------- | ----------------------- | ------------ | ---------------------------- | --------------------------------------------------------------------------------- |
-| ☑   | Do not flag `any` in files under `src/legacy/`; they are typed in ABC-210. · `acme/round/api`    | Review  | 3        | Review reply · !1204 +2 | ▮▮▮▮▯ High   | <Tag>Folder acme/round</Tag> | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
-| ☑   | Use `formatMoney` from @acme/widget-kit for prices in UI. · `acme/round/web`                     | General | 1        | Review reply · !318     | ▮▮▮▯▯ Medium | <Tag>This repository</Tag>   | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
-| ☐   | Snapshot tests need a stable seed. · `acme/square/web` · proposed by agent: flaky snapshot in CI | Testing | 1        | Over MCP                | ▮▮▯▯▯ Low    | <Tag>Family Web apps</Tag>   | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+| Learning                                                       | Scope            | Origin       | Sources | Uses · acted on | Votes | Status                                           |                                                        |
+| -------------------------------------------------------------- | ---------------- | ------------ | ------- | --------------- | ----- | ------------------------------------------------ | ------------------------------------------------------ |
+| Do not flag `any` under `src/legacy/`; it is typed in ABC-210. | `acme/round/api` | Review reply | 3       | 0 · 0           | —     | <Tag tone="warn">Activates in 2 days</Tag>       | <Button>Approve</Button> <Button ghost>Reject</Button> |
+| Use `formatMoney` from @acme/widget-kit for prices in UI.      | `acme/round/web` | Rule miner   | 4       | 0 · 0           | —     | <Tag tone="warn">Activates in 1 day</Tag>        | <Button>Approve</Button> <Button ghost>Reject</Button> |
+| Snapshot tests need a fixed seed.                              | Team Widgets     | Agent        | 2       | 9 · 6           | 👍 3  | <Tag tone="ok">Active · expires in 71 days</Tag> | <Button ghost>Edit</Button>                            |
+| Put new hooks in `src/hooks/`, one per file.                   | `acme/round/web` | Person       | 1       | 2 · 1           | —     | <Tag tone="ok">Active · expires in 9 days</Tag>  | <Button ghost>Edit</Button>                            |
 
   </Scroll>
-  <div style="padding: 0.5rem 0.75rem" class="hk-dim">J / K move · X select · P accept · D reject</div>
 </Screen>
 
-## Where candidates come from
+## Where learnings come from
 
-- **Review reply** — someone replies to a Holtkeeper review comment with a lasting rule: "we don't do X here", "this is intentional because…", "don't flag this". Holtkeeper filters replies cheaply first (thanks, "fixed" and questions never pass), then a small AI call turns a passing reply into one imperative sentence of at most 200 characters, without personal names.
-- **Merged** — candidates drawn from merged work.
-- **Over MCP** — a coding agent proposed a rule with `propose_rule_change`, with a reason and sometimes a target scope. No AI call is made.
+| Origin       | How                                                                                                                                                                                                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review reply | Someone replies to a Holtkeeper review comment with a lasting rule: "we don't do X here", "this is intentional because…", "don't flag this". Thanks, "fixed" and questions never pass a cheap filter; a small AI call turns the rest into one sentence without names. |
+| Rule miner   | The `rule-miner` analyzer reads the review threads of merged merge requests and keeps the comments that led to a code change. At most 10 learnings on a repository's first run, then at most 5 every 14 days.                                                         |
+| Agent        | A coding agent calls `propose_learning` over MCP with the rule, a reason and optionally the files it is about. No AI call is made.                                                                                                                                    |
+| Person       | <Ui>New learning</Ui> with `knowledge:write`. It is active at once.                                                                                                                                                                                                   |
 
-Nothing reaches agents until a person accepts it.
+A new learning that repeats an existing one (the same text, or most of the same words) creates nothing: its sources are merged into the existing learning, which counts as a confirmation.
 
-<Screen title="Merge request !1204 · acme/admin-ui" kind="example" caption="A reply that becomes a candidate.">
+<Screen title="Merge request !1204 · acme/round/api" kind="example" caption="A reply that becomes a learning.">
   <Stack>
     <Comment severity="minor" where="src/legacy/session.ts · line 12">
 
@@ -80,71 +80,58 @@ Files under `src/legacy/` are typed in ABC-210, please don't flag `any` there un
   </Stack>
 </Screen>
 
-## Read the table
+## Lifecycle
 
-| Column     | Meaning                                                                                          |
-| ---------- | ------------------------------------------------------------------------------------------------ |
-| Rule       | The candidate rule and its repository; for a direct proposal, who proposed it and why.           |
-| Section    | The [Guide](/guide/knowledge/guide/) section it goes into.                                       |
-| Evidence   | Replies backing it, plus one for a direct proposal.                                              |
-| Source     | Review reply, Merged or Over MCP, with the first merge request linked and `+N` more.             |
-| Confidence | Five bars and a level: Low (1–2), Medium (3), High (4–5). It is computed from the sources alone. |
-| Promote to | The scope the rule is accepted into.                                                             |
+| Status   | Meaning                                                                                                                                                                                        |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pending  | New. It waits `learnings.approvalDelayDays` (default 3), then becomes active by itself. People with `knowledge:write` approve or reject it earlier here or in the [Inbox](/guide/home/inbox/). |
+| Active   | Agents read it.                                                                                                                                                                                |
+| Expired  | It went `learnings.expiryDays` (default 90) without being confirmed and left the prompts. A confirmation brings it back.                                                                       |
+| Rejected | Never used. A rejected learning still catches duplicates, so the same rule is not learned again.                                                                                               |
 
-The source tabs count proposed candidates per source. **Section** and **Confidence** filter; **Sort** orders by evidence, confidence or newest. In _All_, candidates of other teams' repositories fold into an **Other teams** row. The strip counts candidates waiting for a person (also listed in the [Inbox](/guide/home/inbox/)) and where they came from.
+A learning is **confirmed** when a review comment citing it gets fixed, when someone reacts 👍 to such a comment, or when a new source teaches the same rule. Both settings are in [Settings › Policies](/guide/settings/policies/) on the **Learnings** card; a delay of `0` activates new learnings at once.
 
-## Choose the scope
+## Read a learning
 
-**Promote to** offers every scope you may edit for the candidate's repository: _this repository_, _its family_, _its folder_ (the folder directly holding it) and _its team_ (its first owner team), never _All repositories_. A proposer may also name an outer folder, such as `acme/round` for `acme/round/web/app`. It starts at the scope the proposer named, else at the suggested one. While you pick another scope, `target:` under the picker shows your choice.
+Click a row to open it.
 
-Without the right to decide, the cell only reads `suggested:` or `target:`.
+<Screen title="Knowledge › Learnings › Snapshot tests need a fixed seed.">
+  <Sheet title="Snapshot tests need a fixed seed." position="3 of 14">
+    <Tag slot="tags" tone="ok">
+      Active
+    </Tag>
+    <Button slot="actions" ghost>
+      Edit
+    </Button>
+    <Button slot="actions" ghost>
+      Reject
+    </Button>
+    <Facts
+      items={[
+        ['Reason', 'Snapshots with random ids fail on every second CI run.'],
+        ['Scope', 'Team Widgets · files **/*.test.tsx'],
+        ['Sources', '!318 acme/round/web · !77 acme/square/web'],
+        ['Uses', '9 review comments cited it · 6 were fixed'],
+        ['Votes', '👍 3 · 👎 0'],
+        ['Expires', 'in 71 days · last confirmed 19 days ago'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+- **Sources** link to the merge request notes that taught it.
+- **Uses** counts review comments that cited it (`[learn:<id>]`); **acted on** counts those whose finding was fixed.
+- <Ui>Edit</Ui> changes the text, scope and files. <Ui>Reject</Ui> takes it out of the prompts.
+
+Active learnings are ranked by fixed citations, uses, votes and sources, then by how recently they were confirmed. They share at most 3,000 of the prompt's 12,000 characters; the lowest ranked are dropped whole, and the [effective prompt](/guide/knowledge/rules/#check-the-effective-prompt) shows which.
 
 :::tip
-A code rule taught on one repository often holds for its siblings: promote it to the folder or the family. Promote process rules (how the team reviews, commits, releases) to the team.
+A learning that keeps proving itself is a candidate for a written rule: move it into the repository's `AGENTS.md` or a panel [rule](/guide/knowledge/rules/), then reject the learning.
 :::
-
-## Accept, edit or reject
-
-1. Tick candidates, or focus one with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>X</Kbd> to toggle it.
-2. Check **Promote to** for each.
-3. Click <Ui>Accept N selected</Ui>, or press <Kbd>P</Kbd>. Without a selection, <Kbd>P</Kbd> accepts the focused row.
-
-Rights are checked per candidate and per target scope. Candidates that could not be accepted stay selected with the reason under their rule; a toast counts what was accepted.
-
-- <Ui>Edit</Ui> changes the rule text and section in place.
-- <Ui>Reject</Ui>, or <Kbd>D</Kbd>, rejects the selected or focused candidates.
-
-Keys work outside text fields; the footer lists them.
-
-:::note
-Checkboxes show only on candidates you may decide. Accepting writes the rule into the scope's section of the Guide, with links back to its sources.
-:::
-
-## After deciding
-
-Under the table, **Accepted rules live in the Guide** counts accepted rules per section, each linking to that section of the space's Guide. Accepted rules sit after team rules and before policies and generated text in what agents read.
-
-**Rejected** shows rejected candidates on request. They can still be accepted or edited; rejecting an accepted rule takes it out of the Guide.
-
-### Rules auto-accept let through
-
-The `learnings.autoAccept` policy can accept candidates without a person, by source (_Proposed over MCP_, _Review replies_), into the suggested scope or the repository only. Those rules are behind <Ui>Show N auto-accepted</Ui> in the accepted card, each reading _accepted by Auto-accept_.
-
-- Accept it again to confirm it: your name is recorded, and you may move it to another scope.
-- Reject it to take it out of the Guide.
-
-<Ui>Configure</Ui> on this tab opens the review analyzer in **Settings › Analyzers**, since review
-threads are where learnings come from. The auto-accept policy lives in **Settings › Policies** at
-**Agent knowledge**.
-
-## Reactions are elsewhere
-
-👍 and 👎 on review comments are counted per finding category in [Quality › Reviews](/guide/quality/reviews/), not here. The **Learnings** tab of a review there lists the candidates drawn from that merge request.
 
 ## Related
 
-- [Team guide](/guide/knowledge/guide/) — where accepted rules land, and how much room they get.
+- [Rules](/guide/knowledge/rules/) — written rules, repository rules files and the effective prompt.
 - [Reviews](/guide/quality/reviews/) — review comments, replies and reactions.
-- [Notes](/guide/knowledge/notes/) — longer decisions and migration notes.
-- [Settings › Policies](/guide/settings/policies/) — auto-accept for learnings, notes and generated text.
-- [Guide](/modules/guide/) — how review learnings are captured and decided.
+- [Settings › Analyzers](/guide/settings/analyzers/) — the Rule miner.
+- [Rule miner](/modules/rule-miner/) and [Rules](/modules/rules/) — how learnings are mined, merged and expire.

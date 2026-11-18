@@ -1,4 +1,4 @@
-import { type Principal, can, scopeCoversRepo } from '@holtkeeper/access'
+import type { Principal } from '@holtkeeper/access'
 import type {
   DependencyApi,
   DependencyApiChange,
@@ -43,7 +43,6 @@ import {
   auditHeadFindings,
   bundleShares,
   groupUses,
-  libraryDecisions,
   libraryKeyOf,
   licenseSightings,
   licenseStates,
@@ -58,7 +57,7 @@ import type { FleetCache } from '../fleet-cache.ts'
 import { fleetLibraryUses } from '../libraries.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
 import type { LibraryIndex } from '../tools/libraries.ts'
-import { type CatalogReach, canReadShared, canSee, scopeOwner } from '../visibility.ts'
+import { type CatalogReach, canSee } from '../visibility.ts'
 
 const DOCUMENT_CHUNKS = 100_000
 
@@ -111,8 +110,7 @@ const behindOf = (users: LibraryUsers, latest: string | undefined) => {
  * Docs of one library, internal packages only the API catalog knows included), `GET
  * /dependencies/api` (API tab), `GET /dependencies/upgrade` (Upgrade tab, loaded on demand) and
  * `GET /dependencies/docs` (docs search). Everything is limited to the caller's catalog reach
- * (`canSeeCatalog`; call sites `canSeeSnippets`, advisories `audits:read`, decisions
- * `knowledge:read` or `shared`) and reads stored records, the library index and its latest
+ * (`canSeeCatalog`; call sites `canSeeSnippets`, advisories `audits:read`) and reads stored records, the library index and its latest
  * versions only: nothing reaches a forge, a registry or a model.
  */
 export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteContext) {
@@ -337,7 +335,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     const principal = principalOf(c)
     const ref = refParam(c)
     const key = libraryKeyOf(ref)
-    const { scope, canRead, fleet, libraries, latest, latestOf } = await view(principal)
+    const { canRead, fleet, libraries, latest, latestOf } = await view(principal)
     const users = libraries.get(key)
     const index = context.libraryIndex(principal, canRead)
     const record = await index?.store.getLibrary(ref)
@@ -364,10 +362,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
         documents.set(`${chunk.source}\u0000${chunk.path}`, entry)
       }
 
-    const knowledgeRepos = [...(users?.repos.keys() ?? [])]
-      .map((origin) => repoTarget(config, parseKey(origin)))
-      .filter((target) => canSee(principal, 'knowledge:read', target))
-    const [auditHeads, sightings, bundles, renovate, decisions] = await Promise.all([
+    const [auditHeads, sightings, bundles, renovate] = await Promise.all([
       latestHeadsWithMetrics(store.analyses, kinds, { kind: 'audit' }),
       licenseSightings(store.analyses, canReadAnalyses(principal)),
       ref.ecosystem === 'npm'
@@ -376,17 +371,6 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
           )
         : [],
       renovateMergeRequests(store.analyses, canReadAnalyses(principal)),
-      libraryDecisions(
-        store.knowledge,
-        {
-          canRead: (entry) =>
-            can(principal, 'knowledge:read', { kind: 'scope', scope: entry.scope }) ||
-            knowledgeRepos.some((target) => scopeCoversRepo(entry.scope, target)),
-          canReadShared: (entry) => canReadShared(principal, entry.scope, scope.policy),
-          ownerOf: (entry) => scopeOwner(entry.scope, (repo) => repoTarget(config, repo).teams),
-        },
-        ref,
-      ),
     ])
     const internal = fleet.internal.has(key) || defined !== undefined
     const newestRelease = latestOf(key) ?? defined?.package.version
@@ -427,7 +411,6 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
         ) ?? [],
       licenses: licensesOf(sightings.libraries.get(key) ?? []),
       bundles,
-      decisions,
       mergeRequests: mergeRequestsOf(renovate, key),
       docs: {
         ...(newest ? { version: newest.version } : {}),

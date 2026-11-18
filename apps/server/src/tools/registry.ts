@@ -2,29 +2,32 @@ import {
   type Action,
   type Principal,
   type RepoTarget,
+  type Scope,
   can,
   scopeCoversRepo,
 } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, mountToolsets } from '@holtkeeper/agent-tools'
 import type { McpToolsetName } from '@holtkeeper/api'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
+import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
-import { type GuideResolver, familyOf } from '@holtkeeper/guide'
 import { latestVersions, libraryApi } from '@holtkeeper/libraries'
+import type { RepoRuleFile } from '@holtkeeper/rules'
 import {
   REPORT_TOOL,
   type SecretReportsAccess,
   secretReportsToolset,
 } from '@holtkeeper/secret-reports'
 import type { CrossTeamCatalog } from '@holtkeeper/settings'
-import type { Family, Store } from '@holtkeeper/store'
+import type { Store } from '@holtkeeper/store'
 
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import type { UsageIndex } from '../api-surface/usages.ts'
 import { repoKey } from '../context.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
+import type { RulesResolver } from '../rules.ts'
 import { repoDependencies, stackTeamViews } from '../stack.ts'
-import { canReadShared, reachOf, scopeOwner } from '../visibility.ts'
+import { reachOf } from '../visibility.ts'
 import { type AssetToolsAccess, assetsToolset } from './assets.ts'
 import { type CatalogToolsContext, catalogToolset } from './catalog.ts'
 import { knowledgeToolset } from './knowledge.ts'
@@ -49,16 +52,12 @@ const MCP_TOOLSETS = [
 ]
 
 /**
- * The only tools that write which the MCP endpoint offers: two proposals people review before
- * agents rely on them, and secret reports administrators act on. Every other tool with
+ * The only tools that write which the MCP endpoint offers: learned rules, which wait for the
+ * approval delay before agents rely on them, and secret reports administrators act on. Every other tool with
  * `readOnly: false` stays off MCP, so a new write tool is never exposed to people's clients by
  * accident.
  */
-const MCP_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  'propose_knowledge',
-  'propose_rule_change',
-  REPORT_TOOL,
-])
+const MCP_WRITE_TOOLS: ReadonlySet<string> = new Set(['propose_learning', REPORT_TOOL])
 
 /** Toolsets every internal task mounts. */
 const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
@@ -66,7 +65,7 @@ const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
 /**
  * Extra toolsets by task kind; tool schemas cost prompt tokens, so tasks mount only what they use.
  * One-shot kinds mount none, so they stay off the agent tool loop.
- * `rules` serves related repositories' rules and test ids: the task's own Guide is already its context.
+ * `rules` serves related repositories' rules and test ids: the task's own rules are already its context.
  * Chat replies run without a checkout, so they mount no `code` or `docs`.
  * `git` (read-only history of the checkout) is for reviews, their thread replies and the
  * verification of their findings (`review-verify`). The verification checks a finding against the
@@ -79,13 +78,11 @@ const TASK_TOOLSETS: Record<string, readonly string[]> = {
   chat: ['knowledge', 'libraries', 'catalog', 'stack', 'rules', 'assets', 'releases', 'ops'],
   'chat-summary': [],
   learning: [],
-  guide: [],
   'release-notes': [],
   'qa-notes': [],
   'security-triage': [],
   'library-digest': [],
-  'knowledge-bootstrap': [],
-  'knowledge-verify': [],
+  'rule-miner': [],
   translate: [],
 }
 
@@ -121,7 +118,7 @@ export interface McpToolsetsContext
 /**
  * The toolsets the MCP endpoint serves to one caller, picked for developers at work in one
  * repository: `catalog`, `stack` (with `stack`, `repo_stack` only), `knowledge`, `rules` (with any
- * of `guide`, `proposals`, `commits`, `testIds`, `releases`), `assets` (with `assets`), `libraries`
+ * of `rules`, `commits`, `testIds`, `releases`), `assets` (with `assets`), `libraries`
  * (with `library`), `reviews` (with `reviews`), `qa` (with `qa`) and `security` (with
  * `secretReports`), every one limited by the caller's grants and, but `security`, to the token's
  * `toolsets`. Fleet, operations and release tools stay with the web panel and chat. Tools that
@@ -190,8 +187,9 @@ export const storedStackTools = (
 export interface AgentCatalogOptions {
   catalog: ApiCatalog
   usages: UsageIndex
-  store: Pick<Store, 'analyses' | 'knowledge' | 'libraries'> &
-    Partial<Pick<Store, 'audit' | 'kv' | 'settings'>>
+  store: Pick<Store, 'analyses' | 'rules' | 'learnings' | 'settings' | 'libraries'> &
+    Partial<Pick<Store, 'audit' | 'kv'>>
+  config: HoltkeeperConfig
   /** The repository the task works on. */
   repo: RepoTarget
   /** A repository with its owner teams. */
@@ -242,12 +240,10 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     store,
     knowledge: {
       store,
+      config: options.config,
       canReadScope: (scope) =>
         scopeCoversRepo(scope, repo) &&
         (!requester || can(requester, 'knowledge:read', { kind: 'scope', scope })),
-      canReadShared: (scope) =>
-        requester ? canReadShared(requester, scope, policy) : policy !== 'off',
-      ownerOf: (scope) => scopeOwner(scope, teamsOf).map(label),
       teamLabel: label,
       repoOf: (value) => (value === key ? repo : undefined),
       actor: 'agent',
@@ -280,33 +276,90 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
   }
 }
 
+/** Inputs of `repoRulesAccess`. */
+export interface RepoRulesAccessOptions {
+  store: Pick<Store, 'rules' | 'learnings'>
+  resolve: RulesResolver
+  /** A repository's rules files, read from its default branch (`readForgeRuleFiles`). */
+  repoFiles: (repo: RepoTarget) => Promise<RepoRuleFile[]>
+  /** A repository by `forge:path` whose rules the caller may read; `undefined` otherwise. */
+  readable: (repo: string) => RepoTarget | undefined
+  /** Whether the caller may read rules and learnings of `scope`. */
+  canReadScope: (scope: Scope) => boolean
+}
+
+/**
+ * `repo_rules` and `get_rule` over the one resolver, limited to what `options` lets the caller
+ * read.
+ */
+export function repoRulesAccess(
+  options: RepoRulesAccessOptions,
+): NonNullable<RulesAccess['rules']> {
+  return {
+    resolve: async (value, request) => {
+      const target = options.readable(value)
+      return target ? options.resolve({ repo: target, ...request }) : undefined
+    },
+    rule: async (id) => {
+      const rule = await options.store.rules.get(id)
+      return rule && options.canReadScope(rule.scope) ? rule : undefined
+    },
+    learning: async (id) => {
+      const learning = await options.store.learnings.get(id)
+      return learning && options.canReadScope(learning.scope) ? learning : undefined
+    },
+    repoFile: async (value, path) => {
+      const target = options.readable(value)
+      if (!target) return undefined
+      return (await options.repoFiles(target)).find((file) => file.path === path)
+    },
+  }
+}
+
 /** Inputs of `agentRulesAccess`. */
 export interface AgentRulesOptions {
+  store: Pick<Store, 'rules' | 'learnings'>
   /** The repository the task works on. */
   repo: RepoTarget
   /** The person the task answers; rules then also need their `knowledge:read`, test ids their `analyses:read`. */
   requester?: Principal
   /** A configured repository by `forge:path`, with its owner teams; `undefined` for anything else. */
   targetOf: (repo: string) => RepoTarget | undefined
-  resolve: GuideResolver
+  resolve: RulesResolver
+  repoFiles: (repo: RepoTarget) => Promise<RepoRuleFile[]>
   testIds: (repo: RepoTarget) => Promise<TestIdsSnapshot>
-  /** Confirmed families; a repository in the task repository's family is related like a teammate. */
-  families: () => Promise<readonly Family[]>
 }
 
 /**
- * The `rules` access of an internal agent: `repo_rules` of other configured repositories that share
- * an owner team or a family with the task's repository, without team notes (its own Guide is already the task's
- * context, so asking for it is refused), and test ids of any configured repository. Internal agents
- * propose through the knowledge tools, not here.
+ * The `rules` access of an internal agent: `repo_rules` of other configured repositories that
+ * share an owner team with the task's repository (its own rules are already the task's context,
+ * so asking for them is refused), `get_rule` for rules and learnings the requester may read and
+ * rules files of the task's repository and its teammates, and test ids of any configured
+ * repository. Internal agents propose through the knowledge tools, not here.
  */
 export function agentRulesAccess(options: AgentRulesOptions): RulesAccess {
   const own = repoKey(options.repo)
   const { requester } = options
   const allows = (action: Action, target: RepoTarget) =>
     !requester || can(requester, action, { kind: 'repo', repo: target })
+  const related = (value: string) => {
+    const target = options.targetOf(value)
+    if (!target || !allows('knowledge:read', target)) return undefined
+    return repoKey(target) === own || target.teams.some((team) => options.repo.teams.includes(team))
+      ? target
+      : undefined
+  }
+  const shared = repoRulesAccess({
+    store: options.store,
+    resolve: options.resolve,
+    repoFiles: options.repoFiles,
+    readable: related,
+    canReadScope: (scope) =>
+      !requester || can(requester, 'knowledge:read', { kind: 'scope', scope }),
+  })
   return {
-    guide: {
+    rules: {
+      ...shared,
       resolve: async (value, request) => {
         const target = options.targetOf(value)
         if (!target || !allows('knowledge:read', target)) return undefined
@@ -314,14 +367,11 @@ export function agentRulesAccess(options: AgentRulesOptions): RulesAccess {
           throw new ToolError(
             "This repository's rules are already in your context; use repo_rules for other repositories.",
           )
-        if (
-          !target.teams.some((team) => options.repo.teams.includes(team)) &&
-          !familyOf(await options.families(), own)?.members.includes(repoKey(target))
-        )
+        if (!related(value))
           throw new ToolError(
-            'repo_rules only serves repositories that share a team or a family with this repository.',
+            'repo_rules only serves repositories that share a team with this repository.',
           )
-        return options.resolve({ repo: target, ...request, notesChars: 0 })
+        return options.resolve({ repo: target, ...request })
       },
     },
     testIds: {

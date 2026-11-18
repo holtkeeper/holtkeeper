@@ -13,9 +13,8 @@ const presetValue = (definition: SettingDefinition, id: string) =>
 
 /**
  * Values a fresh install starts with, each for `{ all: true }`: a $150 weekly budget that blocks,
- * the newest Claude Sonnet for the `main` and `deep` tiers and the newest Haiku for `fast`, 1500
- * tokens of team knowledge per task, low-risk knowledge auto-accepted and fixes limited to minor
- * upgrades.
+ * the newest Claude Sonnet for the `main` and `deep` tiers and the newest Haiku for `fast`, and
+ * fixes limited to minor upgrades.
  */
 export const defaultSettings: DefaultSetting[] = [
   { key: 'llm.budget', value: presetValue(llmBudget, 'default') },
@@ -28,8 +27,6 @@ export const defaultSettings: DefaultSetting[] = [
       deep: [{ model: 'claude-sonnet@latest', effort: 'high' }],
     },
   },
-  { key: 'agent.tools', value: { knowledgeTokens: 1500 } },
-  { key: 'knowledge.autoAccept', value: ['quirk', 'howto'] },
   { key: 'audit.upgrade', value: 'minor' },
 ]
 

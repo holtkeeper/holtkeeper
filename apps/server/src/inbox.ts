@@ -11,27 +11,17 @@ import type {
   ReleaseCard,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import { familyOf, scopesFor } from '@holtkeeper/guide'
-import { pendingGenerated, rejectedHashes } from '@holtkeeper/guide-generator'
 import type { CrossTeamCatalog } from '@holtkeeper/settings'
-import type {
-  AgentTask,
-  AgentTaskGroup,
-  GuideGenerated,
-  GuideSection,
-  KnowledgeEntry,
-  LearningCandidate,
-  SettingEntry,
-} from '@holtkeeper/store'
+import type { AgentTask, AgentTaskGroup, Learning, SettingEntry } from '@holtkeeper/store'
 import { type AllowlistEntry, allowlistSchema, isExpired } from '@holtkeeper/vuln'
 import { webPaths } from '@holtkeeper/web-paths'
 
 import { type ServerDeps, parseRepo, repoTarget, teamLabeler } from './context.ts'
-import { withLiveTarget } from './learnings.ts'
 import { awaitsAcceptance, releaseCan, releaseServiceFor } from './releases.ts'
 import { canReadAiScope } from './routes/ai.ts'
 import { peopleOf } from './routes/avatars.ts'
 import { homeTeamsOf } from './routes/preferences.ts'
+import { liveLearnings } from './rules.ts'
 import { snoozedIds } from './snoozes.ts'
 import { canSeeGroup } from './tasks.ts'
 import { canSeeCatalog, crossTeamPolicy, scopeOwner } from './visibility.ts'
@@ -50,10 +40,8 @@ const budgetSeenKey = (budget: string, week: string) => `inbox:budget:${budget}:
 interface InboxSources {
   /** Task groups with at least one `proposed` task, with those tasks. */
   tasks: { group: AgentTaskGroup; proposed: AgentTask[] }[]
-  notes: KnowledgeEntry[]
-  learnings: LearningCandidate[]
-  /** Repository sections with generated text waiting for a person that nobody rejected. */
-  guides: { section: GuideSection; pending: GuideGenerated }[]
+  /** Learnings still pending once settled to now. */
+  learnings: Learning[]
   /** Every stored release card, `can` all false. */
   releases: ReleaseCard[]
   /** `audit.allowlist` setting entries. */
@@ -176,22 +164,9 @@ async function warnedBudgets(deps: ServerDeps): Promise<InboxSources['budgets']>
 
 async function loadSources(deps: ServerDeps): Promise<InboxSources> {
   const { store } = deps
-  const [
-    proposedTasks,
-    notes,
-    proposedLearnings,
-    families,
-    sections,
-    releases,
-    allowlists,
-    budgets,
-    crossTeam,
-  ] = await Promise.all([
+  const [proposedTasks, live, releases, allowlists, budgets, crossTeam] = await Promise.all([
     store.tasks.list({ status: ['proposed'] }),
-    store.knowledge.list({ status: 'proposed' }),
-    store.learnings.list({ status: ['proposed'] }),
-    store.families.list(),
-    store.guides.list(),
+    liveLearnings({ store, config: deps.config, now: deps.now }),
     releaseServiceFor(deps).snapshot(),
     store.settings.list('audit.allowlist'),
     warnedBudgets(deps),
@@ -210,32 +185,9 @@ async function loadSources(deps: ServerDeps): Promise<InboxSources> {
     )
   ).filter((entry) => entry !== undefined)
 
-  const waiting = sections.flatMap((section) => {
-    const pending = section.scope.startsWith('repo:') ? pendingGenerated(section) : undefined
-    return pending ? [{ section, pending }] : []
-  })
-  const rejected = await Promise.all(
-    waiting.map(async (entry) => ({
-      ...entry,
-      hashes: await rejectedHashes(store.kv, entry.section.scope, entry.section.section),
-    })),
-  )
-  const learnings = proposedLearnings.map((candidate) => {
-    const repo = parseRepo(candidate.repo)
-    if (!repo) return candidate
-    const family = familyOf(families, candidate.repo)?.id
-    return withLiveTarget(candidate, scopesFor(repoTarget(deps.config, repo), family))
-  })
-
-  const guides = rejected
-    .filter(({ pending, hashes }) => !hashes.has(pending.inputHash))
-    .map(({ section, pending }) => ({ section, pending }))
-
   return {
     tasks,
-    notes,
-    learnings,
-    guides,
+    learnings: live.filter((learning) => learning.status === 'pending'),
     releases,
     allowlists,
     budgets,
@@ -272,8 +224,8 @@ export const releaseAwaitsDecision = (card: ReleaseCard): card is ReleaseCard & 
 
 /**
  * The Inbox items `principal` may decide, from shared sources: task groups whose every proposed
- * task it may run, proposed notes and learnings it may read and accept (`knowledge:read` and
- * `knowledge:write`), generated Guide text of repositories it may read and edit, releases that
+ * task it may run, pending learnings it may read and decide (`knowledge:read` and
+ * `knowledge:write` over their scope), releases that
  * await an acceptance it may run (`releases:run`, see `releaseAwaitsDecision`) and allowlist entries expiring within `ALLOWLIST_NOTICE_DAYS` (or expired) whose
  * setting it may read and write (`settings:read` and `settings:write`), and budgets at or over their
  * `warnPercent` this week whose scope it may read AI usage in and change settings of (`ai:read`
@@ -302,8 +254,6 @@ function inboxItems(
       repo !== undefined && can(principal, action, { kind: 'repo', repo: repoTarget(config, repo) })
     )
   }
-  const mayEditRepo = (key: string) =>
-    onRepo('knowledge:read', key) && onRepo('knowledge:write', key)
   const mayEditScope = (read: Action, write: Action, scope: Scope) =>
     can(principal, read, { kind: 'scope', scope }) &&
     can(principal, write, { kind: 'scope', scope })
@@ -352,72 +302,30 @@ function inboxItems(
     })
   }
 
-  for (const entry of sources.notes) {
-    if (!mayEditScope('knowledge:read', 'knowledge:write', entry.scope)) continue
+  for (const learning of sources.learnings) {
+    if (!mayEditScope('knowledge:read', 'knowledge:write', learning.scope)) continue
+    const proposer =
+      learning.origin === 'agent' || learning.origin === 'person'
+        ? learning.sources[0]?.author
+        : undefined
     placed.push({
       item: {
-        id: `note:${entry.id}`,
-        kind: 'note',
-        title: entry.title,
-        scope: scopeText(entry.scope, label),
-        repos: scopeRepos(entry.scope),
-        ...(firstLine(entry.body) && { detail: firstLine(entry.body) }),
-        href: webPaths.knowledge('notes'),
-        createdAt: entry.createdAt,
-        proposedBy: entry.author,
-        snoozed: false,
-        entryId: entry.id,
-        version: entry.version,
-      },
-      memberships: scopeMemberships(entry.scope),
-    })
-  }
-
-  for (const candidate of sources.learnings) {
-    if (!mayEditRepo(candidate.repo)) continue
-    const repo = ref(candidate.repo)
-    placed.push({
-      item: {
-        id: `learning:${candidate.id}`,
+        id: `learning:${learning.id}`,
         kind: 'learning',
-        title: candidate.rule,
-        scope: parseRepo(candidate.repo)!.path,
-        repos: [repo],
-        ...(candidate.proposal?.reason && { detail: firstLine(candidate.proposal.reason) }),
-        href: webPaths.knowledge('learnings', { space: `repo:${candidate.repo}` }),
-        createdAt: candidate.createdAt,
-        ...(candidate.proposal && { proposedBy: candidate.proposal.by }),
+        title: learning.text,
+        scope: scopeText(learning.scope, label),
+        repos: scopeRepos(learning.scope),
+        ...(learning.reason && { detail: firstLine(learning.reason) }),
+        href: webPaths.knowledge('learnings', { learning: learning.id }),
+        createdAt: learning.createdAt,
+        ...(proposer && { proposedBy: proposer }),
         snoozed: false,
-        learningId: candidate.id,
-        section: candidate.section,
-        suggestedScope: candidate.suggestedScope,
-        ...(candidate.targetScope && { targetScope: candidate.targetScope }),
+        dueAt: learning.activeAt,
+        learningId: learning.id,
+        origin: learning.origin,
+        activeAt: learning.activeAt,
       },
-      memberships: [repo.teams],
-    })
-  }
-
-  for (const { section, pending } of sources.guides) {
-    const key = section.scope.slice('repo:'.length)
-    if (!mayEditRepo(key)) continue
-    const repo = ref(key)
-    placed.push({
-      item: {
-        id: `guide:${section.scope}:${section.section}`,
-        kind: 'guide',
-        title: `New generated ${section.section} guidance`,
-        scope: parseRepo(key)!.path,
-        repos: [repo],
-        ...(firstLine(pending.body) && { detail: firstLine(pending.body) }),
-        href: webPaths.knowledge('guide', { space: section.scope, section: section.section }),
-        createdAt: pending.generatedAt,
-        snoozed: false,
-        guideScope: section.scope,
-        section: section.section,
-        inputHash: pending.inputHash,
-        generatedAt: pending.generatedAt,
-      },
-      memberships: [repo.teams],
+      memberships: scopeMemberships(learning.scope),
     })
   }
 

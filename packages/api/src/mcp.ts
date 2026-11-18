@@ -48,13 +48,14 @@ export const mcpToolsetCatalog: readonly McpToolsetInfo[] = [
   {
     name: 'knowledge',
     label: 'Team knowledge',
-    description: 'Search and read the knowledge base, propose entries for review.',
+    description: 'Search team rules and learned rules, propose learned rules.',
     defaultOn: true,
   },
   {
     name: 'rules',
     label: 'Repository rules',
-    description: 'Review rules, test ids, commit conventions and release rules of repositories.',
+    description:
+      'The rules agents follow in a repository, test ids, commit conventions and release rules.',
     defaultOn: true,
   },
   {

@@ -4,8 +4,6 @@ import { memoryAudit } from './audit.ts'
 import { memoryChat } from './chat.ts'
 import { memoryCiJobs } from './ci-jobs.ts'
 import { memoryConfig, memoryKv } from './config.ts'
-import { memoryEmbeddings } from './embeddings.ts'
-import { memoryFamilies, memoryGuides } from './guides.ts'
 import {
   claimDueBy,
   DEFAULT_MAX_ATTEMPTS,
@@ -14,9 +12,9 @@ import {
   matchesJobSearch,
   STALE_JOB_ERROR,
 } from './jobs.ts'
-import { memoryKnowledge } from './knowledge.ts'
 import { memoryLearnings } from './learnings.ts'
 import { memoryLibraries } from './libraries.ts'
+import { memoryRules } from './rules.ts'
 import { memorySlackMessages } from './slack.ts'
 import { memoryTasks } from './tasks.ts'
 import type {
@@ -187,10 +185,7 @@ export function memoryStore(): Store {
       getLinkToken: async (hash) => clone(tokens.get(hash)),
     },
     jobs,
-    knowledge: memoryKnowledge(),
-    embeddings: memoryEmbeddings(),
-    guides: memoryGuides(),
-    families: memoryFamilies(),
+    rules: memoryRules(),
     learnings: memoryLearnings(),
     aiUsage: memoryAiUsage(),
     ciJobs: memoryCiJobs(),

@@ -16,27 +16,13 @@ import {
   renderProblems,
 } from '@holtkeeper/commit-conventions'
 import {
-  type GuideChainLayer,
-  type GuideTask,
-  LEARNING_RULE_MAX,
-  LearningScopeError,
-  type ResolvedGuide,
-  type RuleProposalOutcome,
-  chainLayers,
-  chainTaskOf,
-  guideSectionLabels,
-  guideSections,
-  guideTasks,
-  learningScopeKinds,
+  type RepoRuleFile,
+  type ResolvedRules,
+  type RuleBlock,
+  scopeSource,
   testIdsSettingKey,
-} from '@holtkeeper/guide'
-import type {
-  GuideScopeKey,
-  GuideSectionName,
-  LearningScopeKind,
-  SettingStore,
-  Store,
-} from '@holtkeeper/store'
+} from '@holtkeeper/rules'
+import type { Learning, Rule, RuleAgent, SettingStore, Store } from '@holtkeeper/store'
 import {
   type TestIdConvention,
   type TestIdOverrides,
@@ -48,7 +34,6 @@ import {
   testIdOverridesOf,
   testIdsDataSchema,
 } from '@holtkeeper/testids'
-import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
 import { applyingEntry } from '../setting-rules.ts'
@@ -109,39 +94,23 @@ export function commitConventionsReader(deps: CommitConventionsDeps) {
   }
 }
 
-/** The Guide as `repo_rules` reads it, for one caller. */
-interface GuideRulesAccess {
+/** Rules as `repo_rules` and `get_rule` read them, for one caller. */
+interface RepoRulesAccess {
   /**
-   * The Guide of `repo` (`forge:path`) for a task, from the same resolver internal agents use;
-   * `undefined` when the caller may not read that repository's rules.
+   * The resolved rules of `repo` (`forge:path`) for an agent run touching `files`, from the same
+   * resolver internal agents use; `undefined` when the caller may not read that repository's
+   * rules.
    */
   resolve(
     repo: string,
-    request: {
-      task: GuideTask
-      section?: GuideSectionName
-      focus?: readonly GuideSectionName[]
-    },
-  ): Promise<ResolvedGuide | undefined>
-}
-
-/** Where `propose_rule_change` stores proposals, for one caller. */
-interface RuleProposalAccess {
-  /**
-   * Stores a proposal for people to review, or accepts it when `learnings.autoAccept` allows (the
-   * candidate then comes back `accepted`); `undefined` when the caller may not propose for `repo`.
-   */
-  propose(
-    repo: string,
-    input: {
-      section: GuideSectionName
-      rule: string
-      reason: string
-      scope?: LearningScopeKind
-      /** An exact scope of the repository; throws `LearningScopeError` for any other. */
-      targetScope?: GuideScopeKey
-    },
-  ): Promise<RuleProposalOutcome | undefined>
+    request: { agent: RuleAgent; files?: readonly string[] },
+  ): Promise<ResolvedRules | undefined>
+  /** A panel rule by id, when the caller may read it. */
+  rule(id: string): Promise<Rule | undefined>
+  /** A learning by id, when the caller may read it. */
+  learning(id: string): Promise<Learning | undefined>
+  /** A rules file of `repo` by path, when the caller may read the repository's rules. */
+  repoFile(repo: string, path: string): Promise<RepoRuleFile | undefined>
 }
 
 /** A repository's test id catalog and the team's overrides. */
@@ -188,10 +157,8 @@ export function testIdsReader(deps: { store: Pick<Store, 'analyses' | 'settings'
 export interface RulesAccess {
   /** `commit_conventions` and `check_commit_message`. */
   commits?: CommitConventionsAccess
-  /** `repo_rules`. */
-  guide?: GuideRulesAccess
-  /** `propose_rule_change`. */
-  proposals?: RuleProposalAccess
+  /** `repo_rules` and `get_rule`. */
+  rules?: RepoRulesAccess
   /** `test_ids` and `suggest_test_ids`. */
   testIds?: TestIdsAccess
   /** `release_rules` (the MCP endpoint; internal agents get it from the `releases` toolset). */
@@ -200,128 +167,131 @@ export interface RulesAccess {
 
 const repoArg = z.string().min(1).describe('The repository, as forge:path')
 
-/** Numbered layers as `repo_rules` lists them under the Guide text. */
-const renderChainLayers = (layers: readonly GuideChainLayer[]): string =>
-  [
-    'Layers, in the order you read them (higher wins over lower; people over generated):',
-    ...layers.map(
-      (layer) =>
-        `${layer.n}. ${layer.source} (${layer.kind}${layer.version ? ` v${layer.version}` : ''}${layer.proposed ? ', proposed' : ''}): ${layer.chars} chars${layer.cut ? `, cut from ${layer.fullChars}` : ''}`,
-    ),
-  ].join('\n')
-
 const noRepo = (repo: string) =>
   new ToolError(`No readable repository ${repo}; pass forge:path, e.g. gitlab:acme/app.`)
 
-function guideTools(access: GuideRulesAccess): RegistryTool[] {
+const renderBlocks = (blocks: readonly RuleBlock[]): string =>
+  [
+    'Blocks, strongest first:',
+    ...blocks.map(
+      (block) =>
+        `- ${block.layer === 'rule' ? `[rule:${block.id}] ` : ''}${block.title} (${block.source}, ${block.activation}): ${block.text ? `${block.chars} chars${block.cut ? `, cut from ${block.fullChars}` : ''}` : 'left out for room'}`,
+    ),
+  ].join('\n')
+
+const renderRequested = (resolved: ResolvedRules): string[] =>
+  resolved.requested.length
+    ? [
+        [
+          'Rules to read with get_rule when they fit the work:',
+          ...resolved.requested.map(
+            (rule) =>
+              `- \`${rule.id}\`${rule.title === rule.id ? '' : ` ${rule.title}`}${rule.source === rule.id ? '' : ` (${rule.source})`}: ${rule.description}`,
+          ),
+        ].join('\n'),
+      ]
+    : []
+
+const stripCitation = (id: string) => id.trim().replace(/^\[|\]$/g, '')
+
+function repoRulesTools(access: RepoRulesAccess): RegistryTool[] {
   return [
     defineTool({
       name: 'repo_rules',
       description:
-        "The team's rules for a repository (its Guide): team rules from the repository, its family, its folders, its owner teams and the whole organization, learned rules, policies such as commit conventions, generated text marked lower priority, then relevant knowledge notes. Human rules always win over generated text. Call it before changing code in a repository; the repository's own rules files (AGENTS.md, CLAUDE.md, ...) are not included, read them from the checkout.",
+        "The rules agents follow in a repository, resolved as Holtkeeper's own agents get them: rules people wrote in the panel for the organization, teams and repositories, the repository's rules files (AGENTS.md, CLAUDE.md, REVIEW.md, .github/instructions, .cursor/rules, ... including nested ones), policies such as commit conventions, then learned rules, ranked below. Pass the files you change so path-scoped rules apply. Lists the blocks it used and rules to read on demand with get_rule. Call it before changing code in a repository.",
       input: z.object({
         repo: repoArg,
-        task: z
-          .enum(guideTasks)
+        files: z
+          .array(z.string().min(1))
+          .max(200)
           .optional()
           .describe(
-            'What you are doing: agent (writing code, the default), review, chat or release-notes',
+            'Repository-relative paths you touch; without them every path-scoped rule is listed',
           ),
-        section: z
-          .enum(guideSections)
-          .optional()
-          .describe('The topic of the work besides general rules, e.g. testing or testids'),
-        only: z
-          .enum(guideSections)
+        agent: z
+          .enum(['review', 'task', 'chat', 'release'])
           .optional()
           .describe(
-            'Read just this section with its layers, as Knowledge › Guide shows it; overrides task and section',
+            'What you are doing: task (writing code, the default), review, chat or release',
           ),
       }),
-      run: async ({ repo, task, section, only }) => {
-        const topic = only ?? section
-        const resolved = await access.resolve(
-          repo,
-          only
-            ? { task: chainTaskOf(only), focus: [only] }
-            : { task: task ?? 'agent', ...(section && { section }) },
-        )
+      run: async ({ repo, files, agent }) => {
+        const resolved = await access.resolve(repo, {
+          agent: agent ?? 'task',
+          ...(files && { files }),
+        })
         if (!resolved) throw noRepo(repo)
-        if (!resolved.text.trim())
-          return `No team rules apply to \`${repo}\` yet${topic ? ` for ${guideSectionLabels[topic]}` : ''}; follow the repository's own rules files and its existing code.`
+        if (!resolved.text.trim() && !resolved.requested.length)
+          return `No rules apply to \`${repo}\` yet; follow its existing code.`
         return [
           `# Rules for \`${repo}\``,
-          resolved.text.trim(),
-          renderChainLayers(chainLayers(resolved)),
+          ...(resolved.text.trim() ? [resolved.text.trim()] : []),
+          ...renderRequested(resolved),
+          renderBlocks(resolved.blocks),
           ...(resolved.warnings.length ? [`Notes: ${resolved.warnings.join(' ')}`] : []),
         ].join('\n\n')
       },
       subject: ({ repo }) => repo,
     }),
-  ]
-}
-
-const isScopeKind = (value: string): value is LearningScopeKind =>
-  learningScopeKinds.some((kind) => kind === value)
-
-function proposalTools(access: RuleProposalAccess): RegistryTool[] {
-  return [
     defineTool({
-      name: 'propose_rule_change',
+      name: 'get_rule',
       description:
-        "Proposes a rule for a repository's Guide: one imperative sentence people review under Knowledge → Learnings before any agent sees it, unless the team auto-accepts proposed rules. It never edits team rules, and a rule the repository already has a candidate for is not added again. Use it when a lasting convention is missing or wrong, not for one-off facts (propose_knowledge is for notes).",
+        'One rule in full: a panel rule ([rule:<id>]), a learned rule ([learn:<id>]) with its sources and counters, or a rules file of a repository by path (pass repo) such as one repo_rules offers to read on demand.',
       input: z.object({
-        repo: z.string().min(1).describe('The repository the rule comes from, as forge:path'),
-        section: z
-          .enum(guideSections)
-          .describe(
-            'review for what reviews should (not) flag; general, testing, testids, assets, commits or releases otherwise',
-          ),
-        rule: z
+        id: z
           .string()
           .min(1)
-          .max(LEARNING_RULE_MAX)
-          .describe('One imperative sentence, e.g. "Keep shape sizes in ShapeSize."'),
-        reason: z
+          .describe('rule:<id>, learn:<id>, a rule id, or a repository rules file path'),
+        repo: z
           .string()
           .min(1)
-          .max(1000)
-          .describe('Why the rule is needed, with the evidence you saw'),
-        scope: z
-          .union([
-            z.enum(learningScopeKinds),
-            z.templateLiteral([z.enum(learningScopeKinds), ':', z.string().min(1)]),
-          ])
           .optional()
-          .describe(
-            'Where it should apply once accepted (default repo): repo, family, path (the folder directly holding the repository), team (its first owner team), or an exact scope of the repository such as path:<forge>:<folder> for a wider folder, team:<key> for another owner team, family:<id> or repo:<forge:path>',
-          ),
+          .describe('The repository, as forge:path, for a rules file path'),
       }),
-      readOnly: false,
-      run: async ({ repo, section, rule, reason, scope }) => {
-        const outcome = await access
-          .propose(repo, {
-            section,
-            rule,
-            reason,
-            ...(scope && (isScopeKind(scope) ? { scope } : { targetScope: scope })),
-          })
-          .catch((error: unknown) => {
-            if (error instanceof LearningScopeError)
-              throw new ToolError(`Not proposed: ${error.message}.`)
-            throw error instanceof Error && error.message === 'the rule is empty'
-              ? new ToolError('Not proposed: the rule is empty.')
-              : error
-          })
-        if (!outcome) throw noRepo(repo)
-        const { candidate } = outcome
-        if (outcome.status === 'proposed' && candidate.status === 'accepted')
-          return `Accepted "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\` into ${candidate.acceptedScope ?? 'its scope'} without review (learnings auto-accept is on); agents use it from now on. People can reject it in Knowledge › Learnings (${webPaths.knowledge('learnings', { space: `repo:${repo}` })}).`
-        return outcome.status === 'exists'
-          ? `Not added: \`${repo}\` already has this rule as a ${candidate.status} candidate: "${candidate.rule}".`
-          : `Proposed "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\`${candidate.targetScope ? ` into ${candidate.targetScope}` : ''}. People review it in Knowledge › Learnings (${webPaths.knowledge('learnings', { space: `repo:${repo}` })}) before agents use it.`
+      run: async ({ id, repo }) => {
+        const key = stripCitation(id)
+        if (key.startsWith('learn:')) {
+          const learning = await access.learning(key.slice('learn:'.length))
+          if (!learning) throw new ToolError(`No learned rule ${key} you may read.`)
+          return [
+            `# [learn:${learning.id}] Learned rule (${learning.status})`,
+            learning.text,
+            ...(learning.reason ? [`Why: ${learning.reason}`] : []),
+            [
+              `- applies to: ${scopeSource(learning.scope)}${learning.files?.length ? `, files ${learning.files.map((glob) => `\`${glob}\``).join(', ')}` : ''}`,
+              `- origin: ${learning.origin}; used ${learning.uses}×, fixed ${learning.actedOn}×, 👍 ${learning.votesUp} 👎 ${learning.votesDown}`,
+              ...learning.sources.map(
+                (source) =>
+                  `- source: ${source.url ?? `${source.repo ?? ''}${source.mergeRequest ? `!${source.mergeRequest}` : ''}`} (${source.at.slice(0, 10)})`,
+              ),
+            ].join('\n'),
+          ].join('\n\n')
+        }
+        const ruleId = key.startsWith('rule:') ? key.slice('rule:'.length) : key
+        const rule = repo && !key.startsWith('rule:') ? undefined : await access.rule(ruleId)
+        if (rule)
+          return [
+            `# [rule:${rule.id}] ${rule.title}`,
+            [
+              `- applies to: ${scopeSource(rule.scope)}${rule.files?.length ? `, files ${rule.files.map((glob) => `\`${glob}\``).join(', ')}` : ''}`,
+              ...(rule.agents?.length ? [`- read by: ${rule.agents.join(', ')}`] : []),
+              ...(rule.description ? [`- when: ${rule.description}`] : []),
+              `- version ${rule.version}, updated ${rule.updatedAt.slice(0, 10)}`,
+            ].join('\n'),
+            rule.body.trim(),
+          ].join('\n\n')
+        if (repo) {
+          const file = await access.repoFile(repo, key)
+          if (file) return `# ${file.path} (${repo})\n\n${file.text.trim()}`
+        }
+        throw new ToolError(
+          repo
+            ? `No rule or rules file ${key} in \`${repo}\`.`
+            : `No rule ${key} you may read; pass repo for a rules file path.`,
+        )
       },
-      subject: ({ repo }) => repo,
+      subject: ({ id, repo }) => repo ?? id,
     }),
   ]
 }
@@ -500,7 +470,7 @@ function commitTools(access: CommitConventionsAccess): RegistryTool[] {
 }
 
 /**
- * The `rules` toolset: `repo_rules` (with `guide`), `propose_rule_change` (with `proposals`),
+ * The `rules` toolset: `repo_rules` and `get_rule` (with `rules`),
  * `commit_conventions` and `check_commit_message` (with `commits`), `test_ids` and
  * `suggest_test_ids` (with `testIds`) and `release_rules` (with `releases`), over the repositories
  * `access` lets the caller read.
@@ -508,21 +478,17 @@ function commitTools(access: CommitConventionsAccess): RegistryTool[] {
  */
 export function rulesToolset(access: RulesAccess): RegistryToolset | undefined {
   const tools = [
-    ...(access.guide ? guideTools(access.guide) : []),
-    ...(access.proposals ? proposalTools(access.proposals) : []),
+    ...(access.rules ? repoRulesTools(access.rules) : []),
     ...(access.commits ? commitTools(access.commits) : []),
     ...(access.testIds ? testIdTools(access.testIds) : []),
     ...(access.releases ? [releaseRulesTool(access.releases)] : []),
   ]
   if (!tools.length) return undefined
   const instructions = [
-    ...(access.guide
+    ...(access.rules
       ? [
-          'Call repo_rules before changing code in a repository: it returns the team rules agents must follow there.',
+          'Call repo_rules before changing code in a repository, with the files you change: it returns the rules agents must follow there; get_rule reads one in full.',
         ]
-      : []),
-    ...(access.proposals
-      ? ['propose_rule_change suggests a missing or wrong rule for people to review.']
       : []),
     ...(access.commits
       ? [

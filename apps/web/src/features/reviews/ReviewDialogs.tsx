@@ -117,7 +117,7 @@ function ReviewForm({ repo, onClose }: { repo: RepoRef | undefined; onClose: () 
         autoFocus={repo !== undefined}
         placeholder="!42 or a merge request URL"
         error={text.trim() && number === undefined ? 'Type a number or a link' : undefined}
-        description="The guide and review settings of the repository apply."
+        description="The rules and review settings of the repository apply."
       />
     </Dialog>
   )

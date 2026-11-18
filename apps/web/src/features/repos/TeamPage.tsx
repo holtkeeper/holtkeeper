@@ -31,16 +31,16 @@ import {
   Tag,
 } from '../../ui/index.ts'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
+import { ScopedRules } from '../knowledge/ScopedKnowledge.tsx'
 import { ResolvedSettings } from '../settings/ResolvedSettings.tsx'
 import { useSession } from '../shell/session.ts'
 import { StackView } from '../stack/StackPage.tsx'
 import { repoColumns } from './ReposPage.tsx'
-import { ScopeGuide } from './ScopeGuide.tsx'
 import { TeamDialog } from './TeamDialog.tsx'
 
 /**
  * One team: the repositories it owns as a fleet table (those it consumes listed after), its stack,
- * its Guide and the settings resolved for it, with its patterns and members in the summary strip.
+ * the rules scoped to it and the settings resolved for it, with its patterns and members in the summary strip.
  * Global `settings:write` and the team's maintainers get Edit.
  */
 export function TeamPage() {
@@ -164,7 +164,9 @@ export function TeamPage() {
           }
         />
       ) : null}
-      {tab === 'knowledge' ? <ScopeGuide space={{ kind: 'team', team: teamId }} /> : null}
+      {tab === 'knowledge' ? (
+        <ScopedRules query={{ team: teamId }} title="Rules of this team" />
+      ) : null}
       {tab === 'settings' ? <ResolvedSettings focus={{ kind: 'team', team: teamId }} /> : null}
       {editing && entry && level !== 'none' ? (
         <TeamDialog entry={entry} level={level} repos={all} onClose={() => setEditing(false)} />

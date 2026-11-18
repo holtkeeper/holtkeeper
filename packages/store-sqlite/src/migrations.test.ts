@@ -104,7 +104,7 @@ describe('migrate', () => {
     expect(old).not.toHaveProperty('subject')
   })
 
-  test('v25 and v26 add guide generated history and chat context; old rows read empty', async () => {
+  test('v26 adds chat context; old rows read empty', async () => {
     const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
     const db = new Database(path, { create: true })
     migrate(
@@ -112,28 +112,6 @@ describe('migrate', () => {
       migrations.filter((m) => m.version <= 24),
     )
     const at = '2026-11-01T00:00:00.000Z'
-    const layer = {
-      body: '- Run `bun test`.',
-      inputHash: 'h1',
-      model: 'model-fast',
-      costUsd: 0,
-      status: 'proposed',
-      generatedAt: at,
-    }
-    db.run('INSERT INTO guides (scope, section, data) VALUES (?, ?, ?)', [
-      'repo:gl:acme/widget-kit',
-      'testing',
-      JSON.stringify({
-        scope: 'repo:gl:acme/widget-kit',
-        section: 'testing',
-        rules: '',
-        steering: '',
-        version: 0,
-        generated: layer,
-        proposal: layer,
-        learnings: [],
-      }),
-    ])
     db.run('INSERT INTO chat_threads (id, updated_at, archived, data) VALUES (?, ?, 0, ?)', [
       't1',
       at,
@@ -170,13 +148,7 @@ describe('migrate', () => {
     expect(versions(db)).toEqual(expect.arrayContaining([25, 26]))
     db.close()
 
-    const { guides, chat } = sqliteStore({ path })
-    expect(await guides.get('repo:gl:acme/widget-kit', 'testing')).toMatchObject({
-      generated: { ...layer, version: 0 },
-      proposal: { ...layer, version: 0 },
-    })
-    expect(await guides.generatedHistory('repo:gl:acme/widget-kit', 'testing')).toEqual([])
-
+    const { chat } = sqliteStore({ path })
     expect((await chat.getThread('t1'))?.contextRepos).toEqual([])
     expect((await chat.getMessage('m1'))?.refs).toEqual([])
     expect(await chat.context('t1')).toMatchObject({ messageCount: 1, repos: [] })
@@ -286,7 +258,7 @@ describe('migrate', () => {
     db.close()
   })
 
-  test('v30 renames ai usage groups to teams and adds knowledge match', async () => {
+  test('v30 renames ai usage groups to teams', async () => {
     const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
     const db = new Database(path, { create: true })
     migrate(
@@ -300,41 +272,14 @@ describe('migrate', () => {
        VALUES ('u1', '2026-10-01T00:00:00.000Z', 'work', 'shapes/a', '["widgets"]', 'review',
          'system', 'anthropic', 'm', 1, 1, 0, 0, 0.5, 'reported', 10, 1, 'ok')`,
     )
-    db.run(
-      `INSERT INTO knowledge (id, title, body, kind, status, source, author, scope, topics,
-         applies_to, evidence, tags, created_at, updated_at, version)
-       VALUES ('k1', 'Round corners', 'Use the radius token.', 'convention', 'accepted', 'human',
-         'jane', '{"teams":["widgets"]}', '[]', '["*"]', '[]', '', '2026-10-01T00:00:00.000Z',
-         '2026-10-01T00:00:00.000Z', 1)`,
-    )
     migrate(db)
     expect(versions(db)).toContain(30)
     db.close()
-    const { aiUsage, knowledge } = sqliteStore({ path })
+    const { aiUsage } = sqliteStore({ path })
     expect((await aiUsage.list({ team: 'widgets' }))[0]).toMatchObject({
       id: 'u1',
       teams: ['widgets'],
     })
-    expect(await knowledge.get('k1')).not.toHaveProperty('match')
-  })
-
-  test('v31 adds embeddings next to existing knowledge', async () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
-    const db = new Database(path, { create: true })
-    migrate(
-      db,
-      migrations.filter((m) => m.version <= 30),
-    )
-    expect(
-      db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'embeddings'").get(),
-    ).toBeNull()
-    migrate(db)
-    expect(versions(db)).toContain(31)
-    db.close()
-    const { embeddings } = sqliteStore({ path })
-    const vector = Float32Array.of(0.5, -2)
-    await embeddings.put([{ subject: 'knowledge:k1', model: 'fake:m@2', hash: 'h', vector }])
-    expect((await embeddings.list({ model: 'fake:m@2' }))[0]?.vector).toEqual(vector)
   })
 
   test('v32 deletes slack.reviews entries and keeps other settings', async () => {
@@ -357,5 +302,72 @@ describe('migrate', () => {
     db.close()
     const { settings } = sqliteStore({ path })
     expect((await settings.list()).map((entry) => entry.key)).toEqual(['releases.announce'])
+  })
+  test('v34 replaces notes, guides, families and embeddings with rules and learnings', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 33),
+    )
+    const at = '2026-11-01T00:00:00.000Z'
+    db.run(
+      `INSERT INTO knowledge (id, title, body, kind, status, source, author, scope, topics,
+         applies_to, evidence, tags, created_at, updated_at, version)
+       VALUES ('k1', 'Round corners', 'Use the radius token.', 'convention', 'accepted', 'human',
+         'jane', '{"teams":["widgets"]}', '[]', '["*"]', '[]', '', ?1, ?1, 1)`,
+      [at],
+    )
+    db.run(
+      `INSERT INTO learnings (id, repo, key, created_at, data) VALUES ('l1', 'work:a', 'k', ?, '{}')`,
+      [at],
+    )
+    db.run(`INSERT INTO learning_claims (key, at) VALUES ('work:a!1#2', ?)`, [at])
+    migrate(db)
+    expect(versions(db)).toContain(34)
+    const tables = db
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'trigger')",
+      )
+      .all()
+      .map((row) => row.name)
+    for (const gone of [
+      'knowledge',
+      'knowledge_history',
+      'knowledge_fts',
+      'knowledge_fts_insert',
+      'guides',
+      'guide_history',
+      'guide_generated',
+      'families',
+      'embeddings',
+    ])
+      expect(tables).not.toContain(gone)
+    expect(tables).toEqual(
+      expect.arrayContaining([
+        'rules',
+        'rule_history',
+        'rules_fts',
+        'learnings',
+        'learnings_fts',
+        'learning_claims',
+        'review_reactions',
+      ]),
+    )
+    db.close()
+
+    const { rules, learnings } = sqliteStore({ path })
+    expect(await learnings.list()).toEqual([])
+    expect(await learnings.claim('work:a!1#2', at)).toBe(false)
+    await rules.put({
+      id: 'r1',
+      title: 'Round corners',
+      body: 'Use the radius token.',
+      scope: { teams: ['widgets'] },
+      author: 'jane',
+      createdAt: at,
+      updatedAt: at,
+    })
+    expect((await rules.search('radius')).map((hit) => hit.rule.id)).toEqual(['r1'])
   })
 })

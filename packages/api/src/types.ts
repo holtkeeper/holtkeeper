@@ -22,7 +22,6 @@ import type {
   FileCoverageData,
 } from '@holtkeeper/coverage'
 import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
-import type { FamilySuggestion, GuideBlock, GuideCaps, GuideTask } from '@holtkeeper/guide'
 import type { Issue } from '@holtkeeper/issues'
 import type { JobLogLine, JobLogPage, JobStep, JobWait, WaitReason } from '@holtkeeper/jobs'
 import type { QaChange, QaChangeDetail, QaStaleness, QaSummarySections } from '@holtkeeper/qa'
@@ -43,6 +42,7 @@ import type {
   VersionTag,
 } from '@holtkeeper/release'
 import type { Metric, Report } from '@holtkeeper/report'
+import type { ResolvedRules } from '@holtkeeper/rules'
 import type {
   AgentTask,
   AgentTaskCi,
@@ -57,14 +57,12 @@ import type {
   AiUsageTotals,
   AuditEvent,
   ChatMessageRef,
-  Family,
-  GuideGenerated,
-  GuideRevision,
-  GuideScopeKey,
-  GuideSection,
-  GuideSectionName,
-  LearningCandidate,
-  LearningScopeKind,
+  Learning,
+  LearningOrigin,
+  Rule,
+  RuleAgent,
+  RuleContent,
+  RuleRevision,
   ReactionTotals,
   AuditVerification,
   CredentialCapabilities,
@@ -76,14 +74,6 @@ import type {
   JobFailureGroup,
   JobStatus,
   JobTrigger,
-  KnowledgeEntry,
-  KnowledgeKind,
-  KnowledgeLink,
-  KnowledgeMatch,
-  KnowledgePackage,
-  KnowledgeVisibility,
-  KnowledgeRevision,
-  KnowledgeStatus,
   LibraryChunk,
   DatabaseDomain,
   DatabaseIndex,
@@ -1714,20 +1704,6 @@ export interface DependencyBundleShare {
   entrypoints: number
 }
 
-/** An accepted knowledge entry about the library; people's entries come before agents'. */
-export interface DependencyDecision {
-  id: string
-  title: string
-  kind: KnowledgeKind
-  source: 'human' | 'agent'
-  author: string
-  updatedAt: Timestamp
-  /** The teams the entry belongs to; empty for entries about everything. */
-  owner: string[]
-  /** Read through the cross-team catalog: another team's `shared` entry. */
-  shared: boolean
-}
-
 /** A Renovate merge request carrying an update of the library. */
 export interface DependencyMergeRequest {
   repo: string
@@ -1741,7 +1717,7 @@ export interface DependencyMergeRequest {
 
 /**
  * `GET /api/dependencies/library?ecosystem=&name=` — the Overview and Docs tabs of one library:
- * who uses which version, advisories, licenses, bundle shares, team decisions, open update merge
+ * who uses which version, advisories, licenses, bundle shares, open update merge
  * requests, the indexed versions and the documents of the newest indexed one. An internal package
  * that only the public API catalog knows is found too, with empty lists. Upgrade readiness is not
  * part of it: it loads on demand from `GET /api/dependencies/upgrade`.
@@ -1774,7 +1750,6 @@ export interface DependencyDetail {
   advisories: DependencyAdvisory[]
   licenses: DependencyLicense[]
   bundles: DependencyBundleShare[]
-  decisions: DependencyDecision[]
   mergeRequests: DependencyMergeRequest[]
   docs: {
     version?: string
@@ -2402,7 +2377,7 @@ export interface ReleaseEditsInput {
 
 /**
  * `POST /api/releases/summary`: has the AI agent write the notes of one step's plan (one call on
- * the `fast` tier, style from the Guide's `releases` section); kept as an edit.
+ * the `fast` tier, style from the repository's rules for release notes); kept as an edit.
  */
 export interface ReleaseSummaryInput {
   repo: string
@@ -2699,15 +2674,14 @@ export interface RepoWorkSummary {
   costUsd?: number
 }
 
-/** The repository's Guide as the Knowledge card shows it. */
+/** Rules and learnings that apply to the repository, as the Knowledge card counts them. */
 export interface RepoKnowledgeSummary {
-  /** Guide sections written for the repository itself. */
-  sections: number
-  notes: number
-  /** Learnings proposed for the repository, waiting for review. */
-  proposed: number
-  /** Broader Guide scopes it inherits from, broad to narrow, e.g. `team web`, `path acme/web`, `family storefronts`. */
-  inherits: string[]
+  /** Panel rules whose scope covers the repository. */
+  rules: number
+  /** Active learnings whose scope covers it. */
+  learnings: number
+  /** Pending learnings whose scope covers it, waiting for the approval delay or a person. */
+  pending: number
 }
 
 /** The repository's release state from the Releases snapshot. */
@@ -2800,8 +2774,8 @@ export interface ReviewRow {
   model?: string
   /** Wall time of the run; absent for records made before it was stored. */
   durationMs?: number
-  /** Guide scopes the review read, broad to narrow; empty when unknown or none. */
-  guideScopes: string[]
+  /** Where the rules the review read came from (`All repositories`, `AGENTS.md`, …); empty when unknown or none. */
+  ruleSources: string[]
   costUsd?: number
 }
 
@@ -3109,490 +3083,95 @@ export interface DeleteEgressCacheResult {
   bytes: number
 }
 
-/** A knowledge entry; `score` is set on search results (higher is more relevant). */
-export interface KnowledgeEntryView extends KnowledgeEntry {
-  score?: number
-  /**
-   * The teams the entry belongs to: the teams its scope names and the owner teams of the
-   * repositories its path patterns cover. Empty for entries about everything. The UI folds other
-   * teams' notes.
-   */
-  owner: string[]
-  /** How Holtkeeper's review comments citing the entry fared; absent when none cites it. */
-  citations?: KnowledgeCitationSummary
-}
-
-/** Result of the last freshness check of a knowledge entry (`knowledge-verify`). */
-export interface KnowledgeFreshnessView {
-  status: 'fresh' | 'suspect' | 'stale'
-  /** When it was checked. */
-  checkedAt: string
-  /** `signals`: nothing it rests on changed; `model`: a model judged it. */
-  method: 'signals' | 'model'
-  /** The repository whose code was read, `forge:path`. */
-  repo: string
-  reason?: string
-  /** Why it was looked at again, e.g. `changed-file: src/loader.ts`. */
-  signals: string[]
-  /** Id of the entry proposed to replace it. */
-  proposal?: string
-}
-
-/** A derived link between two knowledge entries. */
-export interface HandbookLink {
-  from: string
-  to: string
-  kind: 'supersedes' | 'cites' | 'subject' | 'topics' | 'similar'
-  /** 0–1; stronger links are drawn closer. */
-  weight: number
-}
-
-/** One accepted entry of the handbook. */
-export interface HandbookEntry {
-  id: string
-  title: string
-  body: string
-  kind: KnowledgeKind
-  topics: string[]
-  subject?: string
-  /** Scope in words: `team widgets`, `folder work:acme/round/**`, `repo work:acme/web`, ... */
-  scope: string
-  /** Repositories the scope names exactly (`forge:path`); empty for team, folder and global scopes. */
-  repos: string[]
-  /** Teams the entry belongs to (see `KnowledgeEntryView.owner`). */
-  owner: string[]
-  updatedAt: string
-  version: number
-  /** Evidence links, as `{ label, url }`. */
-  evidence: KnowledgeLink[]
-  freshness?: KnowledgeFreshnessView
-}
-
-/** A chapter of the handbook: entries about one subject, topic or kind, grouped automatically. */
-export interface HandbookChapter {
-  /** Stable key: `subject:…`, `topic:…` or `kind:…`. */
-  key: string
-  title: string
-  entries: HandbookEntry[]
-}
-
-/**
- * `GET /api/knowledge/handbook`: the accepted knowledge the caller may read as one article of
- * chapters, with the links between entries. `repo` (`forge:path`) shows what applies to one
- * repository, `team` the entries of one team.
- */
-export interface Handbook {
-  chapters: HandbookChapter[]
-  links: HandbookLink[]
-  counts: { entries: number; chapters: number; suspect: number; stale: number }
-}
-
-/**
- * What became of the review comments citing a knowledge entry (`[kb:<id>]`), over the stored
- * reviews of the last year. `fixed`: merged and the commented lines changed; `resolved`: merged
- * and the thread resolved, lines unchanged; `dismissed`: merged with the thread open and the lines
- * unchanged; `open`: the merge request is still open; `closed`: closed without merging;
- * `unknown`: the forge could not tell.
- */
-export interface KnowledgeCitationSummary {
-  /** Posted comments citing the entry. */
-  comments: number
-  fixed: number
-  resolved: number
-  dismissed: number
-  open: number
-  closed: number
-  unknown: number
-  /** Comments people replied to. */
-  replied: number
-  /** 👍 and 👎 on the comments. */
-  up: number
-  down: number
-  /**
-   * Comments on repositories the entry's scope does not cover: it reached them as knowledge of a
-   * similar repository.
-   */
-  fromNeighbours: number
-  lastCitedAt?: Timestamp
-}
-
-/** One review comment citing a knowledge entry. */
-export interface KnowledgeCitationView {
-  /** `forge:path`. */
-  repo: string
-  mergeRequest: number
-  /** The comment's title. */
-  title: string
-  severity: string
-  category: string
-  /** The comment on the forge. */
-  href?: string
-  /** When the review that posted it ran. */
-  at: Timestamp
-  outcome: 'fixed' | 'resolved' | 'dismissed' | 'open' | 'closed' | 'unknown'
-  /** Notes people wrote in the thread. */
-  replies: number
-  up: number
-  down: number
-  /** The entry reached the review as knowledge of a similar repository (its scope does not cover `repo`). */
-  neighbour: boolean
-}
-
-/**
- * `GET /api/knowledge/:id/citations` — how the review comments citing the entry fared. Needs
- * `knowledge:read` over the entry's scope (or a `shared` entry within cross-team reach). The
- * summary counts every citing comment; `comments` lists, newest first and at most 50, those on
- * repositories the caller may read reviews of (`analyses:read`), and `hidden` how many citing
- * comments are on repositories the caller may not read reviews of.
- */
-export interface KnowledgeCitations {
-  id: string
-  summary: KnowledgeCitationSummary
-  comments: KnowledgeCitationView[]
-  hidden: number
-}
-
-/**
- * `GET /api/knowledge?status=&kind=&topic=&package=&subject=&scope=&q=&repo=&limit=` — `status` and
- * `kind` take comma lists. With `q`, best matches first; otherwise most recently updated first.
- * With `repo` (`forge:path`), every entry whose scope covers the repository; otherwise entries
- * whose scope the caller may read, plus accepted `shared` entries of other teams within the
- * caller's cross-team catalog reach.
- */
-export interface KnowledgeList {
-  entries: KnowledgeEntryView[]
-  /** Names and avatars of the users among authors and editors. */
-  people: Record<string, PersonView>
-}
-
-/** `GET /api/knowledge/:id` — the entry with its previous versions, newest first. */
-export interface KnowledgeDetail {
-  entry: KnowledgeEntry
-  history: KnowledgeRevision[]
-}
-
-/**
- * `POST /api/knowledge` — a person's entry; `status` defaults to `accepted`. A `migration` must
- * name its packages, the scope must cover something and `appliesTo` must not be empty.
- */
-export interface CreateKnowledgeInput {
-  title: string
-  body: string
-  kind: KnowledgeKind
-  scope: Scope
-  /** Narrows where the entry applies within `scope` (families, touched files). */
-  match?: KnowledgeMatch
-  topics?: string[]
-  appliesTo: string[]
-  packages?: KnowledgePackage[]
-  /**
-   * `shared` lets other teams read the entry under the cross-team catalog policy. On create, a
-   * decision or convention about one package defaults to `shared` with that package as `subject`.
-   */
-  visibility?: KnowledgeVisibility
-  /** What the entry is about: `npm:react`, `Go:example.com/kit`, `tool:node`. */
-  subject?: string
-  evidence?: KnowledgeLink[]
-  supersedes?: string
-  status?: KnowledgeStatus
-}
-
-/**
- * `PUT /api/knowledge/:id` — replaces the content and bumps the version. With `version`, the
- * update fails with 409 when the entry changed since.
- */
-export interface UpdateKnowledgeInput extends CreateKnowledgeInput {
-  version?: number
-}
-
-/** Guide, Notes and Learnings totals of one Knowledge space. */
-export interface KnowledgeSpaceCounts {
-  /** Sections of the space with human rules or generated text. */
-  guide: number
-  /**
-   * Live notes (proposed and accepted) the space's Notes table lists: every note the caller may
-   * read for `all`, notes naming the team, notes covering the folder, notes naming the family or
-   * any family member, and notes covering the repository, inherited ones included.
-   */
-  notes: number
-  /** Learning candidates still proposed for the space. */
-  learnings: number
-}
-
-/**
- * `GET /api/knowledge/counts` — totals per Knowledge space, keyed by space (`all`, `team:<key>`,
- * `path:<forge>:<folder>`, `family:<id>`, `repo:<forge>:<path>`, the Guide scope keys). Only spaces whose scope the caller
- * may read are present; a space with nothing in it may be left out.
- */
-export interface KnowledgeCounts {
-  spaces: Record<string, KnowledgeSpaceCounts>
-}
-
-/** Where a layer of the Guide chain comes from, in the order the agent reads layers. */
-export type GuideChainLayerKind =
-  | 'repo-file'
-  | 'repo'
-  | 'family'
-  | 'path'
-  | 'team'
-  | 'all'
-  | 'learnings'
-  | 'policies'
-  | 'generated'
-  | 'notes'
-  | 'neighbours'
-
-/** One numbered layer of a section's Guide chain: the text the agent gets from one source. */
-export interface GuideChainLayer {
-  /** 1-based position in the section's chain. */
-  n: number
-  kind: GuideChainLayerKind
-  /** Guide scope of the layer; absent for repository files, policies and notes. */
-  scope?: GuideScopeKey
-  /** `REVIEW.md`, `Folder acme/games`, `Team games`, `Family Widgets`, `All repositories`, `Commit policy`, … */
-  source: string
-  /** The text as the agent gets it, cut when `cut` is set. */
-  text: string
-  /** Characters of `text`; 0 when the budget left nothing for the layer. */
-  chars: number
-  /** Characters the layer would take whole. */
-  fullChars: number
-  /** The budget cut the layer short or left it out. */
-  cut: boolean
-  /** For `generated`: the version shown, linking to `GET /api/guide/generated/history`. */
-  version?: number
-  /** For `generated`: proposed text nobody accepted yet. */
-  proposed?: boolean
-}
-
-/** One section of the Guide chain with its layers. */
-export interface GuideChainSection {
-  section: GuideSectionName
-  /**
-   * Layers in exactly the order the agent reads them: repository files, repository rules,
-   * family, folders (deepest first), owner teams (several, in config order), all repositories,
-   * learnings, policies, generated text, notes, knowledge of similar repositories (`neighbours`).
-   * Empty sources are left out; numbering has no gaps.
-   */
-  layers: GuideChainLayer[]
-}
-
-/**
- * `GET /api/guide/chain?repo=&section=` — the layered Guide a task of the repository gets, per
- * section (only `section` when given), with the shared budget. Needs `knowledge:read` on the
- * repository. The MCP knowledge tools return the same layers in the same order.
- */
-export interface GuideChainView {
-  repo: string
-  sections: GuideChainSection[]
-  /**
-   * Characters used against the caps: `total` 12000, `human` 8000, `generated` 4000, at most
-   * `repoFiles` 4800 for rules files and `rules` 4000 kept for team and learned rules.
-   */
-  budget: GuideCaps & { used: number; humanUsed: number; generatedUsed: number }
-  /** Problems a person should see, e.g. repository rules too long to fit. */
-  warnings: string[]
-}
-
-/** A rules file of the repository itself, as read at its default branch head. */
-export interface GuideRepoFileView {
-  /** `REVIEW.md`, `AGENTS.md`, `.github/copilot-instructions.md`, … */
-  path: string
-  /** Blob sha; unchanged sha means unchanged text, so the server caches by it. */
-  sha: string
-  chars: number
-  text: string
-}
-
-/**
- * `GET /api/guide/repo-files?repo=` — the rules files of the repository the Guide chain reads as
- * its `repo-file` layer, in that order. Needs `knowledge:read` on the repository.
- */
-export interface GuideRepoFilesView {
-  repo: string
-  /** The default branch head the files were read at, when the forge reports it. */
-  sha?: string
-  files: GuideRepoFileView[]
-}
-
-/** One stored generator run of a section. */
-export interface GuideGeneratedVersionView extends GuideGenerated {
-  /** A person rejected this text (by its `inputHash`). */
-  rejected: boolean
-  /** Where the section holds this version now: accepted (`generated`), waiting (`proposal`) or neither. */
-  current?: 'generated' | 'proposal'
-}
-
-/**
- * `GET /api/guide/generated/history?scope=&section=` — every text the generator stored for the
- * section, newest version first, for Compare. Needs `knowledge:read` on the scope.
- */
-export interface GuideGeneratedHistory {
-  scope: GuideScopeKey
-  section: GuideSectionName
-  versions: GuideGeneratedVersionView[]
-  /** Names and avatars of the users who accepted versions. */
-  people: Record<string, PersonView>
-}
-
-/** One scope's Guide: every section (empty ones included) and whether the caller may edit them. */
-export interface GuideScopeView {
-  scope: GuideScopeKey
-  /** `All repositories`, `Team games`, `Family Widgets`, `work:games/app`. */
-  label: string
-  sections: GuideSection[]
+/** A panel rule as the API answers it, with whether the caller may edit or delete it. */
+export interface RuleView extends Rule {
+  /** `knowledge:write` over the rule's scope. */
   canEdit: boolean
-  /** Names and avatars of the users who edited rules, accepted generated text or learnings. */
-  people: Record<string, PersonView>
-}
-
-/** `GET /api/guide/section?scope=&section=` — the section with its previous human layers. */
-export interface GuideSectionDetail {
-  section: GuideSection
-  history: GuideRevision[]
-  canEdit: boolean
-  /** Names and avatars of the users who made the section and its revisions. */
-  people: Record<string, PersonView>
 }
 
 /**
- * `PUT /api/guide/section?scope=&section=` — replaces the human layer. With `version`, it fails
- * with 409 when the section changed since. `steering` keeps its value when left out.
+ * `GET /api/rules?team=&repo=&text=` — panel rules the caller may read (`knowledge:read` over their
+ * scope), sorted by title; with `text`, best match first. `team` keeps rules naming that team or
+ * covering everything; `repo` (`forge:path`) keeps rules whose scope covers that repository.
  */
-export interface PutGuideSectionInput {
-  rules: string
-  steering?: string
+export interface RuleList {
+  rules: RuleView[]
+  /** Whether the caller may create a rule for some scope. */
+  canCreate: boolean
+}
+
+/** `GET /api/rules/:id` — the rule with its previous versions, newest first. */
+export interface RuleDetail {
+  rule: RuleView
+  history: RuleRevision[]
+}
+
+/**
+ * `POST /api/rules` and `PUT /api/rules/:id` — the rule's content. On `PUT`, `version` is the
+ * version the editor started from: 409 when the rule changed since. Needs `knowledge:write` over
+ * the scope (both the old and the new one on `PUT`).
+ */
+export interface RuleInputBody extends RuleContent {
   version?: number
 }
 
-/**
- * `POST /api/guide/section/accept?scope=repo:…&section=` — accepts the generated text waiting for a
- * person (the proposal, or a first generated layer nobody accepted); it becomes what agents see.
- * With `inputHash`, it fails with 409 unless that is still the waiting text. Answers the section.
- */
-export interface AcceptGuideSectionInput {
-  inputHash?: string
+/** A learning as the API answers it. */
+export interface LearningView extends Learning {
+  /** `knowledge:write` over the learning's scope: may approve, reject, edit and delete it. */
+  canEdit: boolean
+  /** When an active learning expires unless something reinforces it before. */
+  expiresAt?: Timestamp
 }
 
 /**
- * `POST /api/guide/section/reject`: rejects the generated text waiting for a person in one section.
- * The rejected `inputHash` is remembered for that section: the stored version is kept but hidden
- * from the Guide views and the Inbox, and the generator does not propose text from the same inputs again; changed inputs propose anew. Needs
- * `knowledge:write` on the scope; 409 unless `inputHash` is still the waiting text. Audited as
- * `guide.reject`. Answers the section.
- */
-export interface GuideSectionRejectInput {
-  scope: GuideScopeKey
-  section: GuideSectionName
-  inputHash: string
-}
-
-/**
- * `POST /api/guide/regenerate?repo=` — queues a `guide` job that regenerates even when the evidence
- * did not change, optionally for some sections and with a one-off extra prompt stored with the
- * result. Needs `knowledge:write` and `analyses:run` on the repository. Answers the job (201).
- */
-export interface RegenerateGuideInput {
-  sections?: ('general' | 'testing' | 'testids' | 'commits')[]
-  prompt?: string
-}
-
-/**
- * `GET /api/guide/preview?repo=&task=&section=` — the effective Guide a task of the repository
- * gets from the panel (rules files in the repository are read by the task itself and not shown).
- */
-export interface GuidePreview {
-  repo: string
-  task: GuideTask
-  section?: GuideSectionName
-  text: string
-  sections: GuideSectionName[]
-  blocks: GuideBlock[]
-  warnings: string[]
-  budget: GuideCaps & {
-    used: number
-    humanUsed: number
-    generatedUsed: number
-    /** Notes and knowledge of similar repositories. */
-    notesUsed: number
-    /** Knowledge of similar repositories alone. */
-    neighboursUsed: number
-  }
-}
-
-/**
- * `GET /api/learnings?repo=&status=` — learning candidates from replies to review comments, most
- * recently updated first, of repositories the caller has `knowledge:read` on. `status` is a
- * comma-separated list. Each one says whether the caller may decide it (`knowledge:write` on its
- * repository) and which scopes it may be accepted into, most specific first.
+ * `GET /api/learnings?status=&origin=&repo=&text=` — learnings the caller may read, with their
+ * status brought up to now; most recently updated first, with `text` best match first. `status`
+ * and `origin` are comma-separated lists; `repo` (`forge:path`) keeps learnings whose scope covers
+ * it.
  */
 export interface LearningList {
-  candidates: LearningCandidateView[]
-  /** Names and avatars of the users who proposed, decided or edited candidates. */
+  learnings: LearningView[]
+  /** Names and avatars of the people who decided or edited them. */
   people: Record<string, PersonView>
 }
 
 /**
- * How a learning candidate came about: one review reply (`review-reply`), a direct proposal of an
- * MCP client without replies (`mcp`), or several discussions, or a proposal plus replies,
- * folded into one rule (`merged`).
+ * `POST /api/learnings` — a learning a person writes; it is active at once (origin `person`). A
+ * text the fleet already has reinforces that learning instead (`merged`).
  */
-export type LearningSourceKind = 'review-reply' | 'mcp' | 'merged'
+export interface LearningCreateBody {
+  text: string
+  reason?: string
+  scope: Scope
+  files?: string[]
+  agents?: RuleAgent[]
+}
 
-/** A candidate as listed; it carries `targetScope` only while that is still one of its repository's scopes. */
-export interface LearningCandidateView extends LearningCandidate {
-  canDecide: boolean
-  /** Scope keys of the repository the caller may edit: repository, family, folders, owner teams, `all`. */
-  scopes: GuideScopeKey[]
-  sourceKind: LearningSourceKind
-  /**
-   * 1–5, from the sources alone so the same candidate always scores the same: 1, plus 1 each for
-   * at least 2 distinct discussions, at least 2 distinct authors, at least 2 distinct
-   * repositories, and at least 3 distinct authors; capped at 5. Authors are the reply authors
-   * and the proposer of a direct proposal.
-   */
-  confidence: number
+/** Answer of `POST /api/learnings`. */
+export interface LearningCreateResult {
+  status: 'added' | 'merged'
+  learning: LearningView
+}
+
+/** `PATCH /api/learnings/:id` — edits a learning; absent fields stay, `null` clears `reason`, `files` or `agents`. */
+export interface LearningPatch {
+  text?: string
+  reason?: string | null
+  scope?: Scope
+  files?: string[] | null
+  agents?: RuleAgent[] | null
 }
 
 /**
- * `POST /api/learnings/accept` — accepts several candidates at once, each into `scope` (default:
- * its `targetScope`, else the scope its `suggestedScope` points at), with the same rights as accepting one. Each accepted
- * candidate gets its own audit event; one failing never stops the rest.
+ * `GET /api/rules/effective?repo=&agent=&files=` — the rules block an agent run on the repository
+ * gets, with every block considered (included, cut or left out), the rules offered by description
+ * and warnings; the same resolver reviews, tasks, chat, release notes and MCP use. `files` is a
+ * comma-separated list of touched paths; without it file-scoped rules are listed with their paths.
  */
-export interface AcceptLearningsInput {
-  ids: string[]
-  scope?: GuideScopeKey
-}
-
-/** What `POST /api/learnings/accept` did, per candidate, in the order given. */
-export interface AcceptLearningsResult {
-  /** Ids of the candidates now accepted. */
-  accepted: string[]
-  /** Candidates left as they were, with why (unknown, no rights, scope not allowed, …). */
-  failed: { id: string; error: string }[]
-}
-
-/**
- * `POST /api/learnings/:id/accept` — accepts a candidate into a scope's learnings (default: its
- * `targetScope`, else the scope its `suggestedScope` points at), optionally edited first; accepting again moves it. Needs
- * `knowledge:write` on the repository and edit rights on the scope. Answers the candidate.
- */
-export interface AcceptLearningInput {
-  scope?: GuideScopeKey
-  rule?: string
-  section?: GuideSectionName
-}
-
-/**
- * `PATCH /api/learnings/:id` — edits a candidate; an accepted one's Guide entry follows. A
- * `targetScope` must be a `team:`, `path:`, `family:` or `repo:` scope of the candidate's repository the
- * caller may edit; a `suggestedScope` without one drops the old target.
- */
-export interface EditLearningInput {
-  rule?: string
-  section?: GuideSectionName
-  suggestedScope?: LearningScopeKind
-  targetScope?: GuideScopeKey
+export interface EffectiveRules extends ResolvedRules {
+  /** `forge:path`. */
+  repo: string
+  agent: RuleAgent
 }
 
 /**
@@ -3601,33 +3180,6 @@ export interface EditLearningInput {
  */
 export interface ReactionTotalsList {
   totals: ReactionTotals[]
-}
-
-/** `GET /api/families` — the families the caller can see a member of. */
-export interface FamilyList {
-  families: Family[]
-}
-
-/**
- * `GET /api/families/suggestions` — proposed families of repositories with similar stacks and
- * dependencies that are in no family yet; only those the caller could create, minus dismissed ones.
- */
-export interface FamilySuggestionList {
-  suggestions: FamilySuggestion[]
-}
-
-/**
- * `POST /api/families/suggestions/dismiss` — hides the suggestion with exactly these members (any
- * order) for everyone; a suggestion whose member set changes shows up again.
- */
-export interface FamilySuggestionDismissInput {
-  members: string[]
-}
-
-/** `POST /api/families`, `PUT /api/families/:id` — members as `forge:path`, at least two. */
-export interface FamilyInput {
-  name: string
-  members: string[]
 }
 
 /** `POST /api/artifacts/zip` — downloads stored artifacts as one ZIP archive. */
@@ -5107,7 +4659,6 @@ export type HomeAttentionKind =
   | 'allowlist-expiring'
   | 'release'
   | 'learnings'
-  | 'knowledge'
   | 'stale-analyses'
   | 'not-analysed'
 
@@ -5139,8 +4690,8 @@ export interface HomeAttentionItem {
   /** When it started or was last seen, for the age. */
   at: string
   /**
-   * Web UI path to act on it, query string included. Releases the caller may decide, learnings,
-   * knowledge proposals and allowlist entries open their Inbox item (`/inbox?item=<InboxItem.id>&kind=`).
+   * Web UI path to act on it, query string included. Releases the caller may decide, pending
+   * learnings and allowlist entries open their Inbox item (`/inbox?item=<InboxItem.id>&kind=`).
    */
   href: string
   action: HomeAttentionAction
@@ -5154,7 +4705,6 @@ export type HomeChangeKind =
   | 'deploy'
   | 'settings'
   | 'knowledge'
-  | 'guide'
   | 'repo'
   | 'credentials'
   | 'access'
@@ -5203,7 +4753,7 @@ export interface HomeSpend {
 /**
  * `GET /api/home`: the Home page in one read, built from stored data only (no forge calls) and
  * filtered by the caller's permissions: job items and analyses need `analyses:read`, vulnerability
- * items `audits:read`, release items `releases:read`, learnings and knowledge proposals
+ * items `audits:read`, release items `releases:read`, pending learnings
  * `knowledge:write` where they would be decided, changes what History shows the caller, spend
  * `ai:read`, allowlist entries `settings:write` on their scope. Scoping to the viewer's teams is
  * left to the client: every row names its repositories and their owner teams. Repository health lives
@@ -5222,7 +4772,7 @@ export interface HomeView {
 }
 
 /** What an Inbox item asks a person to decide. */
-export type InboxKind = 'task' | 'note' | 'learning' | 'guide' | 'release' | 'allowlist' | 'budget'
+export type InboxKind = 'task' | 'learning' | 'release' | 'allowlist' | 'budget'
 
 /** What every Inbox item carries, whatever its kind. */
 interface InboxItemBase {
@@ -5254,35 +4804,16 @@ export interface InboxTaskItem extends InboxItemBase {
   taskKind: AgentTaskKind
 }
 
-/** A proposed knowledge note waiting for acceptance. */
-export interface InboxNoteItem extends InboxItemBase {
-  kind: 'note'
-  entryId: string
-  /** The entry version a decision applies to. */
-  version: number
-}
-
 /**
- * A learning candidate waiting for acceptance; accepting without a scope uses `targetScope`, else
- * `suggestedScope`.
+ * A pending learning a person may approve or reject before its approval delay activates it
+ * (`activeAt`).
  */
 export interface InboxLearningItem extends InboxItemBase {
   kind: 'learning'
   learningId: string
-  section: GuideSectionName
-  suggestedScope: LearningScopeKind
-  /** The exact scope the proposer named, while it is still one of the repository's scopes. */
-  targetScope?: GuideScopeKey
-}
-
-/** Generated Guide text waiting for a person to accept or reject it. */
-export interface InboxGuideItem extends InboxItemBase {
-  kind: 'guide'
-  guideScope: GuideScopeKey
-  section: GuideSectionName
-  /** Pass to accept and to `GuideSectionRejectInput`, so a decision names the text it was made on. */
-  inputHash: string
-  generatedAt: Timestamp
+  origin: LearningOrigin
+  /** When it becomes active by itself. */
+  activeAt: Timestamp
 }
 
 /** A repository's release waiting for a step or for acceptance of the target branch head. */
@@ -5329,9 +4860,7 @@ export interface InboxBudgetItem extends InboxItemBase {
 /** One decision waiting in the Inbox. */
 export type InboxItem =
   | InboxTaskItem
-  | InboxNoteItem
   | InboxLearningItem
-  | InboxGuideItem
   | InboxReleaseItem
   | InboxAllowlistItem
   | InboxBudgetItem

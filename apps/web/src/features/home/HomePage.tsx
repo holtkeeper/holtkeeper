@@ -103,7 +103,6 @@ const attentionIcons: Record<HomeAttentionKind, LucideIcon> = {
   'allowlist-expiring': Clock,
   release: Rocket,
   learnings: Lightbulb,
-  knowledge: BookOpen,
   'stale-analyses': History,
   'not-analysed': CircleDashed,
 }
@@ -113,7 +112,6 @@ const changeIcons: Record<HomeChangeKind, LucideIcon> = {
   deploy: Rocket,
   settings: Settings2,
   knowledge: BookOpen,
-  guide: BookOpen,
   repo: FolderGit2,
   credentials: KeyRound,
   access: Users,

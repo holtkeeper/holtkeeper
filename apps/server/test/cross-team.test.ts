@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { Principal } from '@holtkeeper/access'
-import type { KnowledgeDetail, KnowledgeList, RepoList, RepoOverview } from '@holtkeeper/api'
+import type { RepoList, RepoOverview } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -9,7 +9,7 @@ import { type DepEdge, type DepNode, analyzeLayer } from '@holtkeeper/depgraph'
 import { latestVersions } from '@holtkeeper/libraries'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { StackData } from '@holtkeeper/stack'
-import type { KnowledgeEntry, Store } from '@holtkeeper/store'
+import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
@@ -122,24 +122,6 @@ const stack = (group: string, uses: Record<string, string>): StackData => ({
   notes: [],
 })
 
-const note = (id: string, fields: Partial<KnowledgeEntry>) =>
-  store.knowledge.put({
-    id,
-    title: `Note ${id}`,
-    body: 'Body.',
-    kind: 'decision',
-    scope: { teams: ['colors'] },
-    topics: [],
-    appliesTo: ['*'],
-    status: 'accepted',
-    evidence: [],
-    source: 'human',
-    author: 'header:ann',
-    createdAt: at,
-    updatedAt: at,
-    ...fields,
-  })
-
 const crossTeam = (level: 'off' | 'metadata' | 'snippets') =>
   store.settings.put({
     id: 'cross-team',
@@ -188,8 +170,6 @@ beforeEach(async () => {
     createdAt: at,
     data: stack('colors', { 'colors/red': '26' }),
   })
-  await note('shared', { visibility: 'shared', subject: 'npm:widget-kit' })
-  await note('private', {})
 })
 
 const callTool = async (
@@ -245,7 +225,7 @@ describe('grant matrix', () => {
     expect(canSeeSnippets(nobody, colors, 'snippets')).toBe(false)
   })
 
-  test('shared notes, the policy default and owners', () => {
+  test('shared catalog reach, the policy default and owners', () => {
     expect(canReadShared(reader, { teams: ['colors'] }, 'metadata')).toBe(true)
     expect(canReadShared(reader, { teams: ['colors'] }, 'off')).toBe(false)
     expect(crossTeamOf([])).toBe('snippets')
@@ -334,53 +314,6 @@ describe('MCP cross-team tools', () => {
     expect(parseSubject('tool:node')).toEqual({ kind: 'tool', name: 'tool:node' })
     expect(parseSubject('widget-kit')).toEqual({ kind: 'package', name: 'widget-kit' })
   })
-
-  test('search_knowledge includes shared notes of other teams and names the team', async () => {
-    const result = await callTool('search_knowledge', { package: 'widget-kit' }, asShapes)
-    expect(result.text).toBe('No accepted knowledge entry matches.')
-    const bySubject = await callTool('search_knowledge', { subject: 'npm:widget-kit' }, asShapes)
-    expect(bySubject.text).toContain('[kb:shared]')
-    expect(bySubject.text).toContain('_shared by team colors_')
-    const all = await callTool('search_knowledge', {}, asShapes)
-    expect(all.text).not.toContain('[kb:private]')
-  })
-})
-
-describe('knowledge routes', () => {
-  test('list shared notes of other teams with their owner', async () => {
-    const response = await app.request('/api/knowledge', { headers: asShapes })
-    const list = (await response.json()) as KnowledgeList
-    expect(list.entries.map((entry) => [entry.id, entry.owner])).toEqual([['shared', ['colors']]])
-    const detail = await app.request('/api/knowledge/shared', { headers: asShapes })
-    expect(((await detail.json()) as KnowledgeDetail).entry.subject).toBe('npm:widget-kit')
-    expect((await app.request('/api/knowledge/private', { headers: asShapes })).status).toBe(403)
-    await crossTeam('off')
-    const off = (await (
-      await app.request('/api/knowledge', { headers: asShapes })
-    ).json()) as KnowledgeList
-    expect(off.entries).toEqual([])
-  })
-
-  test('a decision about one package is created shared', async () => {
-    const response = await app.request('/api/knowledge', {
-      method: 'POST',
-      headers: {
-        'x-forwarded-user': 'jane',
-        'x-forwarded-groups': 'admin',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        title: 'Pin widget-kit 3',
-        body: 'Use widget-kit 3 everywhere.',
-        kind: 'decision',
-        scope: { teams: ['colors'] },
-        appliesTo: ['*'],
-        packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
-      }),
-    })
-    expect(response.status).toBe(201)
-    expect(await response.json()).toMatchObject({ visibility: 'shared', subject: 'npm:widget-kit' })
-  })
 })
 
 const auditRecord = (path: string) =>
@@ -449,7 +382,7 @@ describe('repository fields', () => {
     expect(overview.cards.map((card) => card.key)).not.toContain('security')
     expect(overview).not.toHaveProperty('audit')
     expect(overview).not.toHaveProperty('release')
-    expect(overview.knowledge).toEqual({ sections: 0, notes: 0, proposed: 0, inherits: [] })
+    expect(overview.knowledge).toEqual({ rules: 0, learnings: 0, pending: 0 })
     expect(overview.analyses.map((record) => record.kind)).not.toContain('audit')
     expect(overview.work).not.toHaveProperty('costUsd')
     expect(overview.work).toHaveProperty('awaitingApproval')
@@ -509,6 +442,7 @@ const agentBase = () => ({
   catalog: createApiCatalog({ analyses: store.analyses }),
   usages: createUsageIndex({ analyses: store.analyses }),
   store,
+  config,
   repo: repo('shapes/circle', ['shapes']),
   targetOf: (other: { forge: string; path: string }) => ({
     ...other,
@@ -525,13 +459,12 @@ describe('internal agents', () => {
     const open = agentCatalogContext({ ...base(), policy: 'metadata' })
     expect(open.canRead(colors)).toBe(true)
     expect(open.canReadSnippets?.(colors)).toBe(false)
-    expect(open.knowledge.canReadShared?.({ teams: ['colors'] })).toBe(true)
     const closed = agentCatalogContext({ ...base(), policy: 'off' })
     expect(closed.canRead(colors)).toBe(false)
     expect(closed.canRead({ forge: 'work', path: 'shapes/square' })).toBe(true)
   })
 
-  test('owners name a repository by its owner teams and a scope by the teams it names', () => {
+  test('owners name a repository by its owner teams', () => {
     const titles: Record<string, string> = { shapes: 'Shapes', round: 'Round' }
     const context = agentCatalogContext({
       ...base(),
@@ -544,12 +477,6 @@ describe('internal agents', () => {
     })
     expect(context.ownerOf?.({ forge: 'work', path: 'shapes/circle' })).toEqual(['Shapes', 'Round'])
     expect(context.ownerOf?.(colors)).toEqual(['colors'])
-    expect(context.knowledge.ownerOf?.({ teams: ['round'] })).toEqual(['Round'])
-    expect(context.knowledge.ownerOf?.({ repos: ['work:shapes/circle'] })).toEqual([
-      'Shapes',
-      'Round',
-    ])
-    expect(context.knowledge.ownerOf?.({ repos: ['work:shapes/*'] })).toEqual([])
   })
 
   test('chat follows the asker: their reach under the policy', () => {

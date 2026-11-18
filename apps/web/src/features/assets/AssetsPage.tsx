@@ -37,7 +37,6 @@ function RepoPolicy({ repo, onEdit }: { repo: RepoRef; onEdit: (() => void) | un
     <AssetsPolicyCard
       lines={policyLines(assets.data.policy)}
       source={policySource(assets.data.policySource, titleOf)}
-      space={`repo:${repoKey(repo)}`}
       actions={<EditPolicy onPress={onEdit} />}
     />
   )
@@ -58,7 +57,6 @@ function FleetPolicy({ onEdit }: { onEdit: (() => void) | undefined }) {
     <AssetsPolicyCard
       lines={policyLines(fleet.policy)}
       source={overrides ? `${fleet.source} · ${overrides}` : fleet.source}
-      space="all"
       actions={<EditPolicy onPress={onEdit} />}
     />
   )

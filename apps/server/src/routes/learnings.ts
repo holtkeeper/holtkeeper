@@ -1,209 +1,172 @@
-import { type Principal, can } from '@holtkeeper/access'
+import { type Principal, type Scope, can, scopeCoversRepo } from '@holtkeeper/access'
 import type {
-  AcceptLearningsResult,
-  LearningCandidateView,
+  LearningCreateResult,
   LearningList,
+  LearningView,
   ReactionTotalsList,
 } from '@holtkeeper/api'
-import {
-  LEARNING_RULE_MAX,
-  LearningConflictError,
-  LearningScopeError,
-  acceptLearning,
-  defaultLearningScope,
-  editLearning,
-  familyOf,
-  guideScopeKey,
-  guideSections,
-  learningScopeKinds,
-  parseGuideScope,
-  rejectLearning,
-  scopesFor,
-} from '@holtkeeper/guide'
-import type { Family, GuideScopeKey, LearningCandidate, LearningStatus } from '@holtkeeper/store'
+import { decideLearning, learningKey, settleLearning } from '@holtkeeper/rules'
+import type { Learning, LearningOrigin, LearningStatus, SettingEntry } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
-import { appendAudit, auditActorOf, diffChanges, viaOf } from '../audit.ts'
+import { diffChanges } from '../audit.ts'
 import {
   type AppContext,
   type Env,
   type ServerDeps,
-  authorizeRecord,
+  ForbiddenException,
+  authorize,
   parseRepo,
   principalOf,
   readBody,
+  readQuery,
   repoTarget,
-  ForbiddenException,
-  repoKey,
 } from '../context.ts'
-import { learningConfidence, learningSourceKind, withLiveTarget } from '../learnings.ts'
+import { addLearning } from '../learnings.ts'
+import { policyOfLearning } from '../rules.ts'
 import { peopleOf } from './avatars.ts'
-import { editAction, guideScopePermission } from './guides.ts'
+import { globsSchema, ruleAgentSchema, ruleScopeSchema } from './rules.ts'
 
-const statuses = ['proposed', 'accepted', 'rejected'] as const satisfies LearningStatus[]
+const DAY = 24 * 3600 * 1000
 
-const ruleSchema = z.string().trim().min(1).max(LEARNING_RULE_MAX)
+const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
 
-const editSchema = z.object({
-  rule: ruleSchema.optional(),
-  section: z.enum(guideSections).optional(),
-  suggestedScope: z.enum(learningScopeKinds).optional(),
-  targetScope: z.string().min(1).optional(),
+const statuses = ['pending', 'active', 'rejected', 'expired'] as const satisfies LearningStatus[]
+const origins = ['reply', 'miner', 'agent', 'person'] as const satisfies LearningOrigin[]
+
+const textSchema = z.string().trim().min(1).max(300)
+
+const listQuery = z.object({
+  status: z.string().optional(),
+  origin: z.string().optional(),
+  repo: z.string().optional(),
+  text: z.string().optional(),
 })
 
-const acceptSchema = z.object({
-  scope: z.string().min(1).optional(),
-  rule: ruleSchema.optional(),
-  section: z.enum(guideSections).optional(),
+const createSchema = z.object({
+  text: textSchema,
+  reason: z.string().trim().max(1000).optional(),
+  scope: ruleScopeSchema,
+  files: globsSchema.optional(),
+  agents: z.array(ruleAgentSchema).optional(),
 })
 
-const batchSchema = z.object({
-  ids: z.array(z.string().min(1)).min(1).max(200),
-  scope: z.string().min(1).optional(),
+const patchSchema = z.object({
+  text: textSchema.optional(),
+  reason: z.string().trim().max(1000).nullable().optional(),
+  scope: ruleScopeSchema.optional(),
+  files: globsSchema.nullable().optional(),
+  agents: z.array(ruleAgentSchema).nullable().optional(),
 })
 
-const decided = (candidate: LearningCandidate) => ({
-  rule: candidate.rule,
-  section: candidate.section,
-  status: candidate.status,
-  suggested: candidate.suggestedScope,
-  ...(candidate.targetScope && { target: candidate.targetScope }),
-  ...(candidate.acceptedScope && { scope: candidate.acceptedScope }),
-})
-
-const auditOf = (action: string, before: LearningCandidate, after: LearningCandidate) => ({
-  action,
-  target: { type: 'learning', id: after.id, repo: after.repo },
-  changes: diffChanges(decided(before), decided(after)),
-})
-
-const audit = (
-  c: AppContext,
-  action: string,
-  before: LearningCandidate,
-  after: LearningCandidate,
-) => c.set('audit', auditOf(action, before, after))
-
-const saving = async (work: () => Promise<LearningCandidate>) => {
-  try {
-    return await work()
-  } catch (error) {
-    if (error instanceof LearningConflictError)
-      throw new HTTPException(409, { message: error.message })
-    if (error instanceof LearningScopeError)
-      throw new HTTPException(400, { message: error.message })
-    throw error
-  }
+function listParam<T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  name: string,
+): T[] | undefined {
+  if (!value) return undefined
+  const isAllowed = (item: string): item is T => allowed.some((candidate) => candidate === item)
+  const items = value.split(',').map((item) => item.trim())
+  const unknown = items.find((item) => !isAllowed(item))
+  if (unknown !== undefined) throw new HTTPException(400, { message: `unknown ${name} ${unknown}` })
+  return items.filter(isAllowed)
 }
 
+const audited = (learning: Learning | undefined) =>
+  learning && {
+    text: learning.text,
+    reason: learning.reason,
+    scope: learning.scope,
+    files: learning.files,
+    agents: learning.agents,
+    status: learning.status,
+  }
+
+const audit = (c: AppContext, action: string, before?: Learning, after?: Learning) =>
+  c.set('audit', {
+    action,
+    target: { type: 'learning', id: (after ?? before)?.id ?? '' },
+    changes: diffChanges(audited(before), audited(after)),
+  })
+
 /**
- * Learning candidates from replies to review comments and the reactions on those comments.
- * Reading needs `knowledge:read` on the candidate's repository (reaction totals without `repo`
- * need it globally); accepting, editing and rejecting
- * need `knowledge:write` on it, plus edit rights (`editAction`) on the scope the rule goes to or
- * leaves. A candidate may be accepted into any scope that applies to its repository; without a
- * scope it goes to its `targetScope`, else where `suggestedScope` points. `PATCH` may set a
- * `targetScope` among the repository's scopes that the caller may edit.
- * `POST /learnings/accept` accepts several with the same checks per candidate; each accepted one
- * gets its own `learning.accept` audit event, and the request itself is audited as
- * `learnings.accept`.
+ * Learnings: the short rules Holtkeeper learned from review replies, merged merge requests and
+ * agents, and the ones people write. Each is checked against its scope: reading needs
+ * `knowledge:read` over it, approving, rejecting, editing and deleting `knowledge:write` (on the
+ * old and the new scope when an edit moves it). Lists show the status brought up to now
+ * (`settleLearning`), so a learning past its approval delay reads `active` before the leader tick
+ * stores it. `GET /learnings/reactions` sums 👍/👎 on review comments per finding category.
  */
 export function learningRoutes(deps: ServerDeps) {
   const { store, config, now } = deps
   const app = new Hono<Env>()
-  const permitted = guideScopePermission(config)
 
-  const targetOf = (candidate: LearningCandidate) => {
-    const repo = parseRepo(candidate.repo)
-    if (!repo) throw new HTTPException(500, { message: 'candidate has no repository' })
-    return repoTarget(config, repo)
-  }
+  const settled = (learning: Learning, entries: readonly SettingEntry[]) =>
+    settleLearning(learning, now().toISOString(), policyOfLearning(config, entries, learning))
 
-  const scopeAllowed = (principal: Principal, key: GuideScopeKey, family?: Family) => {
-    const scope = parseGuideScope(key)
-    return scope !== undefined && permitted(principal, editAction(scope), scope, family)
-  }
-
-  const contextOf = async (candidate: LearningCandidate) => {
-    const target = targetOf(candidate)
-    const family = familyOf(await store.families.list(), candidate.repo)
-    return { target, family, scopes: scopesFor(target, family?.id) }
-  }
-
-  const load = async (c: AppContext, action: string) => {
-    const candidate = await store.learnings.get(c.req.param('id') ?? '')
-    if (!candidate) throw new HTTPException(404, { message: 'learning candidate not found' })
-    c.set('audit', { action, target: { type: 'learning', id: candidate.id } })
-    const context = await contextOf(candidate)
-    const principal = authorizeRecord(c, 'knowledge:write', { kind: 'repo', repo: context.target })
-    return { candidate, principal, ...context }
-  }
-
-  const ensureScope = (
+  const view = (
     principal: Principal,
-    key: GuideScopeKey,
-    family?: Family,
-    stored = false,
-  ) => {
-    if (!scopeAllowed(principal, key, family)) {
-      const scope = parseGuideScope(key)
-      throw new ForbiddenException(
-        'knowledge:write',
-        !stored && scope?.kind === 'repo' ? repoKey(scope) : undefined,
-        stored
-          ? 'missing permission to edit the scope this rule lives in'
-          : `missing permission to edit ${key}`,
-      )
+    learning: Learning,
+    entries: readonly SettingEntry[],
+  ): LearningView => {
+    const expiryDays = policyOfLearning(config, entries, learning).expiryDays
+    return {
+      ...learning,
+      canEdit: can(principal, 'knowledge:write', scopeTarget(learning.scope)),
+      ...(learning.status === 'active' && {
+        expiresAt: new Date(Date.parse(learning.lastReinforcedAt) + expiryDays * DAY).toISOString(),
+      }),
     }
   }
 
-  const ensurePlaced = async (principal: Principal, candidate: LearningCandidate) => {
-    if (candidate.status !== 'accepted' || !candidate.acceptedScope) return
-    const scope = parseGuideScope(candidate.acceptedScope)
-    const family = scope?.kind === 'family' ? await store.families.get(scope.family) : undefined
-    ensureScope(principal, candidate.acceptedScope, family, true)
+  const existing = async (c: AppContext) => {
+    const [stored, entries] = await Promise.all([
+      store.learnings.get(c.req.param('id') ?? ''),
+      store.settings.list(),
+    ])
+    const principal = principalOf(c)
+    if (!stored) throw new HTTPException(404, { message: 'learning not found' })
+    if (
+      !can(principal, 'knowledge:read', scopeTarget(stored.scope)) ||
+      !can(principal, 'knowledge:write', scopeTarget(stored.scope))
+    )
+      throw new ForbiddenException('knowledge:write')
+    return { learning: settled(stored, entries), stored, principal, entries }
   }
 
   app.get('/learnings', async (c) => {
     const principal = principalOf(c)
-    const repo = parseRepo(c.req.query('repo'))
-    const wanted = (c.req.query('status') ?? '').split(',').filter(Boolean)
-    const status = wanted.filter((value): value is LearningStatus =>
-      statuses.some((known) => known === value),
-    )
-    if (status.length !== wanted.length)
-      throw new HTTPException(400, { message: `status must be among ${statuses.join(', ')}` })
-    const families = await store.families.list()
-    const candidates = await store.learnings.list({
-      ...(repo && { repos: [`${repo.forge}:${repo.path}`] }),
-      ...(status.length && { status }),
-    })
-    const views = candidates.flatMap((candidate): LearningCandidateView[] => {
-      const target = targetOf(candidate)
-      if (!can(principal, 'knowledge:read', { kind: 'repo', repo: target })) return []
-      const family = familyOf(families, candidate.repo)
-      const canDecide = can(principal, 'knowledge:write', { kind: 'repo', repo: target })
-      const scopes = scopesFor(target, family?.id)
-      return [
-        {
-          ...withLiveTarget(candidate, scopes),
-          sourceKind: learningSourceKind(candidate),
-          confidence: learningConfidence(candidate),
-          canDecide,
-          scopes: canDecide ? scopes.filter((key) => scopeAllowed(principal, key, family)) : [],
-        },
-      ]
-    })
+    const query = readQuery(c, listQuery)
+    const status = listParam(query.status, statuses, 'status')
+    const origin = listParam(query.origin, origins, 'origin')
+    const repo = query.repo ? parseRepo(query.repo) : undefined
+    const target = repo && repoTarget(config, repo)
+    const text = query.text?.trim()
+    const filter = { ...(origin && { origin }) }
+    const [found, entries] = await Promise.all([
+      text
+        ? store.learnings.search(text, filter, 200).then((hits) => hits.map((hit) => hit.learning))
+        : store.learnings.list(filter),
+      store.settings.list(),
+    ])
+    const learnings = found
+      .map((learning) => settled(learning, entries))
+      .filter(
+        (learning) =>
+          (!status || status.includes(learning.status)) &&
+          can(principal, 'knowledge:read', scopeTarget(learning.scope)) &&
+          (!target || scopeCoversRepo(learning.scope, target)),
+      )
+      .map((learning) => view(principal, learning, entries))
     return c.json<LearningList>({
-      candidates: views,
+      learnings,
       people: await peopleOf(
         deps,
-        views.flatMap((view) => [
-          ...(view.decidedBy ? [view.decidedBy] : []),
-          ...(view.editedBy ? [view.editedBy] : []),
-          ...(view.proposal ? [view.proposal.by] : []),
+        learnings.flatMap((learning) => [
+          ...(learning.decidedBy ? [learning.decidedBy] : []),
+          ...(learning.editedBy ? [learning.editedBy] : []),
         ]),
       ),
     })
@@ -226,126 +189,84 @@ export function learningRoutes(deps: ServerDeps) {
     return c.json<ReactionTotalsList>({ totals })
   })
 
-  const accept = async (
-    principal: Principal,
-    candidate: LearningCandidate,
-    input: z.infer<typeof acceptSchema>,
-  ) => {
-    const { family, scopes } = await contextOf(candidate)
-    const chosen = input.scope === undefined ? undefined : parseGuideScope(input.scope)
-    if (input.scope !== undefined && !chosen)
-      throw new HTTPException(400, {
-        message: 'scope must be all, team:, path:, family: or repo:',
-      })
-    const scope = chosen ? guideScopeKey(chosen) : defaultLearningScope(candidate, scopes)
-    if (!scope)
-      throw new HTTPException(400, {
-        message: `the repository has no ${candidate.suggestedScope}; choose a scope`,
-      })
-    if (!scopes.some((key) => key === scope))
-      throw new HTTPException(400, { message: `${scope} does not apply to ${candidate.repo}` })
-    ensureScope(principal, scope, family)
-    await ensurePlaced(principal, candidate)
-    return saving(() =>
-      acceptLearning(store, candidate, {
-        scope,
-        ...(input.rule && { rule: input.rule }),
-        ...(input.section && { section: input.section }),
-        by: principal.id,
-        at: now().toISOString(),
-      }),
+  app.post('/learnings', async (c) => {
+    const body = await readBody(c, createSchema)
+    const principal = authorize(c, 'knowledge:write', scopeTarget(body.scope))
+    const outcome = await addLearning(
+      deps,
+      {
+        text: body.text,
+        ...(body.reason && { reason: body.reason }),
+        scope: body.scope,
+        ...(body.files?.length && { files: body.files }),
+        ...(body.agents?.length && { agents: body.agents }),
+        origin: 'person',
+        source: { author: principal.id, at: now().toISOString() },
+      },
+      { approvedBy: principal.id },
     )
-  }
-
-  const acceptOneOf = async (
-    c: AppContext,
-    principal: Principal,
-    id: string,
-    scope: string | undefined,
-  ): Promise<string | undefined> => {
-    const candidate = await store.learnings.get(id)
-    const target = candidate && targetOf(candidate)
-    if (!candidate || !target || !can(principal, 'knowledge:read', { kind: 'repo', repo: target }))
-      return 'learning candidate not found'
-    if (!can(principal, 'knowledge:write', { kind: 'repo', repo: target }))
-      return 'missing permission knowledge:write'
-    try {
-      const stored = await accept(principal, candidate, scope === undefined ? {} : { scope })
-      await appendAudit(store, {
-        at: now().toISOString(),
-        actor: auditActorOf(principal, deps.auth.name),
-        via: viaOf(c, c.req.path),
-        ...auditOf('learning.accept', candidate, stored),
-        outcome: 'ok',
-        details: { batch: true },
-      })
-      return undefined
-    } catch (error) {
-      if (error instanceof HTTPException) return error.message
-      throw error
-    }
-  }
-
-  app.post('/learnings/accept', async (c) => {
-    const principal = principalOf(c)
-    const input = await readBody(c, batchSchema)
-    const result: AcceptLearningsResult = { accepted: [], failed: [] }
-    for (const id of new Set(input.ids)) {
-      // oxlint-disable-next-line no-await-in-loop -- one Guide write after another keeps section versions apart
-      const outcome = await acceptOneOf(c, principal, id, input.scope)
-      if (outcome === undefined) result.accepted.push(id)
-      else result.failed.push({ id, error: outcome })
-    }
-    c.set('audit', {
-      action: 'learnings.accept',
-      target: { type: 'learning' },
-      details: { accepted: result.accepted.length, failed: result.failed.length },
-    })
-    return c.json<AcceptLearningsResult>(result)
-  })
-
-  app.post('/learnings/:id/accept', async (c) => {
-    const { candidate, principal } = await load(c, 'learning.accept')
-    const input = await readBody(c, acceptSchema)
-    const stored = await accept(principal, candidate, input)
-    audit(c, 'learning.accept', candidate, stored)
-    return c.json<LearningCandidate>(stored)
-  })
-
-  app.post('/learnings/:id/reject', async (c) => {
-    const { candidate, principal } = await load(c, 'learning.reject')
-    await ensurePlaced(principal, candidate)
-    const stored = await rejectLearning(store, candidate, {
-      by: principal.id,
-      at: now().toISOString(),
-    })
-    audit(c, 'learning.reject', candidate, stored)
-    return c.json<LearningCandidate>(stored)
+    audit(
+      c,
+      outcome.status === 'added' ? 'learning.create' : 'learning.reinforce',
+      undefined,
+      outcome.learning,
+    )
+    const entries = await store.settings.list()
+    return c.json<LearningCreateResult>(
+      { status: outcome.status, learning: view(principal, outcome.learning, entries) },
+      outcome.status === 'added' ? 201 : 200,
+    )
   })
 
   app.patch('/learnings/:id', async (c) => {
-    const { candidate, principal, scopes, family } = await load(c, 'learning.update')
-    const input = await readBody(c, editSchema)
-    const target = input.targetScope === undefined ? undefined : parseGuideScope(input.targetScope)
-    const key = target && target.kind !== 'all' ? guideScopeKey(target) : undefined
-    if (input.targetScope !== undefined && (!key || !scopes.includes(key)))
-      throw new HTTPException(400, {
-        message: `${input.targetScope} is not a team, folder, family or repository scope of ${candidate.repo}`,
-      })
-    await ensurePlaced(principal, candidate)
-    if (key) ensureScope(principal, key, family)
-    const stored = await saving(() =>
-      editLearning(store, candidate, {
-        ...(input.rule && { rule: input.rule }),
-        ...(input.section && { section: input.section }),
-        ...(input.suggestedScope && { suggestedScope: input.suggestedScope }),
-        ...(key && { targetScope: key }),
-        by: principal.id,
-        at: now().toISOString(),
-      }),
-    )
-    audit(c, 'learning.update', candidate, stored)
-    return c.json<LearningCandidate>(stored)
+    const { learning, principal, entries } = await existing(c)
+    const patch = await readBody(c, patchSchema)
+    if (patch.scope) authorize(c, 'knowledge:write', scopeTarget(patch.scope))
+    const { reason: _reason, files: _files, agents: _agents, ...rest } = learning
+    const text = patch.text ?? learning.text
+    const reason = patch.reason === undefined ? learning.reason : (patch.reason ?? undefined)
+    const files = patch.files === undefined ? learning.files : (patch.files ?? undefined)
+    const agents = patch.agents === undefined ? learning.agents : (patch.agents ?? undefined)
+    const at = now().toISOString()
+    const updated: Learning = {
+      ...rest,
+      text,
+      key: learningKey(text),
+      ...(reason && { reason }),
+      ...(patch.scope && { scope: patch.scope }),
+      ...(files?.length && { files }),
+      ...(agents?.length && { agents }),
+      editedBy: principal.id,
+      updatedAt: at,
+    }
+    const clash = updated.key !== learning.key && (await store.learnings.find(updated.key))
+    if (clash && clash.id !== learning.id)
+      throw new HTTPException(409, { message: `another learning already says this (${clash.id})` })
+    await store.learnings.put(updated)
+    audit(c, 'learning.update', learning, updated)
+    return c.json<LearningView>(view(principal, updated, entries))
+  })
+
+  const decide = (decision: 'approve' | 'reject') => async (c: AppContext) => {
+    const { learning, principal, entries } = await existing(c)
+    if (decision === 'approve' && learning.status === 'active')
+      throw new HTTPException(409, { message: 'the learning is already active' })
+    if (decision === 'reject' && learning.status === 'rejected')
+      throw new HTTPException(409, { message: 'the learning is already rejected' })
+    const decided = decideLearning(learning, decision, principal.id, now().toISOString())
+    await store.learnings.put(decided)
+    audit(c, `learning.${decision}`, learning, decided)
+    return c.json<LearningView>(view(principal, decided, entries))
+  }
+
+  app.post('/learnings/:id/approve', decide('approve'))
+  app.post('/learnings/:id/reject', decide('reject'))
+
+  app.delete('/learnings/:id', async (c) => {
+    const { stored } = await existing(c)
+    await store.learnings.remove(stored.id)
+    audit(c, 'learning.delete', stored, undefined)
+    return c.body(null, 204)
   })
 
   return app

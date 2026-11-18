@@ -67,7 +67,6 @@ export const attentionKindLabel: Record<HomeAttentionKind, string> = {
   'allowlist-expiring': 'Allowlist',
   release: 'Release',
   learnings: 'Learnings',
-  knowledge: 'Knowledge',
   'stale-analyses': 'Stale analysis',
   'not-analysed': 'Not analysed',
 }

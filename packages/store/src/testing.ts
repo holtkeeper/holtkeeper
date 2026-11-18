@@ -3,17 +3,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { ExternalAccountConflictError } from './accounts.ts'
 import { AUDIT_GENESIS_HASH, auditHash } from './audit.ts'
 import { chatStoreTests } from './chat-contract.ts'
-import { embeddingStoreTests } from './embeddings-contract.ts'
-import { guideStoreTests } from './guides-contract.ts'
 import { learningStoreTests } from './learnings-contract.ts'
+import { ruleStoreTests } from './rules-contract.ts'
 import { slackMessageStoreTests } from './slack-contract.ts'
 import { taskStoreTests } from './tasks-contract.ts'
 import type {
   AuditEventInput,
   CiJobRecord,
   ExternalAccount,
-  KnowledgeEntryInput,
-  KnowledgeFilter,
   LibraryChunk,
   LibraryChunkFilter,
   LibraryIssue,
@@ -52,28 +49,6 @@ const job = (path: string, createdAt: string, overrides: Partial<NewJob> = {}): 
   repo: { forge: 'work', path },
   trigger: 'manual',
   createdAt,
-  ...overrides,
-})
-
-const knowledgeEntry = (
-  id: string,
-  overrides: Partial<KnowledgeEntryInput> = {},
-): KnowledgeEntryInput => ({
-  id,
-  title: 'Prefer Vitest over Jest',
-  body: 'We **decided** to use Vitest.',
-  kind: 'convention',
-  scope: { teams: ['games'] },
-  topics: ['testing'],
-  appliesTo: ['tests', 'review'],
-  packages: [{ ecosystem: 'npm', name: 'vitest', from: '>=1 <2' }],
-  status: 'accepted',
-  source: 'agent',
-  author: 'agent:review',
-  evidence: [{ label: 'MR', url: 'https://forge.test/mr/1' }],
-  createdAt: '2026-10-30T09:00:00.000Z',
-  updatedAt: '2026-10-30T09:00:00.000Z',
-  updatedBy: 'agent:review',
   ...overrides,
 })
 
@@ -220,9 +195,8 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       await store.close()
     })
 
-    guideStoreTests(() => store)
+    ruleStoreTests(() => store)
     learningStoreTests(() => store)
-    embeddingStoreTests(() => store)
     chatStoreTests(() => store)
     taskStoreTests(() => store)
     slackMessageStoreTests(() => store)
@@ -1106,212 +1080,6 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         { repo: { forge: 'work', path: 'games/a' } },
       ])
     })
-    test('knowledge: put bumps the version and keeps history, remove drops both', async () => {
-      const first = await store.knowledge.put(knowledgeEntry('k1', { updatedAt: t(0) }))
-      expect(first.version).toBe(1)
-      expect(await store.knowledge.history('k1')).toEqual([])
-
-      const second = await store.knowledge.put(
-        knowledgeEntry('k1', {
-          title: 'Use Vitest',
-          updatedAt: t(1),
-          updatedBy: 'jane',
-        }),
-      )
-      expect(second).toMatchObject({
-        version: 2,
-        title: 'Use Vitest',
-        updatedBy: 'jane',
-      })
-      await store.knowledge.put(
-        knowledgeEntry('k1', {
-          status: 'archived',
-          updatedAt: t(2),
-          updatedBy: 'bob',
-        }),
-      )
-      expect(await store.knowledge.get('k1')).toMatchObject({
-        version: 3,
-        status: 'archived',
-      })
-      const history = await store.knowledge.history('k1')
-      expect(history.map((r) => [r.version, r.editedBy, r.editedAt, r.title])).toEqual([
-        [2, 'jane', t(1), 'Use Vitest'],
-        [1, 'agent:review', t(0), 'Prefer Vitest over Jest'],
-      ])
-      expect(history[1]).toMatchObject({
-        scope: { teams: ['games'] },
-        packages: [{ ecosystem: 'npm', name: 'vitest', from: '>=1 <2' }],
-        evidence: [{ label: 'MR', url: 'https://forge.test/mr/1' }],
-      })
-
-      await store.knowledge.remove('k1')
-      expect(await store.knowledge.get('k1')).toBeUndefined()
-      expect(await store.knowledge.history('k1')).toEqual([])
-      expect(await store.knowledge.history('missing')).toEqual([])
-    })
-
-    test('knowledge: entries round-trip, optional fields stay absent', async () => {
-      const plain = knowledgeEntry('k2', { updatedAt: t(0) })
-      delete plain.packages
-      delete plain.updatedBy
-      const stored = await store.knowledge.put(plain)
-      expect(stored).toEqual({ ...plain, version: 1 })
-      expect(await store.knowledge.get('k2')).toEqual({ ...plain, version: 1 })
-      const match = { families: ['family-1'], files: ['src/**/*.tsx', 'package.json'] }
-      const full = await store.knowledge.put(
-        knowledgeEntry('k3', { supersedes: 'k2', match, updatedAt: t(1) }),
-      )
-      expect(full.match).toEqual(match)
-      expect(await store.knowledge.get('k3')).toEqual(full)
-      const { match: _match, ...unmatched } = full
-      await store.knowledge.put({ ...unmatched, updatedAt: t(2) })
-      expect(Object.hasOwn((await store.knowledge.get('k3'))!, 'match')).toBe(false)
-      expect((await store.knowledge.history('k3'))[0]?.match).toEqual(match)
-      const familyOnly = await store.knowledge.put(
-        knowledgeEntry('k4', { match: { families: ['family-2'] }, updatedAt: t(3) }),
-      )
-      expect(await store.knowledge.get('k4')).toEqual(familyOnly)
-      expect(Object.hasOwn((await store.knowledge.get('k2'))!, 'match')).toBe(false)
-    })
-
-    test('knowledge: list newest first with filters', async () => {
-      await store.knowledge.put(knowledgeEntry('a', { updatedAt: t(1) }))
-      await store.knowledge.put(
-        knowledgeEntry('b', {
-          kind: 'migration',
-          status: 'proposed',
-          topics: ['I18n'],
-          scope: { repos: ['work:tools/**'] },
-          packages: [{ ecosystem: 'npm', name: 'react', from: '>=18 <19' }],
-          updatedAt: t(3),
-        }),
-      )
-      await store.knowledge.put(
-        knowledgeEntry('c', {
-          status: 'rejected',
-          scope: { all: true },
-          packages: [{ ecosystem: 'go', name: 'react' }],
-          updatedAt: t(2),
-        }),
-      )
-      const ids = async (filter: KnowledgeFilter) =>
-        (await store.knowledge.list(filter)).map((entry) => entry.id)
-
-      expect(await ids({})).toEqual(['b', 'c', 'a'])
-      expect(await ids({ status: 'accepted' })).toEqual(['a'])
-      expect(await ids({ status: ['accepted', 'proposed'] })).toEqual(['b', 'a'])
-      expect(await ids({ kind: 'migration' })).toEqual(['b'])
-      expect(await ids({ kind: ['convention', 'migration'] })).toEqual(['b', 'c', 'a'])
-      expect(await ids({ topic: 'i18n' })).toEqual(['b'])
-      expect(await ids({ scope: 'TOOLS' })).toEqual(['b'])
-      expect(await ids({ scope: 'games' })).toEqual(['a'])
-      expect(await ids({ scope: 'all' })).toEqual(['c'])
-      expect(await ids({ package: 'react' })).toEqual(['b', 'c'])
-      expect(await ids({ package: 'npm:react' })).toEqual(['b'])
-      expect(await ids({ package: 'vue' })).toEqual([])
-      expect(await ids({ status: 'proposed', topic: 'testing' })).toEqual([])
-    })
-
-    test('knowledge: keeps visibility and subject, filters by subject', async () => {
-      await store.knowledge.put(
-        knowledgeEntry('shared', {
-          visibility: 'shared',
-          subject: 'npm:widget-kit',
-        }),
-      )
-      await store.knowledge.put(knowledgeEntry('team', { subject: 'tool:node' }))
-      await store.knowledge.put(knowledgeEntry('plain'))
-      const shared = await store.knowledge.get('shared')
-      expect(shared?.visibility).toBe('shared')
-      expect(shared?.subject).toBe('npm:widget-kit')
-      expect((await store.knowledge.get('plain'))?.visibility).toBeUndefined()
-      expect(
-        (await store.knowledge.list({ subject: 'npm:widget-kit' })).map((entry) => entry.id),
-      ).toEqual(['shared'])
-      await store.knowledge.put({
-        ...knowledgeEntry('shared'),
-        visibility: 'team',
-      })
-      expect((await store.knowledge.history('shared'))[0]?.visibility).toBe('shared')
-      expect((await store.knowledge.get('shared'))?.subject).toBeUndefined()
-    })
-
-    test('knowledge: search ranks title over topics over body, matches prefixes', async () => {
-      await store.knowledge.put(
-        knowledgeEntry('body', {
-          title: 'Release notes',
-          body: 'Mention snapshot tests.',
-          topics: [],
-        }),
-      )
-      await store.knowledge.put(
-        knowledgeEntry('title', {
-          title: 'Snapshot tests are banned',
-          body: 'See review.',
-          topics: [],
-        }),
-      )
-      await store.knowledge.put(
-        knowledgeEntry('topic', {
-          title: 'Fixtures',
-          body: 'Keep them small.',
-          topics: ['snapshots'],
-        }),
-      )
-      await store.knowledge.put(
-        knowledgeEntry('other', {
-          title: 'Translations',
-          body: 'Use ICU.',
-          topics: ['i18n'],
-        }),
-      )
-
-      const hits = await store.knowledge.search('snapshot')
-      expect(hits.map((hit) => hit.entry.id)).toEqual(['title', 'topic', 'body'])
-      expect(hits[0]?.score).toBeGreaterThan(hits[1]?.score ?? 0)
-      expect(hits[0]?.entry.version).toBe(1)
-      expect((await store.knowledge.search('transl')).map((hit) => hit.entry.id)).toEqual(['other'])
-      expect((await store.knowledge.search('ICU snapshot', {}, 2)).length).toBe(2)
-      expect(
-        (await store.knowledge.search('snapshot', { topic: 'snapshots' })).map((h) => h.entry.id),
-      ).toEqual(['topic'])
-      expect(await store.knowledge.search('   ')).toEqual([])
-      expect(await store.knowledge.search('nothing-like-this')).toEqual([])
-    })
-
-    test('knowledge: search treats operators and punctuation as plain words', async () => {
-      await store.knowledge.put(
-        knowledgeEntry('ops', {
-          title: 'NOT a drill',
-          body: 'Use "quotes" AND (parens) near: x*y-z',
-        }),
-      )
-      for (const query of [
-        '"',
-        '"quotes',
-        'AND',
-        'NOT',
-        'OR OR',
-        'near(',
-        'NEAR(x y)',
-        'title:drill',
-        '*',
-        'x*',
-        '-z',
-        '^drill',
-        "it's",
-        '(((',
-        '{x}',
-      ]) {
-        const hits = await store.knowledge.search(query)
-        expect(Array.isArray(hits)).toBeTrue()
-      }
-      expect((await store.knowledge.search('"quotes"')).map((h) => h.entry.id)).toEqual(['ops'])
-      expect((await store.knowledge.search('title:drill')).map((h) => h.entry.id)).toEqual(['ops'])
-      expect((await store.knowledge.search('NOT')).map((h) => h.entry.id)).toEqual(['ops'])
-    })
-
     test('ci jobs: put replaces by job id, list oldest first in a range, coverage, prune', async () => {
       const a = { forge: 'work', path: 'games/a' }
       await store.ciJobs.put([

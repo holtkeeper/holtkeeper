@@ -24,8 +24,8 @@ Access in Holtkeeper is a list of **grants**. Each grant pairs a scope (everythi
 | `settings:write`    | Change settings in scope.                                                                                                                                                                                      |
 | `credentials:read`  | See credentials. On a grant scoped to everything, also see [secret reports](/guide/supply-chain/secret-reports/).                                                                                              |
 | `credentials:write` | Add, rotate or delete credentials. On a grant scoped to everything, also change the status and notes of secret reports.                                                                                        |
-| `knowledge:read`    | Read the knowledge base and the Guide.                                                                                                                                                                         |
-| `knowledge:write`   | Write notes, accept or reject notes and learnings.                                                                                                                                                             |
+| `knowledge:read`    | Read rules and learnings.                                                                                                                                                                                      |
+| `knowledge:write`   | Write rules and learnings, approve or reject learnings.                                                                                                                                                        |
 | `ai:read`           | See AI spend.                                                                                                                                                                                                  |
 | `ai:admin`          | Manage AI spend: the budget and the provider. Includes `ai:read`.                                                                                                                                              |
 | `users:read`        | See people.                                                                                                                                                                                                    |
@@ -56,7 +56,7 @@ Without `audit:read`, the audit log still lists events about repositories you ca
 | See release plans and timelines               |   ✓    |     ✓     |     ✓      |   ✓   |
 | Run release steps                             |        |           |     ✓      |   ✓   |
 | Read knowledge                                |   ✓    |     ✓     |     ✓      |   ✓   |
-| Write notes, approve learnings                |        |     ✓     |     ✓      |   ✓   |
+| Write rules, approve learnings                |        |     ✓     |     ✓      |   ✓   |
 | Read settings and the effective config        |   ✓    |     ✓     |     ✓      |   ✓   |
 | Change settings in scope                      |        |           |     ✓      |   ✓   |
 | See AI spend                                  |        |           |            |   ✓   |
@@ -74,7 +74,7 @@ A person may hand grants to someone else only with `users:invite` over each scop
 
 ## MCP tokens
 
-A token acts as its owner, cut down to `repos:read`, `analyses:read`, `audits:read`, `knowledge:read` and `releases:read`. Besides reading, it can only propose knowledge entries and Guide rules for people to review (`propose_knowledge`, `propose_rule_change`). It never runs release steps or tasks, whatever its owner may do. Its tools check the owner's grants per repository: catalog tools catalog reach, knowledge and `repo_rules` `knowledge:read`, `release_rules` `releases:read`, and `commit_conventions`, `test_ids`, the asset tools and `review_status` `analyses:read`.
+A token acts as its owner, cut down to `repos:read`, `analyses:read`, `audits:read`, `knowledge:read` and `releases:read`. Besides reading, it can only propose learnings, which people may reject before they activate (`propose_learning`). It never runs release steps or tasks, whatever its owner may do. Its tools check the owner's grants per repository: catalog tools catalog reach, knowledge and `repo_rules` `knowledge:read`, `release_rules` `releases:read`, and `commit_conventions`, `test_ids`, the asset tools and `review_status` `analyses:read`.
 
 A token may also report exposed secrets with `report_secret_exposure`, unless its owner set **Report exposed secrets** to **Off**. The report needs no permission beyond reading: a report naming a repository is accepted only when the owner may read it (`repos:read`). Only the owner sees and changes that choice; it is not audited. Reading and handling reports needs `credentials:read` and `credentials:write` on everything, which a token never gets.
 

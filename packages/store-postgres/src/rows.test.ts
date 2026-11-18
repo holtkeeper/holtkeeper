@@ -4,17 +4,16 @@ import {
   type AiUsageRow,
   type AnalysisRow,
   type JobRow,
-  type KnowledgeRow,
+  type RuleRow,
   iso,
-  knowledgeContent,
   num,
   toAiUsage,
   toAnalysis,
   toCredential,
   toJob,
-  toKnowledgeEntry,
-  toKnowledgeRevision,
   toPasskey,
+  toRule,
+  toRuleRevision,
 } from './rows.ts'
 
 const at = new Date('2026-10-30T10:00:00.000Z')
@@ -147,44 +146,39 @@ describe('row mapping', () => {
     ).toEqual({ id: 'p', userId: 'u', publicKey: 'k', counter: 42, createdAt: 'now' })
   })
 
-  test('knowledge entries and revisions round-trip their content', () => {
-    const row: KnowledgeRow = {
-      id: 'k',
+  test('rules and revisions round-trip, absent fields stay absent', () => {
+    const row: RuleRow = {
+      id: 'r',
       title: 't',
       body: 'b',
-      kind: 'quirk',
-      status: 'accepted',
-      source: 'human',
-      author: 'jane',
+      description: null,
       scope: { teams: ['games'] },
-      matches: null,
-      topics: ['x'],
-      applies_to: ['*'],
-      packages: null,
-      visibility: null,
-      subject: null,
-      evidence: [],
-      supersedes: null,
+      files: null,
+      agents: null,
+      always_apply: null,
+      author: 'jane',
       created_at: at,
       updated_at: at,
       updated_by: null,
       version: 2,
     }
-    const entry = toKnowledgeEntry(row)
-    expect(entry.packages).toBeUndefined()
-    expect('updatedBy' in entry).toBeFalse()
-    expect('match' in entry).toBeFalse()
-    const match = { families: ['family-1'], files: ['src/**'] }
-    expect(toKnowledgeEntry({ ...row, matches: match }).match).toEqual(match)
-    expect(knowledgeContent(toKnowledgeEntry({ ...row, matches: match })).match).toEqual(match)
-    const revision = toKnowledgeRevision({
-      version: 1,
-      content: knowledgeContent(entry),
-      edited_by: 'bob',
-      edited_at: at,
+    const rule = toRule(row)
+    expect(rule).toEqual({
+      id: 'r',
+      title: 't',
+      body: 'b',
+      scope: { teams: ['games'] },
+      author: 'jane',
+      createdAt: iso(at),
+      updatedAt: iso(at),
+      version: 2,
     })
-    expect(revision).toEqual({
-      ...knowledgeContent(entry),
+    expect(
+      toRule({ ...row, files: ['src/**'], agents: ['review'], always_apply: false }),
+    ).toMatchObject({ files: ['src/**'], agents: ['review'], alwaysApply: false })
+    const content = { title: 't', body: 'b', scope: { all: true }, description: 'd' }
+    expect(toRuleRevision({ version: 1, content, edited_by: 'bob', edited_at: at })).toEqual({
+      ...content,
       version: 1,
       editedBy: 'bob',
       editedAt: iso(at),

@@ -4,6 +4,7 @@ import type { ChatForm, ChatMessageList, ChatMessageView, ChatThreadView } from 
 
 import {
   addableRepos,
+  citationOf,
   asksAgent,
   firstUnreadId,
   formCommand,
@@ -302,14 +303,16 @@ test('refs read as short labels and list once per thread, repositories aside', (
   expect(
     [
       { kind: 'repo', repo: 'work:acme/widget-kit' },
-      { kind: 'note', id: '5c2e81d0-4f1a' },
+      { kind: 'note', id: 'rule:5c2e81d0-4f1a' },
+      { kind: 'note', id: 'learn:7d1a0b22-9e3c' },
       { kind: 'task', id: '0f3a9c21-77aa' },
       { kind: 'job', id: '9b1e44d0-1234' },
       { kind: 'mr', repo: 'work:acme/storefront', iid: 418 },
     ].map((ref) => refLabel(ref as Parameters<typeof refLabel>[0])),
   ).toEqual([
     'acme/widget-kit',
-    'kb:5c2e81d0',
+    'rule:5c2e81d0',
+    'learn:7d1a0b22',
     'Task 0f3a9c21',
     'Run 9b1e44d0',
     'acme/storefront!418',
@@ -393,4 +396,10 @@ test('new threads send a trimmed title or none, and pending titles read as namin
   expect(isNaming({ titlePending: true, messageCount: 1 })).toBe(true)
   expect(isNaming({ titlePending: true, messageCount: 0 })).toBe(false)
   expect(isNaming({ messageCount: 3 })).toBe(false)
+})
+
+test('a cited note ref names a rule or a learning', () => {
+  expect(citationOf('rule:r-1')).toEqual({ kind: 'rule', id: 'r-1' })
+  expect(citationOf('learn:l-2')).toEqual({ kind: 'learning', id: 'l-2' })
+  expect(citationOf('r-3')).toEqual({ kind: 'rule', id: 'r-3' })
 })

@@ -24,7 +24,7 @@ The header's primary **Run analyzer…** (`useRunJob`, `analyses:run`) opens the
 - **Options**: `SettingEntries` for `analyzers.<kind>`, the same editor the page drawers open (`useConfigure`), with every entry per scope.
 - **Overrides**: the same editor limited to entries narrower than the organization's; a new entry starts without a scope so it must name groups or repositories.
 
-Analyzers without an `analyzers.<kind>` setting (run-only ones such as `guide`) say they have no options.
+Analyzers without an `analyzers.<kind>` setting (run-only ones) say they have no options.
 
 ## Bot messages
 

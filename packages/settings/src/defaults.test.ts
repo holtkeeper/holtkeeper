@@ -41,9 +41,7 @@ describe('seedDefaultSettings', () => {
     const entries = await store.settings.list()
     expect(entries).toHaveLength(keys.length)
     expect(entries.every((entry) => entry.scope.all === true && !entry.secret)).toBe(true)
-    expect((await store.settings.get('default:agent.tools'))?.value).toEqual({
-      knowledgeTokens: 1500,
-    })
+    expect((await store.settings.get('default:audit.upgrade'))?.value).toBe('minor')
     const [event] = (await store.audit.list()).events
     expect(event).toMatchObject({
       actor: { id: 'system' },

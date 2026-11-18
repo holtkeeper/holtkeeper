@@ -1,17 +1,16 @@
 import { expect, test } from 'bun:test'
 
-import type { LearningCandidate, Store } from './types.ts'
+import type { Learning, Store } from './types.ts'
 
 const at = (minute: number) => `2026-11-02T09:${String(minute).padStart(2, '0')}:00.000Z`
 
-const candidate = (id: string, overrides: Partial<LearningCandidate> = {}): LearningCandidate => ({
+const learning = (id: string, overrides: Partial<Learning> = {}): Learning => ({
   id,
-  repo: 'work:games/arcade',
-  rule: 'Do not flag magic numbers in tween presets.',
+  text: 'Do not flag magic numbers in tween presets.',
   key: 'do not flag magic numbers in tween presets',
-  section: 'review',
-  suggestedScope: 'repo',
-  status: 'proposed',
+  scope: { repos: ['work:games/arcade'] },
+  origin: 'reply',
+  status: 'pending',
   sources: [
     {
       repo: 'work:games/arcade',
@@ -26,35 +25,123 @@ const candidate = (id: string, overrides: Partial<LearningCandidate> = {}): Lear
   costUsd: 0.001,
   createdAt: at(0),
   updatedAt: at(0),
+  activeAt: at(30),
+  lastReinforcedAt: at(0),
+  uses: 0,
+  actedOn: 0,
+  votesUp: 0,
+  votesDown: 0,
   ...overrides,
 })
 
 /** Contract tests every `LearningStore` must pass. */
 export function learningStoreTests(store: () => Store) {
-  test('learnings: put, get, find by key and list newest first with filters', async () => {
+  test('learnings: put, get, find by key, list newest first with filters, remove', async () => {
     const learnings = store().learnings
-    await learnings.put(candidate('a'))
-    await learnings.put(
-      candidate('b', { repo: 'work:games/puzzle', key: 'other', updatedAt: at(5) }),
-    )
-    await learnings.put(candidate('c', { status: 'accepted', key: 'third', updatedAt: at(3) }))
+    await learnings.put(learning('a'))
+    await learnings.put(learning('b', { key: 'other', origin: 'miner', updatedAt: at(5) }))
+    await learnings.put(learning('c', { status: 'active', key: 'third', updatedAt: at(3) }))
 
-    expect(await learnings.get('a')).toEqual(candidate('a'))
+    expect(await learnings.get('a')).toEqual(learning('a'))
     expect(await learnings.get('missing')).toBeUndefined()
-    expect((await learnings.find('work:games/arcade', candidate('a').key))?.id).toBe('a')
-    expect(await learnings.find('work:games/puzzle', candidate('a').key)).toBeUndefined()
-    expect((await learnings.list()).map((c) => c.id)).toEqual(['b', 'c', 'a'])
-    expect((await learnings.list({ repos: ['work:games/arcade'] })).map((c) => c.id)).toEqual([
-      'c',
-      'a',
-    ])
-    expect((await learnings.list({ status: ['proposed'] })).map((c) => c.id)).toEqual(['b', 'a'])
+    expect((await learnings.find(learning('a').key))?.id).toBe('a')
+    expect(await learnings.find('missing key')).toBeUndefined()
+    expect((await learnings.list()).map((l) => l.id)).toEqual(['b', 'c', 'a'])
+    expect((await learnings.list({ status: ['pending'] })).map((l) => l.id)).toEqual(['b', 'a'])
+    expect((await learnings.list({ origin: ['reply'] })).map((l) => l.id)).toEqual(['c', 'a'])
+    expect(
+      (await learnings.list({ status: ['pending'], origin: ['reply'] })).map((l) => l.id),
+    ).toEqual(['a'])
+    expect(await learnings.list({ status: [] })).toEqual([])
 
-    await learnings.put(candidate('a', { rule: 'Edited.', status: 'rejected', updatedAt: at(9) }))
-    expect(await learnings.get('a')).toMatchObject({ rule: 'Edited.', status: 'rejected' })
-    await learnings.put(candidate('d', { key: 'fourth', targetScope: 'path:work:games/arcade' }))
-    expect((await learnings.get('d'))?.targetScope).toBe('path:work:games/arcade')
+    await learnings.put(
+      learning('a', {
+        text: 'Edited.',
+        key: 'edited',
+        status: 'rejected',
+        updatedAt: at(9),
+        decidedBy: 'jane',
+        decidedAt: at(9),
+      }),
+    )
+    expect(await learnings.get('a')).toMatchObject({ text: 'Edited.', status: 'rejected' })
+    expect(await learnings.find(learning('a').key)).toBeUndefined()
+    expect((await learnings.find('edited'))?.id).toBe('a')
     expect((await learnings.list())[0]?.id).toBe('a')
+
+    await learnings.remove('a')
+    expect(await learnings.get('a')).toBeUndefined()
+    expect(await learnings.find('edited')).toBeUndefined()
+    expect((await learnings.list()).map((l) => l.id)).toEqual(['b', 'c'])
+    await learnings.remove('missing')
+  })
+
+  test('learnings: optional fields round-trip and stay absent when unset', async () => {
+    const learnings = store().learnings
+    const full = learning('full', {
+      reason: 'Presets are tuned by designers.',
+      scope: { teams: ['games'] },
+      files: ['src/tweens/**'],
+      agents: ['review'],
+      origin: 'agent',
+      status: 'active',
+      sources: [{ author: 'principal-1', at: at(1), url: 'https://forge.test/mr/7' }],
+      uses: 4,
+      actedOn: 2,
+      votesUp: 3,
+      votesDown: 1,
+      decidedBy: 'jane',
+      decidedAt: at(2),
+      editedBy: 'kim',
+    })
+    await learnings.put(full)
+    expect(await learnings.get('full')).toEqual(full)
+
+    const { model: _model, costUsd: _cost, ...bare } = learning('bare', { key: 'bare' })
+    await learnings.put(bare)
+    const stored = await learnings.get('bare')
+    expect(stored).toEqual(bare)
+    for (const field of ['model', 'costUsd', 'reason', 'files', 'agents', 'decidedBy'])
+      expect(Object.hasOwn(stored!, field)).toBe(false)
+  })
+
+  test('learnings: search matches prefixes of the text, filters and limits', async () => {
+    const learnings = store().learnings
+    await learnings.put(
+      learning('one', { text: 'Name snapshot files after the widget.', key: '1' }),
+    )
+    await learnings.put(
+      learning('two', {
+        text: 'Snapshot tests replace snapshot fixtures.',
+        key: '2',
+        status: 'active',
+      }),
+    )
+    await learnings.put(learning('three', { text: 'Translations use ICU.', key: '3' }))
+
+    const hits = await learnings.search('snapsh')
+    expect(hits.map((hit) => hit.learning.id).toSorted()).toEqual(['one', 'two'])
+    expect(hits.every((hit) => hit.score > 0)).toBeTrue()
+    expect(hits.find((hit) => hit.learning.id === 'two')?.learning).toEqual(
+      await learnings.get('two'),
+    )
+    expect((await learnings.search('widget')).map((h) => h.learning.id)).toEqual(['one'])
+    expect(
+      (await learnings.search('snapshot', { status: ['active'] })).map((h) => h.learning.id),
+    ).toEqual(['two'])
+    expect(await learnings.search('snapshot', { origin: ['miner'] })).toEqual([])
+    expect(await learnings.search('snapshot translations', undefined, 1)).toHaveLength(1)
+    expect(await learnings.search('   ')).toEqual([])
+    expect(await learnings.search('nothing-like-this')).toEqual([])
+    const hostile = ['"', 'AND', 'NEAR(x y)', 'text:icu', '*', "\\ ' '' :* & | ! <->", '((']
+    for (const found of await Promise.all(hostile.map((query) => learnings.search(query))))
+      expect(Array.isArray(found)).toBeTrue()
+    expect((await learnings.search('text:icu')).map((h) => h.learning.id)).toEqual(['three'])
+
+    await learnings.put(learning('three', { text: 'Dates use Temporal.', key: '3' }))
+    expect(await learnings.search('icu')).toEqual([])
+    await learnings.remove('one')
+    expect((await learnings.search('snapshot')).map((h) => h.learning.id)).toEqual(['two'])
   })
 
   test('learnings: a source is claimed once until released', async () => {

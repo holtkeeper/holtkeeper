@@ -4,22 +4,15 @@ import type { ReviewDetail, ReviewList, ReviewQuality } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { GuideBlock } from '@holtkeeper/guide'
 import { type ReviewData, reviewMetrics } from '@holtkeeper/review'
 import { builtinSettings } from '@holtkeeper/settings'
-import type {
-  AnalysisQuery,
-  AnalysisStore,
-  GuideScopeKey,
-  ReactionSignal,
-  Store,
-} from '@holtkeeper/store'
+import type { AnalysisQuery, AnalysisStore, ReactionSignal, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
 import { builtinAnalyses } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
-import { REVIEWS_SCAN, guideScopesOf } from '../src/reviews.ts'
+import { REVIEWS_SCAN } from '../src/reviews.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
@@ -92,7 +85,7 @@ const review = (iid: number, overrides: Partial<ReviewData> = {}): ReviewData =>
   approved: false,
   checks: [],
   usage: { turns: 4, costUsd: 0.25, inputTokens: 9000, outputTokens: 800, model: 'model-a' },
-  guideScopes: ['all', 'team:shapes'],
+  ruleSources: ['All repositories', 'Team shapes'],
   durationMs: 64_000,
   ...overrides,
 })
@@ -183,7 +176,7 @@ describe('GET /api/reviews', () => {
       resolved: 1,
       model: 'model-a',
       durationMs: 64_000,
-      guideScopes: ['all', 'team:shapes'],
+      ruleSources: ['All repositories', 'Team shapes'],
       costUsd: 0.25,
     })
     expect(result.totals).toEqual({ reviews: 2, findings: 1, resolved: 2, costUsd: 0.3 })
@@ -288,7 +281,7 @@ describe('GET /api/reviews', () => {
     })
     const [row] = (await list()).reviews
     expect(row?.mergeRequest).toEqual({ iid: 4, title: '!4', url: '' })
-    expect(row?.guideScopes).toEqual([])
+    expect(row?.ruleSources).toEqual([])
     expect(row?.model).toBeUndefined()
   })
 })
@@ -333,33 +326,6 @@ describe('GET /api/reviews/:id', () => {
     const admin = await app.request(`/api/reviews/${hidden.id}`, { headers: asAdmin })
     expect(admin.status).toBe(200)
   })
-})
-
-const block = (scope: GuideScopeKey | undefined, chars: number): GuideBlock => ({
-  layer: 'repo',
-  ...(scope ? { scope } : {}),
-  title: 'x',
-  source: 'x',
-  text: '',
-  chars,
-  fullChars: chars,
-  cut: false,
-})
-
-test('guide scopes are the filled ones, broad to narrow, each once', () => {
-  expect(
-    guideScopesOf({
-      blocks: [
-        block('repo:work:shapes/circle', 10),
-        block('family:f1', 5),
-        block('team:shapes', 3),
-        block('all', 7),
-        block('team:shapes', 2),
-        block('team:empty', 0),
-        block(undefined, 40),
-      ],
-    }),
-  ).toEqual(['all', 'team:shapes', 'family:f1', 'repo:work:shapes/circle'])
 })
 
 const ingest = (data: ReviewData) =>

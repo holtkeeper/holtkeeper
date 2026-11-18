@@ -17,7 +17,7 @@ import {
 } from '@holtkeeper/store'
 import type { SQL } from 'bun'
 
-import { RANK_WEIGHTS } from './knowledge.ts'
+import { RANK_WEIGHTS } from './search.ts'
 import type { Db } from './tables.ts'
 
 interface ChunkRow {

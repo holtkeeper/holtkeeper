@@ -131,13 +131,16 @@ describe('releases toolset over MCP', () => {
     )
   })
 
-  test('release_rules explains the flow with the Guide releases section', async () => {
-    await store.guides.put({
-      scope: 'team:games',
-      section: 'releases',
-      rules: 'Release notes name the shapes that changed.',
-      steering: '',
-      learnings: [],
+  test('release_rules explains the flow with the team rules for release notes', async () => {
+    await store.rules.put({
+      id: 'r-release',
+      title: 'Release notes',
+      body: 'Release notes name the shapes that changed.',
+      scope: { teams: ['games'] },
+      agents: ['release'],
+      author: 'header:jane',
+      createdAt: '2026-11-01T08:00:00.000Z',
+      updatedAt: '2026-11-01T08:00:00.000Z',
     })
     const { call } = await connect(reader)
     const { text } = await call('release_rules', { repo })

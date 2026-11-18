@@ -27,7 +27,9 @@ const doneText = (item: InboxItem, decision: InboxDecision) =>
       ? 'Queued on the write workers'
       : item.kind === 'allowlist'
         ? 'Renewed'
-        : 'Accepted'
+        : item.kind === 'learning'
+          ? 'Approved'
+          : 'Accepted'
 
 /** `Decide` backed by `useInboxDecisions`; `onDone` runs after each decision that went through. */
 export function useDecide(onDone: (item: InboxItem) => void): { decide: Decide; pending: boolean } {

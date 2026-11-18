@@ -1,46 +1,40 @@
 import { join } from 'node:path'
 
-/** Repository files whose rules the review follows, in this order. */
-export const GUIDELINE_FILES = ['REVIEW.md', 'CLAUDE.md', 'AGENTS.md', 'CONTRIBUTING.md'] as const
+import type { CommandRunner } from '@holtkeeper/exec'
+import { ROOT_RULE_FILES, type RepoRuleFile, readRepoRules } from '@holtkeeper/rules'
 
-export interface Guideline {
-  file: string
-  text: string
-  truncated: boolean
-}
-
-/** Cuts `text` to at most `max` characters at a line break, marking the cut. */
-export function trimText(text: string, max: number): { text: string; truncated: boolean } {
-  if (text.length <= max) return { text, truncated: false }
-  const cut = text.lastIndexOf('\n', max)
-  return { text: `${text.slice(0, cut > max / 2 ? cut : max)}\n[...]`, truncated: true }
+async function checkoutPaths(
+  runner: CommandRunner,
+  dir: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const listed = await runner
+    .run(['git', 'ls-files'], { cwd: dir, ...(signal && { signal }) })
+    .catch(() => undefined)
+  const tracked = listed?.exitCode === 0 ? listed.stdout.split('\n').filter(Boolean) : []
+  const present = await Promise.all(
+    ROOT_RULE_FILES.map(async (path) => ((await Bun.file(join(dir, path)).exists()) ? path : '')),
+  )
+  return [...new Set([...tracked, ...present.filter(Boolean)])]
 }
 
 /**
- * The guideline files present at the checkout root, each trimmed to `perFile` characters and all
- * together to `total`; files that do not fit are left out.
+ * The rules files of a checkout (`readRepoRules`): those among the files `git ls-files` lists,
+ * plus the root rules files present on disk (all a checkout git cannot list has).
  */
-export async function readGuidelines(
+export async function readCheckoutRules(
+  runner: CommandRunner,
   dir: string,
-  { perFile = 6000, total = 12_000 }: { perFile?: number; total?: number } = {},
-): Promise<Guideline[]> {
-  const found: Guideline[] = []
-  let used = 0
-  for (const file of GUIDELINE_FILES) {
-    const handle = Bun.file(join(dir, file))
-    // Files are read one by one so the budget goes to the earlier, more specific ones first.
-    // oxlint-disable-next-line no-await-in-loop
-    if (!(await handle.exists())) continue
-    // oxlint-disable-next-line no-await-in-loop
-    const raw = (await handle.text()).trim()
-    if (!raw) continue
-    const trimmed = trimText(raw, Math.min(perFile, total - used))
-    if (trimmed.text.length < 200 && trimmed.truncated) break
-    found.push({ file, ...trimmed })
-    used += trimmed.text.length
-    if (used >= total) break
-  }
-  return found
+  signal?: AbortSignal,
+): Promise<RepoRuleFile[]> {
+  const paths = await checkoutPaths(runner, dir, signal)
+  return readRepoRules({
+    paths,
+    read: async (path) => {
+      const file = Bun.file(join(dir, path))
+      return (await file.exists()) ? file.text() : undefined
+    },
+  })
 }
 
 /** Review rules for files matching `glob`, from REVIEW.md. */

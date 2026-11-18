@@ -105,7 +105,7 @@ describe('seedDefaults', () => {
     })
     expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual([])
   })
-  test('adds starter knowledge to a new-repo trigger that lists analyzers, never to one without a list', async () => {
+  test('adds the rule miner to a new-repo trigger that lists analyzers, never to one without a list', async () => {
     const listed = memoryStore()
     await listed.kv?.set(defaultMarker('new-repo'), { at: now().toISOString() })
     await listed.config?.put({
@@ -114,14 +114,14 @@ describe('seedDefaults', () => {
       data: { on: 'newRepo', analyzers: ['depgraph'] },
       updatedAt: now().toISOString(),
     })
-    const withBootstrap = [...kinds, 'knowledge-bootstrap']
+    const withBootstrap = [...kinds, 'rule-miner']
     expect(await seedDefaults({ store: listed, analyzers: withBootstrap, now })).toEqual([
       'trigger:tag',
-      'trigger:new-repo+knowledge-bootstrap',
+      'trigger:new-repo+rule-miner',
     ])
     expect((await listed.config?.get('trigger', 'new-repo'))?.data).toEqual({
       on: 'newRepo',
-      analyzers: ['depgraph', 'knowledge-bootstrap'],
+      analyzers: ['depgraph', 'rule-miner'],
     })
     expect(await seedDefaults({ store: listed, analyzers: withBootstrap, now })).toEqual([])
 

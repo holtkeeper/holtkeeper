@@ -44,6 +44,6 @@ export interface EvalCase {
   expected: readonly ExpectedFinding[]
   /** `false` for a repository with no tests by design, as `ReviewRun.tests`. */
   tests?: false
-  /** Conventions of the repository, passed as the review's Guide. */
+  /** Conventions of the repository, passed as the review's resolved rules. */
   guide?: string
 }

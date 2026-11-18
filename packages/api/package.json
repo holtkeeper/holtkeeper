@@ -18,12 +18,12 @@
     "@holtkeeper/ci-jobs": "workspace:*",
     "@holtkeeper/coverage": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
-    "@holtkeeper/guide": "workspace:*",
     "@holtkeeper/issues": "workspace:*",
     "@holtkeeper/jobs": "workspace:*",
     "@holtkeeper/qa": "workspace:*",
     "@holtkeeper/release": "workspace:*",
     "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/rules": "workspace:*",
     "@holtkeeper/store": "workspace:*",
     "@holtkeeper/usages": "workspace:*",
     "@holtkeeper/vuln": "workspace:*"

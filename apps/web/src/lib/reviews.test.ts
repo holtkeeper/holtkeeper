@@ -32,7 +32,7 @@ const row = (patch: Partial<ReviewRow> & { iid: number }): ReviewRow => {
     findings: 0,
     severities: { critical: 0, major: 0, minor: 0, info: 0 },
     resolved: 0,
-    guideScopes: [],
+    ruleSources: [],
     ...rest,
   }
 }

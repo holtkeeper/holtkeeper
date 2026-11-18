@@ -23,7 +23,7 @@ export interface ProbeOptions {
   checks?: Record<string, () => Promise<unknown>>
   /**
    * Named facts reported in the body under `info` that never fail readiness, e.g. the state of
-   * optional features (`embeddings`). One that throws or times out reads `unknown`.
+   * optional features. One that throws or times out reads `unknown`.
    */
   info?: Record<string, () => Promise<string>>
   /** Each check fails after this long. Default 3 seconds. */

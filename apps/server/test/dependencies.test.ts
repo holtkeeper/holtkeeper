@@ -17,7 +17,7 @@ import { createCredentialService } from '@holtkeeper/credentials'
 import { type DepEdge, type DepNode, analyzeLayer } from '@holtkeeper/depgraph'
 import { latestVersions } from '@holtkeeper/libraries'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { KnowledgeEntry, LibraryStore, Store } from '@holtkeeper/store'
+import type { LibraryStore, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
@@ -142,24 +142,6 @@ const usages: UsagesData = {
   types: { status: 'used' },
 }
 
-const knowledge = (id: string, fields: Partial<KnowledgeEntry>) =>
-  store.knowledge.put({
-    id,
-    title: `Entry ${id}`,
-    body: 'Body.',
-    kind: 'decision',
-    scope: { all: true },
-    topics: [],
-    appliesTo: ['*'],
-    status: 'accepted',
-    evidence: [],
-    source: 'human',
-    author: 'header:jane',
-    createdAt: at,
-    updatedAt: at,
-    ...fields,
-  })
-
 const seed = async () => {
   await depgraph(
     'games/arcade',
@@ -282,35 +264,6 @@ const seed = async () => {
       output: '',
     },
   })
-  await knowledge('agent-pick', {
-    title: 'Wrap widget-kit in a board helper',
-    source: 'agent',
-    updatedAt: '2026-10-29T00:00:00.000Z',
-    packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
-  })
-  await knowledge('team-pin', {
-    title: 'Stay on widget-kit 3',
-    updatedAt: '2026-10-01T00:00:00.000Z',
-    packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
-  })
-  await knowledge('proposed', {
-    title: 'Drop widget-kit',
-    status: 'proposed',
-    packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
-  })
-  await knowledge('tools-only', {
-    title: 'Tools team note',
-    scope: { teams: ['tools'] },
-    packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
-  })
-  await knowledge('tools-shared', {
-    title: 'Tools team picked widget-kit 3',
-    scope: { teams: ['tools'] },
-    visibility: 'shared',
-    subject: 'npm:widget-kit',
-    updatedAt: '2026-09-01T00:00:00.000Z',
-  })
-
   await libraries.putLibrary({
     ...widget,
     description: 'Widgets',
@@ -501,7 +454,7 @@ describe('dependency table', () => {
 })
 
 describe('dependency detail', () => {
-  test('joins users, advisories, licenses, decisions, merge requests and docs', async () => {
+  test('joins users, advisories, licenses, merge requests and docs', async () => {
     const detail = await get<DependencyDetail>(
       '/api/dependencies/library?ecosystem=npm&name=widget-kit',
       asGames,
@@ -524,13 +477,6 @@ describe('dependency detail', () => {
         verdicts: [{ verdict: 'allowed', repos: ['work:games/arcade'] }],
       },
     ])
-    expect(detail.decisions.map((decision) => decision.id)).toEqual([
-      'team-pin',
-      'tools-shared',
-      'agent-pick',
-    ])
-    expect(detail.decisions[1]).toMatchObject({ owner: ['tools'], shared: true })
-    expect(detail.decisions[0]).toMatchObject({ owner: [], shared: false })
     expect(detail.mergeRequests).toEqual([
       {
         repo: 'work:games/arcade',
@@ -554,12 +500,6 @@ describe('dependency detail', () => {
     )
     expect(admin.advisories.map((advisory) => [advisory.id, advisory.versions])).toEqual([
       ['GHSA-aaaa-bbbb-cccc', ['1.4.0']],
-    ])
-    expect(admin.decisions.map((decision) => decision.id)).toEqual([
-      'tools-only',
-      'team-pin',
-      'tools-shared',
-      'agent-pick',
     ])
   })
 

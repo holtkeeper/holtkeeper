@@ -3,7 +3,6 @@ import { Link } from '@tanstack/react-router'
 
 import { useReactionTotals } from '../../api/queries.ts'
 import { helpfulShare, reactionSum } from '../../lib/learnings.ts'
-import { repoKey } from '../../lib/repo.ts'
 import { Legend, SegmentBar, Tag } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
 
@@ -44,12 +43,8 @@ export function ReviewReactions({ repo }: { repo?: RepoRef }) {
             { label: 'not helpful', tone: 'warning' },
           ]}
         />
-        <Link
-          to="/knowledge/learnings"
-          search={repo ? { space: `repo:${repoKey(repo)}` } : {}}
-          className="text-xs hover:underline"
-        >
-          Learning candidates
+        <Link to="/knowledge/learnings" className="text-xs hover:underline">
+          Learnings
         </Link>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

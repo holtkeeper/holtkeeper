@@ -1,44 +1,21 @@
 import type {
-  GuideScopeKey,
-  GuideTask,
   InboxAllowlistItem,
-  InboxGuideItem,
   InboxItem,
   InboxLearningItem,
-  InboxNoteItem,
   InboxReleaseItem,
   InboxTaskItem,
 } from '@holtkeeper/api'
-import { Check, RefreshCw } from 'lucide-react'
+import { ExternalLink, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 
-import {
-  useFamilies,
-  useTeamTitles,
-  useGuideSection,
-  useKnowledgeEntry,
-  useLearnings,
-  useReleaseRepo,
-  useTaskGroup,
-} from '../../api/queries.ts'
+import { useLearnings, useReleaseRepo, useTaskGroup, useTeamTitles } from '../../api/queries.ts'
 import { formatDate, formatRelative, isoDay } from '../../lib/format.ts'
-import { guideTasks, pendingGenerated, scopeLabel, sectionLabel } from '../../lib/guide.ts'
-import { lineDiff, renewalDate } from '../../lib/inbox.ts'
-import { kindLabel as knowledgeKindLabel } from '../../lib/knowledge.ts'
-import { suggestedScopeOf } from '../../lib/learnings.ts'
+import { renewalDate } from '../../lib/inbox.ts'
+import { learningTiming, originLabel, sourceLabel } from '../../lib/learnings.ts'
 import { parseRepoKey } from '../../lib/repo.ts'
-import {
-  Button,
-  ErrorState,
-  KeyValue,
-  Markdown,
-  Placeholder,
-  Select,
-  Tag,
-  TextField,
-} from '../../ui/index.ts'
+import { agentsLabel, ruleScopeLabel } from '../../lib/rules.ts'
+import { Button, ErrorState, KeyValue, Placeholder, Tag, TextField } from '../../ui/index.ts'
 import { BudgetWarningBody } from '../ai/BudgetWarning.tsx'
-import { EffectivePrompt } from '../knowledge/EffectivePrompt.tsx'
 import { NextCard } from '../releases/NextCard.tsx'
 import { TaskDetail, TaskGroupView } from '../tasks/TaskGroupView.tsx'
 import { WritesOffNotice, useWritesOff } from '../tasks/WritesOff.tsx'
@@ -52,12 +29,7 @@ export const sheetTabs: Record<InboxItem['kind'], readonly { id: string; label: 
     { id: 'request', label: 'Context' },
     { id: 'repos', label: 'Repositories' },
   ],
-  note: [
-    { id: 'note', label: 'Note' },
-    { id: 'prompt', label: 'Effective prompt' },
-  ],
-  learning: [{ id: 'rule', label: 'Rule' }],
-  guide: [{ id: 'diff', label: 'Diff' }],
+  learning: [{ id: 'rule', label: 'Learning' }],
   release: [{ id: 'next', label: 'Next version' }],
   allowlist: [{ id: 'renew', label: 'Renewal' }],
   budget: [{ id: 'budget', label: 'Budget' }],
@@ -103,182 +75,67 @@ function TaskBody({ item, tab }: { item: InboxTaskItem; tab: string }) {
   )
 }
 
-function NoteBody({ item, tab }: { item: InboxNoteItem; tab: string }) {
-  const entry = useKnowledgeEntry(item.entryId)
-  const repos = item.repos.map((repo) => repo.repo)
-  const [repo, setRepo] = useState(repos[0])
-  const [task, setTask] = useState<GuideTask>('review')
-  if (tab === 'prompt') {
-    const ref = parseRepoKey(repo)
-    if (!repos.length || !ref)
-      return (
-        <p className="text-sm text-muted">
-          This note applies above any one repository; open a repository’s Guide to see its prompt.
-        </p>
-      )
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-2 gap-2">
-          <Select
-            aria-label="Repository"
-            options={repos.map((key) => ({ id: key, label: key }))}
-            value={repo}
-            onChange={setRepo}
-          />
-          <Select
-            aria-label="Task"
-            options={guideTasks}
-            value={task}
-            onChange={(id) => setTask(guideTasks.find((t) => t.id === id)?.id ?? 'review')}
-          />
-        </div>
-        <EffectivePrompt repo={ref} task={task} />
-      </div>
-    )
-  }
-  if (!entry.data) return <Loading error={entry.error} />
-  const note = entry.data.entry
-  return (
-    <div className="flex flex-col gap-4">
-      <KeyValue
-        rows={[
-          { label: 'Kind', value: <Tag>{knowledgeKindLabel(note.kind)}</Tag> },
-          { label: 'Applies to', value: item.scope },
-          {
-            label: 'Topics',
-            value: note.topics.length ? note.topics.map((t) => <Tag key={t}>{t}</Tag>) : null,
-          },
-          { label: 'Version', value: <span className="mono">v{note.version}</span> },
-        ]}
-      />
-      <h3 className="text-[13px] font-semibold">{note.title}</h3>
-      <Markdown text={note.body} className="text-[13px]" />
-    </div>
-  )
-}
-
-function LearningBody({ item, decide }: { item: InboxLearningItem; decide: Decide }) {
+function LearningBody({ item }: { item: InboxLearningItem }) {
   const titleOf = useTeamTitles()
-  const repo = parseRepoKey(item.repos[0]?.repo)
-  const learnings = useLearnings({ ...(repo && { repo }), status: ['proposed'] })
-  const families = useFamilies()
-  const candidate = learnings.data?.candidates.find((each) => each.id === item.learningId)
-  const [chosen, setChosen] = useState<GuideScopeKey>()
+  const learnings = useLearnings({ status: ['pending'] })
+  const learning = learnings.data?.learnings.find((each) => each.id === item.learningId)
   if (!learnings.data) return <Loading error={learnings.error} />
-  if (!candidate)
-    return <p className="text-sm text-muted">This rule is no longer waiting; someone decided it.</p>
-  const scope = chosen ?? suggestedScopeOf(candidate)
-  const familyList = families.data?.families ?? []
+  if (!learning)
+    return <p className="text-sm text-muted">This learning is no longer pending; it was decided.</p>
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-[13px]">{candidate.rule}</p>
+      <p className="text-[13px] font-medium">{learning.text}</p>
       <KeyValue
         rows={[
-          { label: 'Section', value: <Tag>{sectionLabel(item.section)}</Tag> },
+          { label: 'Reason', value: learning.reason || null },
           {
-            label: candidate.targetScope ? 'Target' : 'Suggested',
+            label: 'Scope',
             value: (
-              <Tag tone="info">
-                {candidate.targetScope
-                  ? scopeLabel(candidate.targetScope, familyList, titleOf)
-                  : item.suggestedScope}
-              </Tag>
+              <span className="flex flex-wrap items-center gap-1">
+                {ruleScopeLabel(learning.scope, titleOf)}
+                {(learning.files ?? []).map((glob) => (
+                  <Tag key={glob} mono>
+                    {glob}
+                  </Tag>
+                ))}
+              </span>
             ),
           },
-          { label: 'From', value: <span className="mono text-xs">{candidate.repo}</span> },
-          { label: 'Why', value: candidate.proposal?.reason },
-        ]}
-      />
-      {candidate.canDecide && candidate.scopes.length ? (
-        <div className="flex items-end gap-2">
-          <Select
-            label="Accept into"
-            className="min-w-0 flex-1"
-            options={candidate.scopes.map((key) => ({
-              id: key,
-              label: scopeLabel(key, familyList, titleOf),
-            }))}
-            value={scope}
-            onChange={(key) => setChosen(candidate.scopes.find((k) => k === key))}
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            isDisabled={!scope}
-            onPress={() => decide(item, 'approve', scope ? { scope } : {})}
-          >
-            <Check className="size-3.5" />
-            Accept
-          </Button>
-        </div>
-      ) : (
-        <p className="text-xs text-muted">Your grants do not let you accept it into a scope.</p>
-      )}
-    </div>
-  )
-}
-
-function DiffView({ before, after }: { before: string; after: string }) {
-  const lines = lineDiff(before, after)
-  const added = lines.filter((line) => line.kind === 'add').length
-  const removed = lines.filter((line) => line.kind === 'del').length
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted">{before ? 'Against the accepted text' : 'First text'}</span>
-        <span className="mono text-ok">+{added}</span>
-        <span className="mono text-bad">−{removed}</span>
-      </div>
-      <div
-        role="group"
-        aria-label="Changes"
-        className="mono overflow-x-auto rounded-lg border border-line bg-sunk py-1 text-[11.5px] leading-[1.7]"
-      >
-        {lines.map((line, index) => (
-          <div
-            // oxlint-disable-next-line react/no-array-index-key
-            key={index}
-            className={`whitespace-pre px-2.5 ${line.kind === 'add' ? 'bg-[color-mix(in_oklab,var(--ok)_10%,transparent)]' : line.kind === 'del' ? 'bg-[color-mix(in_oklab,var(--bad)_10%,transparent)]' : ''}`}
-          >
-            <span aria-hidden className="inline-block w-3.5 text-muted">
-              {line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '}
-            </span>
-            <span className="sr-only">
-              {line.kind === 'add' ? 'added: ' : line.kind === 'del' ? 'removed: ' : ''}
-            </span>
-            {line.text}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function GuideBody({ item }: { item: InboxGuideItem }) {
-  const detail = useGuideSection(item.guideScope, item.section)
-  if (!detail.data) return <Loading error={detail.error} />
-  const section = detail.data.section
-  const pending = pendingGenerated(section)
-  if (!pending || pending.inputHash !== item.inputHash)
-    return <p className="text-sm text-muted">This text is no longer waiting; it changed since.</p>
-  const accepted = section.proposal && section.generated ? section.generated.body : ''
-  return (
-    <div className="flex flex-col gap-4">
-      <KeyValue
-        rows={[
-          { label: 'Section', value: <Tag>{sectionLabel(item.section)}</Tag> },
-          { label: 'Model', value: <span className="mono text-xs">{pending.model}</span> },
-          { label: 'Generated', value: formatRelative(pending.generatedAt) },
+          { label: 'Agents', value: agentsLabel(learning.agents) },
+          { label: 'Origin', value: originLabel(learning.origin) },
           {
-            label: 'Commit',
-            value: pending.sha ? (
-              <span className="mono text-xs">{pending.sha.slice(0, 8)}</span>
-            ) : null,
+            label: 'Activates',
+            value: learningTiming(learning)?.label ?? formatRelative(item.activeAt),
           },
-          { label: 'Extra prompt', value: pending.prompt },
         ]}
       />
-      <DiffView before={accepted} after={pending.body} />
+      <section className="flex flex-col gap-1.5">
+        <h3 className="text-[11.5px] font-medium text-muted">Sources</h3>
+        <ul className="flex flex-col gap-1 text-[12.5px]">
+          {learning.sources.map((source, position) => (
+            // oxlint-disable-next-line react/no-array-index-key
+            <li key={`${source.noteId ?? source.at}:${position}`}>
+              {source.url ? (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mono inline-flex items-center gap-1 hover:underline"
+                >
+                  {sourceLabel(source)}
+                  <ExternalLink className="size-3 text-muted" />
+                </a>
+              ) : (
+                <span className="mono">{sourceLabel(source)}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+      <p className="text-xs text-muted">
+        Left alone it activates by itself after the approval delay. Approve to let agents use it
+        now, or Reject to keep it out of the prompts.
+      </p>
     </div>
   )
 }
@@ -356,12 +213,8 @@ export function InboxSheetBody({
   switch (item.kind) {
     case 'task':
       return <TaskBody item={item} tab={tab} />
-    case 'note':
-      return <NoteBody item={item} tab={tab} />
     case 'learning':
-      return <LearningBody item={item} decide={decide} />
-    case 'guide':
-      return <GuideBody item={item} />
+      return <LearningBody item={item} />
     case 'release':
       return <ReleaseBody item={item} />
     case 'budget':

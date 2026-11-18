@@ -10,14 +10,9 @@ export interface Tables {
   identities: SQL.Query<unknown>
   linkTokens: SQL.Query<unknown>
   jobs: SQL.Query<unknown>
-  knowledge: SQL.Query<unknown>
-  knowledgeHistory: SQL.Query<unknown>
   knowledgeFold: SQL.Query<unknown>
-  embeddings: SQL.Query<unknown>
-  guides: SQL.Query<unknown>
-  guideHistory: SQL.Query<unknown>
-  guideGenerated: SQL.Query<unknown>
-  families: SQL.Query<unknown>
+  rules: SQL.Query<unknown>
+  ruleHistory: SQL.Query<unknown>
   learnings: SQL.Query<unknown>
   learningClaims: SQL.Query<unknown>
   reviewReactions: SQL.Query<unknown>
@@ -56,14 +51,9 @@ export function tables(sql: SQL, schema: string): Tables {
     identities: name('identities'),
     linkTokens: name('link_tokens'),
     jobs: name('jobs'),
-    knowledge: name('knowledge'),
-    knowledgeHistory: name('knowledge_history'),
     knowledgeFold: name('knowledge_fold'),
-    embeddings: name('embeddings'),
-    guides: name('guides'),
-    guideHistory: name('guide_history'),
-    guideGenerated: name('guide_generated'),
-    families: name('families'),
+    rules: name('rules'),
+    ruleHistory: name('rule_history'),
     learnings: name('learnings'),
     learningClaims: name('learning_claims'),
     reviewReactions: name('review_reactions'),

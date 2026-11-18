@@ -1,4 +1,15 @@
 import type {
+  EffectiveRules,
+  LearningCreateBody,
+  LearningCreateResult,
+  LearningOrigin,
+  LearningPatch,
+  LearningView,
+  RuleAgent,
+  RuleDetail,
+  RuleInputBody,
+  RuleList,
+  RuleView,
   QaSummaryView,
   QaTaskList,
   QaTaskView,
@@ -12,41 +23,18 @@ import type {
   ReviewDetail,
   ReviewList,
   ReviewQuery,
-  AcceptGuideSectionInput,
   AgentTaskGroupDetail,
   AgentTaskGroupInput,
   AgentTaskGroupList,
   AgentTaskGroupView,
   TaskApprovalCount,
   WriteTasksStatus,
-  AcceptLearningInput,
-  AcceptLearningsInput,
-  AcceptLearningsResult,
   AgentTranscriptView,
-  EditLearningInput,
-  Family,
-  FamilyInput,
-  FamilyList,
-  FamilySuggestionDismissInput,
-  FamilySuggestionList,
-  GuideChainView,
-  GuideGeneratedHistory,
-  GuidePreview,
-  GuideRepoFilesView,
-  GuideScopeKey,
-  GuideScopeView,
-  GuideSection,
-  GuideSectionDetail,
-  GuideSectionName,
-  GuideTask,
-  LearningCandidate,
   LearningList,
   LearningStatus,
-  PutGuideSectionInput,
   ReactionTotalsList,
   ReviewQuality,
   ReviewQualityQuery,
-  RegenerateGuideInput,
   AnalysisBackfillInput,
   AnalysisBackfillStarted,
   ChatMessageList,
@@ -147,7 +135,6 @@ import type {
   ApplyChangesResult,
   ConfigEntryList,
   ConfigEntryView,
-  CreateKnowledgeInput,
   ForgeAccountView,
   ForgeRepositoryList,
   ForgeSshKeyInput,
@@ -158,13 +145,8 @@ import type {
   HomeView,
   HistoryScope,
   AllowlistRenewInput,
-  GuideSectionRejectInput,
   InboxCount,
   InboxFeed,
-  KnowledgeCounts,
-  Handbook,
-  KnowledgeCitations,
-  KnowledgeDetail,
   ReleaseDismissInput,
   SnoozeInput,
   SnoozeList,
@@ -186,9 +168,6 @@ import type {
   DependencyUpgrade,
   StackOverview,
   InviteUserInput,
-  KnowledgeEntry,
-  KnowledgeList,
-  KnowledgeStatus,
   LibraryIndexStatus,
   LibraryReindexResult,
   LibrarySearchResult,
@@ -210,7 +189,6 @@ import type {
   SettingList,
   SettingView,
   UpdateCredentialInput,
-  UpdateKnowledgeInput,
   UpdateUserInput,
   UserList,
   UserPreferences,
@@ -230,6 +208,21 @@ import type { ScopeFocus } from '../lib/scope.ts'
 import { mcpRequest, request, requestBlob, uploadFile, urlOf } from './client.ts'
 
 const id = (value: string) => encodeURIComponent(value)
+
+/** Filters of the rule list: a team key, a repository and free text. */
+export interface RuleQuery {
+  team?: string
+  repo?: RepoRef
+  text?: string
+}
+
+/** Filters of the learning list. */
+export interface LearningQuery {
+  status?: readonly LearningStatus[]
+  origin?: readonly LearningOrigin[]
+  repo?: RepoRef
+  text?: string
+}
 
 /** Filters of the job list; `repos` are `forge:path` keys, `repo` wins over them. */
 export interface JobQuery {
@@ -355,8 +348,6 @@ export const api = {
     request<SnoozeList>('DELETE', '/api/me/snoozes', { query: { id: itemId } }),
   dismissRelease: (input: ReleaseDismissInput) =>
     request<{ ok: true }>('POST', '/api/releases/dismiss', { body: input }),
-  rejectGuideSection: (input: GuideSectionRejectInput) =>
-    request<GuideSection>('POST', '/api/guide/section/reject', { body: input }),
   renewAllowlist: (input: AllowlistRenewInput) =>
     request<SettingView>('POST', '/api/audits/allowlist/renew', { body: input }),
   repos: () => request<RepoList>('GET', '/api/repos'),
@@ -512,94 +503,41 @@ export const api = {
       query: focus.kind === 'repo' ? { repo: repoKey(focus.repo) } : { team: focus.team },
     }),
 
-  knowledge: (query: { status?: readonly KnowledgeStatus[]; repo?: RepoRef; q?: string }) =>
-    request<KnowledgeList>('GET', '/api/knowledge', {
+  rules: (query: RuleQuery = {}) =>
+    request<RuleList>('GET', '/api/rules', {
       query: {
-        status: query.status?.length ? query.status.join(',') : undefined,
+        team: query.team || undefined,
         repo: query.repo ? repoKey(query.repo) : undefined,
-        q: query.q || undefined,
-        limit: 500,
+        text: query.text?.trim() || undefined,
       },
     }),
-  createKnowledge: (input: CreateKnowledgeInput) =>
-    request<KnowledgeEntry>('POST', '/api/knowledge', { body: input }),
-  updateKnowledge: (entryId: string, input: UpdateKnowledgeInput) =>
-    request<KnowledgeEntry>('PUT', `/api/knowledge/${id(entryId)}`, { body: input }),
-  knowledgeEntry: (entryId: string) =>
-    request<KnowledgeDetail>('GET', `/api/knowledge/${id(entryId)}`),
-  knowledgeCitations: (entryId: string) =>
-    request<KnowledgeCitations>('GET', `/api/knowledge/${id(entryId)}/citations`),
-  reviewKnowledge: (entryId: string, action: 'accept' | 'reject' | 'archive') =>
-    request<KnowledgeEntry>('POST', `/api/knowledge/${id(entryId)}/${action}`),
-  deleteKnowledge: (entryId: string) => request<void>('DELETE', `/api/knowledge/${id(entryId)}`),
-  handbook: (query: { repo?: string; team?: string }) =>
-    request<Handbook>('GET', '/api/knowledge/handbook', {
-      query: { repo: query.repo || undefined, team: query.team || undefined },
-    }),
-  knowledgeCounts: () => request<KnowledgeCounts>('GET', '/api/knowledge/counts'),
-
-  guide: (scope: GuideScopeKey) =>
-    request<GuideScopeView>('GET', '/api/guide', { query: { scope } }),
-  guideSection: (scope: GuideScopeKey, section: GuideSectionName) =>
-    request<GuideSectionDetail>('GET', '/api/guide/section', { query: { scope, section } }),
-  putGuideSection: (scope: GuideScopeKey, section: GuideSectionName, input: PutGuideSectionInput) =>
-    request<GuideSection>('PUT', '/api/guide/section', { query: { scope, section }, body: input }),
-  restoreGuideSection: (scope: GuideScopeKey, section: GuideSectionName, version: number) =>
-    request<GuideSection>('POST', '/api/guide/section/restore', {
-      query: { scope, section, version },
-    }),
-  acceptGuideSection: (
-    scope: GuideScopeKey,
-    section: GuideSectionName,
-    input: AcceptGuideSectionInput,
-  ) =>
-    request<GuideSection>('POST', '/api/guide/section/accept', {
-      query: { scope, section },
-      body: input,
-    }),
-  regenerateGuide: (repo: RepoRef, input: RegenerateGuideInput) =>
-    request<Job>('POST', '/api/guide/regenerate', { query: { repo: repoKey(repo) }, body: input }),
-  guidePreview: (repo: RepoRef, task: GuideTask) =>
-    request<GuidePreview>('GET', '/api/guide/preview', { query: { repo: repoKey(repo), task } }),
-  guideChain: (repo: RepoRef, section?: GuideSectionName) =>
-    request<GuideChainView>('GET', '/api/guide/chain', {
-      query: { repo: repoKey(repo), section },
-    }),
-  guideRepoFiles: (repo: RepoRef) =>
-    request<GuideRepoFilesView>('GET', '/api/guide/repo-files', {
-      query: { repo: repoKey(repo) },
-    }),
-  guideGeneratedHistory: (scope: GuideScopeKey, section: GuideSectionName) =>
-    request<GuideGeneratedHistory>('GET', '/api/guide/generated/history', {
-      query: { scope, section },
+  rule: (ruleId: string) => request<RuleDetail>('GET', `/api/rules/${id(ruleId)}`),
+  createRule: (input: RuleInputBody) => request<RuleView>('POST', '/api/rules', { body: input }),
+  updateRule: (ruleId: string, input: RuleInputBody) =>
+    request<RuleView>('PUT', `/api/rules/${id(ruleId)}`, { body: input }),
+  deleteRule: (ruleId: string) => request<void>('DELETE', `/api/rules/${id(ruleId)}`),
+  effectiveRules: (repo: RepoRef, agent: RuleAgent, files: readonly string[] = []) =>
+    request<EffectiveRules>('GET', '/api/rules/effective', {
+      query: { repo: repoKey(repo), agent, files: files.length ? files.join(',') : undefined },
     }),
 
-  families: () => request<FamilyList>('GET', '/api/families'),
-  familySuggestions: () => request<FamilySuggestionList>('GET', '/api/families/suggestions'),
-  dismissFamilySuggestion: (input: FamilySuggestionDismissInput) =>
-    request<void>('POST', '/api/families/suggestions/dismiss', { body: input }),
-  createFamily: (input: FamilyInput) => request<Family>('POST', '/api/families', { body: input }),
-  updateFamily: (familyId: string, input: FamilyInput) =>
-    request<Family>('PUT', `/api/families/${id(familyId)}`, { body: input }),
-  deleteFamily: (familyId: string) => request<void>('DELETE', `/api/families/${id(familyId)}`),
-
-  learnings: (query: { repo?: RepoRef; status?: readonly LearningStatus[] }) =>
+  learnings: (query: LearningQuery = {}) =>
     request<LearningList>('GET', '/api/learnings', {
       query: {
-        repo: query.repo ? repoKey(query.repo) : undefined,
         status: query.status?.length ? query.status.join(',') : undefined,
+        origin: query.origin?.length ? query.origin.join(',') : undefined,
+        repo: query.repo ? repoKey(query.repo) : undefined,
+        text: query.text?.trim() || undefined,
       },
     }),
-  acceptLearning: (candidateId: string, input: AcceptLearningInput) =>
-    request<LearningCandidate>('POST', `/api/learnings/${id(candidateId)}/accept`, {
-      body: input,
-    }),
-  acceptLearnings: (input: AcceptLearningsInput) =>
-    request<AcceptLearningsResult>('POST', '/api/learnings/accept', { body: input }),
-  rejectLearning: (candidateId: string) =>
-    request<LearningCandidate>('POST', `/api/learnings/${id(candidateId)}/reject`),
-  editLearning: (candidateId: string, input: EditLearningInput) =>
-    request<LearningCandidate>('PATCH', `/api/learnings/${id(candidateId)}`, { body: input }),
+  createLearning: (input: LearningCreateBody) =>
+    request<LearningCreateResult>('POST', '/api/learnings', { body: input }),
+  editLearning: (learningId: string, input: LearningPatch) =>
+    request<LearningView>('PATCH', `/api/learnings/${id(learningId)}`, { body: input }),
+  decideLearning: (learningId: string, decision: 'approve' | 'reject') =>
+    request<LearningView>('POST', `/api/learnings/${id(learningId)}/${decision}`),
+  deleteLearning: (learningId: string) =>
+    request<void>('DELETE', `/api/learnings/${id(learningId)}`),
   reactions: (repo?: RepoRef) =>
     request<ReactionTotalsList>('GET', '/api/learnings/reactions', {
       query: { repo: repo ? repoKey(repo) : undefined },

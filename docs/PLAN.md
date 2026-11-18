@@ -99,7 +99,8 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 ### 1. Code review
 
 - Triggers: MR opened/updated, `/holtkeeper review` command.
-- Context: the diff, full content of touched files, project rules (`REVIEW.md`, `CLAUDE.md`, `AGENTS.md` from the repository + rules from the config).
+- Context: the diff, full content of touched files, and one rules block ([packages/rules](../packages/rules/docs/README.md)): panel rules (everything, teams, path patterns), the repository's rules files (`REVIEW.md`, `AGENTS.md`, `CLAUDE.md`, Copilot and Cursor rules, nested ones for the changed files), policies, then learned rules.
+- Learnings: replies to bot threads and the `rule-miner` analyzer (merged MR threads that led to changes) produce one-sentence learnings; they activate after an approval delay, expire without reinforcement, and are ranked below written rules.
 - Output: line threads with suggestions, a summary comment, optional approve/request changes.
 - On re-push: incremental review of the new diff only, no duplicates; the bot resolves its own threads once the issue is fixed.
 - Replies to bot threads continue the conversation in the thread.
@@ -220,7 +221,7 @@ Releases › QA lists only changes that name a real ticket key; changes without 
 
 ### MCP for developers
 
-The MCP endpoint serves developers at work in one repository: read tools plus two reviewed proposals (`propose_knowledge`, `propose_rule_change`), and `review_status` for their merge requests. Open points:
+The MCP endpoint serves developers at work in one repository: read tools (`repo_rules`, `get_rule`, `search_knowledge` over rules and learnings, ...) plus one write, `propose_learning` (a pending learning people may reject before it activates), and `review_status` for their merge requests. Open points:
 
 - **Token scopes `release` and `tasks`.** The API still accepts them and old tokens keep them, but no MCP tool uses them and Account › Connect agents no longer offers them. Remove them from `McpTokenScope`, the stored tokens and the docs, or keep them in case write tools come back.
 - **Task merge requests.** `task_status` left MCP; `review_status` on the task's branch covers the review but not the CI status or the task group's spend. Decide whether `review_status` should show the pipeline status of the head.

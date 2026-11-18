@@ -2,7 +2,7 @@ import type { ChatMessageRef } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { BookOpen, FolderGit2, GitMerge, ListChecks, Play, type LucideIcon } from 'lucide-react'
 
-import { refKey, refLabel } from '../../lib/chat.ts'
+import { citationOf, refKey, refLabel } from '../../lib/chat.ts'
 import { parseRepoKey, repoSplat } from '../../lib/repo.ts'
 
 const icons: Record<ChatMessageRef['kind'], LucideIcon> = {
@@ -51,8 +51,13 @@ function RefChip({ value: ref }: { value: ChatMessageRef }) {
         {body}
       </Link>
     )
-  return (
-    <Link to="/knowledge/notes" search={{ note: ref.id }} className={chipClass}>
+  const cited = citationOf(ref.id)
+  return cited.kind === 'learning' ? (
+    <Link to="/knowledge/learnings" search={{ learning: cited.id }} className={chipClass}>
+      {body}
+    </Link>
+  ) : (
+    <Link to="/knowledge/rules" search={{ rule: cited.id }} className={chipClass}>
       {body}
     </Link>
   )

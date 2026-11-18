@@ -96,7 +96,7 @@ Every person has one role on one scope, or an exact set of grants. The **Roles**
 | Role       | Can                                                                                         |
 | ---------- | ------------------------------------------------------------------------------------------- |
 | Viewer     | Read health, libraries, releases, knowledge and settings in its scope.                      |
-| Developer  | Viewer, plus run analyzers and audits, start agent tasks and write knowledge notes.         |
+| Developer  | Viewer, plus run analyzers and audits, start agent tasks and write rules and learnings.     |
 | Maintainer | Developer, plus run release steps and edit settings in its scope.                           |
 | Admin      | Everything, everywhere, including people and credentials. Always covers the whole instance. |
 
@@ -158,7 +158,7 @@ Click a row, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows status, r
       <Field label="Applies to" value="Team Gizmo" />
       <Facts
         items={[
-          ['Allowed', 'read repositories, run analyzers, start agent tasks, write notes'],
+          ['Allowed', 'read repositories, run analyzers, start agent tasks, write rules'],
           ['Gains', 'run release steps, edit settings'],
           ['Loses', '—'],
           ['Not allowed', 'manage people, read credentials'],

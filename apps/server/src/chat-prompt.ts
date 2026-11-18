@@ -58,18 +58,19 @@ export function uniqueRefs(refs: readonly ChatMessageRef[]): ChatMessageRef[] {
 }
 
 /**
- * What a message body refers to, read once when the message is written: knowledge citations
- * (`kb:<id>`, bracketed or not) as notes and `forge:path` keys whose forge `isForge` accepts as
+ * What a message body refers to, read once when the message is written: rule and learning
+ * citations (`rule:<id>`, `learn:<id>`, bracketed or not) as `note` refs whose id is the citation,
+ * and `forge:path` keys whose forge `isForge` accepts as
  * repositories, in order of first mention.
  */
 export function textRefs(body: string, isForge: (forge: string) => boolean): ChatMessageRef[] {
   const found: { at: number; ref: ChatMessageRef }[] = []
-  for (const match of body.matchAll(/(?<![\w/-])kb:([\w-]+)/g))
-    found.push({ at: match.index, ref: { kind: 'note', id: match[1] ?? '' } })
+  for (const match of body.matchAll(/(?<![\w/-])(rule|learn):([\w-]+)/g))
+    found.push({ at: match.index, ref: { kind: 'note', id: `${match[1]}:${match[2]}` } })
   for (const match of body.matchAll(/(?<![\w/.:-])([\w-]+):([\w.-]+(?:\/[\w.-]+)+)/g)) {
     const forge = match[1] ?? ''
     const path = (match[2] ?? '').replace(/[.-]+$/, '')
-    if (forge !== 'kb' && isForge(forge))
+    if (forge !== 'rule' && forge !== 'learn' && isForge(forge))
       found.push({ at: match.index, ref: { kind: 'repo', repo: `${forge}:${path}` } })
   }
   return uniqueRefs(found.toSorted((a, b) => a.at - b.at).map((entry) => entry.ref))
@@ -266,12 +267,12 @@ export function buildSummaryPrompt(history: ChatHistory, fold: readonly ChatMess
   ].join('\n\n')
 }
 
-/** System prompt of chat replies; stable, so it caches with the tool schemas and the Guide. */
+/** System prompt of chat replies; stable, so it caches with the tool schemas and the rules. */
 export const CHAT_SYSTEM = [
   'You are Holtkeeper, a teammate in a team chat about the organization’s repositories.',
   'People appear only as "Participant A", "Participant B" and so on; you never learn who they are, so do not ask for names and address people by their label when it helps.',
   '"assistant" lines are your own earlier replies; "system" lines are Holtkeeper commands and notices.',
-  'Answer the new messages concisely in Markdown. Use the tools to look things up instead of guessing, and cite knowledge entries as [kb:<id>].',
+  'Answer the new messages concisely in Markdown. Use the tools to look things up instead of guessing, and cite rules as [rule:<id>] and learned rules as [learn:<id>].',
   'You cannot change code yourself. When a code change would help, call propose_task with the target repositories, a short title and the plan; people see a card and approve or cancel it, and an approved change runs as a separate task that opens merge requests.',
 ].join('\n')
 

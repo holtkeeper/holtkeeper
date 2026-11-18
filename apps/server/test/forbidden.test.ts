@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import { type RegistryToolset, defineTool } from '@holtkeeper/agent-tools'
-import type { Action, ForbiddenError, KnowledgeEntry } from '@holtkeeper/api'
+import type { Action, ForbiddenError, RuleView } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -127,7 +127,7 @@ describe('403 body', () => {
       [
         'spender',
         'knowledge:read',
-        (repo) => ({ path: `/api/guide/preview?repo=${repo}` }),
+        (repo) => ({ path: `/api/rules/effective?repo=${repo}` }),
         'missing permission knowledge:read',
       ],
       [
@@ -162,28 +162,24 @@ describe('403 body', () => {
     }
   })
 
-  test('a knowledge entry of another team names only the action', async () => {
+  test('a rule of another team names only the action', async () => {
     const app = setup()
-    const created = await app.request('/api/knowledge', {
+    const created = await app.request('/api/rules', {
       method: 'POST',
       headers: { ...as('admin'), 'content-type': 'application/json' },
       body: JSON.stringify({
         title: 'Prefer round widgets',
         body: 'Round widgets roll.',
-        kind: 'convention',
         scope: { teams: ['gizmos'] },
-        topics: ['testing'],
-        appliesTo: ['review'],
-        visibility: 'team',
       }),
     })
     expect(created.status).toBe(201)
-    const entry = (await created.json()) as KnowledgeEntry
-    expect(await denied(app, `/api/knowledge/${entry.id}`, 'reader')).toEqual({
+    const rule = (await created.json()) as RuleView
+    expect(await denied(app, `/api/rules/${rule.id}`, 'reader')).toEqual({
       error: 'missing permission knowledge:read',
       missing: { action: 'knowledge:read' },
     })
-    const missing = await app.request('/api/knowledge/nope', { headers: as('reader') })
+    const missing = await app.request('/api/rules/nope', { headers: as('reader') })
     expect(missing.status).toBe(404)
   })
 
@@ -205,17 +201,20 @@ describe('403 body', () => {
     })
     await store.learnings.put({
       id: 'l1',
-      repo: 'work:other/secret',
-      rule: 'Prefer round widgets.',
+      text: 'Prefer round widgets.',
       key: 'prefer round widgets',
-      section: 'review',
-      suggestedScope: 'repo',
-      status: 'proposed',
+      scope: { repos: ['work:other/secret'] },
+      origin: 'reply',
+      status: 'pending',
       sources: [],
-      model: 'fast-model',
-      costUsd: 0,
       createdAt: '2026-11-15T10:00:00.000Z',
       updatedAt: '2026-11-15T10:00:00.000Z',
+      activeAt: '2026-11-18T10:00:00.000Z',
+      lastReinforcedAt: '2026-11-15T10:00:00.000Z',
+      uses: 0,
+      actedOn: 0,
+      votesUp: 0,
+      votesDown: 0,
     })
     const cases: [string, Action, { method?: string; body?: unknown }][] = [
       [`/api/jobs/${job.id}`, 'analyses:read', {}],
@@ -230,21 +229,20 @@ describe('403 body', () => {
     }
   })
 
-  test('a guide edit outside the caller scope names the repository scope only', async () => {
+  test('a rule written outside the caller scope names the action only', async () => {
     const app = setup()
     expect(
-      await denied(
-        app,
-        '/api/guide/section?scope=repo:work:acme/gadget&section=general',
-        'writer',
-        {
-          method: 'PUT',
-          body: { body: 'Use round widgets.' },
+      await denied(app, '/api/rules', 'writer', {
+        method: 'POST',
+        body: {
+          title: 'Round',
+          body: 'Use round widgets.',
+          scope: { repos: ['work:acme/gadget'] },
         },
-      ),
+      }),
     ).toEqual({
       error: 'missing permission knowledge:write',
-      missing: { action: 'knowledge:write', target: 'work:acme/gadget' },
+      missing: { action: 'knowledge:write' },
     })
   })
 

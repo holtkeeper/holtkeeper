@@ -1,6 +1,6 @@
 ---
 title: Policies
-description: Set the organization's rules in one place — licenses, the security allowlist, fixes, conventions, tests, analyzers off, merge request reviews and agent knowledge — for everyone or for one team, saved as one change.
+description: Set the organization's rules in one place — licenses, the security allowlist, fixes, conventions, tests, analyzers off, merge request reviews and learnings — for everyone or for one team, saved as one change.
 panel: Settings › Policies
 route: /settings/policies
 permission: settings:read
@@ -24,7 +24,7 @@ import {
   Ui,
 } from '@ui'
 
-Set the organization's rules in one place — licenses, the security allowlist, fixes, conventions, tests, analyzers off, merge request reviews and agent knowledge — for everyone or for one team, saved as one change.
+Set the organization's rules in one place — licenses, the security allowlist, fixes, conventions, tests, analyzers off, merge request reviews and learnings — for everyone or for one team, saved as one change.
 
 <Screen
   title="Settings › Policies"
@@ -171,20 +171,16 @@ A repository turns them back on in its own settings.
 
 Nothing else changes, and no badge shows: the repository simply gets no reviews. Unlike a freeze, analyses of the default branch go on. A repository entry that is on lifts a team or folder entry that is off.
 
-## Agent knowledge
+## Learnings
 
-What agents add to [Knowledge](/guide/knowledge/notes/) without someone reviewing it first:
+How [learnings](/guide/knowledge/learnings/) Holtkeeper picks up from review replies, merged merge requests and agents reach prompts:
 
-| Row             | Toggles                                                                                                                     |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Notes           | The kinds of notes agents add at once.                                                                                      |
-| Learnings       | The sources accepted (_Proposed over MCP_, _Review replies_) and where they go: the _Suggested scope_ or _Repository only_. |
-| Generated Guide | The Guide sections whose generated text is accepted when the guide job writes it.                                           |
+| Row            | Meaning                                                                                                                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Approval delay | Days a new learning stays pending before it activates by itself (`learnings.approvalDelayDays`, default 3; `0` activates at once). People with `knowledge:write` approve or reject it earlier. |
+| Expiry         | Days an active learning lives without being confirmed before it expires (`learnings.expiryDays`, default 90).                                                                                  |
 
-<Ui>Reset</Ui> clears all three at the scope. Everything not accepted waits in Knowledge for review.
-[Starter knowledge](/guide/knowledge/notes/#starter-knowledge) for new repositories always waits for
-review, whatever the Notes row says; its options are in [Settings ›
-Analyzers](/guide/settings/analyzers/).
+The entry for the learning's repository decides; learnings scoped to a team or to everything use the entry for all repositories. A learning someone writes in the panel is active at once.
 
 :::tip
 A card whose stored entries carry keys the setting no longer reads shows a warning under its header, naming each key and where a moved one lives now. Nothing is migrated for you.

@@ -131,14 +131,14 @@ describe('chat prompt', () => {
   test('refs come from citations and configured repository keys, in order, once each', () => {
     expect(
       textRefs(
-        'See [kb:12] for work:acme/widget-kit and work:acme/storefront. kb:12 again, work:acme/widget-kit too; other:acme/x, https://forge.test/acme/y and kb:a-3.',
+        'See [rule:12] for work:acme/widget-kit and work:acme/storefront. rule:12 again, work:acme/widget-kit too; other:acme/x, https://forge.test/acme/y and learn:a-3.',
         isForge,
       ),
     ).toEqual([
-      { kind: 'note', id: '12' },
+      { kind: 'note', id: 'rule:12' },
       { kind: 'repo', repo: 'work:acme/widget-kit' },
       { kind: 'repo', repo: 'work:acme/storefront' },
-      { kind: 'note', id: 'a-3' },
+      { kind: 'note', id: 'learn:a-3' },
     ])
     expect(textRefs('nothing here', isForge)).toEqual([])
     expect(

@@ -1,13 +1,11 @@
 import { AgentToolsPanel, AiStrip, BudgetsPanel } from '../../ai/AiSettings.tsx'
-import { SemanticSearchPanel } from '../../ai/SemanticSearch.tsx'
 import { Credentials } from '../../credentials/Credentials.tsx'
 import { useSession } from '../../shell/session.ts'
 import { SectionSettings } from '../SettingsSection.tsx'
 
 /**
  * Settings › AI: a summary line, the AI provider cards, Budgets with the spend per feature and the
- * scoped caps, Semantic search (knowledge vectors), the provider and budget settings per scope, then
- * the read-only agent tool registry.
+ * scoped caps, the provider and budget settings per scope, then the read-only agent tool registry.
  */
 export function AiSection() {
   const { can } = useSession()
@@ -17,7 +15,6 @@ export function AiSection() {
       <AiStrip />
       {can('credentials:read') ? <Credentials /> : null}
       {readAi ? <BudgetsPanel /> : null}
-      <SemanticSearchPanel />
       <SectionSettings
         section="ai"
         title="Provider and budget settings"

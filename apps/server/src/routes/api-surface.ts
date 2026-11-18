@@ -19,7 +19,6 @@ import type {
 import { mcpToolsetCatalog, mcpToolsetNames } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
 import type { RepoRef } from '@holtkeeper/forge'
-import { createGuideResolver, familyOf, proposeRule, scopesFor } from '@holtkeeper/guide'
 import { latestVersions, libraryApi } from '@holtkeeper/libraries'
 import {
   DEFAULT_REPORTING_MODE,
@@ -51,7 +50,6 @@ import {
   withTeams,
 } from '../context.ts'
 import { createFleetCache } from '../fleet-cache.ts'
-import { autoAcceptLearning } from '../learnings.ts'
 import {
   agentSummarize,
   githubClientFor,
@@ -65,24 +63,19 @@ import { qaToolsAccess } from '../qa.ts'
 import { releaseToolsAccess } from '../release-steps.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { reviewToolsAccess } from '../review-status.ts'
+import { createRulesResolver, readForgeRuleFiles } from '../rules.ts'
 import { secretReportsFor } from '../secret-reports.ts'
 import { storedAssetTools } from '../tools/assets.ts'
 import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
 import type { LibraryIndex } from '../tools/libraries.ts'
-import { storedStackTools } from '../tools/registry.ts'
+import { repoRulesAccess, storedStackTools } from '../tools/registry.ts'
 import {
   type CommitConventionsAccess,
   type RulesAccess,
   commitConventionsReader,
   testIdsReader,
 } from '../tools/rules.ts'
-import {
-  type CatalogReach,
-  canReadShared,
-  canSee,
-  catalogReach,
-  scopeOwner,
-} from '../visibility.ts'
+import { canSee, catalogReach } from '../visibility.ts'
 import { dependencyRoutes } from './dependencies.ts'
 import { homeTeamsOf } from './preferences.ts'
 import { usageRoutes } from './usages.ts'
@@ -240,14 +233,10 @@ export function createApiSurface(deps: ServerDeps) {
     return { docs, api: libraryApi({ store: libraries, artifacts }), store: libraries }
   }
 
-  const knowledgeContext = (
-    principal: Principal,
-    reached: CatalogReach,
-  ): KnowledgeToolsContext => ({
+  const knowledgeContext = (principal: Principal): KnowledgeToolsContext => ({
     store,
+    config,
     canReadScope: (scope) => can(principal, 'knowledge:read', { kind: 'scope', scope }),
-    canReadShared: (scope) => canReadShared(principal, scope, reached.policy),
-    ownerOf: (scope) => scopeOwner(scope, teamsOf).map(teamLabel),
     teamLabel,
     repoOf: (value) => {
       const separator = value.indexOf(':')
@@ -259,63 +248,32 @@ export function createApiSurface(deps: ServerDeps) {
       return canSee(principal, 'knowledge:read', target) ? target : undefined
     },
     actor: principal.id,
+    audit: {
+      actor: { id: principal.id, name: principal.name, provider: principal.provider },
+      via: 'api',
+    },
     now: deps.now,
-    ...(deps.embeddings && { semantics: deps.embeddings }),
   })
 
-  const resolveGuide = createGuideResolver({ store, teamTitle: teamLabel })
+  const resolveRules = createRulesResolver({ store, config, now: deps.now })
   const testIdsOf = testIdsReader({ store })
   const rulesContext = (
     principal: Principal,
     knowledge: KnowledgeToolsContext,
   ): Omit<RulesAccess, 'commits'> => ({
-    guide: {
-      resolve: async (value, request) => {
-        const target = knowledge.repoOf(value)
-        return target ? resolveGuide({ repo: target, ...request }) : undefined
-      },
-    },
-    proposals: {
-      propose: async (value, input) => {
-        const target = knowledge.repoOf(value)
-        if (!target) return undefined
-        const repo = `${target.forge}:${target.path}`
-        const at = deps.now().toISOString()
-        const family = input.targetScope ? familyOf(await store.families.list(), repo) : undefined
-        const outcome = await proposeRule(store, {
-          repo,
-          rule: input.rule,
-          section: input.section,
-          ...(input.scope && { suggestedScope: input.scope }),
-          ...(input.targetScope && {
-            targetScope: input.targetScope,
-            scopes: scopesFor(target, family?.id),
-          }),
-          reason: input.reason,
-          by: principal.id,
-          at,
-        })
-        if (outcome.status === 'proposed')
-          await store.audit.append({
-            at,
-            actor: { id: principal.id, name: principal.name, provider: principal.provider },
-            via: 'api',
-            action: 'learning.propose',
-            target: { type: 'learning', id: outcome.candidate.id, repo },
-            outcome: 'ok',
-            details: {
-              section: input.section,
-              rule: outcome.candidate.rule,
-              ...(outcome.candidate.targetScope && { scope: outcome.candidate.targetScope }),
-              through: 'mcp',
-            },
-          })
-        if (outcome.status !== 'proposed' || !canSee(principal, 'knowledge:write', target))
-          return outcome
-        const accepted = await autoAcceptLearning(deps, outcome.candidate, 'mcp')
-        return accepted ? { ...outcome, candidate: accepted } : outcome
-      },
-    },
+    rules: repoRulesAccess({
+      store,
+      resolve: resolveRules,
+      repoFiles: (target) =>
+        readForgeRuleFiles({
+          forge: forgeFor(config, target.forge),
+          forgeId: target.forge,
+          repo: target.path,
+          ...(store.kv && { kv: store.kv }),
+        }),
+      readable: knowledge.repoOf,
+      canReadScope: knowledge.canReadScope,
+    }),
     testIds: {
       testIds: async (value) => {
         const separator = value.indexOf(':')
@@ -592,7 +550,7 @@ export function createApiSurface(deps: ServerDeps) {
     const token = fromToken.get(principal)
     const scope = await reach(principal)
     const library = libraryContext(principal, scope.catalog)
-    const knowledge = knowledgeContext(principal, scope)
+    const knowledge = knowledgeContext(principal)
     // Signed-in browsers (the tool reference) have no token and see the default choice.
     const reporting = reportingOf.get(principal) ?? DEFAULT_REPORTING_MODE
     const reports = secretReports?.accessFor(principal, reporting)

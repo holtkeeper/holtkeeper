@@ -1,20 +1,15 @@
-import type { Principal, RepoTarget } from '@holtkeeper/access'
-import type { LearningSourceKind } from '@holtkeeper/api'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import type { Scope } from '@holtkeeper/access'
+import type { Agent } from '@holtkeeper/agent'
+import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { DiffFile, Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
 import { reactionCounts } from '@holtkeeper/forge'
 import {
-  type CaptureOutcome,
-  acceptLearning,
-  captureLearning,
-  defaultLearningScope,
-  familyOf,
-  looksLikeFeedback,
-  parseGuideScope,
-  repoKey,
-  scopesFor,
-} from '@holtkeeper/guide'
-import {
   commentFinding,
+  citedRules,
   findingOrigins,
   markerOf,
   outcomeFields,
@@ -22,114 +17,160 @@ import {
   reviewRef,
 } from '@holtkeeper/review'
 import {
-  type LearningAutoAcceptSource,
-  type LearningsAutoAccept,
-  learningsAutoAcceptSchema,
-  resolveSetting,
-} from '@holtkeeper/settings'
-import {
-  AUTO_ACCEPT_ACTOR,
-  type GuideScopeKey,
-  type LearningCandidate,
-  type SettingEntry,
-} from '@holtkeeper/store'
+  type LearningDraft,
+  type LearningSignal,
+  findDuplicateLearning,
+  newLearning,
+  reinforceLearning,
+} from '@holtkeeper/rules'
+import type { Learning, LearningSource, Store } from '@holtkeeper/store'
+import { z } from 'zod'
 
-import { appendAudit } from './audit.ts'
-import { type ServerDeps, parseRepo, repoTarget } from './context.ts'
-import { editAction, guideScopePermission } from './routes/guides.ts'
+import { type ServerDeps, repoKey, repoTarget } from './context.ts'
+import { policyOfLearning } from './rules.ts'
 
-const off: LearningsAutoAccept = { sources: [], scope: 'suggested' }
+/** Most characters of a learned rule. */
+export const LEARNING_TEXT_MAX = 200
 
-/** `learnings.autoAccept` for a repository and the entry it comes from; off when unset or invalid. */
-function learningsAutoAcceptFrom(
-  entries: readonly SettingEntry[],
-  repo: RepoTarget,
-): { policy: LearningsAutoAccept; entry?: SettingEntry } {
-  const entry = resolveSetting(entries, 'learnings.autoAccept', repo)
-  const parsed = learningsAutoAcceptSchema.safeParse(entry?.value)
-  return parsed.success && entry ? { policy: parsed.data, entry } : { policy: off }
+/** Spend cap of one extraction call in USD. */
+const LEARNING_CALL_CAP_USD = 0.02
+
+/** `taskKind` of extraction runs, for budgets and usage reports. */
+const LEARNING_TASK_KIND = 'learning'
+
+const MAX_EXCERPT = 1_500
+const MAX_KNOWN = 30
+
+/** What `addLearning` did: stored a new learning, or reinforced the one it repeats. */
+export type AddLearningOutcome =
+  | { status: 'added'; learning: Learning }
+  | { status: 'merged'; learning: Learning }
+
+/**
+ * Stores `draft` as a new learning (`newLearning`: pending for the approval delay of its
+ * repository, or active at once with `approvedBy` or a delay of 0), unless an existing learning
+ * states the same rule (`findDuplicateLearning`, rejected ones included): that one is reinforced
+ * with the draft's source instead and returned as `merged`, its status kept.
+ */
+export async function addLearning(
+  deps: {
+    store: Pick<Store, 'learnings' | 'settings'>
+    config: HoltkeeperConfig
+    now: () => Date
+  },
+  draft: LearningDraft,
+  options: { approvedBy?: string; newId?: () => string } = {},
+): Promise<AddLearningOutcome> {
+  const at = deps.now().toISOString()
+  const [existing, entries] = await Promise.all([
+    deps.store.learnings.list(),
+    deps.store.settings.list(),
+  ])
+  const duplicate = findDuplicateLearning(draft.text, existing)
+  if (duplicate) {
+    const merged = draft.source
+      ? reinforceLearning(duplicate, { source: draft.source }, at)
+      : duplicate
+    if (merged !== duplicate) await deps.store.learnings.put(merged)
+    return { status: 'merged', learning: merged }
+  }
+  const learning = newLearning(draft, {
+    id: options.newId?.() ?? crypto.randomUUID(),
+    now: at,
+    policy: policyOfLearning(deps.config, entries, draft),
+    ...(options.approvedBy !== undefined && { approvedBy: options.approvedBy }),
+  })
+  await deps.store.learnings.put(learning)
+  return { status: 'added', learning }
 }
 
-const triggerOf = (candidate: LearningCandidate, origin: LearningAutoAcceptSource) => {
-  if (origin === 'mcp') return candidate.proposal ? { proposedBy: candidate.proposal.by } : {}
-  const source = candidate.sources.at(-1)
-  return source
-    ? {
-        author: source.author,
-        mergeRequest: source.mergeRequest,
-        ...(source.url && { url: source.url }),
-      }
-    : {}
+const stripMarkup = (text: string) =>
+  text
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^>.*$/gm, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const ACKNOWLEDGEMENT =
+  /^(?:thanks?|thank you|thx|ty|ok(?:ay)?|done|fixed|good catch|nice|agreed?|right|sure|lgtm|will do|\+1|👍|спасибо|ок|поправил|исправил|сделал|согласен)[\s.!,)]*$/iu
+
+const FEEDBACK = [
+  /\b(?:we|our team|this (?:repo|repository|project|codebase|team))\b.{0,40}\b(?:do(?:n't| not)|never|always|prefer|use|keep|avoid|allow|want|agreed|decided)\b/i,
+  /\b(?:here|in this (?:repo|repository|project|codebase))\b.{0,40}\b(?:we|it'?s|is)\b/i,
+  /\b(?:intentional(?:ly)?|on purpose|by design|deliberate(?:ly)?|expected behaviou?r|as designed|false positive|not a (?:bug|problem|issue))\b/i,
+  /\b(?:convention|our (?:style|rule|standard|guideline)s?|code style|team rule|policy)\b/i,
+  /\b(?:do(?:n't| not)|stop|no need to) (?:flag|report|suggest|comment|ask)\b/i,
+  /\b(?:is|are) fine (?:here|in this)\b/i,
+  /(?:^|\s)(?:у нас|мы (?:не|всегда|никогда)|так задумано|намеренно|специально|это не баг|принято|договорились|соглашени)/iu,
+]
+
+/**
+ * Whether a reply to a review comment may teach a lasting rule, decided without an LLM: it must
+ * have some substance and read like a convention, a deliberate decision or "do not flag this".
+ * Thanks, "fixed" and other acknowledgements never pass.
+ */
+export function looksLikeFeedback(body: string): boolean {
+  const text = stripMarkup(body)
+  if (text.length < 15 || text.length > 4_000) return false
+  if (text.startsWith('/')) return false
+  if (ACKNOWLEDGEMENT.test(text)) return false
+  return FEEDBACK.some((pattern) => pattern.test(text))
+}
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const CODE = /(```[\s\S]*?```|`[^`\n]+`)/
+
+const MENTION = /(^|[\s(])@([\w-]+)(?![\w/(-]|\.[\w-])/g
+
+const cleanProse = (text: string, names: readonly string[]) => {
+  let prose = text.replace(MENTION, (_match, before: string) => before)
+  for (const name of names)
+    prose = prose.replace(
+      new RegExp(`(?<![\\p{L}\\p{N}_@./-])${escape(name)}(?![\\p{L}\\p{N}_/-]|\\.\\w)`, 'giu'),
+      '',
+    )
+  return prose.replace(/\s+/g, ' ').replace(/ ([.,;:!?])(?= |$)/g, '$1')
 }
 
 /**
- * Accepts a `proposed` candidate without review when the `learnings.autoAccept` entry of its
- * repository lists `origin`: into its target or suggested scope (`defaultLearningScope`) when that
- * entry's own scope covers it, else into the repository, so an entry never reaches a team,
- * folder or family wider than itself. The acceptance is made by `AUTO_ACCEPT_ACTOR` and audited as
- * `learning.accept` with `details.auto` and what triggered it (`proposedBy`, or the replying
- * `author`, `mergeRequest` and `url`). Callers check who may trigger an origin. Returns the accepted
- * candidate; `undefined` when the policy leaves it proposed or accepting failed (logged, so the
- * proposal itself always stands). People reject it in Knowledge › Learnings like any other.
+ * `text` single-spaced and at most `LEARNING_TEXT_MAX` characters (cut at a word, ending with
+ * `…`), with person `@mentions` and every name of `names` removed from its prose; inline and
+ * fenced code stay as they are.
  */
-export async function autoAcceptLearning(
-  deps: Pick<ServerDeps, 'store' | 'config' | 'now'>,
-  candidate: LearningCandidate,
-  origin: LearningAutoAcceptSource,
-): Promise<LearningCandidate | undefined> {
-  if (candidate.status !== 'proposed') return undefined
-  try {
-    const repo = parseRepo(candidate.repo)
-    if (!repo) return undefined
-    const target = repoTarget(deps.config, repo)
-    const { policy, entry } = learningsAutoAcceptFrom(
-      await deps.store.settings.list('learnings.autoAccept'),
-      target,
-    )
-    if (!entry || !policy.sources.includes(origin)) return undefined
-    const family = familyOf(await deps.store.families.list(), candidate.repo)
-    const scopes = scopesFor(target, family?.id)
-    const suggested =
-      policy.scope === 'suggested' ? defaultLearningScope(candidate, scopes) : undefined
-    const permitted = guideScopePermission(deps.config)
-    const entryScope: Principal = {
-      ...AUTO_ACCEPT_ACTOR,
-      grants: [{ scope: entry.scope, actions: ['*'] }],
-    }
-    const covered = (key: GuideScopeKey) => {
-      const parsed = parseGuideScope(key)
-      return parsed !== undefined && permitted(entryScope, editAction(parsed), parsed, family)
-    }
-    const scope = suggested && covered(suggested) ? suggested : scopes[0]
-    if (!scope) return undefined
-    const at = deps.now().toISOString()
-    const accepted = await acceptLearning(deps.store, candidate, {
-      scope,
-      by: AUTO_ACCEPT_ACTOR.id,
-      at,
-    })
-    await appendAudit(deps.store, {
-      at,
-      actor: AUTO_ACCEPT_ACTOR,
-      via: 'system',
-      action: 'learning.accept',
-      target: { type: 'learning', id: accepted.id, repo: accepted.repo },
-      outcome: 'ok',
-      details: {
-        auto: true,
-        origin,
-        scope,
-        section: accepted.section,
-        rule: accepted.rule,
-        ...triggerOf(candidate, origin),
-      },
-    })
-    return accepted
-  } catch (error) {
-    console.error('learnings: auto-accept failed', error)
-    return undefined
-  }
+export function cleanLearningText(text: string, names: readonly string[] = []): string {
+  const people = names.map((name) => name.trim()).filter((name) => name.length >= 2)
+  const cleaned = text
+    .split(CODE)
+    .map((part, index) => (index % 2 ? part : cleanProse(part, people)))
+    .join('')
+    .trim()
+  if (cleaned.length <= LEARNING_TEXT_MAX) return cleaned
+  const cut = cleaned.slice(0, LEARNING_TEXT_MAX - 1)
+  const space = cut.lastIndexOf(' ')
+  return `${cut.slice(0, space > LEARNING_TEXT_MAX / 2 ? space : cut.length).trimEnd()}…`
 }
+
+/** The claim key of one reply note: the same note is never sent to an LLM twice. */
+const replyKey = (source: LearningSource) =>
+  `learning:${source.repo}!${source.mergeRequest}#${source.noteId}`
+
+const extractionOutput = z.object({
+  /** Empty when the reply teaches no lasting rule. */
+  text: z.string(),
+  scope: z.enum(['repo', 'team']),
+  files: z.array(z.string()).optional(),
+})
+
+const LEARNING_SYSTEM = [
+  'You read a developer reply to an automated code review comment and decide whether it states a lasting rule for future reviews.',
+  'Answer with text "" unless the reply states a convention, a deliberate design decision or something reviews should not flag, beyond this one change. Thanks, agreeing to fix, questions and one-off explanations give "".',
+  `The rule is one imperative English sentence of at most ${LEARNING_TEXT_MAX} characters about the code. Never name or mention a person, a username or an @handle.`,
+  'scope: repo when it is about this repository (most rules); team when it is a practice of the team that owns it across its repositories. Prefer repo when unsure.',
+  'files: path globs the rule is about, only when it clearly concerns some files (e.g. "src/legacy/**"); leave it out otherwise.',
+  'When the reply only restates one of the known rules, return that rule exactly as written.',
+].join('\n')
 
 /** What learning capture reads of a reply event. */
 export interface ReplyEvent {
@@ -139,18 +180,42 @@ export interface ReplyEvent {
   body: string
 }
 
+/** What looking at one reply did. */
+export type CaptureOutcome =
+  | { status: 'skipped'; reason: string }
+  | { status: 'none'; costUsd: number }
+  | { status: 'added' | 'merged'; learning: Learning }
+
 /** The note of `discussion` the event describes: the newest one by its author with its text. */
 const replyNote = (discussion: Discussion, event: ReplyEvent) => {
   const mine = discussion.notes.filter((note) => !note.system && note.author === event.author)
   return mine.findLast((note) => note.body.trim() === event.body.trim()) ?? mine.at(-1)
 }
 
+const excerpt = (text: string) => {
+  const clean = text.replace(/<!--[\s\S]*?-->/g, '').trim()
+  return clean.length > MAX_EXCERPT ? `${clean.slice(0, MAX_EXCERPT)}\n[...]` : clean
+}
+
+async function knownRules(store: Pick<Store, 'learnings'>, repo: string) {
+  const known = await store.learnings.list({ status: ['pending', 'active'] })
+  const texts = known
+    .filter((learning) => learning.scope.repos?.includes(repo))
+    .slice(0, MAX_KNOWN)
+    .map((learning) => learning.text)
+    .toSorted()
+  return texts.length
+    ? `Known rules of this repository:\n${texts.map((text) => `- ${text}`).join('\n')}`
+    : 'This repository has no known rules yet.'
+}
+
 /**
- * Looks at a reply in one of Holtkeeper's review threads for a lasting rule (`captureLearning`),
- * on the automatic agent of `deps.automaticAgentFor`, so the budget reserve is kept. Replies that
- * do not read like feedback, and replies already looked at, make no LLM call. The merge request's
- * URL is read from the forge only for a reply that passes the filter. A new candidate is accepted
- * at once when `learnings.autoAccept` lists `review-reply` (`autoAcceptLearning`).
+ * Looks at a reply in one of Holtkeeper's review threads for a lasting rule, on the automatic
+ * agent of `deps.automaticAgentFor`, so the budget reserve is kept. Replies that do not read like
+ * feedback (`looksLikeFeedback`) make no LLM call; a reply that passes is claimed by its note, so
+ * the same note never makes two calls, and a failed call releases the claim and rethrows. The rule
+ * becomes a learning of origin `reply` scoped to the repository (or its owner teams) through
+ * `addLearning`, so a rule the fleet already has is reinforced instead.
  */
 export async function captureReplyLearning(
   deps: Pick<ServerDeps, 'store' | 'config' | 'now' | 'automaticAgentFor'>,
@@ -163,34 +228,72 @@ export async function captureReplyLearning(
   if (!note || !comment) return { status: 'skipped', reason: 'the reply note was not found' }
   if (!looksLikeFeedback(note.body))
     return { status: 'skipped', reason: 'the reply does not read like feedback' }
-  const agent = await deps.automaticAgentFor?.(event.repo)
-  const webUrl = agent
-    ? await forge
-        ?.getMergeRequest?.(event.repo.path, event.mergeRequest)
-        .then((mr) => mr.webUrl)
-        .catch(() => undefined)
-    : undefined
-  const outcome = await captureLearning(
-    { store: deps.store, ...(agent && { agent }), now: deps.now },
-    {
-      source: {
-        repo: repoKey(event.repo),
-        mergeRequest: event.mergeRequest,
-        discussionId: discussion.id,
-        noteId: String(note.id),
-        author: event.author,
-        at: note.createdAt || deps.now().toISOString(),
-        ...(webUrl && { url: `${webUrl}#note_${note.id}` }),
-      },
-      body: note.body,
-      comment: comment.body,
-      ...(discussion.position && { path: discussion.position.path }),
-      names: [...new Set(discussion.notes.map((item) => item.author).filter(Boolean))],
-    },
-  )
-  if (outcome.status !== 'proposed') return outcome
-  const accepted = await autoAcceptLearning(deps, outcome.candidate, 'review-reply')
-  return accepted ? { ...outcome, candidate: accepted } : outcome
+  const agent: Agent | undefined = await deps.automaticAgentFor?.(event.repo)
+  if (!agent) return { status: 'skipped', reason: 'no agent' }
+  const repo = repoKey(event.repo)
+  const webUrl = await forge
+    ?.getMergeRequest?.(event.repo.path, event.mergeRequest)
+    .then((mr) => mr.webUrl)
+    .catch(() => undefined)
+  const source: LearningSource = {
+    repo,
+    mergeRequest: event.mergeRequest,
+    discussionId: discussion.id,
+    noteId: String(note.id),
+    author: event.author,
+    at: note.createdAt || deps.now().toISOString(),
+    ...(webUrl && { url: `${webUrl}#note_${note.id}` }),
+  }
+  const { store } = deps
+  const key = replyKey(source)
+  if (!(await store.learnings.claim(key, deps.now().toISOString())))
+    return { status: 'skipped', reason: 'the reply was already looked at' }
+
+  const scratch = await mkdtemp(join(tmpdir(), 'holtkeeper-learning-'))
+  let answer: Awaited<ReturnType<Agent['run']>>
+  try {
+    answer = await agent.run({
+      dir: scratch,
+      system: LEARNING_SYSTEM,
+      context: await knownRules(store, repo),
+      prompt: [
+        `Review comment${discussion.position ? ` on ${discussion.position.path}` : ''}:\n${excerpt(comment.body)}`,
+        `Reply:\n${excerpt(note.body)}`,
+      ].join('\n\n'),
+      capabilities: [],
+      output: extractionOutput,
+      maxTurns: 1,
+      maxCostUsd: LEARNING_CALL_CAP_USD,
+      tier: 'fast',
+      taskKind: LEARNING_TASK_KIND,
+    })
+  } catch (error) {
+    await store.learnings.release(key)
+    throw error
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+
+  const costUsd = answer.costUsd ?? 0
+  const output = extractionOutput.safeParse(answer.output)
+  const names = [...new Set(discussion.notes.map((item) => item.author).filter(Boolean))]
+  const text = output.success ? cleanLearningText(output.data.text, [event.author, ...names]) : ''
+  if (!output.success || !text) return { status: 'none', costUsd }
+  const teams = repoTarget(deps.config, event.repo).teams
+  const scope: Scope = output.data.scope === 'team' && teams.length ? { teams } : { repos: [repo] }
+  const files = output.data.files?.map((glob) => glob.trim()).filter(Boolean)
+  const outcome = await addLearning(deps, {
+    text,
+    scope,
+    ...(files?.length && { files }),
+    origin: 'reply',
+    source,
+    model: answer.model ?? 'tier:fast',
+    costUsd,
+  })
+  return outcome.status === 'added'
+    ? { status: 'added', learning: outcome.learning }
+    : { status: 'merged', learning: outcome.learning }
 }
 
 /** How a merge request ended, as `harvestReviewSignals` needs it. */
@@ -203,15 +306,65 @@ export interface EndedMergeRequest {
 }
 
 /**
+ * Reinforces every learning a review comment cites as `[learn:<id>]` once per comment (claimed by
+ * repository, merge request, note and learning): one use, `actedOn` when its finding was fixed,
+ * and one vote per 👍 and 👎. Unknown ids are skipped. Returns how many learnings changed.
+ */
+async function reinforceCitedLearnings(
+  deps: Pick<ServerDeps, 'store' | 'now'>,
+  comment: {
+    repo: string
+    mergeRequest: number
+    noteId: string
+    body: string
+    fixed: boolean
+    up: number
+    down: number
+  },
+): Promise<number> {
+  const ids = citedRules(comment.body)
+    .filter((cited) => cited.kind === 'learn')
+    .map((cited) => cited.id)
+  let changed = 0
+  for (const id of ids) {
+    // oxlint-disable-next-line no-await-in-loop -- a comment cites one or two learnings
+    const learning = await deps.store.learnings.get(id)
+    if (!learning) continue
+    const at = deps.now().toISOString()
+    // oxlint-disable-next-line no-await-in-loop
+    const first = await deps.store.learnings.claim(
+      `learning-cite:${comment.repo}!${comment.mergeRequest}#${comment.noteId}:${id}`,
+      at,
+    )
+    if (!first) continue
+    const signals: LearningSignal[] = [
+      { cited: true, actedOn: comment.fixed },
+      ...Array.from({ length: comment.up }, () => ({ vote: 'up' as const })),
+      ...Array.from({ length: comment.down }, () => ({ vote: 'down' as const })),
+    ]
+    const updated = signals.reduce(
+      (current, signal) => reinforceLearning(current, signal, at),
+      learning,
+    )
+    if (updated === learning) continue
+    // oxlint-disable-next-line no-await-in-loop
+    await deps.store.learnings.put(updated)
+    changed++
+  }
+  return changed
+}
+
+/**
  * Reads what became of every inline comment Holtkeeper posted on a merge request that has ended
  * and stores it per comment under its finding category: the 👍/👎 counts, whether the commented
  * lines changed after the review (`compareCommits` from the head the comment was written at to the
  * final head), the thread's state, replies of people, and the severity, model and prompt version
- * of the review run that first posted the finding. Forge reads only, no LLM; reading again
- * replaces the signals. Merge requests without a stored `review` record (Holtkeeper never reviewed
- * them) and forges without `listNoteReactions` are skipped before any forge request. A forge that
- * cannot compare commits, or fails to, leaves the outcome of open threads `unknown`. Returns how
- * many comments were read.
+ * of the review run that first posted the finding. Learnings a comment cites are reinforced
+ * (`reinforceCitedLearnings`). Forge reads only, no LLM; reading again replaces the signals and
+ * reinforces nothing twice. Merge requests without a stored `review` record (Holtkeeper never
+ * reviewed them) and forges without `listNoteReactions` are skipped before any forge request. A
+ * forge that cannot compare commits, or fails to, leaves the outcome of open threads `unknown`.
+ * Returns how many comments were read.
  */
 export async function harvestReviewSignals(
   deps: Pick<ServerDeps, 'store' | 'now'>,
@@ -262,6 +415,13 @@ export async function harvestReviewSignals(
     const counts = reactionCounts(await forge.listNoteReactions(repo.path, mergeRequest, first.id))
     // oxlint-disable-next-line no-await-in-loop -- compared once per head, then cached
     const diff = origin ? await changes(origin.head) : undefined
+    const outcome = outcomeFields({
+      state: ended.state,
+      discussion,
+      ...(origin ? { origin } : {}),
+      ...(diff ? { changes: diff } : {}),
+      ...(ended.botUsername ? { botUsername: ended.botUsername } : {}),
+    })
     // oxlint-disable-next-line no-await-in-loop
     await deps.store.learnings.putReactions({
       repo: repoKey(repo),
@@ -270,68 +430,20 @@ export async function harvestReviewSignals(
       category: finding.category,
       findingId: finding.findingId,
       ...counts,
-      ...outcomeFields({
-        state: ended.state,
-        discussion,
-        ...(origin ? { origin } : {}),
-        ...(diff ? { changes: diff } : {}),
-        ...(ended.botUsername ? { botUsername: ended.botUsername } : {}),
-      }),
+      ...outcome,
       updatedAt: deps.now().toISOString(),
+    })
+    // oxlint-disable-next-line no-await-in-loop
+    await reinforceCitedLearnings(deps, {
+      repo: repoKey(repo),
+      mergeRequest,
+      noteId: String(first.id),
+      body: first.body,
+      fixed: ended.state === 'merged' && outcome.outcome === 'fixed',
+      up: counts.up,
+      down: counts.down,
     })
     read++
   }
   return read
-}
-
-const distinct = (values: readonly string[]) => new Set(values).size
-
-const discussionsOf = (candidate: LearningCandidate) =>
-  distinct(
-    candidate.sources.map(
-      (source) => `${source.repo}\u0000${source.mergeRequest}\u0000${source.discussionId}`,
-    ),
-  )
-
-/**
- * How a candidate came about: a direct proposal without replies is `mcp`, several discussions or
- * a proposal with replies are `merged`, anything else is one `review-reply`.
- */
-export function learningSourceKind(candidate: LearningCandidate): LearningSourceKind {
-  if (candidate.proposal && candidate.sources.length === 0) return 'mcp'
-  if (candidate.proposal || discussionsOf(candidate) > 1) return 'merged'
-  return 'review-reply'
-}
-
-/**
- * 1–5 from the sources alone: 1, plus 1 each for at least 2 distinct discussions, 2 distinct
- * authors, 2 distinct repositories and 3 distinct authors. Authors are the reply authors and the
- * proposer of a direct proposal; repositories include the candidate's own.
- */
-export function learningConfidence(candidate: LearningCandidate): number {
-  const authors = distinct([
-    ...candidate.sources.map((source) => source.author),
-    ...(candidate.proposal ? [candidate.proposal.by] : []),
-  ])
-  const repos = distinct([candidate.repo, ...candidate.sources.map((source) => source.repo)])
-  const score =
-    1 +
-    Number(discussionsOf(candidate) >= 2) +
-    Number(authors >= 2) +
-    Number(repos >= 2) +
-    Number(authors >= 3)
-  return Math.min(score, 5)
-}
-
-/**
- * `candidate` without its `targetScope` once that is no longer one of `scopes` (its repository's
- * `scopesFor`), so a view names the scope accepting it without a scope actually uses.
- */
-export function withLiveTarget(
-  candidate: LearningCandidate,
-  scopes: readonly GuideScopeKey[],
-): LearningCandidate {
-  if (!candidate.targetScope || scopes.includes(candidate.targetScope)) return candidate
-  const { targetScope: _stale, ...rest } = candidate
-  return rest
 }

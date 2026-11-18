@@ -4,19 +4,16 @@ import { LinkButton } from '../../ui/index.ts'
 
 /**
  * The asset policy as a card: where it comes from, the labelled lines agents read, a link to the
- * prose rules in the Guide (`space`) and, below, `children` such as the policy's own entries.
+ * written rules in Knowledge and, below, `children` such as the policy's own entries.
  */
 export function AssetsPolicyCard({
   lines,
   source,
-  space,
   actions,
   children,
 }: {
   lines: readonly { label: string; value: string }[]
   source: ReactNode
-  /** Guide space key of the prose rules, e.g. `all` or `repo:forge:path`. */
-  space: string
   actions?: ReactNode
   children?: ReactNode
 }) {
@@ -26,8 +23,8 @@ export function AssetsPolicyCard({
         <h2 className="text-[13px] font-semibold">Asset policy</h2>
         <span className="text-xs text-muted">{source}</span>
         <span className="flex-1" />
-        <LinkButton to="/knowledge/guide" search={{ space }} variant="ghost" size="sm">
-          Prose rules in the Guide
+        <LinkButton to="/knowledge/rules" variant="ghost" size="sm">
+          Written rules in Knowledge
         </LinkButton>
         {actions}
       </div>

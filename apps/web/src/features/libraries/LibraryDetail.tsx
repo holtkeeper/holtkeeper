@@ -1,5 +1,4 @@
 import {
-  type DependencyDecision,
   type DependencyDetail,
   type DependencyRow,
   type DependencyUpgrade,
@@ -14,7 +13,6 @@ import {
   useDependency,
   useDependencyApi,
   useDependencyDocs,
-  useTeamTitles,
   usePublicApiPackage,
   useWriteTasks,
 } from '../../api/queries.ts'
@@ -27,7 +25,6 @@ import {
   mergeRequestStatusLabel,
 } from '../../lib/dependencies.ts'
 import { formatDate, formatRelative, plural } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
 import {
   excerpt,
   formatRoles,
@@ -50,7 +47,6 @@ import {
   type KeyValueRow,
   Markdown,
   Notice,
-  OtherTeams,
   Placeholder,
   SearchInput,
   SegmentBar,
@@ -58,7 +54,6 @@ import {
   SeverityChip,
   Tag,
 } from '../../ui/index.ts'
-import { useScope } from '../shell/scope.ts'
 import { useSession } from '../shell/session.ts'
 import { ApiSummary, ApiTab } from './ApiTab.tsx'
 import { ChangesTab, ReleaseNotes } from './ChangesTab.tsx'
@@ -343,53 +338,12 @@ function SheetFacts({ detail }: { detail: DependencyDetail }) {
   )
 }
 
-function DecisionList({ decisions }: { decisions: readonly DependencyDecision[] }) {
-  const titleOf = useTeamTitles()
-  if (!decisions.length) return null
-  return (
-    <ul className="flex flex-col gap-1.5">
-      {decisions.map((decision) => (
-        <li key={decision.id} className="flex flex-wrap items-center gap-2 text-sm">
-          <Tag tone={decision.source === 'human' ? 'accent' : 'info'}>{decision.kind}</Tag>
-          <Link
-            to="/knowledge/notes"
-            search={{}}
-            className="min-w-0 flex-1 truncate hover:underline"
-          >
-            {decision.title}
-          </Link>
-          {decision.shared && decision.owner.length ? (
-            <Tag>{decision.owner.map(titleOf).join(', ')}</Tag>
-          ) : null}
-          <span className="text-xs text-muted">
-            {decision.source === 'agent' ? 'agent, approved' : decision.author} ·{' '}
-            {formatRelative(decision.updatedAt)}
-          </span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 function OverviewTab({ detail, inSheet }: { detail: DependencyDetail; inSheet: boolean }) {
   const users = useFoldedUsers(detail.usedBy)
-  const { homeTeams } = useScope()
-  const decisions = foldOtherTeams(detail.decisions, homeTeams, (decision) =>
-    decision.shared ? decision.owner : [],
-  )
   const sorted = users.shown.toSorted((a, b) => b.majorsBehind - a.majorsBehind)
   return (
     <div className="flex flex-col gap-5">
       {inSheet ? <SheetFacts detail={detail} /> : <ExternalLinks detail={detail} />}
-
-      {detail.decisions.length ? (
-        <Section title="Team decisions">
-          <DecisionList decisions={decisions.mine} />
-          <OtherTeams count={decisions.others.length} teams={decisions.teams}>
-            <DecisionList decisions={decisions.others} />
-          </OtherTeams>
-        </Section>
-      ) : null}
 
       <Section title="Versions in use">
         <SegmentBar

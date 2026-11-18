@@ -74,10 +74,7 @@ test('the rail holds the eight workspaces in order, with Settings at the bottom'
       ],
     ],
     ['releases', ['/releases', '/releases/timeline', '/releases/qa', '/releases/setup']],
-    [
-      'knowledge',
-      ['/knowledge/handbook', '/knowledge/guide', '/knowledge/notes', '/knowledge/learnings'],
-    ],
+    ['knowledge', ['/knowledge/rules', '/knowledge/learnings']],
     ['ops', ['/ops/runs', '/ops/tasks', '/ops/automation', '/ops/spend']],
     [
       'settings',
@@ -244,7 +241,7 @@ test('the active entry is the longest path prefix', () => {
   expect(activeNav('/releases/qa/ABC-1')?.label).toBe('QA')
   expect(activeNav('/releases/setup')?.workspace).toBe('releases')
   expect(activeNav('/releases/timeline/')?.label).toBe('Timeline')
-  expect(activeNav('/knowledge/notes')?.label).toBe('Notes')
+  expect(activeNav('/knowledge/learnings')?.label).toBe('Learnings')
   expect(activeNav('/ops/runs/j1')?.label).toBe('Runs')
   expect(activeNav('/ops/spend')?.label).toBe('AI spend')
   expect(activeNav('/ops/history')).toBeUndefined()

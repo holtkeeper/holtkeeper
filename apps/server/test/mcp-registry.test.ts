@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 
 import type { RepoTarget } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
-import { createGuideResolver, proposeRule, scopesFor } from '@holtkeeper/guide'
+import { parseConfig } from '@holtkeeper/core'
+import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import type { TestIdsData } from '@holtkeeper/testids'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -13,12 +14,54 @@ import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { registryServer } from '../src/api-surface/mcp.ts'
 import type { McpCall } from '../src/api-surface/usage.ts'
 import { createUsageIndex } from '../src/api-surface/usages.ts'
+import { createRulesResolver, readForgeRuleFiles } from '../src/rules.ts'
+import { knowledgeToolset } from '../src/tools/knowledge.ts'
 import { type QaToolsAccess, qaToolset } from '../src/tools/qa.ts'
-import { agentRulesAccess, mcpToolsets, taskToolsets } from '../src/tools/registry.ts'
+import {
+  agentRulesAccess,
+  mcpToolsets,
+  repoRulesAccess,
+  taskToolsets,
+} from '../src/tools/registry.ts'
 import { type RulesAccess, rulesToolset, testIdsReader } from '../src/tools/rules.ts'
 
 const now = () => new Date('2026-11-01T10:00:00.000Z')
 const principal = { id: 'header:sam', name: 'Sam', provider: 'header', grants: [] }
+
+const kiteFiles: Record<string, string> = {
+  'AGENTS.md': 'Kites are drawn with the shared canvas.',
+  'src/tails/AGENTS.md': 'Tails are always optional.',
+  '.cursor/rules/colors.mdc':
+    '---\ndescription: How kite colors are named\n---\nColors come from the palette module.',
+}
+
+const forgeConfig = parseConfig({
+  forges: {
+    work: {
+      kind: 'fake',
+      url: 'https://forge.test',
+      create: () =>
+        ({
+          listFiles: async (repo: string) =>
+            repo === 'toys/kite'
+              ? Object.keys(kiteFiles).map((path) => ({ path, type: 'file' }))
+              : [],
+          readFile: async (repo: string, path: string) =>
+            repo === 'toys/kite' ? kiteFiles[path] : undefined,
+        }) as never,
+    },
+  },
+  teams: { toys: { owns: ['work:toys/*'] }, barns: { owns: ['work:barns/*'] } },
+})
+
+const knowledgeOf = (store: Store) => ({
+  store,
+  config: forgeConfig,
+  canReadScope: () => true,
+  repoOf: () => undefined,
+  actor: 'header:sam',
+  now,
+})
 
 const widgets = {
   name: 'widgets',
@@ -58,6 +101,8 @@ async function connect(calls: McpCall[], toolsets: readonly RegistryToolset[] = 
   await client.connect(clientSide)
   return client
 }
+
+const none = async () => undefined
 
 const textOf = (result: Awaited<ReturnType<Client['callTool']>>) =>
   (result.content as { text: string }[])[0]?.text ?? ''
@@ -111,13 +156,7 @@ describe('mcpToolsets', () => {
     catalog: createApiCatalog({ analyses: store.analyses }),
     usages: createUsageIndex({ analyses: store.analyses }),
     store,
-    knowledge: {
-      store,
-      canReadScope: () => true,
-      repoOf: () => undefined,
-      actor: 'header:sam',
-      now,
-    },
+    knowledge: knowledgeOf(store),
     canRead: () => true,
     canReadAnalyses: () => true,
     canReadAudits: () => true,
@@ -141,24 +180,22 @@ describe('mcpToolsets', () => {
       'evaluate_dependency',
       'who_uses',
       'search_knowledge',
-      'get_knowledge',
-      'propose_knowledge',
+      'propose_learning',
       'commit_conventions',
       'check_commit_message',
     ])
   })
 
-  test('adds the Guide and test id tools to rules after the existing ones keep their names', () => {
+  test('adds the rule and test id tools to rules after the existing ones keep their names', () => {
     const rules = mcpToolsets({
       ...base,
-      guide: { resolve: async () => undefined },
-      proposals: { propose: async () => undefined },
+      rules: { resolve: none, rule: none, learning: none, repoFile: none },
       commits: { conventions: async () => undefined },
       testIds: { testIds: async () => undefined },
     }).find((toolset) => toolset.name === 'rules')
     expect(rules?.tools.map((tool) => [tool.name, tool.readOnly ?? true])).toEqual([
       ['repo_rules', true],
-      ['propose_rule_change', false],
+      ['get_rule', true],
       ['commit_conventions', true],
       ['check_commit_message', true],
       ['test_ids', true],
@@ -167,15 +204,14 @@ describe('mcpToolsets', () => {
     expect(rules?.instructions).toStartWith('Call repo_rules before changing code in a repository')
   })
 
-  test('offers no write tools besides the proposals, and no fleet, ops or release state', () => {
+  test('offers no write tools besides learning proposals, and no fleet, ops or release state', () => {
     const toolsets = mcpToolsets({
       ...base,
-      guide: { resolve: async () => undefined },
-      proposals: { propose: async () => undefined },
+      rules: { resolve: none, rule: none, learning: none, repoFile: none },
       releases: {
         repoOf: () => undefined,
         settings: async () => ({}),
-        guide: async () => '',
+        rules: async () => '',
         status: async () => ({}),
         changes: async () => ({}),
         steps: { preview: async () => ({}), run: async () => ({}) },
@@ -194,8 +230,7 @@ describe('mcpToolsets', () => {
     ])
     const tools = toolsets.flatMap((toolset) => toolset.tools)
     expect(tools.filter((tool) => tool.readOnly === false).map((tool) => tool.name)).toEqual([
-      'propose_knowledge',
-      'propose_rule_change',
+      'propose_learning',
     ])
     const names = tools.map((tool) => tool.name)
     expect(names).toContain('release_rules')
@@ -216,10 +251,9 @@ describe('mcpToolsets', () => {
       'stack',
       'assets',
     ])
-    expect(taskToolsets('guide')).toEqual([])
+    expect(taskToolsets('rule-miner')).toEqual([])
     expect(taskToolsets('release-notes')).toEqual([])
     expect(taskToolsets('library-digest')).toEqual([])
-    expect(taskToolsets('knowledge-bootstrap')).toEqual([])
     expect(taskToolsets('chat')).toEqual([
       'knowledge',
       'libraries',
@@ -340,13 +374,7 @@ describe('qa toolset', () => {
       catalog: createApiCatalog({ analyses: memoryStore().analyses }),
       usages: createUsageIndex({ analyses: memoryStore().analyses }),
       store: memoryStore(),
-      knowledge: {
-        store: memoryStore(),
-        canReadScope: () => true,
-        repoOf: () => undefined,
-        actor: 'header:sam',
-        now,
-      },
+      knowledge: knowledgeOf(memoryStore()),
       canRead: () => true,
       canReadAnalyses: () => true,
       canReadAudits: () => true,
@@ -420,12 +448,14 @@ describe('rules toolset', () => {
 
   async function setup() {
     const store = memoryStore()
-    await store.guides.put({
-      scope: 'team:toys',
-      section: 'general',
-      rules: 'Widgets never fetch data themselves.',
-      steering: '',
-      learnings: [],
+    await store.rules.put({
+      id: 'r-fetch',
+      title: 'Data fetching',
+      body: 'Widgets never fetch data themselves.',
+      scope: { teams: ['toys'] },
+      author: 'sam',
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
     })
     await store.analyses.add({
       repo: { forge: 'work', path: 'toys/kite' },
@@ -442,34 +472,22 @@ describe('rules toolset', () => {
       secret: false,
       updatedAt: '2026-10-31T08:00:00.000Z',
     })
-    const resolve = createGuideResolver({ store })
+    const resolve = createRulesResolver({ store, config: forgeConfig, now })
+    const repoFiles = (repo: RepoTarget) =>
+      readForgeRuleFiles({
+        forge: forgeConfig.forges.work!.create(),
+        forgeId: repo.forge,
+        repo: repo.path,
+      })
     const testIds = testIdsReader({ store })
     const access: RulesAccess = {
-      guide: {
-        resolve: async (value, request) => {
-          const repo = target(value)
-          return repo ? resolve({ repo, ...request }) : undefined
-        },
-      },
-      proposals: {
-        propose: async (value, input) => {
-          const repo = target(value)
-          return repo
-            ? proposeRule(store, {
-                repo: value,
-                rule: input.rule,
-                section: input.section,
-                ...(input.targetScope && {
-                  targetScope: input.targetScope,
-                  scopes: scopesFor(repo),
-                }),
-                reason: input.reason,
-                by: principal.id,
-                at: now().toISOString(),
-              })
-            : undefined
-        },
-      },
+      rules: repoRulesAccess({
+        store,
+        resolve,
+        repoFiles,
+        readable: target,
+        canReadScope: (scope) => !scope.teams?.includes('sheds'),
+      }),
       testIds: {
         testIds: async (value) => {
           const repo = target(value)
@@ -479,73 +497,118 @@ describe('rules toolset', () => {
     }
     const rules = rulesToolset(access)
     if (!rules) throw new Error('no rules toolset')
+    const knowledge = knowledgeToolset({
+      ...knowledgeOf(store),
+      repoOf: target,
+      canReadScope: (scope) => !scope.teams?.includes('sheds'),
+    })
     const calls: McpCall[] = []
-    return { store, client: await connect(calls, [rules]), calls }
+    return { store, client: await connect(calls, [rules, knowledge]), calls, resolve, repoFiles }
   }
 
-  test('repo_rules returns the resolved Guide of readable repositories only', async () => {
+  test('repo_rules resolves panel rules, nested rules files and requested rules of readable repositories only', async () => {
     const { client } = await setup()
     expect(client.getInstructions()).toContain('Call repo_rules before changing code')
-    const rules = textOf(
+    const all = textOf(
       await client.callTool({ name: 'repo_rules', arguments: { repo: 'work:toys/kite' } }),
     )
-    expect(rules).toStartWith('# Rules for `work:toys/kite`')
-    expect(rules).toContain('Widgets never fetch data themselves.')
+    expect(all).toStartWith('# Rules for `work:toys/kite`')
+    expect(all).toContain('### Data fetching [rule:r-fetch]\nWidgets never fetch data themselves.')
+    expect(all).toContain('Kites are drawn with the shared canvas.')
+    expect(all).toContain('Tails are always optional.')
+    expect(all).toContain('- `.cursor/rules/colors.mdc`: How kite colors are named')
+    expect(all).toContain('Blocks, strongest first:')
+    const scoped = textOf(
+      await client.callTool({
+        name: 'repo_rules',
+        arguments: { repo: 'work:toys/kite', files: ['src/kite.ts'] },
+      }),
+    )
+    expect(scoped).not.toContain('Tails are always optional.')
     const denied = await client.callTool({
       name: 'repo_rules',
-      arguments: { repo: 'work:other/app', section: 'testids' },
+      arguments: { repo: 'work:other/app' },
     })
     expect(denied.isError).toBe(true)
     expect(textOf(denied)).toContain('No readable repository work:other/app')
   })
 
-  test('propose_rule_change stores a learning candidate and never a rule', async () => {
+  test('get_rule reads a rule, a learning and a requested rules file', async () => {
     const { store, client } = await setup()
-    const args = {
-      repo: 'work:toys/kite',
-      section: 'testids',
-      rule: 'Put test ids on list rows, not on their wrappers.',
-      reason: 'Row selectors broke twice.',
-    }
-    expect(textOf(await client.callTool({ name: 'propose_rule_change', arguments: args }))).toBe(
-      'Proposed "Put test ids on list rows, not on their wrappers." for Test ids of `work:toys/kite`. People review it in Knowledge › Learnings (/knowledge/learnings?space=repo%3Awork%3Atoys%2Fkite) before agents use it.',
-    )
     expect(
-      textOf(await client.callTool({ name: 'propose_rule_change', arguments: args })),
-    ).toStartWith('Not added: `work:toys/kite` already has this rule as a proposed candidate')
-    expect(await store.learnings.list()).toMatchObject([
-      { status: 'proposed', section: 'testids', proposal: { by: 'header:sam' }, sources: [] },
-    ])
-    expect(await store.guides.list({ sections: ['testids'] })).toEqual([])
-  })
-
-  test('propose_rule_change takes an exact scope of the repository only', async () => {
-    const { store, client } = await setup()
-    const args = {
-      repo: 'work:toys/kite',
-      section: 'general',
-      rule: 'Keep spool sizes in SpoolSize.',
-      reason: 'Every team toy repeats it.',
-    }
-    const refused = await client.callTool({
-      name: 'propose_rule_change',
-      arguments: { ...args, scope: 'team:sheds' },
-    })
-    expect(refused.isError).toBe(true)
-    expect(textOf(refused)).toBe(
-      'Not proposed: team:sheds is not a team, folder, family or repository scope of work:toys/kite.',
-    )
+      textOf(await client.callTool({ name: 'get_rule', arguments: { id: '[rule:r-fetch]' } })),
+    ).toContain('# [rule:r-fetch] Data fetching')
     expect(
       textOf(
         await client.callTool({
-          name: 'propose_rule_change',
-          arguments: { ...args, scope: 'team:toys' },
+          name: 'get_rule',
+          arguments: { id: '.cursor/rules/colors.mdc', repo: 'work:toys/kite' },
         }),
       ),
-    ).toContain('of `work:toys/kite` into team:toys.')
+    ).toContain('Colors come from the palette module.')
+    await client.callTool({
+      name: 'propose_learning',
+      arguments: { repo: 'work:toys/kite', text: 'Keep spool sizes in SpoolSize.' },
+    })
+    const [learning] = await store.learnings.list()
+    expect(
+      textOf(
+        await client.callTool({ name: 'get_rule', arguments: { id: `learn:${learning?.id}` } }),
+      ),
+    ).toContain('Keep spool sizes in SpoolSize.')
+    expect((await client.callTool({ name: 'get_rule', arguments: { id: 'nope' } })).isError).toBe(
+      true,
+    )
+  })
+
+  test('propose_learning stores a pending learning once and merges repeats', async () => {
+    const { store, client } = await setup()
+    const args = {
+      repo: 'work:toys/kite',
+      text: 'Put test ids on list rows, not on their wrappers.',
+      reason: 'Row selectors broke twice.',
+    }
+    expect(textOf(await client.callTool({ name: 'propose_learning', arguments: args }))).toMatch(
+      /^Proposed \[learn:[\w-]+\] for `work:toys\/kite`\. Agents use it from 2026-11-04/,
+    )
+    expect(
+      textOf(await client.callTool({ name: 'propose_learning', arguments: args })),
+    ).toStartWith('Not added: [learn:')
     expect(await store.learnings.list()).toMatchObject([
-      { suggestedScope: 'team', targetScope: 'team:toys' },
+      {
+        status: 'pending',
+        origin: 'agent',
+        scope: { repos: ['work:toys/kite'] },
+        reason: 'Row selectors broke twice.',
+      },
     ])
+    expect(await store.rules.list()).toHaveLength(1)
+    const denied = await client.callTool({
+      name: 'propose_learning',
+      arguments: { ...args, repo: 'work:sheds/vault' },
+    })
+    expect(denied.isError).toBe(true)
+  })
+
+  test('search_knowledge finds readable rules and active learnings only', async () => {
+    const { store, client } = await setup()
+    await store.rules.put({
+      id: 'r-sheds',
+      title: 'Shed widgets',
+      body: 'Shed widgets are hidden.',
+      scope: { teams: ['sheds'] },
+      author: 'sam',
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    })
+    const found = textOf(
+      await client.callTool({
+        name: 'search_knowledge',
+        arguments: { query: 'widgets', repo: 'work:toys/kite' },
+      }),
+    )
+    expect(found).toContain('[rule:r-fetch] Data fetching')
+    expect(found).not.toContain('r-sheds')
   })
 
   test('test_ids lists the learned convention, overrides and selectors under a path', async () => {
@@ -605,53 +668,46 @@ describe('rules toolset', () => {
     ).toBe("`src/legacy/Old.tsx` is left out of test ids by the team's settings.")
   })
 
-  test('internal agents read other repositories through rules, never their own Guide again', async () => {
-    const { store } = await setup()
-    await store.guides.put({
-      scope: 'team:barns',
-      section: 'general',
-      rules: 'Barn doors swing outward.',
-      steering: '',
-      learnings: [],
-    })
-    await store.families.put({
-      id: 'f1',
-      name: 'kites',
-      members: ['work:barns/kite-shop', 'work:toys/kite'],
-      createdBy: 'sam',
+  test('internal agents read other repositories through rules, never their own rules again', async () => {
+    const { store, resolve, repoFiles } = await setup()
+    await store.rules.put({
+      id: 'r-barns',
+      title: 'Doors',
+      body: 'Barn doors swing outward.',
+      scope: { teams: ['barns'] },
+      author: 'sam',
       createdAt: '2026-10-31T08:00:00.000Z',
       updatedAt: '2026-10-31T08:00:00.000Z',
     })
     const access = agentRulesAccess({
-      repo: { forge: 'work', path: 'toys/kite', teams: ['toys'] },
+      store,
+      repo: { forge: 'work', path: 'toys/kite', teams: ['toys', 'barns'] },
       targetOf: (value) =>
         value === 'work:sheds/vault'
           ? { forge: 'work', path: 'sheds/vault', teams: ['sheds'] }
           : value === 'work:barns/kite-shop'
             ? { forge: 'work', path: 'barns/kite-shop', teams: ['barns'] }
             : target(value),
-      resolve: createGuideResolver({ store }),
+      resolve,
+      repoFiles,
       testIds: testIdsReader({ store }),
-      families: () => store.families.list(),
     })
-    const unrelated = await access.guide
-      ?.resolve('work:sheds/vault', { task: 'agent' })
+    const unrelated = await access.rules
+      ?.resolve('work:sheds/vault', { agent: 'task' })
       .catch((error: unknown) => error)
-    expect(unrelated instanceof ToolError && unrelated.message).toContain(
-      'share a team or a family',
-    )
+    expect(unrelated instanceof ToolError && unrelated.message).toContain('share a team')
     expect(
-      (await access.guide?.resolve('work:barns/kite-shop', { task: 'agent' }))?.text,
+      (await access.rules?.resolve('work:barns/kite-shop', { agent: 'task' }))?.text,
     ).toContain('Barn doors swing outward.')
-    const refused = await access.guide
-      ?.resolve('work:toys/kite', { task: 'agent' })
+    const refused = await access.rules
+      ?.resolve('work:toys/kite', { agent: 'task' })
       .catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(ToolError)
     expect(refused instanceof Error && refused.message).toContain('already in your context')
-    expect((await access.guide?.resolve('work:toys/boat', { task: 'agent' }))?.text).toContain(
+    expect((await access.rules?.resolve('work:toys/boat', { agent: 'task' }))?.text).toContain(
       'Widgets never fetch data themselves.',
     )
-    expect(await access.guide?.resolve('work:other/app', { task: 'agent' })).toBeUndefined()
+    expect(await access.rules?.resolve('work:other/app', { agent: 'task' })).toBeUndefined()
     expect((await access.testIds?.testIds('work:toys/kite'))?.overrides).toEqual({
       exclude: ['src/legacy/**'],
     })

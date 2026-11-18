@@ -162,7 +162,7 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * reply then queues no `review`), and those whose options stay invalid with the repository's
  * `analyzers.<kind>` setting (an analyzer not set up there), are left out rather than queued to
  * fail, and so is every job that would carry a ref for an analyzer that reads only the default
- * branch (`defaultBranchOnly`, e.g. `guide`). Write tasks are never
+ * branch (`defaultBranchOnly`). Write tasks are never
  * queued from events, policies or note commands; only an approved task group queues them.
  *
  * Tags, pushes, merge request changes and pipelines also go to the release assistant, in the background;

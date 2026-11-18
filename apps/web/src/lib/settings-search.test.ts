@@ -30,24 +30,18 @@ const definitions = [
   definition('polling', 'Polling', 'System'),
   definition('analyzers.widget', 'Widget analyzer', 'Analyzers'),
   definition('analyzers.review', 'Code review', 'Analyzers', 'Options for the review analyzer'),
-  definition('analyzers.guide', 'Guide', 'Analyzers', 'Options for the guide analyzer'),
+  definition('analyzers.rule-miner', 'Rule miner', 'Analyzers', 'Options for the rule miner'),
   definition(
-    'knowledge.autoAccept',
-    'Auto-accept agent knowledge',
+    'learnings.approvalDelayDays',
+    'Learning approval delay',
     'Knowledge',
-    'Kinds of knowledge entries agents may add without review',
+    'Days a learned rule waits before agents use it',
   ),
   definition(
-    'learnings.autoAccept',
-    'Auto-accept learnings',
+    'learnings.expiryDays',
+    'Learning expiry',
     'Knowledge',
-    'Rule candidates accepted into the Guide by where they come from',
-  ),
-  definition(
-    'guide.autoAccept',
-    'Auto-accept generated Guide',
-    'Knowledge',
-    'Guide sections whose generated text agents use at once',
+    'Days an active learned rule lives without being confirmed again',
   ),
 ]
 
@@ -68,29 +62,25 @@ test('settings edited on other pages say where they live and link there', () => 
 })
 
 test('knowledge and review settings are found where they are edited, not in System', () => {
-  const [accept] = searchSettings(everything, 'auto-accept')
-  expect(accept).toMatchObject({
-    key: 'knowledge.autoAccept',
+  const [delay] = searchSettings(everything, 'approval delay')
+  expect(delay).toMatchObject({
+    key: 'learnings.approvalDelayDays',
     where: 'Settings › Policies',
     link: {
       to: '/settings/$section',
       params: { section: 'policies' },
-      hash: 'setting-knowledge.autoAccept',
+      hash: 'setting-learnings.approvalDelayDays',
     },
   })
-  expect(searchSettings(everything, 'auto-accept learnings')[0]).toMatchObject({
-    key: 'learnings.autoAccept',
+  expect(searchSettings(everything, 'learning expiry')[0]).toMatchObject({
+    key: 'learnings.expiryDays',
     where: 'Settings › Policies',
-    link: { hash: 'setting-learnings.autoAccept' },
+    link: { hash: 'setting-learnings.expiryDays' },
   })
-  expect(searchSettings(everything, 'without review').map((e) => e.id)).toEqual([
-    'section:policies',
-    'setting:knowledge.autoAccept',
-  ])
   const [review] = searchSettings(everything, 'analyzers.review')
   expect(review).toMatchObject({ where: 'Quality › Reviews', link: { to: '/quality/reviews' } })
-  const [guide] = searchSettings(everything, 'analyzers.guide')
-  expect(guide).toMatchObject({ where: 'Knowledge › Guide', link: { to: '/knowledge/guide' } })
+  const [miner] = searchSettings(everything, 'analyzers.rule-miner')
+  expect(miner).toMatchObject({ where: 'Knowledge › Rules', link: { to: '/knowledge/rules' } })
 })
 
 test('settings in a section link to their entries there; unclaimed ones live in System', () => {

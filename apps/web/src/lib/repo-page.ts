@@ -140,7 +140,7 @@ const shareOf = (part: number, whole: number) => Math.round((part / whole) * 100
 /**
  * The Delivery and activity cards of an overview: Releases (with `releases:read`; `Off` while
  * releases are off), AI reviews of 30 days, this week's runs and tasks (tasks and spend only when
- * the overview carries them), and the Guide (with
+ * the overview carries them), and Knowledge (with
  * `knowledge:read`, which the overview reflects by carrying `knowledge`).
  */
 export function deliveryCards(
@@ -238,19 +238,14 @@ export function deliveryCards(
     cards.push({
       key: 'knowledge',
       label: 'Knowledge',
-      ...(knowledge.proposed
-        ? { tone: 'warn' as const, status: `${knowledge.proposed} to review` }
-        : knowledge.sections
-          ? { tone: 'ok' as const, status: 'Written' }
-          : { tone: 'none' as const, status: 'No own sections' }),
-      value: String(knowledge.sections),
-      unit: 'own guide sections',
-      lines: [
-        `${plural(knowledge.notes, 'note')} · ${knowledge.proposed} learnings proposed`,
-        knowledge.inherits.length
-          ? `Inherits ${knowledge.inherits.join(', ')}`
-          : 'Inherits nothing',
-      ],
+      ...(knowledge.pending
+        ? { tone: 'warn' as const, status: `${knowledge.pending} pending` }
+        : knowledge.rules || knowledge.learnings
+          ? { tone: 'ok' as const, status: 'In use' }
+          : { tone: 'none' as const, status: 'No rules' }),
+      value: String(knowledge.rules),
+      unit: knowledge.rules === 1 ? 'rule' : 'rules',
+      lines: [`${plural(knowledge.learnings, 'active learning')} · ${knowledge.pending} pending`],
     })
   return cards
 }

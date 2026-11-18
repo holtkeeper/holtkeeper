@@ -25,10 +25,8 @@ import type { z } from 'zod'
 
 import type { AuditEnrichment } from './audit.ts'
 import type { ChatAgentFor } from './chat-threads.ts'
-import type { KnowledgeEmbeddings } from './embeddings.ts'
 import type { MediaEngine } from './media/engine.ts'
 import type { MergeRequestStatusSink } from './mr-status.ts'
-import type { NeighbourIndex } from './neighbours.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 import type { SlackApi, SlackPoster } from './slack/client.ts'
 import type { SlackReviews } from './slack/service.ts'
@@ -57,16 +55,6 @@ export interface ServerDeps {
   store: Store
   vault: Vault
   credentials: CredentialService
-  /**
-   * Vectors of knowledge notes (`knowledge.embeddings`): status and reindex routes, search and
-   * duplicate checks by meaning. Without it the routes report `off` and everything is full text.
-   */
-  embeddings?: KnowledgeEmbeddings
-  /**
-   * Repositories like each other (`createNeighbourIndex`), for the Guide's block of knowledge of
-   * similar repositories; routes build their own when absent.
-   */
-  neighbours?: NeighbourIndex
   settings: SettingDefinition[]
   /** Analysis kinds the server accepts and renders. */
   // oxlint-disable-next-line typescript/no-explicit-any -- kinds differ in their data type

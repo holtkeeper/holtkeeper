@@ -1136,7 +1136,7 @@ export async function refreshTaskGroup(deps: TaskDeps, groupId: string): Promise
 
 /**
  * Repositories related to a write task's repository, for its agent: the other targets of its
- * group, members of its family and repositories sharing an owner team that Holtkeeper has run
+ * group and repositories sharing an owner team that Holtkeeper has run
  * jobs on. At most 50.
  */
 export async function relatedRepos(
@@ -1149,10 +1149,6 @@ export async function relatedRepos(
   const task = options.task ? await deps.store.tasks.get(options.task) : undefined
   const group = task ? await deps.store.tasks.getGroup(task.groupId) : undefined
   for (const other of group?.repos ?? []) if (other !== own) found.set(other, 'in this task')
-  for (const family of await deps.store.families.list())
-    if (family.members.includes(own))
-      for (const member of family.members)
-        if (member !== own && !found.has(member)) found.set(member, `same family ${family.name}`)
   const teams = repoTarget(deps.config, repo).teams
   if (teams.length)
     for (const target of await deps.store.jobs.targets()) {

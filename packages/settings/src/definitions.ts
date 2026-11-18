@@ -1,4 +1,3 @@
-import type { GuideSectionName, KnowledgeKind } from '@holtkeeper/store'
 import { allowlistSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
@@ -165,129 +164,33 @@ export const llmBudget = defineSetting({
   ],
 })
 
-export const agentTools = defineSetting({
-  key: 'agent.tools',
-  label: 'Agent tools',
-  description: 'Tokens of team knowledge put into every agent task (default 1500).',
-  section: 'AI',
-  help: `Tunes what agents get with every task.
-
-- **knowledgeTokens** is how much team knowledge goes into every task (default 1500); \`0\` leaves it out.`,
-  default: { knowledgeTokens: 1500 },
-  schema: z.object({
-    knowledgeTokens: z.number().int().min(0).max(50_000).optional(),
-  }),
-})
-
-export const knowledgeAutoAccept = defineSetting({
-  key: 'knowledge.autoAccept',
-  label: 'Auto-accept agent knowledge',
+export const learningsApprovalDelayDays = defineSetting({
+  key: 'learnings.approvalDelayDays',
+  label: 'Learning approval delay',
   description:
-    'Kinds of knowledge entries agents may add without review; other proposals wait in Knowledge › Notes.',
+    'Days a learned rule waits before agents use it (default 3); people may approve or reject it earlier.',
   section: 'Knowledge',
-  help: `Agents propose what they learn while working. Proposals of the kinds listed here are accepted at once and reach later tasks; the rest wait for review in Knowledge › Notes.
+  help: `Holtkeeper learns short rules from replies to review comments, from merged merge requests and from agents. A new learning waits this many days in the Inbox and in Knowledge › Learnings, then reaches prompts by itself.
 
-- \`quirk\` and \`howto\` are low risk: facts about the code agents found the hard way.
-- Keep \`decision\` and \`convention\` under review: they change how agents judge code.
-- The scope is the repository the agent worked on, so an entry for a folder lets agents learn freely in that folder only.
-- Starter knowledge for new repositories (\`knowledge-bootstrap\`) is always proposed, whatever this says; its options are \`analyzers.knowledge-bootstrap\` under Settings › Analyzers.`,
-  default: [],
-  schema: z.array(
-    z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),
-  ),
+- People with \`knowledge:write\` over the repository may approve or reject it earlier.
+- \`0\` activates new learnings at once.
+- A learning someone writes in the panel is active at once whatever this says.
+- The entry that applies to the learning's repository decides; learnings of a team or of everything use the entry for all repositories.`,
+  default: 3,
+  schema: z.number().int().min(0).max(365),
 })
 
-/** Model `knowledge.embeddings` uses until someone picks another. */
-export const DEFAULT_EMBEDDING_MODEL = 'openai/text-embedding-3-small'
-
-/** Value of `knowledge.embeddings`: whether knowledge gets vectors and from which credential and model. */
-export const knowledgeEmbeddingsSchema = z.object({
-  /** Off (default): retrieval and duplicate checks stay full text. */
-  enabled: z.boolean().default(false),
-  /** Id or name of an `ai-sdk` credential; unset: the credential `llm.provider` names. */
-  credential: z.string().trim().min(1).optional().meta({ 'x-credential': 'ai-sdk' }),
-  /** Embedding model id as the credential's endpoint names it. */
-  model: z.string().trim().min(1).default(DEFAULT_EMBEDDING_MODEL),
-  /** Vector length to ask for; unset: the model's own. */
-  dimensions: z.number().int().min(1).max(8192).optional(),
-})
-
-/** A parsed `knowledge.embeddings` value; `enabled` and `model` are always set. */
-export type KnowledgeEmbeddings = z.output<typeof knowledgeEmbeddingsSchema>
-
-export const knowledgeEmbeddings = defineSetting({
-  key: 'knowledge.embeddings',
-  label: 'Semantic search',
+export const learningsExpiryDays = defineSetting({
+  key: 'learnings.expiryDays',
+  label: 'Learning expiry',
   description:
-    'Vectors for knowledge notes, so agents find notes by meaning and duplicates worded differently are caught. Off by default.',
+    'Days an active learned rule lives without being confirmed again before it expires (default 90).',
   section: 'Knowledge',
-  global: true,
-  help: `Gives every knowledge note a vector from an embedding model, so notes rank by meaning next to their words, also across languages, and a proposal that repeats a note in other words is caught as a duplicate.
+  help: `A learning is confirmed again when a review comment citing it gets fixed, when someone reacts 👍 to such a comment, or when the same rule is learned once more. An active learning that goes this many days without any of that expires and leaves the prompts; confirming it later brings it back.
 
-- **enabled** (default off): the switch. Off, or whenever the model cannot be reached, search and the Guide stay full text and nothing else changes.
-- **credential**: an \`ai-sdk\` credential whose endpoint speaks the OpenAI Embeddings format (OpenAI, Waibee Router and most gateways). Unset, the credential of **AI provider** (\`llm.provider\`) is used.
-- **model** (default \`${DEFAULT_EMBEDDING_MODEL}\`): a multilingual embedding model, named as the endpoint names it. Changing it re-embeds every note in the background.
-- **dimensions**: the vector length to ask for, for models that can shorten their vectors. Unset, the model's own length.
-
-Vectors never decide where a note applies; they only rank notes and flag duplicates. Embedding spend counts against the weekly **AI budget** as task kind \`embedding\`; once the budget is used up, new and changed notes wait and search stays full text.`,
-  default: knowledgeEmbeddingsSchema.parse({}),
-  schema: knowledgeEmbeddingsSchema,
-})
-
-/** Where `learnings.autoAccept` comes from: rules MCP clients propose, rules learned from review replies. */
-export const learningAutoAcceptSources = ['mcp', 'review-reply'] as const
-
-export type LearningAutoAcceptSource = (typeof learningAutoAcceptSources)[number]
-
-/** Value of `learnings.autoAccept`. */
-export const learningsAutoAcceptSchema = z.object({
-  /** Origins of candidates accepted without review; empty keeps every candidate proposed. */
-  sources: z.array(z.enum(learningAutoAcceptSources)).default([]),
-  /**
-   * `suggested`: the candidate's target scope, else the scope its suggested kind points at;
-   * `repo`: always the candidate's repository.
-   */
-  scope: z.enum(['suggested', 'repo']).default('suggested'),
-})
-
-export type LearningsAutoAccept = z.output<typeof learningsAutoAcceptSchema>
-
-export const learningsAutoAccept = defineSetting({
-  key: 'learnings.autoAccept',
-  label: 'Auto-accept learnings',
-  description:
-    'Rule candidates accepted into the Guide without review, by where they come from; the rest wait in Knowledge › Learnings.',
-  section: 'Knowledge',
-  help: `Learned rules reach every agent prompt of the scope they are accepted into. By default each candidate waits for a person in Knowledge › Learnings.
-
-- **sources**: \`mcp\` accepts rules MCP clients propose with \`propose_rule_change\`, but only from people who may edit the repository's knowledge (\`knowledge:write\`); proposals of mere readers stay for review. \`review-reply\` accepts rules extracted from replies to review comments, from anyone who replies on the repository's merge requests. Empty (default) accepts nothing.
-- **scope**: \`suggested\` (default) accepts into the scope the proposer named, else the folder, team, family or repository as suggested, but never wider than this entry's own scope: an entry on a repository or folder accepts a rule meant for a parent folder, team or family into the repository. \`repo\` always accepts into the candidate's repository only.
-- The entry that applies to the candidate's repository decides. Auto-accepted rules show as accepted by *Auto-accept* and in History; reject one in Knowledge › Learnings to take it out of the Guide.`,
-  default: { sources: [], scope: 'suggested' },
-  schema: learningsAutoAcceptSchema,
-})
-
-/** Guide sections the generator writes, which `guide.autoAccept` may list. */
-export const generatedGuideSections = [
-  'general',
-  'testing',
-  'testids',
-  'commits',
-] as const satisfies readonly GuideSectionName[]
-
-export const guideAutoAccept = defineSetting({
-  key: 'guide.autoAccept',
-  label: 'Auto-accept generated Guide',
-  description:
-    'Guide sections whose generated text agents use as soon as the guide job writes it, without review.',
-  section: 'Knowledge',
-  help: `The guide job writes each section from repository signals as a proposal; agents keep the accepted text until a person accepts the new one.
-
-- Sections listed here are accepted when the job writes them, as *Auto-accept*, and audited.
-- Rejecting auto-accepted text in Knowledge › Guide puts back the text a person accepted before, or removes the generated layer, and the same inputs are not proposed again.
-- \`commits\` is built without an LLM from the repository's history and rules; \`general\` changes most of what agents read.`,
-  default: [],
-  schema: z.array(z.enum(generatedGuideSections)),
+The entry that applies to the learning's repository decides; learnings of a team or of everything use the entry for all repositories.`,
+  default: 90,
+  schema: z.number().int().min(1).max(3650),
 })
 
 export const auditFix = defineSetting({
@@ -433,7 +336,7 @@ Set it for everything, a folder or a repository pattern. The most specific entry
 
 When tests are off:
 - Coverage is never queued automatically (events, new repositories, freshness, schedules), counts as skipped in Ops › Automation and leaves repository freshness; a manual run still goes ahead. Quality › Coverage, repository health and the repository overview show "No tests by design" instead of a coverage figure.
-- The Guide drops its Testing section for the repository, the Guide generator skips it, and agents are told not to add or run tests.
+- Agents are told not to add or run tests.
 - AI reviews never ask for tests (test-id comments still come), write tasks and propagation fixes leave out test checks, and test write tasks are refused, also when proposed before tests were turned off.
 
 Test ids (\`analyzers.testids\`) are unaffected: end-to-end suites in other repositories read them.`,
@@ -585,7 +488,7 @@ export const accessCrossTeam = defineSetting({
   help: `How far people and agents see past their own teams. Grants still decide everything else: other teams' findings, jobs, merge requests and releases stay hidden at every level.
 
 - **off**: only the repositories a person's grants cover. Agents working without an asker stay within the teams of the repository they work on.
-- **metadata**: anyone who may read some repository also reads every repository's package and version inventory, public API, stack and tool versions, usage counts and knowledge notes marked *shared*. Agents (reviews, chat, Guide, MCP tokens) get the same reach; chat replies stay within what the asker may read.
+- **metadata**: anyone who may read some repository also reads every repository's package and version inventory, public API, stack and tool versions, usage counts. Agents (reviews, chat, Guide, MCP tokens) get the same reach; chat replies stay within what the asker may read.
 - **snippets** (default): metadata plus the code of how other teams use a package (\`find_usages\`, upgrade call sites).
 
 The level applies to every person, team and agent alike; there are no per-team exceptions. Pages show your teams first and fold other teams into a collapsed section.`,
@@ -604,11 +507,8 @@ export const builtinSettings: SettingDefinition[] = [
   llmProvider,
   llmTiers,
   llmBudget,
-  agentTools,
-  knowledgeAutoAccept,
-  knowledgeEmbeddings,
-  learningsAutoAccept,
-  guideAutoAccept,
+  learningsApprovalDelayDays,
+  learningsExpiryDays,
   auditFix,
   auditUpgrade,
   auditAllowlist,

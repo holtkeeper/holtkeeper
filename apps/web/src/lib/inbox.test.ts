@@ -10,7 +10,6 @@ import {
   inboxKpis,
   shortItemId,
   kindCounts,
-  lineDiff,
   openCount,
   parseInboxSearch,
   renewalDate,
@@ -75,8 +74,8 @@ const learning: InboxItem = {
   repos: [{ repo: 'work:acme/shape-lib', teams: ['pay'] }],
   createdAt: '2026-11-01T10:00:00.000Z',
   learningId: 'l-1',
-  section: 'review',
-  suggestedScope: 'repo',
+  origin: 'reply',
+  activeAt: '2026-11-04T10:00:00.000Z',
 }
 
 const feed: InboxFeed = {
@@ -128,9 +127,7 @@ test('counts each kind segment in the chosen tab', () => {
   expect(kindCounts(feed, 'open')).toEqual({
     all: 5,
     task: 2,
-    note: 0,
     learning: 1,
-    guide: 0,
     release: 1,
     allowlist: 1,
     budget: 0,
@@ -166,7 +163,7 @@ test('summarises open items for the strip', () => {
 test('names and offers decisions per kind', () => {
   expect(approveLabel(feed.mine[0]!)).toBe('Approve')
   expect(approveLabel(allowlist)).toBe('Renew')
-  expect(approveLabel(learning)).toBe('Accept')
+  expect(approveLabel(learning)).toBe('Approve')
   expect(canApprove(release({ accept: false, run: true }))).toBe(false)
   expect(canApprove(release({ accept: true, run: false }))).toBe(true)
   expect(canReject(release({ accept: true, run: false }))).toBe(false)
@@ -207,17 +204,6 @@ test('bulk decisions run one by one and collect errors per row', async () => {
       error: 'acme/widget-kit moved to def45678 since',
     },
   ])
-})
-
-test('diffs two texts line by line', () => {
-  expect(
-    lineDiff('- Run make check.\n- Use ShapeBase.', '- Run make test.\n- Use ShapeBase.'),
-  ).toEqual([
-    { kind: 'del', text: '- Run make check.' },
-    { kind: 'add', text: '- Run make test.' },
-    { kind: 'same', text: '- Use ShapeBase.' },
-  ])
-  expect(lineDiff('', 'new')).toEqual([{ kind: 'add', text: 'new' }])
 })
 
 test('shows uuids of items short and other ids whole', () => {

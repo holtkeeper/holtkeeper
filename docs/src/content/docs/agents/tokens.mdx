@@ -9,7 +9,7 @@ sidebar:
 
 import { Button, Screen, Scroll, Tag, Toolbar, Ui } from '@ui'
 
-An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner. Besides reading, it can only make proposals that people review (knowledge entries and Guide rules) and report exposed secrets. It cannot start tasks, run release steps or approve anything.
+An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner. Besides reading, it can only propose learnings, which people may reject before they activate, and report exposed secrets. It cannot start tasks, run release steps or approve anything.
 
 ## What a token can see
 
@@ -20,7 +20,7 @@ A token carries its owner's grants, limited to these permissions:
 | `repos:read`     | Repositories, their health and analysis freshness.                             |
 | `analyses:read`  | Analysis records: public API, usages, stack, coverage, assets, test ids, jobs. |
 | `audits:read`    | Vulnerability findings from audits.                                            |
-| `knowledge:read` | The knowledge base and the Guide.                                              |
+| `knowledge:read` | Rules and learnings.                                                           |
 | `releases:read`  | Release rules, status and changes.                                             |
 
 So a developer of the storefront team gets an agent that sees the storefront's repositories, and other teams' repositories only as far as the **Reach** setting (`access.crossTeam`) lets everyone read their catalog. An admin's token reads everything, but still cannot write anything a read-only token cannot.
@@ -33,12 +33,11 @@ With passkey sign-in (`users` accounts) a token follows your **current** grants:
 
 ## What a token can propose
 
-Two tools write, and both only leave a proposal for people to review:
+One tool writes knowledge:
 
-| Tool                  | What it leaves                                                                                        |
-| --------------------- | ----------------------------------------------------------------------------------------------------- |
-| `propose_knowledge`   | A knowledge entry for one repository, waiting in **Knowledge › Notes**.                               |
-| `propose_rule_change` | One rule for a Guide section, waiting in **Knowledge › Learnings** unless the team auto-accepts them. |
+| Tool               | What it leaves                                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `propose_learning` | A pending learning in **Knowledge › Learnings**; it activates after the approval delay unless a person rejects it earlier. |
 
 See [Rules and knowledge](/agents/rules-and-knowledge/).
 

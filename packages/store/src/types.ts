@@ -489,419 +489,155 @@ export interface JobStore {
   targets(): Promise<JobTarget[]>
 }
 
-export type KnowledgeKind = 'decision' | 'convention' | 'migration' | 'quirk' | 'howto'
+/** Which kind of agent run reads a rule: reviews, agent tasks, chat or release notes. */
+export type RuleAgent = 'review' | 'task' | 'chat' | 'release'
 
-export type KnowledgeStatus = 'proposed' | 'accepted' | 'rejected' | 'archived'
-
-/**
- * Who reads an entry: `team` (default) the people its scope covers; `shared` also everyone with
- * cross-team catalog reach, so a team's decision about a library reaches other teams.
- */
-export type KnowledgeVisibility = 'team' | 'shared'
-
-/**
- * A package a knowledge entry is about. `from` and `to` are semver ranges: the versions a
- * migration starts from and lands on. Absent ranges mean any version.
- */
-export interface KnowledgePackage {
-  /** `npm`, `go`, ... */
-  ecosystem: string
-  name: string
-  from?: string
-  to?: string
-}
-
-/** A link backing an entry up: a merge request, an issue, a discussion, a doc. */
-export interface KnowledgeLink {
-  label: string
-  url: string
-}
-
-/**
- * Narrows a knowledge entry within its scope. Every given field must hold. Applicability stays
- * deterministic: nothing here depends on similarity search.
- */
-export interface KnowledgeMatch {
-  /** Only repositories in one of these families (`Store.families` ids). */
-  families?: string[]
+/** The editable content of a rule. */
+export interface RuleContent {
+  title: string
+  /** Markdown, short imperative lines. */
+  body: string
+  /** Repositories the rule applies to, and its authority: `knowledge:write` over it edits it. */
+  scope: Scope
   /**
-   * Only tasks touching a file matching one of these path globs (relative to the repository
-   * root). A task that does not say which files it touches is not narrowed by this.
+   * Repository-relative path globs: the rule reaches a prompt only when the task touches a
+   * matching file. Absent: always within `scope`.
    */
   files?: string[]
+  /** Agent runs that read the rule; absent: every one. */
+  agents?: RuleAgent[]
+  /**
+   * When to use the rule, for agents that pick rules themselves. A rule with a description and
+   * neither `files` nor an `alwaysApply` meaning is offered to agents instead of injected.
+   */
+  description?: string
+  /** `true` keeps a rule with a `description` injected anyway. */
+  alwaysApply?: boolean
 }
 
-/** The editable content of a knowledge entry. */
-export interface KnowledgeContent {
-  title: string
-  /** Markdown. */
-  body: string
-  kind: KnowledgeKind
-  /**
-   * The widest set of repositories the entry applies to, and its authority: people with
-   * `knowledge:write` over the scope accept and edit it.
-   */
-  scope: Scope
-  /** Narrows where the entry applies within `scope`; absent applies everywhere in the scope. */
-  match?: KnowledgeMatch
-  /** Free tags, e.g. `testing`, `i18n`. */
-  topics: string[]
-  /** Task kinds the entry is relevant for (`review`, `port`, `propagate`, ...) or `*`. */
-  appliesTo: string[]
-  /** Required for `migration` entries. */
-  packages?: KnowledgePackage[]
-  /** Absent means `team`. */
-  visibility?: KnowledgeVisibility
-  /**
-   * What the entry is about, as a join key for pages and tools: a library or package
-   * (`npm:react`, `Go:github.com/acme/kit`) or a stack tool (`tool:node`).
-   */
-  subject?: string
-  status: KnowledgeStatus
-  evidence: KnowledgeLink[]
-  /** Id of the entry this one replaces. */
-  supersedes?: string
-}
-
-/**
- * A decision, convention, migration note, quirk or how-to that agents read and propose and people
- * curate. `version` starts at 1 and grows by one with every `put`.
- */
-export interface KnowledgeEntry extends KnowledgeContent {
+/** A rule people wrote in the panel for an organization, team or set of repositories. */
+export interface Rule extends RuleContent {
   id: string
-  source: 'human' | 'agent'
-  /** Principal id (or agent actor) that created the entry. */
   author: string
   createdAt: Timestamp
   updatedAt: Timestamp
-  /** Who made the current version; absent for the first version. */
   updatedBy?: string
+  /** Starts at 1, grows by one with every `put`. */
   version: number
 }
 
-/** A previous version of an entry, with who made it and when. */
-export interface KnowledgeRevision extends KnowledgeContent {
+/** A previous version of a rule. */
+export interface RuleRevision extends RuleContent {
   version: number
   editedBy: string
   editedAt: Timestamp
 }
 
-/** What `KnowledgeStore.put` takes: the entry without the version the store assigns. */
-export type KnowledgeEntryInput = Omit<KnowledgeEntry, 'version'>
-
-/** Filters for `KnowledgeStore.list` and `search`. Every given field must match. */
-export interface KnowledgeFilter {
-  status?: KnowledgeStatus | KnowledgeStatus[]
-  kind?: KnowledgeKind | KnowledgeKind[]
-  /** Exact topic, case-insensitive. */
-  topic?: string
-  /**
-   * Text matched case-insensitively as a substring of the scope's teams and path patterns;
-   * `all` also matches scopes covering everything.
-   */
-  scope?: string
-  /** Package name, optionally with its ecosystem: `react` or `npm:react`. */
-  package?: string
-  /** Exact `subject`. */
-  subject?: string
-}
+/** What `RuleStore.put` takes: the rule without the version the store assigns. */
+export type RuleInput = Omit<Rule, 'version'>
 
 /** A search result; higher `score` is more relevant. */
-export interface KnowledgeHit {
-  entry: KnowledgeEntry
+export interface RuleHit {
+  rule: Rule
   score: number
 }
 
-/** The knowledge base. Entries keep every previous version. */
-export interface KnowledgeStore {
+/** Rules people wrote, each with every previous version. */
+export interface RuleStore {
   /**
-   * Creates or replaces by id and returns the stored entry. Replacing keeps the previous version
-   * in the history and bumps `version`.
+   * Creates or replaces by id and returns the stored rule; replacing keeps the previous version
+   * in the history and bumps `version`. With `expectedVersion`, throws `RuleVersionConflictError`
+   * unless the stored version (0 for a new rule) equals it, and writes nothing.
    */
-  put(entry: KnowledgeEntryInput): Promise<KnowledgeEntry>
-  get(id: string): Promise<KnowledgeEntry | undefined>
+  put(rule: RuleInput, expectedVersion?: number): Promise<Rule>
+  get(id: string): Promise<Rule | undefined>
+  /** Sorted by title. */
+  list(): Promise<Rule[]>
   /** Previous versions, newest first; empty for unknown ids. */
-  history(id: string): Promise<KnowledgeRevision[]>
-  /** Most recently updated first. */
-  list(filter?: KnowledgeFilter): Promise<KnowledgeEntry[]>
-  /** Removes the entry and its history. */
+  history(id: string): Promise<RuleRevision[]>
+  /** Removes the rule and its history. */
   remove(id: string): Promise<void>
   /**
-   * Entries matching any word of `text` (words are prefixes: `migr` finds `migration`), best
-   * first. Title matches weigh more than topic matches, which weigh more than body matches. Any
-   * text is safe: quotes, operators and punctuation are treated as plain words. Blank text
-   * returns nothing. `limit` defaults to 20.
+   * Rules matching any word of `text` (prefixes: `migr` finds `migration`), best first; title
+   * matches weigh more than body matches. Any text is safe. Blank text returns nothing. `limit`
+   * defaults to 20.
    */
-  search(text: string, filter?: KnowledgeFilter, limit?: number): Promise<KnowledgeHit[]>
+  search(text: string, limit?: number): Promise<RuleHit[]>
 }
 
-/** One stored vector: what it is of, which embedder made it from which text. */
-export interface StoredEmbedding {
-  /** What the vector is of: `knowledge:<entry id>`. */
-  subject: string
-  /** `Embedder.id` that produced it. */
-  model: string
-  /** `contentHash` of the embedded text. */
-  hash: string
-  /** Kept exactly (float32); stores keep it as little-endian float32 bytes. */
-  vector: Float32Array
-  updatedAt: Timestamp
-}
-
-/**
- * Vectors per subject and embedder. Vectors only rank and dedupe, so a store may lose them: the
- * indexer embeds again what is missing.
- */
-export interface EmbeddingStore {
-  /** Upserts by (subject, model); `updatedAt` is the time of the call. */
-  put(entries: readonly Omit<StoredEmbedding, 'updatedAt'>[]): Promise<void>
-  /** Every vector of `model`, optionally only subjects starting with `prefix`; ordered by subject. */
-  list(filter: { model: string; prefix?: string }): Promise<StoredEmbedding[]>
-  /** Drops these subjects for every model. */
-  remove(subjects: readonly string[]): Promise<void>
-  /** Drops vectors of every other model; returns how many. */
-  pruneModels(keep: string): Promise<number>
-}
-
-/** The fixed sections of a Guide, in the order prompts and the panel show them. */
-export type GuideSectionName =
-  | 'general'
-  | 'review'
-  | 'testing'
-  | 'testids'
-  | 'assets'
-  | 'commits'
-  | 'releases'
-
-/**
- * Where a Guide section applies, as a key, broad to narrow: `all`, `team:<team key>`,
- * `path:<forge>:<folder>` (a folder of the forge's path tree and everything under it),
- * `family:<family id>` or `repo:<forge>:<path>`.
- */
-export type GuideScopeKey =
-  | 'all'
-  | `team:${string}`
-  | `path:${string}`
-  | `family:${string}`
-  | `repo:${string}`
-
-/** The text a generator proposed for a section from repository signals; humans accept it. */
-export interface GuideGenerated {
-  /**
-   * Which generator run of this scope and section stored the text: 1 for the first, up by one per
-   * run that stored new text. The store assigns it.
-   */
-  version: number
-  /** The job that generated the text, when a job did. */
-  jobId?: string
-  /** Markdown. */
-  body: string
-  /** Hash of everything the generator read; an unchanged hash means no new LLM call. */
-  inputHash: string
-  model: string
-  costUsd: number
-  status: 'proposed' | 'accepted'
-  generatedAt: Timestamp
-  /** Commit the signals were read at. */
-  sha?: string
-  /** The one-off extra prompt a person gave for this run, kept for traceability. */
-  prompt?: string
-  /** Who accepted the text and when; absent while it is proposed. */
-  acceptedBy?: string
-  acceptedAt?: Timestamp
-}
-
-/** A short rule people accepted from review replies or reactions, with where it came from. */
-export interface GuideLearning {
-  id: string
-  /** One imperative sentence. */
-  rule: string
-  sources: KnowledgeLink[]
-  acceptedBy: string
-  acceptedAt: Timestamp
-}
-
-/** The human-written part of a section, the part revisions track. */
-export interface GuideHumanLayer {
-  /** Team rules in Markdown; empty when nobody wrote any. */
-  rules: string
-  /** A short prompt that steers the generator; never put into task prompts. */
-  steering: string
-}
-
-/**
- * One section of one scope's Guide. Human rules always outrank the generated layer. `version`
- * counts edits of the human layer: 0 before the first one, then up by one per change of `rules`
- * or `steering`.
- */
-export interface GuideSection extends GuideHumanLayer {
-  scope: GuideScopeKey
-  section: GuideSectionName
-  version: number
-  /** Who made the current human layer and when; absent before the first edit. */
-  editedBy?: string
-  editedAt?: Timestamp
-  /**
-   * The generated text agents see: accepted text, or a first proposal nobody accepted yet (agents
-   * get that one only when no human rules apply).
-   */
-  generated?: GuideGenerated
-  /** A newer proposal waiting for a person while `generated` holds accepted text. */
-  proposal?: GuideGenerated
-  learnings: GuideLearning[]
-}
-
-/**
- * A generated layer as `GuideStore.put` takes it: `version` is assigned by the store and only kept
- * for a layer it already stored.
- */
-export type GuideGeneratedInput = Omit<GuideGenerated, 'version'> & { version?: number }
-
-/** What `GuideStore.put` takes: the section without the versions the store assigns. */
-export type GuideSectionInput = Omit<GuideSection, 'version' | 'generated' | 'proposal'> & {
-  generated?: GuideGeneratedInput
-  proposal?: GuideGeneratedInput
-}
-
-/** A previous human layer of a section, with who made it and when. */
-export interface GuideRevision extends GuideHumanLayer {
-  version: number
-  editedBy: string
-  editedAt: Timestamp
-}
-
-/** Filters for `GuideStore.list`; every given field must match. */
-export interface GuideFilter {
-  scopes?: readonly GuideScopeKey[]
-  sections?: readonly GuideSectionName[]
-}
-
-/** Guide sections, one row per scope and section, with revisions of their human layer. */
-export interface GuideStore {
-  get(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideSection | undefined>
-  /** Sorted by scope, then section name. */
-  list(filter?: GuideFilter): Promise<GuideSection[]>
-  /**
-   * Creates or replaces the section and returns it. When `rules` or `steering` differ from the
-   * stored ones, the previous human layer goes to the history (with its `editedBy`/`editedAt`)
-   * and `version` grows by one; otherwise `version`, `editedBy` and `editedAt` stay as stored, so
-   * writing the generated layer or learnings never makes a revision.
-   *
-   * A generated layer (`generated` or `proposal`) with the `generatedAt` and `body` of a layer
-   * the section already holds keeps that layer's `version` (accepting a proposal, refreshing the
-   * hash of kept text); any other layer is a new generator run: it gets the next version of the
-   * section and is appended to the generated history. The history entry of a stored version
-   * follows later writes of that version, so it shows acceptance too.
-   */
-  put(section: GuideSectionInput): Promise<GuideSection>
-  /** Previous human layers, newest first; empty for unknown sections. */
-  history(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideRevision[]>
-  /**
-   * Every generated layer the section ever stored with a version above 0, newest version first,
-   * each as last written; empty for unknown sections.
-   */
-  generatedHistory(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideGenerated[]>
-  /** Removes every section of the scope, their history and their generated history. */
-  removeScope(scope: GuideScopeKey): Promise<void>
-}
-
-/**
- * A named set of similar repositories, e.g. near-identical app frontends of one team. A repository
- * belongs to at most one family.
- */
-export interface Family {
-  id: string
-  name: string
-  /** Repositories as `forge:path`, sorted. */
-  members: string[]
-  createdBy: string
-  createdAt: Timestamp
-  updatedAt: Timestamp
-  updatedBy?: string
-}
-
-/** Confirmed families. */
-export interface FamilyStore {
-  /** Sorted by name. */
-  list(): Promise<Family[]>
-  get(id: string): Promise<Family | undefined>
-  /**
-   * Creates or replaces by id. Throws `FamilyConflictError` when a member belongs to another
-   * family; nothing is written then.
-   */
-  put(family: Family): Promise<void>
-  remove(id: string): Promise<void>
-}
-
-/** One merge request note a learning candidate came from. */
+/** One place a learning came from: a merge request note, or a direct proposal. */
 export interface LearningSource {
   /** `forge:path`. */
-  repo: string
-  mergeRequest: number
-  discussionId: string
-  noteId: string
-  /** The note author's forge username; shown next to the candidate, never put into rule text. */
-  author: string
+  repo?: string
+  mergeRequest?: number
+  discussionId?: string
+  noteId?: string
+  /** Forge username or principal id; shown next to the learning, never put into its text. */
+  author?: string
   at: Timestamp
-  /** Link to the note, when the forge reported the merge request's URL. */
+  /** Link to the note or merge request, when known. */
   url?: string
 }
 
-export type LearningStatus = 'proposed' | 'accepted' | 'rejected'
+/**
+ * `pending` waits for the approval delay (a person may approve or reject it earlier), `active`
+ * reaches prompts, `expired` went without reinforcement for too long, `rejected` was turned down.
+ */
+export type LearningStatus = 'pending' | 'active' | 'rejected' | 'expired'
 
-/** Where a candidate's rule should apply once accepted. */
-export type LearningScopeKind = 'repo' | 'family' | 'path' | 'team'
-
-/** Who proposed a rule directly (an MCP client, through `propose_rule_change`) and why. */
-export interface LearningProposal {
-  /** Principal id of the proposer. */
-  by: string
-  reason: string
-}
+/** How a learning was made: from replies to review comments, mined from merged merge requests, proposed by an agent or written by a person. */
+export type LearningOrigin = 'reply' | 'miner' | 'agent' | 'person'
 
 /**
- * A rule extracted from replies to Holtkeeper's review comments, or proposed directly. It reaches
- * prompts only after a person accepts it: it is then a `GuideLearning` (same `id`) of the
- * `acceptedScope` section.
+ * A short rule Holtkeeper learned, kept apart from the rules people wrote and ranked below them.
+ * Counters only grow; `lastReinforcedAt` moves when the learning is confirmed again.
  */
-export interface LearningCandidate {
+export interface Learning {
   id: string
-  /** `forge:path` of the repository the first reply was in. */
-  repo: string
-  /** One imperative sentence, at most 200 characters, without personal names. */
-  rule: string
-  /** `rule` normalized; one repository holds one candidate per key. */
+  /** One imperative sentence, without personal names. */
+  text: string
+  /** `text` normalized; at most one learning per key. */
   key: string
-  section: GuideSectionName
-  suggestedScope: LearningScopeKind
-  /**
-   * The exact scope the proposer named, one of the repository's own scopes; when set, accepting
-   * without a scope goes there instead of where `suggestedScope` points (`suggestedScope` is its
-   * kind).
-   */
-  targetScope?: GuideScopeKey
+  /** Why the rule holds, when known. */
+  reason?: string
+  /** Repositories it applies to; a learning from one repository starts as `{ repos: [forge:path] }`. */
+  scope: Scope
+  /** Repository-relative path globs it is about; absent: the whole repository. */
+  files?: string[]
+  agents?: RuleAgent[]
+  origin: LearningOrigin
   status: LearningStatus
-  /** Every reply that taught the rule, oldest first; empty for a direct proposal. */
+  /** Every place that taught it, oldest first. */
   sources: LearningSource[]
-  /** Set for a rule proposed directly rather than learned from a reply. */
-  proposal?: LearningProposal
-  /** Model of the extraction and what it cost. */
-  model: string
-  costUsd: number
+  /** Model that extracted it and what that cost, for learned ones. */
+  model?: string
+  costUsd?: number
   createdAt: Timestamp
   updatedAt: Timestamp
-  /** Where the accepted rule lives. */
-  acceptedScope?: GuideScopeKey
-  /** Who accepted or rejected it and when. */
+  /** When a `pending` learning becomes active by itself. */
+  activeAt: Timestamp
+  lastReinforcedAt: Timestamp
+  /** Review comments that cited it. */
+  uses: number
+  /** Of those, comments whose finding was fixed. */
+  actedOn: number
+  votesUp: number
+  votesDown: number
+  /** Who approved, rejected or edited it and when. */
   decidedBy?: string
   decidedAt?: Timestamp
   editedBy?: string
 }
 
 export interface LearningFilter {
-  /** `forge:path` values. */
-  repos?: readonly string[]
   status?: readonly LearningStatus[]
+  origin?: readonly LearningOrigin[]
+}
+
+/** A search result; higher `score` is more relevant. */
+export interface LearningHit {
+  learning: Learning
+  score: number
 }
 
 /**
@@ -1025,15 +761,21 @@ export interface SlackMessageStore {
   prune(before: Timestamp): Promise<number>
 }
 
-/** Learning candidates, the reply notes already looked at, and reaction counts of review comments. */
+/** Learnings, the reply notes already looked at, and reaction counts of review comments. */
 export interface LearningStore {
-  get(id: string): Promise<LearningCandidate | undefined>
+  get(id: string): Promise<Learning | undefined>
   /** Most recently updated first. */
-  list(filter?: LearningFilter): Promise<LearningCandidate[]>
-  /** The candidate of `repo` whose `key` matches. */
-  find(repo: string, key: string): Promise<LearningCandidate | undefined>
+  list(filter?: LearningFilter): Promise<Learning[]>
+  /** The learning whose `key` matches. */
+  find(key: string): Promise<Learning | undefined>
   /** Creates or replaces by id. */
-  put(candidate: LearningCandidate): Promise<void>
+  put(learning: Learning): Promise<void>
+  remove(id: string): Promise<void>
+  /**
+   * Learnings whose text matches any word of `text` (prefixes), best first. Any text is safe;
+   * blank text returns nothing. `limit` defaults to 20.
+   */
+  search(text: string, filter?: LearningFilter, limit?: number): Promise<LearningHit[]>
   /**
    * Marks a source as handled; `true` only for the first caller of `key`, atomically across
    * processes sharing the store.
@@ -2496,11 +2238,9 @@ export interface Store {
   settings: SettingStore
   users: UserStore
   jobs: JobStore
-  knowledge: KnowledgeStore
-  /** Vectors of knowledge entries (and later other subjects) per embedder. */
-  embeddings: EmbeddingStore
-  guides: GuideStore
-  families: FamilyStore
+  /** Rules people wrote in the panel. */
+  rules: RuleStore
+  /** Rules Holtkeeper learned, plus reply claims and reaction counts of review comments. */
   learnings: LearningStore
   aiUsage: AiUsageStore
   ciJobs: CiJobStore

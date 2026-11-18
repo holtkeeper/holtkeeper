@@ -30,12 +30,9 @@ import { coverageRoutes } from './routes/coverage.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { databaseRoutes } from './routes/database.ts'
 import { egressRoutes } from './routes/egress.ts'
-import { embeddingRoutes } from './routes/embeddings.ts'
-import { guideRoutes } from './routes/guides.ts'
 import { homeRoutes, invalidateHome } from './routes/home.ts'
 import { inboxRoutes } from './routes/inbox.ts'
 import { jobRoutes } from './routes/jobs.ts'
-import { knowledgeRoutes } from './routes/knowledge.ts'
 import { learningRoutes } from './routes/learnings.ts'
 import { libraryIndexRoutes } from './routes/library-index.ts'
 import { licensesRoutes } from './routes/licenses.ts'
@@ -49,6 +46,7 @@ import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { repoPageRoutes } from './routes/repo-page.ts'
 import { reachableTeams, repoRoutes } from './routes/repos.ts'
 import { reviewRoutes } from './routes/reviews.ts'
+import { ruleRoutes } from './routes/rules.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { secretReportRoutes } from './routes/secret-reports.ts'
 import { settingRoutes } from './routes/settings.ts'
@@ -171,9 +169,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', branchRoutes(deps))
   api.route('/', repoPageRoutes(deps))
   api.route('/', backfillRoutes(deps))
-  api.route('/', guideRoutes(deps))
-  api.route('/', embeddingRoutes(deps))
-  api.route('/', knowledgeRoutes(deps))
+  api.route('/', ruleRoutes(deps))
   api.route('/', learningRoutes(deps))
   api.route('/', secretReportRoutes(apiSurface.secretReports))
   const dispatch = createEventDispatcher(deps)

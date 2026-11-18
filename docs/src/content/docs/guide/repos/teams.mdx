@@ -1,6 +1,6 @@
 ---
 title: Teams
-description: See the teams that own and consume your repositories, open one to read its repositories, stack, Guide and settings, and edit what it owns and who is in it.
+description: See the teams that own and consume your repositories, open one to read its repositories, stack, rules and settings, and edit what it owns and who is in it.
 panel: Repos › Teams
 route: /repos/teams
 permission: repos:read
@@ -23,7 +23,7 @@ import {
   Ui,
 } from '@ui'
 
-See the teams that own and consume your repositories, open one to read its repositories, stack, Guide and settings, and edit what it owns and who is in it. A team is a key and a title, the path patterns it **owns** (minus those it **excludes**), the patterns it **consumes**, and its members. Membership gives access on its own: nobody needs a separate grant for their team's repositories.
+See the teams that own and consume your repositories, open one to read its repositories, stack, rules and settings, and edit what it owns and who is in it. A team is a key and a title, the path patterns it **owns** (minus those it **excludes**), the patterns it **consumes**, and its members. Membership gives access on its own: nobody needs a separate grant for their team's repositories.
 
 <Screen title="Repos › Teams" caption="A shared library can have several owner teams; repositories nobody owns are counted at the end of the strip.">
   <Toolbar title="Teams">
@@ -55,7 +55,7 @@ Every team you can see: all configured teams when you may read settings for ever
 
 The strip counts the teams shown, the repositories they own and the teams with a failing repository, and ends with the fleet repositories **owned by no team**. Those still get analysed; they are in the fleet through the forge's include list (see [The fleet](/start/concepts/fleet/#what-is-in-the-fleet)).
 
-A team's **title**, such as _Widgets_, is what the panel shows everywhere: lists, the scope switch, tags in tables, Knowledge and chat. The **key** (`widgets`) is the identity: grants, settings, home teams, schedules, Guide spaces and links always use the key.
+A team's **title**, such as _Widgets_, is what the panel shows everywhere: lists, the scope switch, tags in tables, Knowledge and chat. The **key** (`widgets`) is the identity: grants, settings, home teams, schedules, rule scopes and links always use the key.
 
 ## Owners, consumers and members
 
@@ -110,7 +110,7 @@ Click a team to open its page. The header names the key and the patterns, a stri
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Repositories        | The repositories the team owns as the [Repositories](/guide/repos/repositories/) table, with every health cell, then the repositories it consumes.                       |
 | Stack & conventions | Runtimes, package managers and images of its repositories. See [Stack](/guide/supply-chain/stack/).                                                                      |
-| Knowledge           | The team's [Guide](/guide/knowledge/guide/): process rules agents read for its repositories, such as how the team reviews, commits and releases.                         |
+| Knowledge           | The [rules](/guide/knowledge/rules/) scoped to the team: process rules agents read for its repositories, such as how the team reviews, commits and releases.             |
 | Settings            | Every setting as it applies to the team, where it comes from, and overrides. Works like [repository settings](/guide/repos/repository-settings/). Needs `settings:read`. |
 
 <Ui>Run job for team</Ui> starts an analyzer job for the team's repositories.
@@ -152,7 +152,7 @@ Click a team to open its page. The header names the key and the patterns, a stri
 **Owns**, **Exclude** and **Consumes** decide who may see and change which repositories, so creating a team, changing its patterns or deleting it needs `settings:write` over everything. A team's maintainers may edit its title and members; their dialog leaves the patterns out. Team edits are recorded in the [audit log](/guide/settings/audit-log/).
 :::
 
-Deleting a team removes it as an owner from its repositories. Grants, settings and notes that name the team stop matching; the confirmation says how many repositories lose the owner.
+Deleting a team removes it as an owner from its repositories. Grants, settings and rules that name the team stop matching; the confirmation says how many repositories lose the owner.
 
 ## Teams and folders
 
@@ -160,7 +160,7 @@ Teams say who answers for a repository. **Folders** say where it lives: the forg
 
 - Settings and code rules follow folders, so give them a path pattern such as `acme/round/**`. A repository with two owner teams would otherwise get two conflicting team values.
 - Process rules, notifications and the Inbox follow teams.
-- Alike repositories in different folders (`acme/round/web` and `acme/square/web`) are reached with a pattern (`acme/*/web`) or a family in [Knowledge](/guide/knowledge/guide/).
+- Alike repositories in different folders (`acme/round/web` and `acme/square/web`) are reached with a pattern (`acme/*/web`), which a [rule](/guide/knowledge/rules/) can use as its scope.
 
 :::tip
 Pick the teams you work in on [Account › My teams](/guide/account/profile/#choose-your-teams); every list page then opens on them.
@@ -170,6 +170,6 @@ Pick the teams you work in on [Account › My teams](/guide/account/profile/#cho
 
 - [Repositories](/guide/repos/repositories/) — every repository, the folder tree and **Add repository**.
 - [Repository settings](/guide/repos/repository-settings/) — the same settings view for one repository.
-- [Guide](/guide/knowledge/guide/) — the rules a team's repositories inherit.
+- [Rules](/guide/knowledge/rules/) — the rules a team's repositories get; a team is its set of repositories.
 - [The fleet](/start/concepts/fleet/) — paths, teams and scopes.
 - [Permissions](/start/concepts/permissions/) — what membership and grants allow.

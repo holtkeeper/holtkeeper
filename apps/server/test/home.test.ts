@@ -8,7 +8,7 @@ import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { AuditEvent, Job, LearningCandidate, SettingEntry, Store } from '@holtkeeper/store'
+import type { AuditEvent, Job, Learning, SettingEntry, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 import { z } from 'zod'
@@ -101,26 +101,28 @@ const sources = (patch: Partial<HomeSources> = {}): HomeSources => ({
   audits: [],
   releases: [],
   learnings: [],
-  knowledge: [],
   analyses: [],
   allowlists: [],
   repos: [],
   ...patch,
 })
 
-const learning = (id: string, repo: string, createdAt: string): LearningCandidate => ({
+const learning = (id: string, repo: string | undefined, createdAt: string): Learning => ({
   id,
-  repo,
-  rule: 'Prefer widgets over gadgets',
+  text: 'Prefer widgets over gadgets',
   key: id,
-  section: 'general',
-  suggestedScope: 'repo',
-  status: 'proposed',
+  scope: repo ? { repos: [repo] } : { all: true },
+  origin: 'reply',
+  status: 'pending',
   sources: [],
-  model: 'model-fast',
-  costUsd: 0,
   createdAt,
   updatedAt: createdAt,
+  activeAt: createdAt,
+  lastReinforcedAt: createdAt,
+  uses: 0,
+  actedOn: 0,
+  votesUp: 0,
+  votesDown: 0,
 })
 
 const allowlist = (id: string, value: unknown, scope: SettingEntry['scope'] = { all: true }) => ({
@@ -555,37 +557,22 @@ describe('Needs attention rules', () => {
           },
         ],
         repos: ['work:colors/teal'],
-        knowledge: [
-          {
-            id: 'k1',
-            title: 'Use widgets',
-            body: '',
-            kind: 'convention',
-            status: 'proposed',
-            scope: { all: true },
-            topics: [],
-            source: 'agent',
-            author: 'agent:x',
-            createdAt: hoursAgo(4),
-            updatedAt: hoursAgo(4),
-            version: 1,
-          } as never,
-        ],
+        learnings: [learning('k1', undefined, hoursAgo(4))],
       }),
     )
     expect(items.map((item) => item.kind)).toEqual([
       'vulnerabilities',
       'budget-blocked',
       'job-failures',
-      'knowledge',
+      'learnings',
       'not-analysed',
     ])
     expect(items[1]?.href).toBe('/ops/runs?status=blocked')
     expect(items[3]).toMatchObject({
       repos: [],
-      title: '1 knowledge proposal waits for review',
-      href: '/inbox?item=note%3Ak1&kind=note',
-      action: { type: 'review', href: '/inbox?item=note%3Ak1&kind=note' },
+      title: '1 learned rule waits for review',
+      href: '/inbox?item=learning%3Ak1&kind=learning',
+      action: { type: 'review', href: '/inbox?item=learning%3Ak1&kind=learning' },
     })
   })
 })
@@ -600,7 +587,7 @@ describe('summarizeChanges', () => {
         event('user.preferences', hoursAgo(1)),
         event('user.login', hoursAgo(1)),
         event('job.create', hoursAgo(1), 'work:shapes/circle'),
-        { ...event('knowledge.update', hoursAgo(1)), outcome: 'denied' },
+        { ...event('rule.update', hoursAgo(1)), outcome: 'denied' },
       ],
       teamsOf,
     )
@@ -650,10 +637,9 @@ describe('summarizeChanges', () => {
     ])
   })
 
-  test('Guide rejections, release dismissals and allowlist renewals are changes', () => {
+  test('release dismissals and allowlist renewals are changes', () => {
     const changes = summarizeChanges(
       [
-        event('guide.reject', hoursAgo(1), 'work:shapes/circle'),
         event('release.dismiss', hoursAgo(2), 'work:colors/red', 'u1', { sha: 'abc123' }),
         event('allowlist.renew', hoursAgo(3), undefined, 'u1', {
           key: 'audit.allowlist',
@@ -664,11 +650,6 @@ describe('summarizeChanges', () => {
     )
     expect(changes.map((change) => [change.kind, change.text, change.href])).toEqual([
       [
-        'guide',
-        'Rejected generated Guide text for shapes/circle',
-        '/knowledge/guide?space=repo%3Awork%3Ashapes%2Fcircle',
-      ],
-      [
         'release',
         'Dismissed the waiting release of colors/red',
         '/releases/timeline?repo=work%3Acolors%2Fred',
@@ -677,34 +658,25 @@ describe('summarizeChanges', () => {
     ])
   })
 
-  test('each accepted learning is a change; the batch request event is not', () => {
+  test('learning decisions and rule edits are changes', () => {
     const changes = summarizeChanges(
       [
-        event('learning.accept', hoursAgo(1), 'work:shapes/circle'),
-        event('learning.accept', hoursAgo(2), 'work:colors/red'),
-        event('learnings.accept', hoursAgo(1)),
         {
-          ...event('knowledge.update', hoursAgo(3)),
-          target: { type: 'knowledge', id: 'n-1' },
+          ...event('learning.approve', hoursAgo(1), 'work:shapes/circle'),
+          target: { type: 'learning', id: 'l-1', repo: 'work:shapes/circle' },
         },
-        {
-          ...event('knowledge.delete', hoursAgo(4)),
-          target: { type: 'knowledge', id: 'n-2' },
-        },
+        { ...event('learning.reject', hoursAgo(2)), target: { type: 'learning', id: 'l-2' } },
+        { ...event('learning.update', hoursAgo(2)), target: { type: 'learning', id: 'l-3' } },
+        { ...event('rule.update', hoursAgo(3)), target: { type: 'rule', id: 'r-1' } },
+        { ...event('rule.delete', hoursAgo(4)), target: { type: 'rule', id: 'r-2' } },
       ],
       teamsOf,
     )
     expect(changes.map((change) => [change.text, change.href])).toEqual([
-      [
-        'Accepted a learned rule for shapes/circle',
-        '/knowledge/learnings?space=repo%3Awork%3Ashapes%2Fcircle',
-      ],
-      [
-        'Accepted a learned rule for colors/red',
-        '/knowledge/learnings?space=repo%3Awork%3Acolors%2Fred',
-      ],
-      ['Edited a knowledge note', '/knowledge/notes?note=n-1'],
-      ['Deleted a knowledge note', '/knowledge/notes'],
+      ['Approved a learned rule for shapes/circle', '/knowledge/learnings?learning=l-1'],
+      ['Rejected a learned rule', '/knowledge/learnings?learning=l-2'],
+      ['Edited a team rule', '/knowledge/rules?rule=r-1'],
+      ['Deleted a team rule', '/knowledge/rules'],
     ])
   })
 

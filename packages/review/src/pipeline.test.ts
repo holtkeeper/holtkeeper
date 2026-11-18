@@ -177,9 +177,9 @@ describe('reviewMergeRequest', () => {
       runOf({
         forge: requireReviewForge(forge),
         agent,
-        guide: async (docs) => ({
-          text: `Guide with ${docs.length} docs. Check money.`,
-          scopes: ['all', 'team:web'],
+        guide: async (repoFiles) => ({
+          text: `Rules with ${repoFiles.length} files. Check money.`,
+          sources: ['All repositories', 'Team web'],
         }),
         onProgress: (stage) => stages.push(stage),
       }),
@@ -214,7 +214,7 @@ describe('reviewMergeRequest', () => {
     expect(tasks[1]).toMatchObject({ taskKind: 'review-verify', tier: 'deep' })
     expect(tasks[1]?.prompt).toContain('Rounding missing')
     expect(data.usage).toMatchObject({ turns: 4, inputTokens: 200, model: 'fake-main' })
-    expect(data.guideScopes).toEqual(['all', 'team:web'])
+    expect(data.ruleSources).toEqual(['All repositories', 'Team web'])
     expect(data.durationMs).toBeGreaterThanOrEqual(0)
 
     const [submission] = submissions
@@ -263,11 +263,11 @@ describe('reviewMergeRequest', () => {
           forge: requireReviewForge(forge),
           agent,
           dir,
-          guide: async () => ({ text: 'Plain rules.', scopes: [] }),
+          guide: async () => ({ text: 'Plain rules.', sources: [] }),
         }),
       )
       expect(tasks[0]?.context).toContain('Plain rules.')
-      expect(data.guideScopes).toBeUndefined()
+      expect(data.ruleSources).toBeUndefined()
 
       expect(tasks[0]?.prompt).toContain('- `src/**` (src/price.ts): money is integer cents.')
       expect(tasks[0]?.prompt).not.toContain('reversible only')

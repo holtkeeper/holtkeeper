@@ -30,20 +30,7 @@ import { localRunner } from '@holtkeeper/exec'
 import { egressEnvironment, miseCacheStorage } from '@holtkeeper/exec-container'
 import { type RepoRef, resolveSecret } from '@holtkeeper/forge'
 import { gitlabTokenRotator } from '@holtkeeper/forge-gitlab'
-import {
-  createGuideResolver,
-  digestedDocs,
-  testIdOverridesFor,
-  testIdsSettingKey,
-} from '@holtkeeper/guide'
-import { createGuideAnalyzer } from '@holtkeeper/guide-generator'
 import { validateJiraCredentialOptions } from '@holtkeeper/issues-jira'
-import { knowledgeAccess } from '@holtkeeper/knowledge'
-import {
-  createKnowledgeBootstrapAnalyzer,
-  createKnowledgeHarvestAnalyzer,
-  createKnowledgeVerifyAnalyzer,
-} from '@holtkeeper/knowledge-bootstrap'
 import { createLimiter, limitsCredentialsSetting } from '@holtkeeper/limits'
 import {
   type DefaultTrigger,
@@ -61,15 +48,15 @@ import {
   releaseSettingsDefinition,
 } from '@holtkeeper/release'
 import type { AnalysisKind } from '@holtkeeper/report'
-import { createReviewAnalyzer } from '@holtkeeper/review'
+import { createReviewAnalyzer, reviewGuideOf } from '@holtkeeper/review'
+import { createRuleMinerAnalyzer } from '@holtkeeper/rule-miner'
+import { testIdOverridesFor, testIdsSettingKey } from '@holtkeeper/rules'
 import { secretReportsDefinition } from '@holtkeeper/secret-reports'
 import {
   type DefaultSetting,
   type SettingDefinition,
   builtinSettings,
   defaultSettings,
-  guideAutoAccept,
-  resolveSetting,
   seedDefaultSettings,
 } from '@holtkeeper/settings'
 import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
@@ -81,21 +68,18 @@ import { securityAlertsDefinition } from '@holtkeeper/vuln-triage'
 import { mirrorStorage } from '@holtkeeper/workspace'
 import { WRITE_POOL, createWriteTaskAnalyzer } from '@holtkeeper/write-task'
 
-import { autoAcceptFrom, semanticAccess, settingsAgentFor } from './agent.ts'
+import { settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
-import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
 import { createApp } from './app.ts'
 import { assetsPolicyFor } from './assets.ts'
 import { verifyAuditChainIfDue } from './audit-verify.ts'
 import { startAuditRetention } from './audit.ts'
-import { type ServerDeps, forgeFor, repoTarget, teamLabeler } from './context.ts'
+import { type ServerDeps, forgeFor, repoTarget } from './context.ts'
 import { startDatabaseSnapshots } from './database.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
-import { createKnowledgeEmbeddings, guideSemantic, watchKnowledgeWrites } from './embeddings.ts'
 import { createEventDispatcher } from './events.ts'
-import { fleetPackagesOf } from './fleet-packages.ts'
 import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
 import { goGuidelinesDuty, goGuidelinesSource } from './go-guidelines.ts'
 import { retiredReadOnlyCheck } from './health.ts'
@@ -121,7 +105,6 @@ import { startManagedConfig } from './managed.ts'
 import type { MediaEngine } from './media/engine.ts'
 import { createMediaReviewer } from './media/reviewer.ts'
 import { noteReviewJob } from './mr-status.ts'
-import { createNeighbourIndex, guideNeighbours } from './neighbours.ts'
 import { startOperations } from './operations.ts'
 import { agentOpsAccess } from './ops-tools.ts'
 import { releaseAnnouncerFor } from './release-announce.ts'
@@ -130,8 +113,8 @@ import { releaseServiceFor } from './releases.ts'
 import { repoCleanupDuty } from './repo-cleanup.ts'
 import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
 import { reviewApiChanges } from './review-api-changes.ts'
-import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
+import { createRulesResolver, learningPolicyFor, settleLearnings } from './rules.ts'
 import { secretReportsEnabled } from './secret-reports.ts'
 import { createSecurityAlerts } from './security-alerts.ts'
 import { createSlackReviews } from './slack/service.ts'
@@ -145,6 +128,7 @@ import {
   taskJobFinished,
   taskStarted,
 } from './tasks.ts'
+import { knowledgeAccessOf } from './tools/knowledge.ts'
 import { type SupplyToolsAccess, supplyToolsAccess } from './tools/repos.ts'
 import { commitConventionsReader } from './tools/rules.ts'
 import { serverPoller } from './updates.ts'
@@ -291,9 +275,7 @@ export async function startServer(
       validateJiraCredentialOptions(kind, values) ??
       aiProviderOptionsValidatorFor(aiProviders)(kind, values),
   })
-  // Vectors of knowledge notes; every knowledge write through `store` below re-embeds it.
-  const embeddings = createKnowledgeEmbeddings({ store: server.store, credentials, log })
-  const store = watchKnowledgeWrites(server.store, () => embeddings.touch())
+  const store = server.store
   const duties = roleDuties(options.roles ?? ['all'])
   const limiterOptions = limiterOptionsFor(fileConfig, store)
   const limiter = createLimiter(limiterOptions)
@@ -330,12 +312,21 @@ export async function startServer(
   const mediaCache = artifactCache(artifacts, {
     onError: (error) => log(`cache: ${error instanceof Error ? error.message : String(error)}`),
   })
-  // Repositories like each other share knowledge through the Guide's lowest-priority block.
-  const neighbourIndex = createNeighbourIndex({ store, config })
-  // The review analyzer needs server state: the Guide and the knowledge base.
-  const resolveGuide = createGuideResolver({
+  const resolveRules = createRulesResolver({ store, config, now: () => new Date(), log })
+  const knowledge = knowledgeAccessOf({
     store,
-    teamTitle: teamLabeler(config),
+    config,
+    canReadScope: () => true,
+    repoOf: (value) => {
+      const separator = value.indexOf(':')
+      if (separator < 1 || separator === value.length - 1) return undefined
+      return repoTarget(config, {
+        forge: value.slice(0, separator),
+        path: value.slice(separator + 1),
+      })
+    },
+    actor: 'agent:review',
+    now: () => new Date(),
   })
   const testsOf = repoTestsFor(store, () => config)
   const testsExpected = testsExpectedFor(store, () => config)
@@ -363,43 +354,17 @@ export async function startServer(
       ...(server.publicUrl ? { publicUrl: server.publicUrl } : {}),
     }),
     knowledge: {
-      access: knowledgeAccess({
-        store,
-        now: () => new Date(),
-        autoAccept: async (repo) => autoAcceptFrom(await store.settings.list(), repo),
-        ...semanticAccess(embeddings),
-      }),
+      access: knowledge,
       teamsOf: (repo) => repoTarget(config, repo).teams,
     },
-    async guideFor(repo, { docs, query, files }) {
-      const target = repoTarget(config, repo)
-      const neighbours = await guideNeighbours(
-        { index: neighbourIndex, store, config, log },
-        target,
-      )
-      const semantic = await guideSemantic(
-        embeddings,
-        store,
-        target,
-        [query, ...(files ?? [])].filter(Boolean).join('\n'),
-        neighbours?.repos.map((neighbour) => neighbour.repo),
-      )
-      const resolved = await resolveGuide({
-        repo: target,
-        task: 'review',
-        repoDocs: await digestedDocs({
-          kv: store.kv,
-          forgeId: target.forge,
-          repo: target.path,
-          task: 'review',
-          docs,
-        }),
-        ...(query && { query }),
+    async guideFor(repo, { repoFiles, files }) {
+      const resolved = await resolveRules({
+        repo: repoTarget(config, repo),
+        agent: 'review',
+        repoFiles,
         ...(files && { files }),
-        ...(semantic && { semantic }),
-        ...(neighbours && { neighbours }),
       })
-      return resolved.text ? { text: resolved.text, scopes: guideScopesOf(resolved) } : undefined
+      return resolved.text ? reviewGuideOf(resolved) : undefined
     },
   })
   const documentDeps = { config, store, credentials }
@@ -410,28 +375,13 @@ export async function startServer(
     definitionsFor: trackerDefinitionsFor(documentDeps),
     teamRepos: () => undefined,
   })
-  const guide = createGuideAnalyzer({
+  const ruleMiner = createRuleMinerAnalyzer({
     store,
-    teamsOf: (repo) => repoTarget(config, repo).teams,
-    testsExpected,
-    autoAccept: async (repo) => {
-      const entries = await store.settings.list(guideAutoAccept.key)
-      const parsed = guideAutoAccept.schema.safeParse(
-        resolveSetting(entries, guideAutoAccept.key, repoTarget(config, repo))?.value,
-      )
-      return parsed.success ? parsed.data : []
-    },
-  })
-  const lessonDeps = {
-    store,
-    teamsOf: (repo: RepoRef) => repoTarget(config, repo).teams,
     botUsername: (repo: RepoRef) => config.jobs.botUsernames?.[repo.forge],
-    fleetPackages: async () =>
-      fleetPackagesOf(await createApiCatalog({ analyses: store.analyses }).packages(() => true)),
-  }
-  const knowledgeBootstrap = createKnowledgeBootstrapAnalyzer(lessonDeps)
-  const knowledgeHarvest = createKnowledgeHarvestAnalyzer(lessonDeps)
-  const knowledgeVerify = createKnowledgeVerifyAnalyzer({ store, teamsOf: lessonDeps.teamsOf })
+    policy: async (repo: RepoRef) =>
+      learningPolicyFor(await store.settings.list(), repoTarget(config, repo)),
+    now: () => new Date(),
+  })
   const conventionsOf = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),
     settings: store.settings,
@@ -475,10 +425,7 @@ export async function startServer(
     review,
     propagate,
     tracker,
-    guide,
-    'knowledge-bootstrap': knowledgeBootstrap,
-    'knowledge-harvest': knowledgeHarvest,
-    'knowledge-verify': knowledgeVerify,
+    'rule-miner': ruleMiner,
     browserslist,
     'write-task': writeTask,
   }
@@ -506,8 +453,6 @@ export async function startServer(
             releaseServiceFor(deps).snapshot(requester),
           ),
         supply: (requester) => (supplyFor ??= supplyToolsAccess(deps))(requester),
-        semantics: embeddings,
-        neighbours: neighbourIndex,
       })
   const agentFor: AgentFor = options.agentFor ?? settingsAgent ?? (() => undefined)
   // Areas on the disks of the process that runs jobs; web processes see them through reports.
@@ -535,8 +480,6 @@ export async function startServer(
     readOnly: managed.readOnly,
     limiter,
     credentials,
-    embeddings,
-    neighbours: neighbourIndex,
     settings: [
       ...builtinSettings,
       mergeRequestPoliciesSetting,
@@ -640,7 +583,6 @@ export async function startServer(
     artifacts,
     limiter,
     log,
-    readyInfo: { embeddings: async () => (await embeddings.status()).state },
     leaderDuties: [
       () =>
         server.rotationIntervalMinutes > 0
@@ -698,7 +640,10 @@ export async function startServer(
         log,
       }),
       () => releaseServiceFor(deps).startBoardRefresh(),
-      embeddings.duty,
+      periodicDuty('learnings', () => settleLearnings({ store, config, now: deps.now }), {
+        intervalMs: 3_600_000,
+        log,
+      }),
     ],
   })
   metrics = ops.metrics
@@ -736,7 +681,6 @@ export async function startServer(
         log(`drained: ${drained.finished} job(s) finished, ${drained.requeued} requeued`)
       }
       await ops.stop()
-      await embeddings.flush()
       await stopStorageReports?.()
       managed.stop()
       await listener.stop()

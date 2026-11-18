@@ -30,11 +30,11 @@ const home: Pick<HomeView, 'attention' | 'changes'> = {
   attention: [
     attention('a'),
     attention('b', {
-      kind: 'knowledge',
+      kind: 'learnings',
       severity: 'low',
-      title: '1 knowledge proposal',
+      title: '1 pending learning',
       repos: [],
-      href: '/inbox?kind=note',
+      href: '/inbox?kind=learning',
     }),
   ],
   changes: [
@@ -197,7 +197,7 @@ describe('groupAttention', () => {
   const items = [
     attention('a', { severity: 'medium', repos: [{ repo: 'work:shapes/square', teams: [] }] }),
     attention('b', { severity: 'critical', kind: 'vulnerabilities' }),
-    attention('c', { severity: 'low', kind: 'knowledge', repos: [] }),
+    attention('c', { severity: 'low', kind: 'learnings', repos: [] }),
     attention('d', { severity: 'critical', snoozed: true }),
   ]
 
@@ -225,7 +225,7 @@ describe('groupAttention', () => {
     expect(groupAttention(items, 'kind').map((group) => group.label)).toEqual([
       'Job failure',
       'Vulnerability',
-      'Knowledge',
+      'Learnings',
     ])
     expect(groupAttention(items, 'repo').map((group) => group.label)).toEqual([
       'shapes/circle',

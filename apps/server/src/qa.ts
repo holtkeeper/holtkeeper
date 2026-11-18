@@ -8,7 +8,6 @@ import type {
   QaTaskView,
 } from '@holtkeeper/api'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
-import { testIdOverridesFor, testIdsSettingKey } from '@holtkeeper/guide'
 import { type Issue, issuesByKey } from '@holtkeeper/issues'
 import {
   type QaChange,
@@ -34,6 +33,7 @@ import {
   summaryInputs,
 } from '@holtkeeper/qa'
 import { readStored, releaseSettings, releaseSettingsKey } from '@holtkeeper/release'
+import { testIdOverridesFor, testIdsSettingKey } from '@holtkeeper/rules'
 import { resolveSetting } from '@holtkeeper/settings'
 import type { KvStore } from '@holtkeeper/store'
 import { defaultAttributes } from '@holtkeeper/testids'

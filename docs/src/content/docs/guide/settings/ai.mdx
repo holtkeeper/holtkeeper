@@ -158,7 +158,7 @@ The **Budgets** block (needs `ai:read`) shows the broadest budget you may read: 
         ['Reviews', '$31.20'],
         ['Agent tasks', '$14.80'],
         ['Chat', '$9.10'],
-        ['Guide and learnings', '$6.30'],
+        ['Learnings', '$6.30'],
         ['Release notes', '$2.00'],
       ]}
     />
@@ -190,23 +190,9 @@ A budget entry scoped to teams or path patterns is a **cap**: a weekly limit for
 
 Features have no caps of their own; their rows show spend and share only. A **Preset** picker offers ready-made budgets (_default_, _learn_, _small team_).
 
-## Semantic search
-
-**Semantic search** stores a vector of every knowledge note, so agents find notes by meaning, the Guide ranks notes by meaning and differently worded duplicates are caught (see [Notes](/guide/knowledge/notes/#semantic-search)). It is off by default and applies to the whole instance.
-
-1. Turn on the switch.
-2. Pick the credential. By default it is the AI provider agents use. It has to be of kind `ai-sdk`, an endpoint that speaks the OpenAI Embeddings format.
-3. Pick the model. The list comes from the credential's endpoint and shows the price per million tokens when the endpoint gives it. The default is `openai/text-embedding-3-small`.
-4. Set **Dimensions** only for models that can shorten their vectors; leave it empty otherwise.
-5. Save. Notes are embedded in the background.
-
-The status line shows the state (Off, Indexing, Ready, Error), how many notes are indexed, the model, the last run and the last error. While it shows an error, search and the Guide use words only. <Ui>Reindex</Ui> drops every vector and embeds all notes again, for example after the endpoint changed how it embeds.
-
-Embedding calls count against the weekly budget as automatic work, task kind `embedding`. When automatic work has used up the budget, nothing is embedded and search uses words only until the week resets. Changing the switch, the model or the credential needs `settings:write` over everything; the status shows to anyone who reads knowledge.
-
 ## Agent tools
 
-**Advanced: agent tools** lists every tool agents can call, read only: its toolset, who gets it (Reviews, Chat, Agent tasks, MCP clients) and whether it writes. Tools cannot be switched off. Under **Advanced** you also find the setting for how much of an agent's Guide knowledge notes may take.
+**Advanced: agent tools** lists every tool agents can call, read only: its toolset, who gets it (Reviews, Chat, Agent tasks, MCP clients) and whether it writes. Tools cannot be switched off.
 
 ## Who sees this section
 

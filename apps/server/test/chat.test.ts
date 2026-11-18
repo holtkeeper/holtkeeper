@@ -140,6 +140,7 @@ beforeEach(async () => {
       return withServerDefaults(agent, {
         repo: target,
         store,
+        config: chatConfig,
         now,
         artifacts,
         origin: { actor: run.actor, interactive: true },
@@ -318,7 +319,7 @@ describe('team chat threads', () => {
         },
         { dir: task.dir, signal: new AbortController().signal },
       )
-      return { text: 'Use the shared widget. [kb:3]', turns: 3, costUsd: 0.07, transcriptRef }
+      return { text: 'Use the shared widget. [rule:3]', turns: 3, costUsd: 0.07, transcriptRef }
     }
     const asked = await post(thread.id, '@Holtkeeper which widget should we use?', asMember)
     expect(asked.replying).toBe(true)
@@ -343,7 +344,7 @@ describe('team chat threads', () => {
     const page = await messages(thread.id)
     const answer = page.messages.find((message) => message.authorType === 'agent' && message.body)
     expect(answer).toMatchObject({
-      body: 'Use the shared widget. [kb:3]',
+      body: 'Use the shared widget. [rule:3]',
       costUsd: 0.07,
       toolTrace: [
         { tool: 'search_knowledge', calls: 2 },
@@ -909,7 +910,7 @@ describe('thread context, refs, mute and export', () => {
       'work:p/box',
     ])
 
-    await post(team.id, 'Compare with work:p/box and work:g/app, see [kb:7].', asAdmin)
+    await post(team.id, 'Compare with work:p/box and work:g/app, see [learn:7].', asAdmin)
     const asked = await context(team.id, asMember)
     expect(asked.repos).toEqual(['work:g/lib', 'work:g/app'])
     expect(asked.hiddenRepoCount).toBe(1)
@@ -917,12 +918,12 @@ describe('thread context, refs, mute and export', () => {
     const page = await messages(team.id, asMember)
     expect(page.messages[0]?.refs).toEqual([
       { kind: 'repo', repo: 'work:g/app' },
-      { kind: 'note', id: '7' },
+      { kind: 'note', id: 'learn:7' },
     ])
     expect((await messages(team.id)).messages[0]?.refs).toEqual([
       { kind: 'repo', repo: 'work:p/box' },
       { kind: 'repo', repo: 'work:g/app' },
-      { kind: 'note', id: '7' },
+      { kind: 'note', id: 'learn:7' },
     ])
     expect((await context(team.id)).repos).toEqual(['work:g/lib', 'work:p/box', 'work:g/app'])
     expect((await call('GET', `/chat/threads/${team.id}/context`, asNobody)).status).toBe(403)
@@ -944,7 +945,7 @@ describe('thread context, refs, mute and export', () => {
   })
 
   test('cost shows only with ai:read; counts, tools and participants show to every reader', async () => {
-    respond = () => ({ text: 'Look at work:g/app, [kb:3].', turns: 1, costUsd: 0.05 })
+    respond = () => ({ text: 'Look at work:g/app, [rule:3].', turns: 1, costUsd: 0.05 })
     const thread = await createThread({ title: 'Arcade', repo: 'work:g/app', autoReply: true })
     await post(thread.id, 'Hello?', asMember)
     const full = await context(thread.id)
@@ -959,7 +960,7 @@ describe('thread context, refs, mute and export', () => {
     expect(reply).not.toHaveProperty('costUsd')
     expect(reply?.refs).toEqual([
       { kind: 'repo', repo: 'work:g/app' },
-      { kind: 'note', id: '3' },
+      { kind: 'note', id: 'rule:3' },
     ])
     expect((await messages(thread.id)).messages.at(-1)?.costUsd).toBe(0.05)
     expect((await context(thread.id, asMixed)).costUsd).toBe(0.05)

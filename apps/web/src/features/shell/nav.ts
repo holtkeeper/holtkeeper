@@ -1,7 +1,6 @@
 import type { Action, CrossTeamLevel, Principal } from '@holtkeeper/api'
 import type { LinkProps } from '@tanstack/react-router'
 import {
-  BookMarked,
   BookOpen,
   Bot,
   Boxes,
@@ -27,7 +26,6 @@ import {
   type LucideIcon,
   MessageSquareCode,
   MessagesSquare,
-  NotebookPen,
   Package,
   Plug,
   Radar,
@@ -108,9 +106,7 @@ export interface NavItem {
     | '/releases/timeline'
     | '/releases/qa'
     | '/releases/setup'
-    | '/knowledge/handbook'
-    | '/knowledge/guide'
-    | '/knowledge/notes'
+    | '/knowledge/rules'
     | '/knowledge/learnings'
     | '/ops/runs'
     | '/ops/tasks'
@@ -290,23 +286,9 @@ const navItems: readonly NavItem[] = [
   },
   {
     workspace: 'knowledge',
-    to: '/knowledge/handbook',
-    label: 'Handbook',
-    icon: BookMarked,
-    requires: 'knowledge:read',
-  },
-  {
-    workspace: 'knowledge',
-    to: '/knowledge/guide',
-    label: 'Guide',
+    to: '/knowledge/rules',
+    label: 'Rules',
     icon: BookOpen,
-    requires: 'knowledge:read',
-  },
-  {
-    workspace: 'knowledge',
-    to: '/knowledge/notes',
-    label: 'Notes',
-    icon: NotebookPen,
     requires: 'knowledge:read',
   },
   {
@@ -426,7 +408,7 @@ const workspaceGuides: Record<string, string> = {
   supply: 'supply-chain/libraries',
   quality: 'quality/coverage',
   releases: 'releases/overview',
-  knowledge: 'knowledge/guide',
+  knowledge: 'knowledge/rules',
   ops: 'ops/runs',
   settings: 'settings/people',
 }

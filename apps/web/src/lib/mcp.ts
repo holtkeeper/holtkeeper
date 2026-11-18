@@ -109,7 +109,7 @@ export const toolParams = (tool: McpTool): McpToolParam[] => {
     .toSorted((a, b) => Number(b.required) - Number(a.required))
 }
 
-const knowledgeTools = new Set(['search_knowledge', 'get_knowledge', 'propose_knowledge'])
+const knowledgeTools = new Set(['search_knowledge', 'propose_learning'])
 
 const isLibraryTool = (name: string) =>
   name === 'evaluate_dependency' || (libraryTools as readonly string[]).includes(name)
@@ -142,7 +142,7 @@ export const groupTools = (tools: readonly McpTool[]) =>
       id: 'knowledge',
       label: 'Team knowledge',
       description:
-        'Decisions, conventions and migration notes of the knowledge base; proposals from agents wait for review in Knowledge › Notes.',
+        'Rules agents follow in each repository and the learnings Holtkeeper picked up; proposed learnings wait in Knowledge › Learnings.',
       tools: tools.filter((tool) => isKnowledgeTool(tool.name)),
     },
     {

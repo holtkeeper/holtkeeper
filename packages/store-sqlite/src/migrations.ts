@@ -760,6 +760,101 @@ export const migrations: readonly Migration[] = [
       DROP TABLE audit_runs;
     `,
   },
+  {
+    version: 34,
+    sql: `
+      DROP TRIGGER knowledge_fts_insert;
+      DROP TRIGGER knowledge_fts_delete;
+      DROP TRIGGER knowledge_fts_update;
+      DROP TABLE knowledge_fts;
+      DROP TABLE knowledge_history;
+      DROP TABLE knowledge;
+      DROP TABLE guide_generated;
+      DROP TABLE guide_history;
+      DROP TABLE guides;
+      DROP TABLE families;
+      DROP TABLE embeddings;
+      DROP TABLE learnings;
+
+      CREATE TABLE rules (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        description TEXT,
+        scope TEXT NOT NULL,
+        files TEXT,
+        agents TEXT,
+        always_apply INTEGER,
+        author TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT,
+        version INTEGER NOT NULL
+      );
+      CREATE INDEX rules_title ON rules (lower(title), id);
+
+      CREATE TABLE rule_history (
+        rule_id TEXT NOT NULL REFERENCES rules (id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        edited_by TEXT NOT NULL,
+        edited_at TEXT NOT NULL,
+        PRIMARY KEY (rule_id, version)
+      );
+
+      CREATE VIRTUAL TABLE rules_fts USING fts5(
+        title, description, body,
+        content = 'rules', content_rowid = 'seq',
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER rules_fts_insert AFTER INSERT ON rules BEGIN
+        INSERT INTO rules_fts (rowid, title, description, body)
+          VALUES (new.seq, new.title, new.description, new.body);
+      END;
+      CREATE TRIGGER rules_fts_delete AFTER DELETE ON rules BEGIN
+        INSERT INTO rules_fts (rules_fts, rowid, title, description, body)
+          VALUES ('delete', old.seq, old.title, old.description, old.body);
+      END;
+      CREATE TRIGGER rules_fts_update AFTER UPDATE ON rules BEGIN
+        INSERT INTO rules_fts (rules_fts, rowid, title, description, body)
+          VALUES ('delete', old.seq, old.title, old.description, old.body);
+        INSERT INTO rules_fts (rowid, title, description, body)
+          VALUES (new.seq, new.title, new.description, new.body);
+      END;
+
+      CREATE TABLE learnings (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        key TEXT NOT NULL,
+        text TEXT NOT NULL,
+        status TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX learnings_key ON learnings (key);
+      CREATE INDEX learnings_updated_at ON learnings (updated_at DESC, id);
+      CREATE INDEX learnings_status ON learnings (status, updated_at DESC);
+
+      CREATE VIRTUAL TABLE learnings_fts USING fts5(
+        text,
+        content = 'learnings', content_rowid = 'seq',
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER learnings_fts_insert AFTER INSERT ON learnings BEGIN
+        INSERT INTO learnings_fts (rowid, text) VALUES (new.seq, new.text);
+      END;
+      CREATE TRIGGER learnings_fts_delete AFTER DELETE ON learnings BEGIN
+        INSERT INTO learnings_fts (learnings_fts, rowid, text) VALUES ('delete', old.seq, old.text);
+      END;
+      CREATE TRIGGER learnings_fts_update AFTER UPDATE ON learnings BEGIN
+        INSERT INTO learnings_fts (learnings_fts, rowid, text) VALUES ('delete', old.seq, old.text);
+        INSERT INTO learnings_fts (rowid, text) VALUES (new.seq, new.text);
+      END;
+    `,
+  },
 ]
 
 /**

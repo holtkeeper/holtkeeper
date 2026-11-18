@@ -231,8 +231,8 @@ async function bundleSection(context: DependencyContext, query: Resolved) {
 /**
  * What the organization knows about a dependency before it is added or upgraded, as Markdown:
  * who uses it at which versions, open advisories from the newest audits, licenses with the
- * verdicts of each repository's policy, its share of measured bundles and accepted team
- * knowledge about it. Only stored analyses are read; nothing is fetched from registries.
+ * verdicts of each repository's policy, its share of measured bundles and the team rules
+ * and learned rules that mention it. Only stored analyses are read; nothing is fetched from registries.
  */
 export async function evaluateDependency(
   context: DependencyContext,
@@ -250,7 +250,7 @@ export async function evaluateDependency(
     licenseSection(context, query),
     bundleSection(context, query),
     searchKnowledge(context.knowledge, {
-      package: query.package,
+      query: query.package,
       limit: 5,
       ...(query.repo && context.knowledge.repoOf(query.repo) ? { repo: query.repo } : {}),
     }),
@@ -261,6 +261,6 @@ export async function evaluateDependency(
     ['## Vulnerabilities', ...vulnerabilities].join('\n'),
     ['## Licenses', ...licenses].join('\n'),
     ...(bundles.length ? [['## Bundle size', ...bundles].join('\n')] : []),
-    `## Team knowledge\n\n${knowledge}`,
+    `## Team rules\n\n${knowledge}`,
   ].join('\n\n')
 }

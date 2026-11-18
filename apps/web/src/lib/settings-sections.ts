@@ -1,7 +1,6 @@
 import type { SettingDefinitionView } from '@holtkeeper/api'
 
 import { automationSettingKeys } from './automation-flow.ts'
-import { type KnowledgeTab, sectionPolicies } from './guide.ts'
 
 /** The sections of Settings in display order; also the `$section` of `/settings/$section`. */
 export const settingsSectionIds = [
@@ -18,9 +17,9 @@ export type SettingsSectionId = (typeof settingsSectionIds)[number]
 
 /**
  * Label, summary and the setting keys each Settings section is the home of, in display order.
- * Analyzers homes no key and Policies only the auto-accept policies (`knowledge.autoAccept`,
- * `learnings.autoAccept`, `guide.autoAccept`), `repo.analyzers` and `mergeRequests.comments`: otherwise they are a second way
- * into keys their pages own (see `sharedSectionKeys`).
+ * Analyzers homes no key and Policies only the learning lifecycle (`learnings.approvalDelayDays`,
+ * `learnings.expiryDays`), `repo.analyzers` and `mergeRequests.comments`: otherwise they are a
+ * second way into keys their pages own (see `sharedSectionKeys`).
  */
 export const settingsSections: Readonly<
   Record<SettingsSectionId, { label: string; description: string; keys: readonly string[] }>
@@ -34,7 +33,7 @@ export const settingsSections: Readonly<
   ai: {
     label: 'AI',
     description: 'The provider agents use, the weekly budget and AI credentials',
-    keys: ['llm.provider', 'llm.tiers', 'llm.budget', 'agent.tools', 'knowledge.embeddings'],
+    keys: ['llm.provider', 'llm.tiers', 'llm.budget', 'agent.tools'],
   },
   integrations: {
     label: 'Integrations',
@@ -57,11 +56,10 @@ export const settingsSections: Readonly<
   policies: {
     label: 'Policies',
     description:
-      'License policy, the security allowlist, commit conventions, what agents may learn without review and other rules repositories are judged by',
+      'License policy, the security allowlist, commit conventions, how long learnings wait and live and other rules repositories are judged by',
     keys: [
-      'knowledge.autoAccept',
-      'learnings.autoAccept',
-      'guide.autoAccept',
+      'learnings.approvalDelayDays',
+      'learnings.expiryDays',
       'repo.analyzers',
       'mergeRequests.comments',
     ],
@@ -103,12 +101,6 @@ const sharedSectionKeys: Readonly<Partial<Record<SettingsSectionId, (key: string
 
 /** Keys of a section shown under Advanced: rarely changed, their defaults are constants. */
 export const advancedSettingKeys: ReadonlySet<string> = new Set(['agent.tools'])
-
-/**
- * Keys a section edits in a block of its own rather than in its list of entries per scope:
- * `knowledge.embeddings` (Settings › AI › Semantic search, global only).
- */
-export const blockSettingKeys: ReadonlySet<string> = new Set(['knowledge.embeddings'])
 
 /**
  * Search parameters of `/settings/$section`: `item` opens a record's sheet (a user, a credential,
@@ -176,7 +168,7 @@ export const pageSettingKeys: Readonly<Record<SettingsPage, readonly string[]>> 
   releases: ['releases'],
   assets: ['analyzers.assets'],
   reviews: ['analyzers.review'],
-  knowledge: [...Object.values(sectionPolicies), 'analyzers.guide'],
+  knowledge: ['analyzers.rule-miner', 'commits.conventions', 'assets.policy', 'analyzers.testids'],
   automation: [...automationSettingKeys],
   tasks: ['tasks.write'],
 }
@@ -195,7 +187,7 @@ export const settingsPageHomes = {
   releases: { label: 'Releases', to: '/releases' },
   assets: { label: 'Repository › Assets', to: '/repos' },
   reviews: { label: 'Quality › Reviews', to: '/quality/reviews' },
-  knowledge: { label: 'Knowledge › Guide', to: '/knowledge/guide' },
+  knowledge: { label: 'Knowledge › Rules', to: '/knowledge/rules' },
   automation: { label: 'Ops › Automation', to: '/ops/automation' },
   tasks: { label: 'Ops › Tasks', to: '/ops/tasks' },
 } as const satisfies Record<SettingsPage, { label: string; to: string }>
@@ -245,22 +237,3 @@ export const definitionsOf = (
 
 /** The element id a setting's entries carry in a Settings section, the target of search links. */
 export const settingAnchor = (key: string): string => `setting-${key}`
-
-/**
- * Where Knowledge's Configure leads for a tab: the Guide generator's options (Settings › Analyzers,
- * `guide`), the auto-accept policy for agent notes (Settings › Policies) or the review analyzer
- * whose replies become learnings (Settings › Analyzers, `review`).
- */
-export function knowledgeSettingsLink(tab: KnowledgeTab) {
-  if (tab === 'notes')
-    return {
-      to: '/settings/$section',
-      params: { section: 'policies' },
-      hash: settingAnchor('knowledge.autoAccept'),
-    } as const
-  return {
-    to: '/settings/$section',
-    params: { section: 'analyzers' },
-    search: { item: tab === 'guide' ? 'guide' : 'review' },
-  } as const
-}

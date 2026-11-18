@@ -151,7 +151,7 @@ describe('delivery cards', () => {
         },
         reviews30d: { reviews: 20, posted: 57, resolved: 41, up: 6, down: 1, costUsd: 3.4 },
         work: { runs: 23, failed: 0, awaitingApproval: 1, costUsd: 6.4 },
-        knowledge: { sections: 14, notes: 3, proposed: 0, inherits: ['team web'] },
+        knowledge: { rules: 14, learnings: 3, pending: 0 },
       },
       true,
       now,
@@ -160,7 +160,7 @@ describe('delivery cards', () => {
       ['releases', 'warn', 'Waiting', 'v2.13.2'],
       ['reviews', 'ok', '86% helpful', '20'],
       ['work', 'warn', '1 needs approval', '23'],
-      ['knowledge', 'ok', 'Written', '14'],
+      ['knowledge', 'ok', 'In use', '14'],
     ])
     expect(cards[0]?.lines).toEqual(['Next 2.14.0 · minor', 'production deploy 2 hours ago'])
     expect(cards[1]?.segments).toEqual([
@@ -168,7 +168,7 @@ describe('delivery cards', () => {
       { tone: 'bad', share: 0.143 },
     ])
     expect(cards[1]?.lines).toEqual(['57 comments posted · 41 resolved', 'Spend $3.40'])
-    expect(cards[3]?.lines).toEqual(['3 notes · 0 learnings proposed', 'Inherits team web'])
+    expect(cards[3]?.lines).toEqual(['3 active learnings · 0 pending'])
   })
 })
 

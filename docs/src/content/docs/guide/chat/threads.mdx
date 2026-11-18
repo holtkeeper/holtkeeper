@@ -60,8 +60,8 @@ Talk with your team and Holtkeeper in threads about everything, one team or one 
 
 The growth comes from `@acme/widget-kit` 5.0.0, which now ships its date helpers in the main entry. Moving the import to `@acme/widget-kit/date` would bring it back under budget.
 
-<Tag mono>acme/checkout-web</Tag> <Tag mono>Run 3fa81c02</Tag> <Tag mono>kb:91d0e4</Tag> · ▸ 4 tool
-calls · $0.06
+<Tag mono>acme/checkout-web</Tag> <Tag mono>Run 3fa81c02</Tag> <Tag mono>rule:91d0e4</Tag> · ▸ 4
+tool calls · $0.06
 
 <Fields columns={1}>
   <Field
@@ -98,7 +98,7 @@ calls · $0.06
   </Sheet>
 </Screen>
 
-The scope decides who sees the thread: a repository thread is visible to everyone who may read that repository, a team thread to everyone who may read the team's repositories, and a thread for everyone to everyone who can use chat. It also decides what Holtkeeper knows when it answers: the repository's or team's Guide and notes.
+The scope decides who sees the thread: a repository thread is visible to everyone who may read that repository, a team thread to everyone who may read the team's repositories, and a thread for everyone to everyone who can use chat. It also decides what Holtkeeper knows when it answers: the repository's or team's rules and learnings.
 
 :::tip
 **Ask in chat** on a Knowledge page starts a new thread with that repository as context.
@@ -145,7 +145,7 @@ Commands run in repository and team threads only. In a thread for everyone the c
 
 ## Read Holtkeeper's answers
 
-- **References.** A message lists what it refers to as chips: repositories, merge requests (`acme/checkout-web!212`), task groups, runs and knowledge notes (`kb:91d0e4`). Each opens where it lives. Repositories you may not read are left out.
+- **References.** A message lists what it refers to as chips: repositories, merge requests (`acme/checkout-web!212`), task groups, runs, rules (`rule:91d0e4`) and learnings (`learn:4c2a7e`). Each opens where it lives. Repositories you may not read are left out.
 - **Tool trace.** A collapsible line counts the tools the reply used; open it to see each call with its input and result.
 - **Cost.** With `ai:read` on the thread's scope you also see what the reply cost.
 - **Cards.** Holtkeeper's command answers are cards with a status stripe, fields, steps, buttons and sometimes a small form. Danger buttons ask first.
@@ -213,5 +213,5 @@ New messages arrive on their own; <Ui>Load older messages</Ui> fetches earlier o
 - [Inbox](/guide/home/inbox/) — the same task approvals, with diffs.
 - [Tasks](/guide/ops/tasks/) — task groups and their merge requests.
 - [Release overview](/guide/releases/overview/) — what the `/release` commands drive.
-- [Guide](/guide/knowledge/guide/) — the rules Holtkeeper follows when it answers.
+- [Rules](/guide/knowledge/rules/) — the rules Holtkeeper follows when it answers.
 - [AI spend](/guide/ops/ai-spend/) — Chat spend by thread and person.

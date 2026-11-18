@@ -68,13 +68,13 @@ Four kinds of rules queue analyzer runs:
   />
   <Scroll>
 
-| Schedule                                  | When                                           | Teams   | Analyzers                      | Last 14 runs                        | Health                                     | Next        | On                      |                          |
-| ----------------------------------------- | ---------------------------------------------- | ------- | ------------------------------ | ----------------------------------- | ------------------------------------------ | ----------- | ----------------------- | ------------------------ |
-| **Nightly audit** · `nightly`             | `0 2 * * *` Every day at 02:00 · Europe/Berlin | Gizmo   | audit, licenses                | <Ticks healthy={11} failing={3} />  | <Tag tone="bad">Failing · 3 in a row</Tag> | today 02:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
-| **Weekly guide refresh** · `weekly-guide` | `0 6 * * 1` Mon at 06:00                       | Widgets | guide <Tag tone="acc">AI</Tag> | <Ticks healthy={12} warnings={2} /> | <Tag tone="warn">Partly failed</Tag>       | Mon 06:00   | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
-| **Office hours CI** · `office`            | `1h` Every hour · weekdays 09:00–18:00         | Gizmo   | ci-jobs                        | <Ticks healthy={14} />              | <Tag tone="ok">Healthy</Tag>               | today 11:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
-| **Bundle backfill** · `bundles`           | `0 3 * * 6` Sat at 03:00                       | Widgets | bundle                         | <Ticks healthy={0} none={14} />     | <Tag>Paused</Tag>                          | —           | <Tag>Off</Tag>          | <Button>Run now</Button> |
-| _Other teams · 2 schedules_               |                                                |         |                                |                                     |                                            |             |                         |                          |
+| Schedule                                | When                                           | Teams   | Analyzers                           | Last 14 runs                        | Health                                     | Next        | On                      |                          |
+| --------------------------------------- | ---------------------------------------------- | ------- | ----------------------------------- | ----------------------------------- | ------------------------------------------ | ----------- | ----------------------- | ------------------------ |
+| **Nightly audit** · `nightly`           | `0 2 * * *` Every day at 02:00 · Europe/Berlin | Gizmo   | audit, licenses                     | <Ticks healthy={11} failing={3} />  | <Tag tone="bad">Failing · 3 in a row</Tag> | today 02:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Weekly rule mining** · `weekly-rules` | `0 6 * * 1` Mon at 06:00                       | Widgets | rule-miner <Tag tone="acc">AI</Tag> | <Ticks healthy={12} warnings={2} /> | <Tag tone="warn">Partly failed</Tag>       | Mon 06:00   | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Office hours CI** · `office`          | `1h` Every hour · weekdays 09:00–18:00         | Gizmo   | ci-jobs                             | <Ticks healthy={14} />              | <Tag tone="ok">Healthy</Tag>               | today 11:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Bundle backfill** · `bundles`         | `0 3 * * 6` Sat at 03:00                       | Widgets | bundle                              | <Ticks healthy={0} none={14} />     | <Tag>Paused</Tag>                          | —           | <Tag>Off</Tag>          | <Button>Run now</Button> |
+| _Other teams · 2 schedules_             |                                                |         |                                     |                                     |                                            |             |                         |                          |
 
   </Scroll>
 </Screen>

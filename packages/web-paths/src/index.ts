@@ -67,21 +67,22 @@ interface TasksSearch {
   filter?: string
 }
 
-/** Tabs of the Knowledge workspace. */
-type KnowledgeSection = 'guide' | 'notes' | 'learnings'
+/** Tabs of the Knowledge workspace: panel rules, learned rules, a repository's effective prompt. */
+type KnowledgeSection = 'rules' | 'learnings' | 'effective'
 
 /**
- * What a Knowledge link opens: a space (a Guide scope key: `all`, `team:<t>`, `path:<forge>:<folder>`, `family:<id>`,
- * `repo:<forge>:<path>`), a Guide section of it, a note by id.
+ * What a Knowledge link opens: a repository (`forge:path`) the lists are filtered to or whose
+ * effective prompt is shown, a team filter, a rule or a learning by id.
  */
 interface KnowledgeSearch {
-  space?: string
-  section?: string
-  note?: string
+  repo?: string
+  team?: string
+  rule?: string
+  learning?: string
 }
 
 /** Kinds of Inbox items, as the Inbox's kind filter names them. */
-type InboxKindFilter = 'task' | 'note' | 'learning' | 'guide' | 'release' | 'allowlist'
+type InboxKindFilter = 'task' | 'learning' | 'release' | 'allowlist'
 
 /** What an Inbox link opens: an item by its id, a kind filter, the Snoozed tab. */
 interface InboxSearch {

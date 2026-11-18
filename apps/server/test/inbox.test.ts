@@ -7,7 +7,7 @@ import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { type ReleaseBoardRow, releaseSettingsDefinition } from '@holtkeeper/release'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { GuideGeneratedInput, Store } from '@holtkeeper/store'
+import type { Learning, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
@@ -73,13 +73,24 @@ const ids = (items: InboxItem[]) => items.map((item) => item.id).toSorted()
 
 const open = (items: InboxItem[]) => items.filter((item) => !item.snoozed).length
 
-const generated = (body: string): GuideGeneratedInput => ({
-  body,
-  inputHash: `hash:${body}`,
-  model: 'model-main',
-  costUsd: 0.01,
-  status: 'proposed',
-  generatedAt: '2026-11-01T08:00:00.000Z',
+const learning = (id: string, scope: Scope, overrides: Partial<Learning> = {}): Learning => ({
+  id,
+  text: `Name widgets after their shape (${id}).`,
+  key: `name widgets ${id}`,
+  reason: 'Seen in three reviews.',
+  scope,
+  origin: 'agent',
+  status: 'pending',
+  sources: [{ author: 'header:lead', at: '2026-10-31T10:00:00.000Z' }],
+  createdAt: '2026-10-31T10:00:00.000Z',
+  updatedAt: '2026-10-31T10:00:00.000Z',
+  activeAt: '2026-11-08T10:00:00.000Z',
+  lastReinforcedAt: '2026-10-31T10:00:00.000Z',
+  uses: 0,
+  actedOn: 0,
+  votesUp: 0,
+  votesDown: 0,
+  ...overrides,
 })
 
 const row = (path: string): ReleaseBoardRow => ({
@@ -134,55 +145,11 @@ async function seed() {
     })
   }
   for (const [id, scope] of [
-    ['n-web', { teams: ['web'] }],
-    ['n-pay', { teams: ['pay'] }],
-    ['n-all', { all: true }],
-  ] satisfies [string, Scope][]) {
-    await store.knowledge.put({
-      id,
-      title: `Widgets note ${id}`,
-      body: 'Use fooUtil for widgets.',
-      kind: 'convention',
-      scope,
-      topics: [],
-      appliesTo: ['*'],
-      status: 'proposed',
-      evidence: [],
-      source: 'agent',
-      author: 'header:lead',
-      createdAt: '2026-10-31T09:00:00.000Z',
-      updatedAt: '2026-10-31T09:00:00.000Z',
-    })
-  }
-  for (const [id, path] of [
-    ['l-web', 'acme/web-shop'],
-    ['l-pay', 'acme/pay-api'],
-  ] as const) {
-    await store.learnings.put({
-      id,
-      repo: `work:${path}`,
-      rule: 'Name widgets after their shape.',
-      key: `name widgets ${id}`,
-      section: 'review',
-      suggestedScope: 'repo',
-      status: 'proposed',
-      sources: [],
-      proposal: { by: 'header:lead', reason: 'Seen in three reviews.' },
-      model: 'model-fast',
-      costUsd: 0,
-      createdAt: '2026-10-31T10:00:00.000Z',
-      updatedAt: '2026-10-31T10:00:00.000Z',
-    })
-  }
-  for (const path of ['acme/web-shop', 'acme/pay-api'])
-    await store.guides.put({
-      scope: `repo:work:${path}`,
-      section: 'general',
-      rules: '',
-      steering: '',
-      learnings: [],
-      generated: generated(`- Run make check in ${path}.`),
-    })
+    ['l-web', { repos: ['work:acme/web-shop'] }],
+    ['l-pay', { repos: ['work:acme/pay-api'] }],
+    ['l-all', { all: true }],
+  ] satisfies [string, Scope][])
+    await store.learnings.put(learning(id, scope))
   await store.kv!.set('release:board:index', {
     repos: [
       { forge: 'work', path: 'acme/web-shop' },
@@ -265,27 +232,16 @@ describe('GET /api/inbox', () => {
     })
 
     const writer = await feedOf('writer')
-    expect(ids([...writer.mine, ...writer.teams])).toEqual([
-      'guide:repo:work:acme/web-shop:general',
-      'learning:l-web',
-      'note:n-web',
-    ])
-    const guide = writer.mine.find((item) => item.kind === 'guide')
-    expect(guide).toMatchObject({
-      guideScope: 'repo:work:acme/web-shop',
-      section: 'general',
-      inputHash: 'hash:- Run make check in acme/web-shop.',
-      generatedAt: '2026-11-01T08:00:00.000Z',
-    })
-    expect(writer.mine.find((item) => item.kind === 'note')).toMatchObject({
-      entryId: 'n-web',
-      version: 1,
-      scope: 'Team web',
-    })
+    expect(ids([...writer.mine, ...writer.teams])).toEqual(['learning:l-web'])
     expect(writer.mine.find((item) => item.kind === 'learning')).toMatchObject({
       learningId: 'l-web',
-      section: 'review',
-      suggestedScope: 'repo',
+      origin: 'agent',
+      activeAt: '2026-11-08T10:00:00.000Z',
+      dueAt: '2026-11-08T10:00:00.000Z',
+      scope: 'acme/web-shop',
+      detail: 'Seen in three reviews.',
+      proposedBy: 'header:lead',
+      href: '/knowledge/learnings?learning=l-web',
     })
 
     const releaser = await feedOf('releaser')
@@ -325,7 +281,7 @@ describe('GET /api/inbox', () => {
     expect(forgeCalls).toBe(0)
   })
 
-  test('a write grant without the matching read sees no notes, learnings, Guide text or allowlist entries', async () => {
+  test('a write grant without the matching read sees no learnings or allowlist entries', async () => {
     for (const role of ['scribbler', 'tweaker']) {
       const feed = await feedOf(role)
       expect([...feed.mine, ...feed.teams]).toEqual([])
@@ -350,9 +306,9 @@ describe('GET /api/inbox', () => {
     const feed = await feedOf('admin')
     expect(feed.teams).toEqual([])
     expect(new Set(feed.mine.map((item) => item.kind))).toEqual(
-      new Set(['task', 'note', 'learning', 'guide', 'release', 'allowlist']),
+      new Set(['task', 'learning', 'release', 'allowlist']),
     )
-    expect(feed.mine).toHaveLength(15)
+    expect(feed.mine).toHaveLength(11)
     const times = feed.mine.map((item) => item.createdAt)
     expect(times).toEqual(times.toSorted())
     expect(Object.keys(feed.people)).toEqual(['header:lead'])
@@ -367,53 +323,49 @@ describe('GET /api/inbox', () => {
     expect(feed.mine.every((item) => !item.repos.some((repo) => repo.teams.includes('pay')))).toBe(
       true,
     )
-    expect(ids(feed.mine)).toContain('note:n-all')
+    expect(ids(feed.mine)).toContain('learning:l-all')
     expect(ids(feed.teams)).toEqual([
       'allowlist:a-pay:GHSA-past:some-lib',
       'allowlist:a-pay:GHSA-soon',
-      'guide:repo:work:acme/pay-api:general',
       'learning:l-pay',
-      'note:n-pay',
       'release:work:acme/pay-api',
       'task:g-pay',
     ])
   })
 
-  test('a note names its teams by title and key, and folder patterns as written', async () => {
-    const note = (await store.knowledge.get('n-web'))!
-    await store.knowledge.put({ ...note, id: 'n-docs', scope: { teams: ['docs'] } })
-    await store.knowledge.put({ ...note, id: 'n-both', scope: { teams: ['docs', 'pay'] } })
-    await store.knowledge.put({ ...note, id: 'n-folder', scope: { repos: ['work:acme/web-*'] } })
+  test('a learning names its teams by title and key, and folder patterns as written', async () => {
+    await store.learnings.put(learning('l-docs', { teams: ['docs'] }))
+    await store.learnings.put(learning('l-both', { teams: ['docs', 'pay'] }))
+    await store.learnings.put(learning('l-folder', { repos: ['work:acme/web-*'] }))
     const items = [...(await feedOf('admin')).mine, ...(await feedOf('admin')).teams]
-    expect(items.find((item) => item.id === 'note:n-docs')).toMatchObject({
+    expect(items.find((item) => item.id === 'learning:l-docs')).toMatchObject({
       scope: 'Team Docs (docs)',
     })
-    expect(items.find((item) => item.id === 'note:n-both')).toMatchObject({
+    expect(items.find((item) => item.id === 'learning:l-both')).toMatchObject({
       scope: 'Team Docs (docs), Team pay',
     })
-    expect(items.find((item) => item.id === 'note:n-folder')).toMatchObject({
+    expect(items.find((item) => item.id === 'learning:l-folder')).toMatchObject({
       scope: 'work:acme/web-*',
     })
   })
 
-  test('rejected generated text and dismissed releases leave the Inbox', async () => {
-    await store.kv!.set('guide:rejected:repo:work:acme/web-shop:general', [
-      {
-        inputHash: 'hash:- Run make check in acme/web-shop.',
-        generatedAt: '2026-11-01T08:00:00.000Z',
-        by: 'header:lead',
-        at: '2026-11-02T08:00:00.000Z',
-      },
-    ])
+  test('active learnings and dismissed releases leave the Inbox', async () => {
+    await store.learnings.put(
+      learning('l-web', { repos: ['work:acme/web-shop'] }, { status: 'active' }),
+    )
+    await store.learnings.put(
+      learning('l-pay', { repos: ['work:acme/pay-api'] }, { activeAt: '2026-11-02T00:00:00.000Z' }),
+    )
     await store.kv!.set('release:dismissal:work:acme/web-shop', {
       sha: 'head-acme/web-shop',
       by: 'header:lead',
       at: '2026-11-02T08:00:00.000Z',
     })
     const feed = await feedOf('admin')
-    expect(ids(feed.mine)).not.toContain('guide:repo:work:acme/web-shop:general')
+    expect(ids(feed.mine)).not.toContain('learning:l-web')
+    expect(ids(feed.mine)).not.toContain('learning:l-pay')
     expect(ids(feed.mine)).not.toContain('release:work:acme/web-shop')
-    expect(ids(feed.mine)).toContain('guide:repo:work:acme/pay-api:general')
+    expect(ids(feed.mine)).toContain('learning:l-all')
   })
 
   test('the 30 second cache keeps raw sources only: callers never see each other’s items', async () => {
@@ -427,31 +379,17 @@ describe('GET /api/inbox', () => {
     ])
     expect(again).toEqual(first)
 
-    await store.knowledge.put({
-      id: 'n-new',
-      title: 'Fresh widgets note',
-      body: 'Prefer ShapeBase.',
-      kind: 'convention',
-      scope: { teams: ['web'] },
-      topics: [],
-      appliesTo: ['*'],
-      status: 'proposed',
-      evidence: [],
-      source: 'human',
-      author: 'header:lead',
-      createdAt: '2026-11-03T11:59:00.000Z',
-      updatedAt: '2026-11-03T11:59:00.000Z',
-    })
+    await store.learnings.put(learning('l-new', { teams: ['web'] }))
     clock += 20_000
-    expect(ids((await feedOf('writer')).mine)).not.toContain('note:n-new')
+    expect(ids((await feedOf('writer')).mine)).not.toContain('learning:l-new')
     clock += 11_000
-    expect(ids((await feedOf('writer')).mine)).toContain('note:n-new')
+    expect(ids((await feedOf('writer')).mine)).toContain('learning:l-new')
   })
 
   test('a decision made through the API is seen at once', async () => {
     await feedOf('admin')
-    expect((await call('POST', '/knowledge/n-web/reject', as('admin'))).status).toBe(200)
-    expect(ids((await feedOf('admin')).mine)).not.toContain('note:n-web')
+    expect((await call('POST', '/learnings/l-web/reject', as('admin'))).status).toBe(200)
+    expect(ids((await feedOf('admin')).mine)).not.toContain('learning:l-web')
   })
 
   test('snoozed items stay in the list, marked', async () => {
@@ -476,9 +414,9 @@ describe('GET /api/inbox/count', () => {
     )
     const response = await call('GET', '/inbox/count', as('lead'))
     expect(response.status).toBe(200)
-    expect((await response.json()) as InboxCount).toEqual({ mine: 7, teams: 7, total: 14 })
+    expect((await response.json()) as InboxCount).toEqual({ mine: 5, teams: 5, total: 10 })
     const etag = response.headers.get('etag')
-    expect(etag).toBe('"inbox-7-7"')
+    expect(etag).toBe('"inbox-5-5"')
 
     const unchanged = await call('GET', '/inbox/count', { ...as('lead'), 'if-none-match': etag! })
     expect(unchanged.status).toBe(304)
@@ -490,7 +428,7 @@ describe('GET /api/inbox/count', () => {
     })
     const after = await call('GET', '/inbox/count', { ...as('lead'), 'if-none-match': etag! })
     expect(after.status).toBe(200)
-    expect((await after.json()) as InboxCount).toEqual({ mine: 7, teams: 6, total: 13 })
+    expect((await after.json()) as InboxCount).toEqual({ mine: 5, teams: 4, total: 9 })
     expect(forgeCalls).toBe(0)
   })
 
@@ -498,7 +436,7 @@ describe('GET /api/inbox/count', () => {
     expect((await call('PUT', '/me/preferences', as('lead'), { homeTeams: ['web'] })).status).toBe(
       200,
     )
-    for (const id of ['task:g-web', 'note:n-pay'])
+    for (const id of ['task:g-web', 'learning:l-pay'])
       await call('POST', '/me/snoozes', as('lead'), { id, until: '2026-11-10T00:00:00.000Z' })
     for (const role of ['lead', 'admin', 'tasker', 'writer', 'configurer', 'watcher']) {
       const feed = await feedOf(role)

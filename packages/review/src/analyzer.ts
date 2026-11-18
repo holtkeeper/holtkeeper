@@ -11,6 +11,7 @@ import {
   resolveMessages,
 } from '@holtkeeper/messages'
 import type { QualityCheck } from '@holtkeeper/quality'
+import type { RepoRuleFile } from '@holtkeeper/rules'
 import { z } from 'zod'
 
 import { reviewAnalysis } from './analysis.ts'
@@ -18,7 +19,7 @@ import { type ReviewCheckName, reviewCheckNames } from './checks.ts'
 import { DEFAULT_DEEP_FROM_MINUTES, DEFAULT_REVIEW_DEPTH, reviewDepths } from './depth.ts'
 import { GO_GUIDELINES_TAG, type GoGuidelineSet } from './go-guidelines/schema.ts'
 import { bundledGoGuidelines } from './go-guidelines/snapshot.ts'
-import { type Guideline, readGuidelines } from './guidelines.ts'
+import { readCheckoutRules } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
 import { type ReviewMessages, englishReviewMessages, reviewMessageCatalog } from './messages.ts'
 import {
@@ -173,18 +174,18 @@ export interface ReviewAnalyzerDeps {
   /** Whether the repository is meant to have tests (`repo.tests`); without it, always. */
   testsExpected?: (repo: RepoRef) => Promise<boolean>
   /**
-   * The repository's Guide for a review or thread reply, from its rules files (read from the
-   * checkout), the text knowledge notes are ranked by and the merge request's changed files (absent
-   * for thread replies: every note may apply); it becomes the agent's stable context. Scopes it
-   * names are stored with the review as `guideScopes`.
+   * The rules of a review or thread reply, from the repository's rules files (read from the
+   * checkout) and the merge request's changed files (absent for thread replies: every file-scoped
+   * rule may apply); they become the agent's stable context, and their sources are stored with the
+   * review as `ruleSources`. Without it the review follows the rules files alone.
    */
   guideFor?: (
     repo: RepoRef,
-    request: { docs: readonly Guideline[]; query?: string; files?: readonly string[] },
+    request: { repoFiles: readonly RepoRuleFile[]; files?: readonly string[] },
   ) => Promise<ReviewGuide | undefined>
   /**
-   * The team knowledge base: the `knowledge` toolset is mounted. `teamsOf` gives the repository's
-   * owner teams.
+   * Rules and learnings for the agent to search and propose to: the `knowledge` toolset is
+   * mounted. `teamsOf` gives the repository's owner teams.
    */
   knowledge?: { access: KnowledgeAccess; teamsOf?: (repo: RepoRef) => string[] }
   /**
@@ -414,10 +415,14 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           const usage: ReviewUsage = { turns: 0 }
           const guide = deps.guideFor
             ? await deps
-                .guideFor(repo, { docs: dir ? await readGuidelines(dir) : [], query: mr.title })
+                .guideFor(repo, {
+                  repoFiles: dir
+                    ? await readCheckoutRules(context.runner, dir, context.signal)
+                    : [],
+                })
                 .catch((error: unknown) => {
                   context.log?.(
-                    `guide lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+                    `rules lookup failed: ${error instanceof Error ? error.message : String(error)}`,
                   )
                   return undefined
                 })
@@ -470,7 +475,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             approved: false,
             checks: [],
             ...(usage.turns ? { usage } : {}),
-            ...(guide?.text && guide.scopes.length ? { guideScopes: guide.scopes } : {}),
+            ...(guide?.text && guide.sources.length ? { ruleSources: guide.sources } : {}),
             durationMs: Math.round(performance.now() - started),
           }
           return { data, ref: reviewRef(mr.id) }
@@ -497,7 +502,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           options,
           ...(checks ? { checks } : {}),
           ...(guideFor
-            ? { guide: (docs, query, files) => guideFor(repo, { docs, query, files }) }
+            ? { guide: (repoFiles, files) => guideFor(repo, { repoFiles, files }) }
             : {}),
           ...(toolsets ? { toolsets } : {}),
           ...(apiChangesFor ? { apiChanges: (request) => apiChangesFor(repo, request) } : {}),
@@ -529,5 +534,5 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
   })
 }
 
-/** The `review` analyzer without checks, a Guide or knowledge. */
+/** The `review` analyzer without checks, panel rules or learnings. */
 export const reviewAnalyzer = createReviewAnalyzer()

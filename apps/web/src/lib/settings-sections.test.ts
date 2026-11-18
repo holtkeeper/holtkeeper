@@ -3,9 +3,7 @@ import { expect, test } from 'bun:test'
 import type { SettingDefinitionView } from '@holtkeeper/api'
 
 import {
-  blockSettingKeys,
   definitionsOf,
-  knowledgeSettingsLink,
   pageSettingKeys,
   parseSettingsSearch,
   parseSettingsSection,
@@ -61,10 +59,9 @@ const sharedKeys = (section: 'analyzers' | 'policies') =>
         'analyzers.tracker',
         'audit.allowlist',
         'analyzers.review',
-        'analyzers.guide',
-        'knowledge.autoAccept',
-        'guide.autoAccept',
-        'learnings.autoAccept',
+        'analyzers.rule-miner',
+        'learnings.approvalDelayDays',
+        'learnings.expiryDays',
         'repo.tests',
         'repo.analyzers',
       ].map(definition),
@@ -77,12 +74,11 @@ test('Analyzers and Policies show keys their pages keep as home', () => {
     'analyzers.widget',
     'analyzers.coverage',
     'analyzers.review',
-    'analyzers.guide',
+    'analyzers.rule-miner',
   ])
   expect(sharedKeys('policies')).toEqual([
-    'knowledge.autoAccept',
-    'learnings.autoAccept',
-    'guide.autoAccept',
+    'learnings.approvalDelayDays',
+    'learnings.expiryDays',
     'repo.analyzers',
     'commits.conventions',
     'analyzers.licenses',
@@ -108,15 +104,6 @@ test('each section lists its own settings in its order, skipping ones the server
   expect(sectionDefinitions(all, 'audit')).toEqual([])
 })
 
-test('semantic search lives in AI, in a block of its own rather than under System', () => {
-  const definitions = [...all, definition('knowledge.embeddings')]
-  expect(settingHome('knowledge.embeddings')).toEqual({ section: 'ai' })
-  expect(blockSettingKeys.has('knowledge.embeddings')).toBe(true)
-  expect(sectionDefinitions(definitions, 'system').map((d) => d.key)).not.toContain(
-    'knowledge.embeddings',
-  )
-})
-
 test('System also takes every setting no page or section claims', () => {
   expect(sectionDefinitions(all, 'system').map((d) => d.key)).toEqual([
     'polling',
@@ -137,9 +124,10 @@ test('analyzer options and policies live on the pages that own them', () => {
   expect(settingHome('audit.allowlist')).toEqual({ page: 'audits' })
   expect(settingHome('commits.conventions')).toEqual({ page: 'knowledge' })
   expect(settingHome('assets.policy')).toEqual({ page: 'knowledge' })
-  expect(settingHome('knowledge.autoAccept')).toEqual({ section: 'policies' })
+  expect(settingHome('learnings.expiryDays')).toEqual({ section: 'policies' })
   expect(settingHome('analyzers.review')).toEqual({ page: 'reviews' })
-  expect(settingHome('analyzers.guide')).toEqual({ page: 'knowledge' })
+  expect(settingHome('analyzers.rule-miner')).toEqual({ page: 'knowledge' })
+  expect(settingsPageHomes.knowledge.to).toBe('/knowledge/rules')
   expect(settingsPageHomes.reviews.to).toBe('/quality/reviews')
   expect(settingHome('mergeRequests.policies')).toEqual({ page: 'automation' })
   expect(settingHome('llm.budget')).toEqual({ section: 'ai' })
@@ -163,23 +151,6 @@ test('reads the section parameter and picks definitions by key', () => {
     'polling',
     'llm.budget',
   ])
-})
-
-test('Knowledge configures the Guide and learnings analyzers or the auto-accept policy', () => {
-  expect(knowledgeSettingsLink('guide')).toEqual({
-    to: '/settings/$section',
-    params: { section: 'analyzers' },
-    search: { item: 'guide' },
-  })
-  expect(knowledgeSettingsLink('learnings')).toMatchObject({
-    params: { section: 'analyzers' },
-    search: { item: 'review' },
-  })
-  expect(knowledgeSettingsLink('notes')).toEqual({
-    to: '/settings/$section',
-    params: { section: 'policies' },
-    hash: 'setting-knowledge.autoAccept',
-  })
 })
 
 test('reads the sheet deep link of a section', () => {

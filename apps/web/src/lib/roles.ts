@@ -46,7 +46,7 @@ export const rolePresets: Readonly<Record<RolePresetId, RolePreset>> = {
   developer: {
     label: 'Developer',
     summary: 'Run analyzers, start agent tasks',
-    description: 'Viewer, plus runs analyzers and audits, starts agent tasks and writes notes.',
+    description: 'Viewer, plus runs analyzers and audits, starts agent tasks and writes rules.',
     actions: developer,
   },
   maintainer: {
@@ -158,7 +158,7 @@ const roleAbilities: readonly RoleAbility[] = [
   { area: 'Releases', label: 'See release plans and timelines', actions: ['releases:read'] },
   { area: 'Releases', label: 'Run release steps', actions: ['releases:run'] },
   { area: 'Knowledge', label: 'Read knowledge', actions: ['knowledge:read'] },
-  { area: 'Knowledge', label: 'Write notes, approve learnings', actions: ['knowledge:write'] },
+  { area: 'Knowledge', label: 'Write rules, approve learnings', actions: ['knowledge:write'] },
   { area: 'Settings', label: 'Read settings and the effective config', actions: ['settings:read'] },
   { area: 'Settings', label: 'Change settings in scope', actions: ['settings:write'] },
   { area: 'AI', label: 'See AI spend', actions: ['ai:read', 'ai:admin'] },

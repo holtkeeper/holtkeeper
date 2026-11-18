@@ -227,7 +227,7 @@ function Notes({
         {editable ? (
           <span className="float-right ml-2 flex gap-1">
             {agent ? (
-              <Tooltip content="Write with AI (fast tier, style from the Guide)">
+              <Tooltip content="Write with AI (fast tier, style from the rules for release notes)">
                 <Button
                   size="sm"
                   variant="ghost"

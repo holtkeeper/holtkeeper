@@ -1,4 +1,4 @@
-import { knowledgeWords } from './knowledge.ts'
+import { searchWords } from './search.ts'
 import type {
   LibraryChunk,
   LibraryChunkFilter,
@@ -76,7 +76,7 @@ export function libraryQueryTerms(text: string): string[][] {
   const unclosed = parts.length % 2 === 0
   const terms = new Map<string, string[]>()
   parts.forEach((part, i) => {
-    const words = knowledgeWords(part)
+    const words = searchWords(part)
     const phrase = i % 2 === 1 && !(unclosed && i === parts.length - 1) && words.length > 1
     for (const term of phrase ? [words] : words.map((word) => [word]))
       terms.set(term.join(' '), term)
@@ -93,7 +93,7 @@ const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 /** Weighted matches of query terms in fields: prefix for words, exact consecutive words for phrases. */
 function termScore(terms: string[][], fields: [weight: number, text: string][]): number {
-  const words = fields.map(([weight, text]) => [weight, knowledgeWords(text)] as const)
+  const words = fields.map(([weight, text]) => [weight, searchWords(text)] as const)
   let score = 0
   for (const term of terms) {
     for (const [weight, list] of words) {

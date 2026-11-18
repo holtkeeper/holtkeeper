@@ -3,7 +3,7 @@ import type { ReactionSignal } from '@holtkeeper/store'
 import type { ReviewData } from './schema.ts'
 
 /**
- * What became of a review comment that cited a knowledge entry:
+ * What became of a review comment that cited a rule or a learning:
  *
  * - `fixed`: the merge request was merged and the commented lines changed after the review;
  * - `resolved`: merged, the thread resolved with the lines unchanged;
@@ -14,10 +14,11 @@ import type { ReviewData } from './schema.ts'
  */
 export type CitationOutcome = 'fixed' | 'resolved' | 'dismissed' | 'open' | 'closed' | 'unknown'
 
-/** One posted review comment citing one knowledge entry. */
-export interface KnowledgeCitation {
-  /** The entry id as cited (`[kb:<id>]`). */
-  entry: string
+/** One posted review comment citing one rule (`[rule:<id>]`) or learning (`[learn:<id>]`). */
+export interface RuleCitation {
+  kind: 'rule' | 'learn'
+  /** The id as cited. */
+  id: string
   /** `forge:path`. */
   repo: string
   mergeRequest: number
@@ -37,9 +38,9 @@ export interface KnowledgeCitation {
   down: number
 }
 
-/** How the comments citing an entry fared. */
+/** How the comments citing a rule or learning fared. */
 export interface CitationSummary {
-  /** Posted comments citing the entry. */
+  /** Posted comments citing it. */
   comments: number
   fixed: number
   resolved: number
@@ -56,14 +57,29 @@ export interface CitationSummary {
   lastCitedAt?: string
 }
 
-const CITATION = /\[\s*kb:\s*([A-Za-z0-9][\w-]*)\s*\]/g
+const CITATION = /\[\s*(rule|learn)\s*:\s*([A-Za-z0-9][\w-]*)\s*\]/g
 
-/** Ids of the knowledge entries `text` cites as `[kb:<id>]`, each once, in order of appearance. */
-export function citedIds(text: string): string[] {
-  return [...new Set([...text.matchAll(CITATION)].map((match) => match[1] ?? '').filter(Boolean))]
+/** A rule or learning a text cites. */
+export interface CitedRule {
+  kind: 'rule' | 'learn'
+  id: string
 }
 
-/** A stored review run, as `knowledgeCitations` reads it. */
+/**
+ * The rules (`[rule:<id>]`) and learnings (`[learn:<id>]`) `text` cites, each once, in order of
+ * appearance.
+ */
+export function citedRules(text: string): CitedRule[] {
+  const found = new Map<string, CitedRule>()
+  for (const match of text.matchAll(CITATION)) {
+    const kind = match[1] === 'rule' ? 'rule' : 'learn'
+    const id = match[2] ?? ''
+    if (id && !found.has(`${kind}:${id}`)) found.set(`${kind}:${id}`, { kind, id })
+  }
+  return [...found.values()]
+}
+
+/** A stored review run, as `ruleCitations` reads it. */
 export interface CitingRun {
   /** `forge:path`. */
   repo: string
@@ -79,34 +95,35 @@ const outcomeOf = (signal: ReactionSignal | undefined): CitationOutcome => {
 }
 
 /**
- * Every posted review comment citing a knowledge entry (in its title or body) across `runs`,
+ * Every posted review comment citing a rule or learning (in its title or body) across `runs`,
  * joined with the comment's stored signal (`ReactionSignal` of the same repository, merge request
  * and finding id) for its outcome, replies and reactions. A finding posted by several runs of a
  * merge request counts once, at the first run; comments the forge rejected never count. Sorted
- * newest first, then by entry, repository, merge request and finding.
+ * newest first, then by citation, repository, merge request and finding.
  */
-export function knowledgeCitations(
+export function ruleCitations(
   runs: Iterable<CitingRun>,
   signals: Iterable<ReactionSignal>,
-): KnowledgeCitation[] {
+): RuleCitation[] {
   const byFinding = new Map<string, ReactionSignal>()
   for (const signal of signals)
     if (signal.findingId !== undefined)
       byFinding.set(`${signal.repo}\u0000${signal.mergeRequest}\u0000${signal.findingId}`, signal)
-  const found = new Map<string, KnowledgeCitation>()
+  const found = new Map<string, RuleCitation>()
   for (const run of runs)
     for (const comment of run.data.comments) {
       if (!comment.posted) continue
-      const ids = citedIds(`${comment.title}\n${comment.body}`)
-      if (!ids.length) continue
+      const cited = citedRules(`${comment.title}\n${comment.body}`)
+      if (!cited.length) continue
       const finding = `${run.repo}\u0000${run.data.mergeRequest.id}\u0000${comment.id}`
       const signal = byFinding.get(finding)
-      for (const entry of ids) {
-        const key = `${entry}\u0000${finding}`
+      for (const { kind, id } of cited) {
+        const key = `${kind}:${id}\u0000${finding}`
         const known = found.get(key)
         if (known && known.at <= run.createdAt) continue
         found.set(key, {
-          entry,
+          kind,
+          id,
           repo: run.repo,
           mergeRequest: run.data.mergeRequest.id,
           findingId: comment.id,
@@ -125,7 +142,7 @@ export function knowledgeCitations(
   return [...found.values()].toSorted(
     (a, b) =>
       b.at.localeCompare(a.at) ||
-      a.entry.localeCompare(b.entry) ||
+      `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`) ||
       a.repo.localeCompare(b.repo) ||
       a.mergeRequest - b.mergeRequest ||
       a.findingId.localeCompare(b.findingId),
@@ -133,7 +150,7 @@ export function knowledgeCitations(
 }
 
 /** Counts of `citations` by outcome, with replies, reactions and the newest time. */
-export function summarizeCitations(citations: Iterable<KnowledgeCitation>): CitationSummary {
+export function summarizeCitations(citations: Iterable<RuleCitation>): CitationSummary {
   const summary: CitationSummary = {
     comments: 0,
     fixed: 0,

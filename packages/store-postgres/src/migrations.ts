@@ -766,6 +766,70 @@ export const migrations: readonly Migration[] = [
       DROP TABLE audit_runs;
     `,
   },
+  {
+    version: 33,
+    sql: `
+      DROP TABLE knowledge_history;
+      DROP TABLE knowledge;
+      DROP TABLE guide_generated;
+      DROP TABLE guide_history;
+      DROP TABLE guides;
+      DROP TABLE families;
+      DROP TABLE embeddings;
+      DROP TABLE learnings;
+
+      CREATE TABLE rules (
+        seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        id text NOT NULL UNIQUE,
+        title text NOT NULL,
+        body text NOT NULL,
+        description text,
+        scope jsonb NOT NULL,
+        files jsonb,
+        agents jsonb,
+        always_apply boolean,
+        author text NOT NULL,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        updated_by text,
+        version integer NOT NULL,
+        search tsvector GENERATED ALWAYS AS (
+          setweight(to_tsvector('simple', knowledge_fold(title)), 'A') ||
+          setweight(to_tsvector('simple', knowledge_fold(coalesce(description, ''))), 'B') ||
+          setweight(to_tsvector('simple', knowledge_fold(body)), 'C')
+        ) STORED
+      );
+      CREATE INDEX rules_title ON rules (lower(title) COLLATE "C", id COLLATE "C");
+      CREATE INDEX rules_search ON rules USING gin (search);
+
+      CREATE TABLE rule_history (
+        rule_id text NOT NULL REFERENCES rules (id) ON DELETE CASCADE,
+        version integer NOT NULL,
+        content jsonb NOT NULL,
+        edited_by text NOT NULL,
+        edited_at timestamptz NOT NULL,
+        PRIMARY KEY (rule_id, version)
+      );
+
+      CREATE TABLE learnings (
+        id text PRIMARY KEY,
+        key text NOT NULL,
+        text text NOT NULL,
+        status text NOT NULL,
+        origin text NOT NULL,
+        created_at text NOT NULL,
+        updated_at text NOT NULL,
+        data jsonb NOT NULL,
+        search tsvector GENERATED ALWAYS AS (
+          setweight(to_tsvector('simple', knowledge_fold(text)), 'A')
+        ) STORED
+      );
+      CREATE INDEX learnings_key ON learnings (key);
+      CREATE INDEX learnings_updated_at ON learnings (updated_at COLLATE "C" DESC, id COLLATE "C");
+      CREATE INDEX learnings_status ON learnings (status, updated_at COLLATE "C" DESC);
+      CREATE INDEX learnings_search ON learnings USING gin (search);
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

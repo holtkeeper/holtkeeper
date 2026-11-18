@@ -2,14 +2,14 @@ import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
 import { ToolError } from '@holtkeeper/agent-tools'
 import type { ReleaseRepoView, ReleaseStepResult } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import { createGuideResolver } from '@holtkeeper/guide'
 import { type GateResult, GateError } from '@holtkeeper/release'
 import type { KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { appendAudit } from './audit.ts'
-import { type ServerDeps, ForbiddenToolError, repoTarget, teamLabeler } from './context.ts'
+import { type ServerDeps, ForbiddenToolError, repoTarget } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
+import { createRulesResolver } from './rules.ts'
 import type { ReleaseStepInput, ReleaseToolsAccess } from './tools/releases.ts'
 import { canSee } from './visibility.ts'
 
@@ -223,7 +223,7 @@ export interface ReleaseToolsAccessOptions {
 
 /**
  * What the `releases` toolset reads and runs for one caller, over the server's release service:
- * settings, the Guide's `releases` section, status, changes, and with `steps` previews that hand
+ * settings, the repository's rules for release notes, status, changes, and with `steps` previews that hand
  * out a one-time confirm token (10 minutes, bound to the caller, the arguments and the release
  * state) and runs that redeem it. Successful steps are recorded (history and audit) with
  * `channel`; refused runs are audited as denied or failed.
@@ -234,7 +234,7 @@ export function releaseToolsAccess(
 ): ReleaseToolsAccess {
   const { config, store } = deps
   const releases = releaseServiceFor(deps)
-  const resolveGuide = createGuideResolver({ store, teamTitle: teamLabeler(config) })
+  const resolveRules = createRulesResolver({ store, config, now: deps.now })
   const kv = store.kv ?? memoryKv()
   const { principal } = options
 
@@ -377,14 +377,8 @@ export function releaseToolsAccess(
   return {
     repoOf,
     settings: (repo) => releases.settingsOf(repo),
-    guide: async (repo) =>
-      (
-        await resolveGuide({
-          repo: repoTarget(config, repo),
-          task: 'release-notes',
-          notesChars: 0,
-        })
-      ).text.trim(),
+    rules: async (repo) =>
+      (await resolveRules({ repo: repoTarget(config, repo), agent: 'release' })).text.trim(),
     status: (repo) => releases.view(principal, repo),
     changes: (repo, range) => releases.changes(repo, range),
     ...(steps ? { steps } : {}),

@@ -58,7 +58,6 @@ const inputOf = (
   mergeRequest: { id: 3, title: 'Add widget pricing', description: 'Prices widgets.' },
   files,
   mode: 'full',
-  guidelines: [],
   threads: [],
   maxComments: 15,
   ...extra,

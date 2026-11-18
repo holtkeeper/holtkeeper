@@ -10,7 +10,7 @@ sidebar:
 
 import { Button, Comment, Diff, Facts, Screen, Sheet, Tabs, Tag, Ui } from '@ui'
 
-Besides answering your agents, Holtkeeper runs an agent of its own: the review agent. It reads a merge request with the repository's Guide and rules files, posts inline comments with one-click suggestions and a summary, comes back when new commits land, resolves its threads once the problem is fixed and answers when someone replies. Every review is listed in **Quality › Reviews**.
+Besides answering your agents, Holtkeeper runs an agent of its own: the review agent. It reads a merge request with the repository's rules and rules files, posts inline comments with one-click suggestions and a summary, comes back when new commits land, resolves its threads once the problem is fixed and answers when someone replies. Every review is listed in **Quality › Reviews**.
 
 ## When a review runs
 
@@ -25,7 +25,7 @@ Some merge requests are skipped by default, with the reason stored and nothing p
 Before the first review of a merge request, Holtkeeper posts a short note saying the review is running and asking to wait for it; the note goes away when the review is posted, or says the review could not finish and how to start it again. The `progressNote` option posts it before every review (`always`) or never (`never`).
 
 1. **Scope.** Only lines the merge request adds in reviewable files. Lockfiles, generated code, snapshots, `dist` and similar are ignored, as are globs listed in the repository's `REVIEW.md`. After the first review, only lines added since the last reviewed head are in scope.
-2. **Context.** The agent gets the repository's `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`, then the team's Guide for reviews: team rules, learned rules, policies and the most relevant knowledge notes, then, with lower priority, notes written for [similar repositories](/guide/knowledge/guide/#knowledge-from-similar-repositories). Comments cite the notes they rely on as `[kb:<id>]`, and **Knowledge › Notes** counts how those comments ended. It reads more code with its tools instead of getting whole files, and asks the package catalog and library index about dependencies, since the checkout is never installed.
+2. **Context.** The agent gets the repository's root `REVIEW.md`, `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md` and `CONTRIBUTING.md`, plus the other [rules](/guide/knowledge/rules/) that apply for reviews: panel rules, nested and file-scoped rules files matching the changed files (`AGENTS.md` in a folder, Copilot `applyTo`, Cursor `globs`), policies and, last, learned rules. Comments cite the rules they rely on as `[rule:<id>]` and `[learn:<id>]`; a cited learning whose finding gets fixed is confirmed, see [Learnings](/guide/knowledge/learnings/). It reads more code with its tools instead of getting whole files, and asks the package catalog and library index about dependencies, since the checkout is never installed.
 3. **Checks.** Deterministic checks run first. By default that is the test id check: new interactive elements without a test id, with an id suggested in the repository's style. The agent comments on the ones it agrees with.
 4. **A deliberate pass.** Every changed file, the code around each change, its callers and the paths it touches; error paths, edge cases, concurrency and contracts. A shallow answer on a larger diff is sent back once to inspect the code. Diffs over 600 changed lines or 12 files are split into parts of related files that are reviewed in parallel.
 5. **Images.** Added or changed images and inline SVG are checked for size and format against the asset policy.
@@ -79,7 +79,7 @@ Its own **summary threads** are resolved when a later review comes back clean (v
 
 ## Replies and learnings
 
-Reply in one of the agent's threads and it answers that thread: it explains, concedes and resolves, or updates the suggestion. A reply that teaches a lasting rule ("we always keep shape sizes in `ShapeSize`") becomes a rule candidate in **Knowledge › Learnings**. Once a person accepts it, it is part of the Guide for every later review and agent. 👍 and 👎 reactions on comments are counted per finding category when the merge request closes; **Quality › Reviews** shows them under the table.
+Reply in one of the agent's threads and it answers that thread: it explains, concedes and resolves, or updates the suggestion. A reply that teaches a lasting rule ("we always keep shape sizes in `ShapeSize`") becomes a learning in **Knowledge › Learnings**. After the approval delay (3 days by default, unless a person rejects it) every later review and agent reads it. 👍 and 👎 reactions on comments are counted per finding category when the merge request closes; **Quality › Reviews** shows them under the table.
 
 Every summary ends with this request: when a comment is wrong or misses the point, reply in its thread and say how it should be.
 
@@ -139,7 +139,7 @@ Replies to the agent's threads and reviews that found nothing new are left out o
         ['Repository', 'acme/checkout-web'],
         ['Branches', 'feat/ABC-512-coupons → main'],
         ['Mode', 'incremental'],
-        ['Guide scopes', 'all, team:widgets, path:gitlab:acme/round, repo:gitlab:acme/round/web'],
+        ['Rules', '4 rules · AGENTS.md · REVIEW.md · 3 learned'],
         ['Cost', '$0.38 · 1m 52s'],
       ]}
     />

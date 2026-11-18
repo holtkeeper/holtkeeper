@@ -29,7 +29,7 @@ Open **Account › Connect agents** (your avatar › **Account**, then **Connect
 
 <Screen
   title="Account › Connect agents › New MCP token"
-  caption="One token per machine or agent. It reads, and proposes knowledge and rules for review."
+  caption="One token per machine or agent. It reads, and proposes learnings."
 >
   <Stack>
     <Fields columns={1}>
@@ -47,7 +47,7 @@ Open **Account › Connect agents** (your avatar › **Account**, then **Connect
 2. Pick how long it lives. 90 days is the default; **Never** is there for a service account you rotate by hand.
 3. Press <Ui>Create</Ui>. The dialog shows the token once, with the ready Claude Code command. **Copy it now; it is not shown again.**
 
-There is nothing else to choose: every token reads with your permissions and can propose knowledge entries and Guide rules for people to review. It cannot start tasks or run release steps; see [Tokens and scopes](/agents/tokens/). Each token also reports exposed secrets under your name unless you switch its **Report exposed secrets** choice to **Anonymously** or **Off**; see [Secret reports](/guide/supply-chain/secret-reports/).
+There is nothing else to choose: every token reads with your permissions and can propose learnings, which people may reject before they activate. It cannot start tasks or run release steps; see [Tokens and scopes](/agents/tokens/). Each token also reports exposed secrets under your name unless you switch its **Report exposed secrets** choice to **Anonymously** or **Off**; see [Secret reports](/guide/supply-chain/secret-reports/).
 
 Tokens start with `hk_mcp_`. Treat one like a password: anyone holding it reads what you can read.
 

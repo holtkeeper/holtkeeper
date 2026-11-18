@@ -5,7 +5,6 @@ import {
   lazyRouteComponent,
   Outlet,
   redirect,
-  retainSearchParams,
 } from '@tanstack/react-router'
 
 import { LinkPage } from './features/auth/LinkPage.tsx'
@@ -19,7 +18,6 @@ import { parseBundlesSearch } from './lib/bundles.ts'
 import { parseCiSearch } from './lib/ci.ts'
 import { parseCoverageSearch } from './lib/coverage.ts'
 import { parseLibrariesSearch, parseLibrarySearch } from './lib/dependencies.ts'
-import { type KnowledgeSearch, knowledgeSearch } from './lib/guide.ts'
 import { parseInboxSearch } from './lib/inbox.ts'
 import { parseJobsSearch } from './lib/jobs.ts'
 import { parseLicensesSearch } from './lib/licenses.ts'
@@ -27,6 +25,7 @@ import { parsePublicApiSearch } from './lib/public-api.ts'
 import { parseRepoHubSearch } from './lib/repo.ts'
 import { parseReposSearch } from './lib/repos.ts'
 import { parseReviewsSearch } from './lib/reviews.ts'
+import { knowledgeSearch } from './lib/rules.ts'
 import { parseSecretReportsSearch } from './lib/secret-reports.ts'
 import { parseSecuritySearch } from './lib/security.ts'
 import { parseSettingsSearch } from './lib/settings-sections.ts'
@@ -350,7 +349,15 @@ const knowledgePage = <P extends string>(path: P) =>
     path,
     component: KnowledgePage,
     validateSearch: knowledgeSearch,
-    search: { middlewares: [retainSearchParams<KnowledgeSearch>(['space'])] },
+  })
+
+const knowledgeRedirect = <P extends string>(path: P) =>
+  createRoute({
+    getParentRoute: () => appRoute,
+    path,
+    beforeLoad: () => {
+      throw redirect({ to: '/knowledge/rules', replace: true })
+    },
   })
 
 const analysisRoute = createRoute({
@@ -385,10 +392,9 @@ const routeTree = rootRoute.addChildren([
     releasesPage('releases/setup', SetupPage),
     page('releases/qa', QaTasksPage),
     page('releases/qa/$key', QaTaskPage),
-    knowledgePage('knowledge/handbook'),
-    knowledgePage('knowledge/guide'),
-    knowledgePage('knowledge/notes'),
+    knowledgePage('knowledge/rules'),
     knowledgePage('knowledge/learnings'),
+    knowledgeRedirect('knowledge/$'),
     runsRoute,
     page('ops/runs/$jobId', JobPage),
     tasksRoute,

@@ -7,7 +7,6 @@ import type {
   ReviewWindowTotals,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { ResolvedGuide } from '@holtkeeper/guide'
 import {
   type QualityGroup,
   type ReviewData,
@@ -22,23 +21,6 @@ export const REVIEWS_LIMIT = { default: 50, max: 200 }
 
 /** Review heads one `GET /api/reviews` request reads at most, however many it filters out. */
 export const REVIEWS_SCAN = 1000
-
-const kindRank = ['all', 'team', 'path', 'family', 'repo']
-
-// Broad to narrow: everything, owner teams, folders (shallow first), the family, the repository.
-const scopeRank = (scope: string) => {
-  const kind = kindRank.indexOf(scope.split(':')[0] ?? '')
-  const depth = scope.startsWith('path:') ? scope.split('/').length / 1000 : 0
-  return (kind < 0 ? kindRank.length : kind) + depth
-}
-
-/** Guide scopes whose text reached a resolved Guide, broad to narrow, each once. */
-export function guideScopesOf(guide: Pick<ResolvedGuide, 'blocks'>): string[] {
-  const scopes = guide.blocks.flatMap((block) =>
-    block.scope && block.chars > 0 ? [block.scope] : [],
-  )
-  return [...new Set(scopes)].toSorted((a, b) => scopeRank(a) - scopeRank(b))
-}
 
 /** The Reviews table row of a review head, from its stored metrics; none without readable ones. */
 function reviewRowOf(head: Pick<AnalysisHead, 'id' | 'repo' | 'createdAt' | 'metrics'>) {
@@ -61,7 +43,7 @@ function reviewRowOf(head: Pick<AnalysisHead, 'id' | 'repo' | 'createdAt' | 'met
     resolved: metrics.resolved,
     ...(metrics.model ? { model: metrics.model } : {}),
     ...(metrics.durationMs === undefined ? {} : { durationMs: metrics.durationMs }),
-    guideScopes: metrics.guideScopes ?? [],
+    ruleSources: metrics.ruleSources ?? [],
     ...(metrics.costUsd === undefined ? {} : { costUsd: metrics.costUsd }),
   }
   return row

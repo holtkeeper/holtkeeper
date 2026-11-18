@@ -8,10 +8,10 @@ import { repoKey } from '../../lib/repo.ts'
 import { patchSearch } from '../../lib/search-params.ts'
 import { pageSettingKeys } from '../../lib/settings-sections.ts'
 import { LinkButton, SearchInput, Tag } from '../../ui/index.ts'
-import { PolicyBlock } from '../knowledge/PolicyBlock.tsx'
 import { SettingsButton } from '../settings/SettingsSheet.tsx'
 import { AssetsFiles } from './AssetsFiles.tsx'
 import { AssetsPolicyCard } from './AssetsPolicyCard.tsx'
+import { RepoPolicyEntries } from './RepoPolicyEntries.tsx'
 
 /**
  * The hub's Quality › Assets section: the repository's asset files to act on with the media
@@ -67,7 +67,6 @@ export function AssetsRepoSection({
         <AssetsPolicyCard
           lines={policyLines(data.policy)}
           source={policySource(data.policySource, titleOf)}
-          space={`repo:${repoKey(repo)}`}
           actions={
             <SettingsButton
               title="Assets analyzer settings"
@@ -76,7 +75,7 @@ export function AssetsRepoSection({
             />
           }
         >
-          <PolicyBlock settingKey="assets.policy" space={{ kind: 'repo', repo }} members={[]} />
+          <RepoPolicyEntries settingKey="assets.policy" repo={repo} />
         </AssetsPolicyCard>
       ) : null}
     </div>

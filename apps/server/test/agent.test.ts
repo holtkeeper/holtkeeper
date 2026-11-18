@@ -7,7 +7,7 @@ import { BudgetDeniedError } from '@holtkeeper/ai-usage'
 import { memoryArtifactStore } from '@holtkeeper/artifacts'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { KnowledgeEntryInput, Store } from '@holtkeeper/store'
+import type { RuleInput, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 import { simulateStreamingMiddleware, wrapLanguageModel } from 'ai'
@@ -16,7 +16,6 @@ import { z } from 'zod'
 
 import {
   type AgentRunInfo,
-  DEFAULT_KNOWLEDGE_TOKENS,
   findProviderCredential,
   settingsAgentFor,
   withServerDefaults,
@@ -45,7 +44,13 @@ async function failure(promise: Promise<unknown>): Promise<string> {
 type Options = NonNullable<Parameters<ClaudeQuery>[0]['options']>
 
 const config = parseConfig({
-  forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
+  forges: {
+    work: {
+      kind: 'fake',
+      url: 'https://forge.test',
+      create: () => ({ readFile: async () => undefined }) as never,
+    },
+  },
   teams: { games: { owns: ['work:games/*'] } },
 })
 const repo = { forge: 'work', path: 'games/chess' }
@@ -76,17 +81,11 @@ const query: ClaudeQuery = async function* ({ options }) {
   yield success(cost)
 }
 
-const knowledge = (overrides: Partial<KnowledgeEntryInput> = {}): KnowledgeEntryInput => ({
-  id: 'k1',
+const rule = (overrides: Partial<RuleInput> = {}): RuleInput => ({
+  id: 'r1',
   title: 'Use the chess engine facade',
   body: 'Never import the engine directly.',
-  kind: 'convention',
   scope: { teams: ['games'] },
-  topics: [],
-  appliesTo: ['*'],
-  status: 'accepted',
-  evidence: [],
-  source: 'human',
   author: 'u1',
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-01T00:00:00.000Z',
@@ -166,12 +165,10 @@ describe('settingsAgentFor', () => {
     expect(await agentFor()(repo)).toBeUndefined()
   })
 
-  test('Anthropic API with the default toolsets, knowledge context and recorded usage', async () => {
+  test('Anthropic API with the default toolsets, rules context and recorded usage', async () => {
     await anthropic('sk-anthropic')
-    await store.knowledge.put(knowledge())
-    await store.knowledge.put(
-      knowledge({ id: 'k2', title: 'Other group', scope: { teams: ['tools'] } }),
-    )
+    await store.rules.put(rule())
+    await store.rules.put(rule({ id: 'r2', title: 'Other group', scope: { teams: ['tools'] } }))
 
     const agent = await agentFor()(repo, { jobId: 'j1', analyzer: 'review' })
     const result = await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review' })
@@ -184,11 +181,11 @@ describe('settingsAgentFor', () => {
     expect(Object.keys(options?.mcpServers ?? {})).toEqual(['holtkeeper'])
     expect(options?.allowedTools).toContain('mcp__holtkeeper__code_search')
     expect(options?.allowedTools).toContain('mcp__holtkeeper__docs_package')
-    expect(options?.allowedTools).toContain('mcp__holtkeeper__knowledge_search')
+    expect(options?.allowedTools).toContain('mcp__holtkeeper__search_knowledge')
     expect(options?.allowedTools).toContain('mcp__holtkeeper__package_usage')
     expect(options?.allowedTools).toContain('mcp__holtkeeper__evaluate_dependency')
     const append = appendOf(options ?? {})
-    expect(append).toContain('[kb:k1] Use the chess engine facade')
+    expect(append).toContain('### Use the chess engine facade [rule:r1]')
     expect(append).not.toContain('Other group')
 
     const [record] = await store.aiUsage.list()
@@ -465,68 +462,56 @@ describe('settingsAgentFor', () => {
     expect((await store.aiUsage.list()).map((record) => record.subject)).toEqual(['MR !12'])
   })
 
-  test('agent.tools sets the knowledge budget; no external MCP server is mounted', async () => {
+  test('no external MCP server is mounted', async () => {
     await anthropic('sk')
-    await setting('agent.tools', { context7: true, knowledgeTokens: 0 })
-    await store.knowledge.put(knowledge())
     const agent = await agentFor()(repo)
     await agent?.run({ dir: '/r', prompt: 'p' })
     expect(Object.keys(calls[0]?.mcpServers ?? {})).toEqual(['holtkeeper'])
-    expect(appendOf(calls[0] ?? {})).not.toContain('[kb:k1]')
   })
 
-  test('the Guide puts team rules before knowledge; a task with its own context keeps it', async () => {
+  test('rules for the task kind come before learned rules; a task with its own context keeps it', async () => {
     await anthropic('sk')
-    await setting('knowledge.autoAccept', ['quirk'])
-    await store.knowledge.put(knowledge())
-    const rules = (
-      scope: 'all' | `team:${string}`,
-      section: 'general' | 'review' | 'releases',
-      text: string,
-    ) =>
-      store.guides.put({
-        scope,
-        section,
-        rules: text,
-        steering: '',
-        editedBy: 'u1',
-        editedAt: '2026-10-01T00:00:00.000Z',
-        learnings: [],
-      })
-    await rules('all', 'general', 'Answer in English.')
-    await rules('team:games', 'review', 'Flag raw SQL.')
-    await rules('team:games', 'releases', 'Keep public APIs.')
+    await store.rules.put(
+      rule({ id: 'all', title: 'Language', body: 'Answer in English.', scope: { all: true } }),
+    )
+    await store.rules.put(
+      rule({ id: 'sql', title: 'SQL', body: 'Flag raw SQL.', agents: ['review'] }),
+    )
+    await store.rules.put(
+      rule({ id: 'api', title: 'APIs', body: 'Keep public APIs.', agents: ['release'] }),
+    )
+    await store.learnings.put({
+      id: 'l1',
+      text: 'Prefer the board helper.',
+      key: 'prefer the board helper',
+      scope: { repos: ['work:games/chess'] },
+      origin: 'reply',
+      status: 'active',
+      sources: [],
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+      activeAt: '2026-10-01T00:00:00.000Z',
+      lastReinforcedAt: '2026-10-29T00:00:00.000Z',
+      uses: 0,
+      actedOn: 0,
+      votesUp: 0,
+      votesDown: 0,
+    })
     const agent = await agentFor()(repo)
     await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review' })
     const append = appendOf(calls[0] ?? {})
     expect(append).toContain('Answer in English.')
     expect(append).toContain('Flag raw SQL.')
     expect(append).not.toContain('Keep public APIs.')
-    expect(append.indexOf('Flag raw SQL.')).toBeLessThan(append.indexOf('Answer in English.'))
-    expect(append.indexOf('Answer in English.')).toBeLessThan(append.indexOf('[kb:k1]'))
+    expect(append.indexOf('Answer in English.')).toBeLessThan(append.indexOf('Flag raw SQL.'))
+    expect(append.indexOf('Flag raw SQL.')).toBeLessThan(append.indexOf('[learn:l1]'))
 
-    await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review', context: 'Own guide' })
+    await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review', context: 'Own rules' })
     const own = appendOf(calls[1] ?? {})
-    expect(own).toContain('Own guide')
+    expect(own).toContain('Own rules')
     expect(own).not.toContain('Flag raw SQL.')
-    expect(own).not.toContain('[kb:k1]')
+    expect(own).not.toContain('[learn:l1]')
   })
-})
-
-const near = (id: string) => ({
-  id,
-  title: `Note ${id}`,
-  body: 'Load sprites lazily.',
-  kind: 'convention' as const,
-  scope: { repos: ['work:acme/square/web'] },
-  topics: [],
-  appliesTo: ['*'],
-  status: 'accepted' as const,
-  evidence: [],
-  source: 'human' as const,
-  author: 'jane',
-  createdAt: '2026-10-01T00:00:00.000Z',
-  updatedAt: '2026-10-01T00:00:00.000Z',
 })
 
 describe('withServerDefaults', () => {
@@ -549,6 +534,7 @@ describe('withServerDefaults', () => {
     const agent = withServerDefaults(inner, {
       repo: target,
       store,
+      config,
       now,
       libraries: {
         versions: answer,
@@ -567,44 +553,6 @@ describe('withServerDefaults', () => {
     expect(asked).toEqual([`${repo.forge}:${repo.path}`])
   })
 
-  test('the Guide ends with knowledge of similar repositories the task may read', async () => {
-    const seen: AgentTask[] = []
-    const inner: Agent = {
-      name: 'fake',
-      async run(task) {
-        seen.push(task)
-        return { text: 'ok', turns: 1 }
-      },
-    }
-    await store.knowledge.put(near('kn-open'))
-    await store.knowledge.put(near('kn-hidden'))
-    const asked: unknown[] = []
-    const agent = withServerDefaults(inner, {
-      repo: target,
-      store,
-      now,
-      neighbours: async (askedRepo, requester) => {
-        asked.push([askedRepo.path, requester])
-        return {
-          repos: [
-            {
-              repo: { forge: 'work', path: 'acme/square/web', teams: ['shapes'] },
-              similarity: 0.8,
-            },
-          ],
-          readable: (entry) => entry.id !== 'kn-hidden',
-        }
-      },
-    })
-    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'review' })
-    expect(seen[0]?.context).toContain('## Knowledge from similar repositories')
-    expect(seen[0]?.context).toContain('[kb:kn-open]')
-    expect(seen[0]?.context).not.toContain('[kb:kn-hidden]')
-    expect(asked).toEqual([[target.path, undefined]])
-    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'review', context: 'Own context' })
-    expect(asked).toHaveLength(1)
-  })
-
   test('hands the task estimate to the budget check; a bootstrap task mounts no toolsets', async () => {
     const seen: AgentTask[] = []
     const inner: Agent = {
@@ -618,6 +566,7 @@ describe('withServerDefaults', () => {
     const agent = withServerDefaults(inner, {
       repo: target,
       store,
+      config,
       now,
       budgets: {
         check: async (run) => {
@@ -629,13 +578,13 @@ describe('withServerDefaults', () => {
     await agent.run({
       dir: '/r',
       prompt: 'p',
-      taskKind: 'knowledge-bootstrap',
+      taskKind: 'rule-miner',
       estimateUsd: 0.12,
       context: 'Own context',
     })
-    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'guide', context: 'Own context' })
+    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'rule-miner', context: 'Own context' })
     expect(checks).toEqual([
-      expect.objectContaining({ taskKind: 'knowledge-bootstrap', estimateUsd: 0.12 }),
+      expect.objectContaining({ taskKind: 'rule-miner', estimateUsd: 0.12 }),
       expect.not.objectContaining({ estimateUsd: expect.anything() }),
     ])
     expect(seen[0]?.toolsets ?? []).toEqual([])
@@ -656,6 +605,7 @@ describe('withServerDefaults', () => {
     const agent = withServerDefaults(inner, {
       repo: target,
       store,
+      config,
       now,
       onRun: (info) => {
         infos.push(info)
@@ -684,7 +634,6 @@ describe('withServerDefaults', () => {
       ['agent', 'fake', 'ok', ''],
       ['tests', 'fake', undefined, 'boom'],
     ])
-    expect(DEFAULT_KNOWLEDGE_TOKENS).toBe(1500)
   })
 
   test('stores transcripts of successful and failed runs; a failing store never fails the run', async () => {
@@ -702,6 +651,7 @@ describe('withServerDefaults', () => {
     const agent = withServerDefaults(inner, {
       repo: target,
       store,
+      config,
       now,
       artifacts,
       origin: { jobId: 'j1' },
@@ -724,6 +674,7 @@ describe('withServerDefaults', () => {
     const broken = withServerDefaults(inner, {
       repo: target,
       store,
+      config,
       now,
       artifacts: {
         put: async () => {
@@ -749,11 +700,13 @@ describe('withServerDefaults', () => {
     const agent = withServerDefaults(inner, {
       repo: target,
       store,
+      config,
       now,
       catalog: agentCatalogContext({
         catalog: createApiCatalog({ analyses: store.analyses }),
         usages: createUsageIndex({ analyses: store.analyses }),
         store,
+        config,
         repo: target,
         targetOf: (other) => ({ ...other, teams: [] }),
         policy: 'metadata',
@@ -798,7 +751,7 @@ describe('withServerDefaults', () => {
     expect(dumped).toContain('output cut at about 4000 tokens')
   })
 
-  test('autoAccept passes to the knowledge tools', async () => {
+  test('propose_learning stores a pending learning of the task repository', async () => {
     const seen: AgentTask[] = []
     const inner: Agent = {
       name: 'fake',
@@ -807,17 +760,23 @@ describe('withServerDefaults', () => {
         return { text: 'ok', turns: 1 }
       },
     }
-    const agent = withServerDefaults(inner, { repo: target, store, now, autoAccept: ['quirk'] })
+    const agent = withServerDefaults(inner, { repo: target, store, config, now })
     await agent.run({ dir: '/r', prompt: 'p', taskKind: 'tests' })
     const propose = seen[0]?.toolsets
       ?.find((toolset) => toolset.name === 'knowledge')
-      ?.tools.find((tool) => tool.name === 'knowledge.propose')
-    await propose?.run(
-      { title: 'Flaky e2e on CI', body: 'Workaround: retry once.', kind: 'quirk' },
-      { dir: '/r', signal: new AbortController().signal },
-    )
-    const [entry] = await store.knowledge.list({})
-    expect(entry?.status).toBe('accepted')
+      ?.tools.find((tool) => tool.name === 'propose_learning')
+    expect(
+      await propose?.run(
+        { text: 'Retry flaky board tests once.' },
+        { dir: '/r', signal: new AbortController().signal },
+      ),
+    ).toContain('(pending)')
+    const [learning] = await store.learnings.list()
+    expect(learning).toMatchObject({
+      status: 'pending',
+      origin: 'agent',
+      scope: { repos: ['work:games/chess'] },
+    })
   })
 
   test('runs for a person search knowledge only with their knowledge:read and never propose', async () => {
@@ -833,8 +792,8 @@ describe('withServerDefaults', () => {
       withServerDefaults(inner, {
         repo: target,
         store,
+        config,
         now,
-        autoAccept: ['quirk'],
         requester: {
           id: 'header:kim',
           name: 'Kim',
@@ -851,7 +810,7 @@ describe('withServerDefaults', () => {
     const [reader, outsider] = seen.map((task) =>
       task.toolsets?.find((toolset) => toolset.name === 'knowledge')?.tools.map((t) => t.name),
     )
-    expect(reader).toEqual(['knowledge.search'])
+    expect(reader).toEqual(['search_knowledge'])
     expect(outsider).toBeUndefined()
   })
 

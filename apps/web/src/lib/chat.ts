@@ -10,7 +10,6 @@ import type {
 
 import { shortId } from './format.ts'
 import { type FoldedScope, type ScopeView, foldScope } from './home-scope.ts'
-import { kbId } from './knowledge.ts'
 import { keyAsTitle, type TeamTitleOf } from './team-titles.ts'
 
 const pathOf = (repo: string) => repo.slice(repo.indexOf(':') + 1)
@@ -348,11 +347,23 @@ export const refKey = (ref: ChatMessageRef): string =>
       ? `mr:${ref.repo}!${ref.iid}`
       : `${ref.kind}:${ref.id}`
 
-/** How a ref reads on a chip: a repository path, `kb:<short id>`, `Task <short id>`, `path!iid`. */
+/**
+ * What a cited `note` ref names: a rule (`rule:<id>`) or a learning (`learn:<id>`); anything else
+ * is read as a rule id.
+ */
+export function citationOf(id: string): { kind: 'rule' | 'learning'; id: string } {
+  if (id.startsWith('learn:')) return { kind: 'learning', id: id.slice('learn:'.length) }
+  return { kind: 'rule', id: id.startsWith('rule:') ? id.slice('rule:'.length) : id }
+}
+
+/** How a ref reads on a chip: a repository path, `rule:<short id>`, `Task <short id>`, `path!iid`. */
 export function refLabel(ref: ChatMessageRef): string {
   if (ref.kind === 'repo') return pathOf(ref.repo)
   if (ref.kind === 'mr') return `${pathOf(ref.repo)}!${ref.iid}`
-  if (ref.kind === 'note') return kbId(ref.id, true)
+  if (ref.kind === 'note') {
+    const cited = citationOf(ref.id)
+    return `${cited.kind === 'learning' ? 'learn' : 'rule'}:${shortId(cited.id)}`
+  }
   return `${ref.kind === 'task' ? 'Task' : 'Run'} ${shortId(ref.id)}`
 }
 

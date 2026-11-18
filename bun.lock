@@ -63,20 +63,14 @@
         "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/credentials": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
-        "@holtkeeper/embed": "workspace:*",
-        "@holtkeeper/embed-openai": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/forge-gitlab": "workspace:*",
-        "@holtkeeper/guide": "workspace:*",
-        "@holtkeeper/guide-generator": "workspace:*",
         "@holtkeeper/identities": "workspace:*",
         "@holtkeeper/issues": "workspace:*",
         "@holtkeeper/issues-jira": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
-        "@holtkeeper/knowledge": "workspace:*",
-        "@holtkeeper/knowledge-bootstrap": "workspace:*",
         "@holtkeeper/libraries": "workspace:*",
         "@holtkeeper/licenses": "workspace:*",
         "@holtkeeper/limits": "workspace:*",
@@ -91,6 +85,8 @@
         "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
+        "@holtkeeper/rule-miner": "workspace:*",
+        "@holtkeeper/rules": "workspace:*",
         "@holtkeeper/secret-reports": "workspace:*",
         "@holtkeeper/settings": "workspace:*",
         "@holtkeeper/ssh-keys": "workspace:*",
@@ -285,9 +281,7 @@
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-go": "workspace:*",
         "@holtkeeper/depgraph-js": "workspace:*",
-        "@holtkeeper/guide-generator": "workspace:*",
         "@holtkeeper/i18n": "workspace:*",
-        "@holtkeeper/knowledge-bootstrap": "workspace:*",
         "@holtkeeper/libraries": "workspace:*",
         "@holtkeeper/licenses": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",
@@ -295,6 +289,7 @@
         "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
+        "@holtkeeper/rule-miner": "workspace:*",
         "@holtkeeper/stack": "workspace:*",
         "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
@@ -325,12 +320,12 @@
         "@holtkeeper/ci-jobs": "workspace:*",
         "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/guide": "workspace:*",
         "@holtkeeper/issues": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
         "@holtkeeper/qa": "workspace:*",
         "@holtkeeper/release": "workspace:*",
         "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/rules": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
@@ -563,17 +558,6 @@
         "@holtkeeper/depgraph": "workspace:*",
       },
     },
-    "packages/embed": {
-      "name": "@holtkeeper/embed",
-      "version": "0.0.0",
-    },
-    "packages/embed-openai": {
-      "name": "@holtkeeper/embed-openai",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/embed": "workspace:*",
-      },
-    },
     "packages/exec": {
       "name": "@holtkeeper/exec",
       "version": "0.0.0",
@@ -604,43 +588,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/api-surface": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-      },
-    },
-    "packages/guide": {
-      "name": "@holtkeeper/guide",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/assets": "workspace:*",
-        "@holtkeeper/commit-conventions": "workspace:*",
-        "@holtkeeper/knowledge": "workspace:*",
-        "@holtkeeper/settings": "workspace:*",
-        "@holtkeeper/store": "workspace:*",
-        "@holtkeeper/testids": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
-    "packages/guide-generator": {
-      "name": "@holtkeeper/guide-generator",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/commit-conventions": "workspace:*",
-        "@holtkeeper/coverage": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/guide": "workspace:*",
-        "@holtkeeper/quality-tests": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "@holtkeeper/store": "workspace:*",
-        "@holtkeeper/testids": "workspace:*",
-        "@holtkeeper/toolchain": "workspace:*",
-        "zod": "^4.6.7",
-      },
-      "devDependencies": {
         "@holtkeeper/exec": "workspace:*",
       },
     },
@@ -695,35 +642,6 @@
         "@holtkeeper/workspace": "workspace:*",
         "croner": "^9",
         "zod": "^4.6.7",
-      },
-    },
-    "packages/knowledge": {
-      "name": "@holtkeeper/knowledge",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/embed": "workspace:*",
-        "@holtkeeper/store": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
-    "packages/knowledge-bootstrap": {
-      "name": "@holtkeeper/knowledge-bootstrap",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/guide-generator": "workspace:*",
-        "@holtkeeper/knowledge": "workspace:*",
-        "@holtkeeper/quality-tests": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "@holtkeeper/store": "workspace:*",
-        "zod": "^4.6.7",
-      },
-      "devDependencies": {
-        "@holtkeeper/exec": "workspace:*",
       },
     },
     "packages/libraries": {
@@ -906,8 +824,38 @@
         "@holtkeeper/messages": "workspace:*",
         "@holtkeeper/quality": "workspace:*",
         "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/rules": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "zod": "^4.6.7",
+      },
+    },
+    "packages/rule-miner": {
+      "name": "@holtkeeper/rule-miner",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/rules": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@holtkeeper/exec": "workspace:*",
+      },
+    },
+    "packages/rules": {
+      "name": "@holtkeeper/rules",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/assets": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
+        "@holtkeeper/settings": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/testids": "workspace:*",
       },
     },
     "packages/secret-reports": {
@@ -964,7 +912,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/embed": "workspace:*",
         "@holtkeeper/store": "workspace:*",
       },
     },
@@ -973,7 +920,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/embed": "workspace:*",
         "@holtkeeper/store": "workspace:*",
       },
     },
@@ -1397,10 +1343,6 @@
 
     "@holtkeeper/docs": ["@holtkeeper/docs@workspace:docs"],
 
-    "@holtkeeper/embed": ["@holtkeeper/embed@workspace:packages/embed"],
-
-    "@holtkeeper/embed-openai": ["@holtkeeper/embed-openai@workspace:packages/embed-openai"],
-
     "@holtkeeper/examples": ["@holtkeeper/examples@workspace:examples"],
 
     "@holtkeeper/exec": ["@holtkeeper/exec@workspace:packages/exec"],
@@ -1413,10 +1355,6 @@
 
     "@holtkeeper/go-source": ["@holtkeeper/go-source@workspace:packages/go-source"],
 
-    "@holtkeeper/guide": ["@holtkeeper/guide@workspace:packages/guide"],
-
-    "@holtkeeper/guide-generator": ["@holtkeeper/guide-generator@workspace:packages/guide-generator"],
-
     "@holtkeeper/i18n": ["@holtkeeper/i18n@workspace:packages/i18n"],
 
     "@holtkeeper/identities": ["@holtkeeper/identities@workspace:packages/identities"],
@@ -1426,10 +1364,6 @@
     "@holtkeeper/issues-jira": ["@holtkeeper/issues-jira@workspace:packages/issues-jira"],
 
     "@holtkeeper/jobs": ["@holtkeeper/jobs@workspace:packages/jobs"],
-
-    "@holtkeeper/knowledge": ["@holtkeeper/knowledge@workspace:packages/knowledge"],
-
-    "@holtkeeper/knowledge-bootstrap": ["@holtkeeper/knowledge-bootstrap@workspace:packages/knowledge-bootstrap"],
 
     "@holtkeeper/libraries": ["@holtkeeper/libraries@workspace:packages/libraries"],
 
@@ -1464,6 +1398,10 @@
     "@holtkeeper/report": ["@holtkeeper/report@workspace:packages/report"],
 
     "@holtkeeper/review": ["@holtkeeper/review@workspace:packages/review"],
+
+    "@holtkeeper/rule-miner": ["@holtkeeper/rule-miner@workspace:packages/rule-miner"],
+
+    "@holtkeeper/rules": ["@holtkeeper/rules@workspace:packages/rules"],
 
     "@holtkeeper/secret-reports": ["@holtkeeper/secret-reports@workspace:packages/secret-reports"],
 

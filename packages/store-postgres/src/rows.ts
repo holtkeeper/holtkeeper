@@ -5,11 +5,11 @@ import type {
   Job,
   JobAttempt,
   ExternalAccount,
-  KnowledgeContent,
-  KnowledgeEntry,
-  KnowledgeRevision,
   LinkToken,
   Passkey,
+  Rule,
+  RuleContent,
+  RuleRevision,
   SettingEntry,
   StoredCredential,
   User,
@@ -255,45 +255,31 @@ export const toJob = (r: JobRow): Job => {
   }
 }
 
-export interface KnowledgeRow {
+export interface RuleRow {
   id: string
   title: string
   body: string
-  kind: KnowledgeEntry['kind']
-  status: KnowledgeEntry['status']
-  source: KnowledgeEntry['source']
+  description: string | null
+  scope: Rule['scope']
+  files: string[] | null
+  agents: Rule['agents'] | null
+  always_apply: boolean | null
   author: string
-  scope: KnowledgeEntry['scope']
-  matches: KnowledgeEntry['match'] | null
-  topics: string[]
-  applies_to: string[]
-  packages: KnowledgeEntry['packages'] | null
-  visibility: KnowledgeEntry['visibility'] | null
-  subject: string | null
-  evidence: KnowledgeEntry['evidence']
-  supersedes: string | null
   created_at: PgTimestamp
   updated_at: PgTimestamp
   updated_by: string | null
   version: number
 }
 
-export const toKnowledgeEntry = (r: KnowledgeRow): KnowledgeEntry => ({
+export const toRule = (r: RuleRow): Rule => ({
   id: r.id,
   title: r.title,
   body: r.body,
-  kind: r.kind,
   scope: r.scope,
-  ...(r.matches !== null && r.matches !== undefined && { match: r.matches }),
-  topics: r.topics,
-  appliesTo: r.applies_to,
-  ...(r.packages !== null && r.packages !== undefined && { packages: r.packages }),
-  ...(r.visibility !== null && r.visibility !== undefined && { visibility: r.visibility }),
-  ...(r.subject !== null && r.subject !== undefined && { subject: r.subject }),
-  status: r.status,
-  evidence: r.evidence,
-  ...(r.supersedes !== null && { supersedes: r.supersedes }),
-  source: r.source,
+  ...(r.files !== null && { files: r.files }),
+  ...(r.agents !== null && { agents: r.agents }),
+  ...(r.description !== null && { description: r.description }),
+  ...(r.always_apply !== null && { alwaysApply: r.always_apply }),
   author: r.author,
   createdAt: iso(r.created_at),
   updatedAt: iso(r.updated_at),
@@ -301,31 +287,14 @@ export const toKnowledgeEntry = (r: KnowledgeRow): KnowledgeEntry => ({
   version: num(r.version),
 })
 
-/** The versioned part of an entry, as stored in `knowledge_history.content`. */
-export const knowledgeContent = (entry: KnowledgeEntry): KnowledgeContent => ({
-  title: entry.title,
-  body: entry.body,
-  kind: entry.kind,
-  scope: entry.scope,
-  ...(entry.match !== undefined && { match: entry.match }),
-  topics: entry.topics,
-  appliesTo: entry.appliesTo,
-  ...(entry.packages !== undefined && { packages: entry.packages }),
-  ...(entry.visibility !== undefined && { visibility: entry.visibility }),
-  ...(entry.subject !== undefined && { subject: entry.subject }),
-  status: entry.status,
-  evidence: entry.evidence,
-  ...(entry.supersedes !== undefined && { supersedes: entry.supersedes }),
-})
-
-export interface KnowledgeHistoryRow {
+export interface RuleHistoryRow {
   version: number
-  content: KnowledgeContent
+  content: RuleContent
   edited_by: string
   edited_at: PgTimestamp
 }
 
-export const toKnowledgeRevision = (r: KnowledgeHistoryRow): KnowledgeRevision => ({
+export const toRuleRevision = (r: RuleHistoryRow): RuleRevision => ({
   ...r.content,
   version: num(r.version),
   editedBy: r.edited_by,

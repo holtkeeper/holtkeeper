@@ -180,7 +180,7 @@ describe('review analyzer', () => {
     const analyzer = createReviewAnalyzer({
       guideFor: async (target, request) => {
         asked.push({ target, request })
-        return { text: '# Repository guide\n\nTeam rule.', scopes: [] }
+        return { text: '# Repository rules\n\nTeam rule.', sources: [] }
       },
     })
     const { agent, tasks } = fakeAgent({
@@ -201,7 +201,7 @@ describe('review analyzer', () => {
     expect(asked).toEqual([
       {
         target: repo,
-        request: { docs: [], query: expect.stringContaining('a.ts'), files: ['a.ts'] },
+        request: { repoFiles: [], files: ['a.ts'] },
       },
     ])
     expect(submissions).toHaveLength(1)
@@ -298,7 +298,10 @@ describe('review analyzer', () => {
       review: [{ action: 'concede', body: 'Right.', resolve: false }],
     })
     const analyzer = createReviewAnalyzer({
-      guideFor: async () => ({ text: 'Prices are integer cents.', scopes: ['all', 'team:web'] }),
+      guideFor: async () => ({
+        text: 'Prices are integer cents.',
+        sources: ['All repositories', 'Team web'],
+      }),
     })
     const result = await analyzer.run({
       repo,
@@ -309,7 +312,7 @@ describe('review analyzer', () => {
     })
     expect(tasks[0]?.context).toBe('Prices are integer cents.')
     expect(result.data.summary).toBe('Answered thread d1 (concede).')
-    expect(result.data.guideScopes).toEqual(['all', 'team:web'])
+    expect(result.data.ruleSources).toEqual(['All repositories', 'Team web'])
     expect(result.data.usage?.model).toBe('fake-main')
     expect(result.data.durationMs).toBeGreaterThanOrEqual(0)
   })
@@ -338,13 +341,13 @@ test('review metrics carry the model, wall time and Guide scopes of newer runs',
     data({
       usage: { turns: 2, model: 'model-a' },
       durationMs: 4200,
-      guideScopes: ['all', 'team:web'],
+      ruleSources: ['All repositories', 'AGENTS.md'],
     }),
   )
   expect(metrics).toMatchObject({
     model: 'model-a',
     durationMs: 4200,
-    guideScopes: ['all', 'team:web'],
+    ruleSources: ['All repositories', 'AGENTS.md'],
   })
   expect(reviewMetricsSchema.parse(metrics)).toEqual(metrics)
 })
@@ -365,5 +368,5 @@ test('records stored before the model, wall time and Guide scopes existed still 
   })
   expect(metrics.title).toBeUndefined()
   expect(metrics.model).toBeUndefined()
-  expect(metrics.guideScopes).toBeUndefined()
+  expect(metrics.ruleSources).toBeUndefined()
 })

@@ -2,7 +2,6 @@ import { type AuditFindingMetric, type AuditMetrics, auditAnalysis } from '@holt
 import type {
   DependencyAdvisory,
   DependencyBundleShare,
-  DependencyDecision,
   DependencyLicense,
   DependencyMergeRequest,
   DependencyRenovateState,
@@ -16,7 +15,6 @@ import {
 } from '@holtkeeper/bundles'
 import { compareVersions } from '@holtkeeper/depgraph'
 import type { RepoRef } from '@holtkeeper/forge'
-import { withoutSuperseded } from '@holtkeeper/knowledge'
 import { type LibraryUse, libraryOfModule, majorsBehind } from '@holtkeeper/libraries'
 import {
   type LicensePolicyData,
@@ -27,14 +25,7 @@ import {
   licensesDataSchema,
 } from '@holtkeeper/licenses'
 import { type RenovateMetrics, isBroken, renovateDataSchema } from '@holtkeeper/renovate'
-import type {
-  AnalysisHead,
-  AnalysisStore,
-  KnowledgeEntry,
-  KnowledgeStore,
-  LibraryEcosystem,
-  LibraryRef,
-} from '@holtkeeper/store'
+import type { AnalysisHead, AnalysisStore, LibraryEcosystem, LibraryRef } from '@holtkeeper/store'
 import type { Severity } from '@holtkeeper/vuln'
 
 import { latestHeadsWithMetrics } from './analyses.ts'
@@ -47,18 +38,6 @@ export const libraryKeyOf = (ref: LibraryRef) =>
 
 const ecosystemOf = (value: string): LibraryEcosystem | undefined =>
   value === 'npm' ? 'npm' : value.toLowerCase() === 'go' ? 'Go' : undefined
-
-const sameLibrary = (ref: LibraryRef, ecosystem: string, name: string) => {
-  const other = ecosystemOf(ecosystem)
-  return other !== undefined && libraryKeyOf({ ecosystem: other, name }) === libraryKeyOf(ref)
-}
-
-const subjectKey = (subject: string | undefined) => {
-  const separator = subject?.indexOf(':') ?? -1
-  if (!subject || separator < 1) return undefined
-  const ecosystem = ecosystemOf(subject.slice(0, separator))
-  return ecosystem && libraryKeyOf({ ecosystem, name: subject.slice(separator + 1) })
-}
 
 /** Uses of one library grouped by repository, versions lowest first. */
 export interface LibraryUsers {
@@ -402,52 +381,3 @@ export const mergeRequestsOf = (
   sightings
     .filter((sighting) => sighting.libraries.has(key))
     .map(({ libraries: _libraries, ...rest }) => rest)
-
-/**
- * Accepted knowledge entries about the library (as their `subject` or among their packages) that
- * `canRead` allows, superseded ones left out: entries people wrote first, then agents' accepted
- * proposals, newest first within each.
- */
-export async function libraryDecisions(
-  knowledge: Pick<KnowledgeStore, 'list'>,
-  access: {
-    /** Entries readable as the caller's own team's. */
-    canRead: (entry: KnowledgeEntry) => boolean
-    /** Entries readable only as another team's `shared` entry. */
-    canReadShared?: (entry: KnowledgeEntry) => boolean
-    ownerOf: (entry: KnowledgeEntry) => string[]
-  },
-  ref: LibraryRef,
-): Promise<DependencyDecision[]> {
-  const shared = (entry: KnowledgeEntry) =>
-    !access.canRead(entry) &&
-    entry.visibility === 'shared' &&
-    access.canReadShared?.(entry) === true
-  const key = libraryKeyOf(ref)
-  const entries = await knowledge.list({ status: 'accepted' })
-  const hits = entries
-    .filter(
-      (entry) =>
-        (subjectKey(entry.subject) === key ||
-          (entry.packages ?? []).some((pkg) => sameLibrary(ref, pkg.ecosystem, pkg.name))) &&
-        (access.canRead(entry) || shared(entry)),
-    )
-    .map((entry) => ({ entry, score: 0 }))
-  return withoutSuperseded(hits)
-    .map(({ entry }) => entry)
-    .toSorted(
-      (a, b) =>
-        Number(a.source === 'agent') - Number(b.source === 'agent') ||
-        b.updatedAt.localeCompare(a.updatedAt),
-    )
-    .map((entry) => ({
-      id: entry.id,
-      title: entry.title,
-      kind: entry.kind,
-      source: entry.source,
-      author: entry.author,
-      updatedAt: entry.updatedAt,
-      owner: access.ownerOf(entry),
-      shared: shared(entry),
-    }))
-}

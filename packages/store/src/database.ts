@@ -23,13 +23,8 @@ const domainOf: Record<string, DatabaseDomain> = {
   audit_state: 'audit',
   audit_chain: 'audit',
   ai_usage: 'ai',
-  knowledge: 'knowledge',
-  knowledge_history: 'knowledge',
-  embeddings: 'knowledge',
-  guides: 'knowledge',
-  guide_history: 'knowledge',
-  guide_generated: 'knowledge',
-  families: 'knowledge',
+  rules: 'knowledge',
+  rule_history: 'knowledge',
   learnings: 'knowledge',
   learning_claims: 'knowledge',
   review_reactions: 'knowledge',
@@ -54,11 +49,12 @@ const domainOf: Record<string, DatabaseDomain> = {
 }
 
 /**
- * The domain of a table of the SQLite or Postgres store. Search side tables (`knowledge_fts`,
- * `library_chunks_fts_data`, …) belong to the table they index; unknown tables are `other`.
+ * The domain of a table of the SQLite or Postgres store. Search side tables (`rules_fts`,
+ * `learnings_fts_data`, `library_chunks_fts_data`, …) belong to the table they index; unknown
+ * tables are `other`.
  */
 export function tableDomain(table: string): DatabaseDomain {
   if (table.startsWith('librar')) return 'libraries'
-  if (table.startsWith('knowledge')) return 'knowledge'
+  if (table.startsWith('rules_fts') || table.startsWith('learnings_fts')) return 'knowledge'
   return domainOf[table] ?? 'other'
 }

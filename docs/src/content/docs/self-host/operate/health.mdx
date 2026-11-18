@@ -17,7 +17,7 @@ Every Holtkeeper process, whatever its role, answers three endpoints without aut
 | `GET /healthz` | The process answers.                                                                                                          | Liveness, startup, Docker `HEALTHCHECK` |
 | `GET /readyz`  | The store answers a query (Postgres: migrations applied), the artifact store answers a ping, and the process is not draining. | Readiness, load balancers               |
 
-`/readyz` answers 503 with a JSON body per check when one fails, so the body tells you which dependency is down. The body also carries `info.embeddings`, the state of [semantic search](/guide/settings/ai/#semantic-search) (`off`, `indexing`, `ready` or `error`); it is informational and never makes `/readyz` fail, since search falls back to full text. The body also carries `info.embeddings`, the state of [semantic search](/guide/settings/ai/#semantic-search) (`off`, `indexing`, `ready` or `error`); it is informational and never makes `/readyz` fail, since search falls back to full text.
+`/readyz` answers 503 with a JSON body per check when one fails, so the body tells you which dependency is down.
 
 ```sh title="Terminal"
 curl -s https://holtkeeper.example.com/readyz
