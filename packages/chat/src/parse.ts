@@ -32,20 +32,29 @@ export function splitWords(text: string): string[] {
   return words
 }
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /**
  * The `/<prefix> <name> [args]` command of a message, from its first line that has one; with
- * `bare`, also a message that starts with the name itself (a direct message to the bot, a button).
- * Names are lowercase words with `-` and `_`.
+ * `mention`, a line starting with `@<mention> <name> [args]` counts too (the handle matched
+ * without case); with `bare`, also a message that starts with the name itself (a direct message
+ * to the bot, a button). Names are lowercase words with `-` and `_`.
  */
 export function parseCommandLine(
   text: string,
-  options: { prefix?: string; bare?: boolean } = {},
+  options: { prefix?: string; mention?: string; bare?: boolean } = {},
 ): CommandLine | undefined {
   const prefix = options.prefix ?? 'holtkeeper'
   const marker = new RegExp(`^\\s*/${prefix}\\s+([a-z][\\w-]*)(.*)$`)
+  const mention = options.mention
+    ? new RegExp(`^\\s*@${escapeRegExp(options.mention)}\\s+([a-z][\\w-]*)(.*)$`, 'i')
+    : undefined
   for (const line of text.split('\n')) {
     const match = marker.exec(line)
     if (match?.[1]) return { name: match[1], args: splitWords(match[2] ?? '') }
+    const mentioned = mention?.exec(line)
+    if (mentioned?.[1])
+      return { name: mentioned[1].toLowerCase(), args: splitWords(mentioned[2] ?? '') }
   }
   if (!options.bare) return undefined
   const match = /^\s*\/?([a-z][\w-]*)(.*)$/s.exec(text)

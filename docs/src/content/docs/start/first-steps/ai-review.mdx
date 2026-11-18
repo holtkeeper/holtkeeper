@@ -88,7 +88,7 @@ Open a merge request in one of those repositories, or push to one. Within a minu
 
 ## 3. Let people ask for a review (optional)
 
-Add a second event trigger with **Event** set to command, **Command** `review` and **Analyzer** `review`. Anyone can then write `/holtkeeper review` in a merge request comment, and `/holtkeeper review force=true` reviews what is normally skipped.
+Add a second event trigger with **Event** set to command, **Command** `review` and **Analyzer** `review`. Anyone can then write `/holtkeeper review` (or mention the bot account, `@<bot> review`) in a merge request comment, and `/holtkeeper review force=true` reviews what is normally skipped.
 
 In the panel, **Quality › Reviews** has <Ui>Review a merge request</Ui> (a repository and `!42` or a merge request URL) and **Review again** on any past review; both need `analyses:run`.
 

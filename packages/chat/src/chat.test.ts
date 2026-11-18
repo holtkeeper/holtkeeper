@@ -66,6 +66,19 @@ describe('parse', () => {
     expect(parseCommandLine('/hk help', { prefix: 'hk' })?.name).toBe('help')
   })
 
+  test('takes a mention of the bot as the prefix', () => {
+    const mention = 'acme.bot'
+    expect(parseCommandLine('Hi\n@Acme.Bot Review force=true', { mention })).toEqual({
+      name: 'review',
+      args: ['force=true'],
+    })
+    expect(parseCommandLine('@acme.bot review', { mention })?.name).toBe('review')
+    expect(parseCommandLine('@acme.bot review')).toBeUndefined()
+    expect(parseCommandLine('@acmeXbot review', { mention })).toBeUndefined()
+    expect(parseCommandLine('@acme.botty review', { mention })).toBeUndefined()
+    expect(parseCommandLine('cc @acme.bot review', { mention })).toBeUndefined()
+  })
+
   test('maps arguments to options', () => {
     expect(commandOptions(['deploy', 'prod', 'tag=v1', '--yes'], ['step', 'environment'])).toEqual({
       step: 'deploy',

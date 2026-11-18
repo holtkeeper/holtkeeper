@@ -54,7 +54,7 @@ Arguments become options before `options` validates them: `key=value` by name, `
 
 `createChatRouter({ commands, authorize, prefix = 'holtkeeper', onError })` → `ChatRouter`:
 
-- `parse(text, bare?)` — the `/holtkeeper <name> [args]` of a message, from its first line that has one (`parseCommandLine`); `bare` also takes a message that starts with the name (a direct message, a button).
+- `parse(text, bare?)` — the `/holtkeeper <name> [args]` of a message, from its first line that has one (`parseCommandLine`); `bare` also takes a message that starts with the name (a direct message, a button). `parseCommandLine(text, { mention })` also takes a line starting with `@<mention> <name> [args]`, the handle matched without case.
 - `handle(message, surface, line?)` — runs the command and answers on the surface. Outcomes: `ignored` (no command, no answer), `done`, `unknown` (answered with the help), `invalid` (the validation errors and the usage), `denied` (what to do about it: link the account, verify it, or that the action is not allowed), `failed` (a `ChatUserError` is shown as it is, any other error as a generic message, passed to `onError`). It never rejects because of a command.
 
 A `help` command listing the commands that are not `hidden` is added unless one is given.

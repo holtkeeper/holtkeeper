@@ -315,6 +315,44 @@ describe('note events', () => {
     expect(await jobs()).toHaveLength(1)
   })
 
+  test('a mention of the bot runs a command like the slash prefix', async () => {
+    const response = await hook('Note Hook', noteEvent('@Holtkeeper review mode=full'))
+    expect(response.status).toBe(202)
+    expect((await jobs())[0]?.options).toEqual({ mergeRequest: 7, mode: 'full' })
+    expect(notes.at(-1)?.body).toContain('Queued `review`')
+    expect(await ignored(await hook('Note Hook', noteEvent('@holtkeeper why?')))).toContain(
+      'not a reply',
+    )
+    expect(notes).toHaveLength(1)
+  })
+
+  test('a mention that is not a command in our thread is a question for the agent', async () => {
+    discussions = [
+      {
+        id: 'disc-1',
+        resolvable: true,
+        resolved: false,
+        notes: [
+          {
+            id: 1,
+            author: 'holtkeeper',
+            body: 'Bug <!-- holtkeeper:review id=x -->',
+            createdAt: '',
+            system: false,
+          },
+          { id: 2, author: 'jane', body: '@holtkeeper explain this', createdAt: '', system: false },
+        ],
+      },
+    ]
+    const response = await hook(
+      'Note Hook',
+      noteEvent('@holtkeeper explain this', { type: 'DiffNote' }),
+    )
+    expect(response.status).toBe(202)
+    expect((await jobs())[0]?.options).toEqual({ mergeRequest: 7, replyTo: 'disc-1' })
+    expect(notes).toEqual([])
+  })
+
   test('release needs a verified linked account, verify links one', async () => {
     expect(await ignored(await hook('Note Hook', noteEvent('/holtkeeper release')))).toBe(
       'command release denied: not-linked',

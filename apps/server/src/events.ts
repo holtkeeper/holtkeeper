@@ -145,7 +145,8 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  *   outcome to the audit log, then queue `jobs.onMergeRequest.analyzers` (open, new commits,
  *   reopen) and `jobs.onLabel[label]` for added labels minus the policies' `skipAnalyzers`, plus
  *   their `enqueue` intents, with `{ mergeRequest: iid }` and `ref` = head sha.
- * - Notes: `/holtkeeper <command>` runs policies as a `command` event, then goes to the chat router
+ * - Notes: `/holtkeeper <command>`, or `@<bot> <command>` naming a known command or one a policy
+ *   matches, runs policies as a `command` event, then goes to the chat router
  *   (see `chatFor`): `jobs.commands[command]` queues its analyzer, built-in commands (`release`,
  *   `verify`, `help`) answer in the merge request; a reply in a review thread Holtkeeper started
  *   queues `review` with `{ mergeRequest, replyTo: discussionId }` and, in the background, is
@@ -516,15 +517,28 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         options: { mergeRequest: iid, ...options },
       })
 
-      const line = parseCommandLine(event.body)
-      if (line) {
-        const policy = await runPolicies(repo, {
-          iid,
-          action: 'command',
-          command: line.name,
-          actor: event.author,
-          mr: stub(iid, event.mergeRequestState, head),
-        })
+      const bot = botUsername(repo)
+      const slash = parseCommandLine(event.body)
+      const mentioned = slash || !bot ? undefined : parseCommandLine(event.body, { mention: bot })
+      const line = slash ?? mentioned
+      const policy = line
+        ? await runPolicies(repo, {
+            iid,
+            action: 'command',
+            command: line.name,
+            actor: event.author,
+            mr: stub(iid, event.mergeRequestState, head),
+          })
+        : undefined
+      const knownCommand = (name: string) =>
+        name in (config.jobs?.commands ?? {}) ||
+        chatFor(deps)
+          .router()
+          .commands.some((command) => command.name === name)
+      const isCommand =
+        slash !== undefined ||
+        (mentioned !== undefined && (knownCommand(mentioned.name) || !!policy?.matched.length))
+      if (line && isCommand) {
         const intents = withPolicies([], policy)
         const fromPolicies = intents.length
           ? await enqueue(
