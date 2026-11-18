@@ -127,6 +127,7 @@ import { agentOpsAccess } from './ops-tools.ts'
 import { releaseAnnouncerFor } from './release-announce.ts'
 import { agentReleaseAccess } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
+import { repoCleanupDuty } from './repo-cleanup.ts'
 import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
 import { reviewApiChanges } from './review-api-changes.ts'
 import { guideScopesOf } from './reviews.ts'
@@ -666,6 +667,7 @@ export async function startServer(
       }),
       () => startLibraryIndex(deps, log),
       vulnIndexDuty(deps, { log }),
+      repoCleanupDuty(deps, log),
       () => startDatabaseSnapshots(store, { log }),
       periodicDuty(
         'storage snapshot',

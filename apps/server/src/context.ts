@@ -158,6 +158,8 @@ export interface JobAnalyzerInfo {
   refresh?: AnyAnalyzer['refresh']
   /** Most automatic jobs per UTC day; triggers and schedules move the rest to later days. */
   dailyLimit?: number
+  /** Records of its kind kept per repository after a new one is stored; absent: all of them. */
+  keepRecords?: number
 }
 
 export interface Env {

@@ -657,6 +657,16 @@ const changeRules: ChangeRule[] = [
     }),
   },
   {
+    kind: 'repo',
+    ...exactly('repo.forget'),
+    line: (_event, path) => ({
+      text: path
+        ? `Deleted the records of ${path}, which left the fleet`
+        : 'Deleted the records of a repository that left the fleet',
+      href: webPaths.repos(),
+    }),
+  },
+  {
     kind: 'credentials',
     ...exactly('credential.create', 'credential.update', 'credential.delete', 'credential.rotate'),
     line: (event) => ({

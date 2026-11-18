@@ -333,6 +333,10 @@ export function analysisRoutes(deps: ServerDeps) {
       data: parsed.data,
       ...(metrics ? { metrics } : {}),
     })
+    const keep = deps.analyzers?.find(
+      (analyzer) => (analyzer.analysis?.kind ?? analyzer.kind) === record.kind,
+    )?.keepRecords
+    if (keep) await store.analyses.prune({ repo: record.repo, kind: record.kind, keep })
     await noteLibraryUses(store.kv, record.kind, deps.now())
     for (const artifact of decoded) {
       await deps.artifacts?.put(artifact.data, {

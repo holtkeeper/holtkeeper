@@ -209,6 +209,15 @@ describe('runVulnIndex', () => {
     expect(await store.analyses.list({ repo: alpha, kind: 'audit' })).toHaveLength(3)
   })
 
+  test('keeps only the newest audit records of a repository', async () => {
+    const { store, run, tick } = await setup()
+    for (let day = 0; day < 5; day += 1) {
+      await run(true)
+      tick(86_400_000)
+    }
+    expect(await store.analyses.list({ repo: alpha, kind: 'audit' })).toHaveLength(3)
+  })
+
   test('an OSV failure throws and leaves the state for the next run', async () => {
     const { store, osv, run } = await setup()
     const failing = {

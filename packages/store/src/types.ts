@@ -223,6 +223,8 @@ export interface AnalysisStore {
    * added first among equal times) and returns how many it deleted.
    */
   prune(query: { repo: RepoRef; kind: string; keep: number }): Promise<number>
+  /** Deletes every record of `repo`, of any kind and ref, and returns how many it deleted. */
+  removeRepo(repo: RepoRef): Promise<number>
 }
 
 /**

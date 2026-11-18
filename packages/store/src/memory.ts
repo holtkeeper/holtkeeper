@@ -118,6 +118,15 @@ export function memoryStore(): Store {
         for (const record of stale) analyses.delete(record.id)
         return stale.length
       },
+      async removeRepo(repo) {
+        let removed = 0
+        for (const [id, record] of analyses)
+          if (record.repo.forge === repo.forge && record.repo.path === repo.path) {
+            analyses.delete(id)
+            removed += 1
+          }
+        return removed
+      },
     },
     credentials: {
       list: async () => [...credentials.values()].map(clone),

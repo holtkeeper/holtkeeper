@@ -50,6 +50,7 @@ const sentences: Record<string, string> = {
   'learning.propose': 'Proposed a learning',
   'learnings.accept': 'Accepted learnings',
   'repo.discover': 'Discovered repositories',
+  'repo.forget': 'Deleted records of repositories that left the fleet',
   'repo.avatar_set': 'Set a repository avatar',
   'repo.avatar_delete': 'Removed a repository avatar',
   'repo.webhook_reenable': 'Re-enabled a repository webhook',

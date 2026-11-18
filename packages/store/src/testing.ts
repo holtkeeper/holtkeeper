@@ -413,6 +413,18 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await store.analyses.prune({ repo: a, kind: 'ci-jobs', keep: 2 })).toBe(0)
     })
 
+    test('analyses: removeRepo deletes every record of one repository', async () => {
+      await store.analyses.add(record('ci-jobs', 'games/a', '2026-10-01T00:00:00.000Z', 'r1'))
+      await store.analyses.add(record('bundle', 'games/a', '2026-10-02T00:00:00.000Z', 'x1'))
+      await store.analyses.add(record('ci-jobs', 'games/b', '2026-10-01T00:00:00.000Z', 'b1'))
+      const a = { forge: 'work', path: 'games/a' }
+
+      expect(await store.analyses.removeRepo(a)).toBe(2)
+      expect(await store.analyses.list({ repo: a })).toEqual([])
+      expect(refs(await store.analyses.list({ kind: 'ci-jobs' }))).toEqual(['b1'])
+      expect(await store.analyses.removeRepo(a)).toBe(0)
+    })
+
     test('credentials: put replaces, remove deletes', async () => {
       const credential: StoredCredential = {
         id: 'c1',

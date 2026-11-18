@@ -273,6 +273,9 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
          SELECT seq FROM analyses WHERE repo_forge = ?1 AND repo_path = ?2 AND kind = ?3
          ORDER BY created_at DESC, seq DESC LIMIT ?4)`,
     ),
+    analysisRemoveRepo: db.prepare<unknown, [string, string]>(
+      'DELETE FROM analyses WHERE repo_forge = ?1 AND repo_path = ?2',
+    ),
     credList: db.query<CredentialRow, []>('SELECT * FROM credentials ORDER BY seq'),
     credGet: db.query<CredentialRow, [string]>('SELECT * FROM credentials WHERE id = ?'),
     credPut: db.prepare(
@@ -410,6 +413,9 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
       },
       async prune({ repo, kind, keep }) {
         return sql.analysisPrune.run(repo.forge, repo.path, kind, Math.max(keep, 0)).changes
+      },
+      async removeRepo(repo) {
+        return sql.analysisRemoveRepo.run(repo.forge, repo.path).changes
       },
     },
     credentials: {

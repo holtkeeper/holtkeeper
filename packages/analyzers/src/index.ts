@@ -50,6 +50,8 @@ export const depgraphAnalyzer = defineAnalyzer({
   scope: 'repo',
   refresh: { on: 'change', minInterval: '1m', debounce: '2m', paths: dependencyPaths },
   needs: { checkout: true },
+  // Readers use the newest graph only; older ones are history nobody shows.
+  keepRecords: 3,
   options: z.object({}),
   async run({ dir, ref, runner, log }) {
     const data = await analyzeDependencies({

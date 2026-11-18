@@ -2,7 +2,7 @@
 
 The contract between analyzers and the runner that runs them (the task engine of `@holtkeeper/jobs`). An `Analyzer` declares its kind, scope (`repo`, or `group`: every repository of one team at once), options schema and what it `needs` (checkout, forge, agent, history); runners provide exactly that in an `AnalyzerContext` (plus `jobId`, the id of the job inside the task engine) and store what `run` returns. `run` returns `{ data, ref?, sha?, at?, artifacts? }`: `sha` is the commit the data describes; runners fall back to the commit of the job's checkout, so analyzers without one set it to the forge head they read.
 
-`keepRecords: n` makes runners delete the analyzer's older records of a repository after storing a new one, keeping the newest `n`; for snapshot analyzers whose history lives elsewhere (`ci-jobs` keeps 3).
+`keepRecords: n` makes runners delete the analyzer's older records of a repository after storing a new one, keeping the newest `n`; for snapshot analyzers whose history lives elsewhere or that only the newest record matters for (`ci-jobs`, `depgraph` and `audit` keep 3). The server's `POST /api/analyses` prunes the same way.
 
 `dailyLimit: n` caps the automatic jobs (triggers and schedules) whose `runAfter` falls on one UTC day; the queue moves the rest to the next days with room (`enqueueUnique` of `@holtkeeper/jobs`), so an expensive analyzer queued for a whole fleet spreads its cost (`knowledge-bootstrap` allows 10).
 

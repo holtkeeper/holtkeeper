@@ -214,6 +214,8 @@ export const auditAnalyzer = defineAnalyzer({
   // No `refresh`: the server's vulnerability index audits npm and Go repositories without a
   // checkout and queues this analyzer when it finds something to fix.
   needs: { checkout: true },
+  // Security shows the newest record; the one before feeds "up/down from" and `firstSeen`.
+  keepRecords: 3,
   options: z.object({
     fix: z.boolean().default(false),
     allowlist: allowlistSchema.default([]),

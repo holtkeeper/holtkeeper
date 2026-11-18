@@ -265,6 +265,13 @@ export async function runVulnIndex(
         data: report,
         ...(metrics !== undefined && { metrics }),
       })
+      if (auditAnalyzer.keepRecords)
+        // oxlint-disable-next-line no-await-in-loop
+        await store.analyses.prune({
+          repo: each.repo,
+          kind: auditAnalysis.kind,
+          keep: auditAnalyzer.keepRecords,
+        })
       summary.written += 1
     }
 

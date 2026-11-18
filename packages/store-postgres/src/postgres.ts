@@ -236,6 +236,13 @@ function coreStores(db: () => Promise<Db>): CoreStores {
               ORDER BY created_at DESC, seq DESC LIMIT ${Math.max(keep, 0)})`
         return result.count
       },
+      async removeRepo(repo) {
+        const { sql, t } = await db()
+        const result = await sql`
+          DELETE FROM ${t.analyses}
+          WHERE repo_forge = ${repo.forge} AND repo_path = ${repo.path}`
+        return result.count
+      },
     },
     credentials: {
       async list() {
