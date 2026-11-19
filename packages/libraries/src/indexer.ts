@@ -331,7 +331,10 @@ async function indexLibrary(run: RunContext, ref: LibraryRef, uses: LibraryUse[]
   if (!registry) registryStatus = sourceStatus('skipped', run.now, `no ${ref.ecosystem} registry`)
   else {
     try {
-      published = await registry.library(ref)
+      published = await registry.library(
+        ref,
+        uses.map((use) => use.version),
+      )
       if (!published) {
         if (previous) {
           await store.removeLibrary(ref)

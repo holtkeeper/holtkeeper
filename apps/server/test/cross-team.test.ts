@@ -260,7 +260,9 @@ describe('MCP cross-team tools', () => {
       { package: 'widget-kit', ecosystem: 'npm' },
       asShapes,
     )
-    expect(result.text).toContain('# widget-kit (npm): 2 repositories of 2 teams, latest 3.0.0')
+    expect(result.text).toContain(
+      '# widget-kit (npm): a direct dependency of 2 repositories of 2 teams, latest 3.0.0',
+    )
     expect(result.text).toContain('## team colors\n- `work:colors/red` 3.0.0')
     expect(result.text).toContain('## team shapes\n- `work:shapes/circle` 1.2.0 (2 majors behind)')
     const tool = await callTool('package_usage', { package: 'node' }, asShapes)
@@ -303,7 +305,7 @@ describe('MCP cross-team tools', () => {
       },
     })
     const { text } = await callTool('package_usage', { package: 'widget-kit' }, asAdmin)
-    expect(text).toContain('# widget-kit (npm): 2 repositories of 2 teams')
+    expect(text).toContain('# widget-kit (npm): a direct dependency of 2 repositories of 2 teams')
     expect(text).toContain(
       '## Exports used\n- **Widget** from `widget-kit` — 2 uses in 1 repos (jsx 2)',
     )
@@ -312,6 +314,66 @@ describe('MCP cross-team tools', () => {
     expect(text).toEndWith(
       'No code use of it was read in `work:colors/red`: they depend on it without importing it, or their usage record is missing.',
     )
+  })
+
+  test('package_usage with repo and code false is the summary of that repository', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'shapes/circle' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        packages: [
+          {
+            name: 'widget-kit',
+            versions: ['1.2.0'],
+            ranges: ['^1.2.0'],
+            workspaces: ['root'],
+            count: 2,
+            files: 1,
+            exports: [
+              {
+                name: 'Widget',
+                subpath: '.',
+                count: 2,
+                files: 1,
+                kinds: { jsx: 2 },
+                members: [],
+                props: [],
+                spread: 0,
+                sites: [
+                  {
+                    file: 'src/a.tsx',
+                    line: 3,
+                    column: 5,
+                    kind: 'jsx',
+                    snippet: '<Widget />',
+                    snippetLine: 3,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        files: 3,
+        types: { status: 'used', projects: ['tsconfig.json'], sites: 0 },
+      },
+    })
+    const summary = await callTool(
+      'package_usage',
+      { package: 'widget-kit', repo: 'work:shapes/circle', code: false },
+      asAdmin,
+    )
+    expect(summary.text).toContain('`work:shapes/circle`')
+    expect(summary.text).toContain('## Exports used\n- **Widget** from `widget-kit`')
+    expect(summary.text).not.toContain('```')
+    expect(summary.text).not.toContain('colors/red')
+    const unknown = await callTool(
+      'package_usage',
+      { package: 'widget-kit', repo: 'work:shapes/square', code: false },
+      asAdmin,
+    )
+    expect(unknown.isError).toBe(true)
+    expect(unknown.text).toContain('No usage record of work:shapes/square')
   })
 
   test('package_usage lists code imports without a resolved version once, apart from the teams', async () => {
@@ -348,7 +410,7 @@ describe('MCP cross-team tools', () => {
       },
     })
     const { text } = await callTool('package_usage', { package: 'widget-kit' }, asAdmin)
-    expect(text).toContain('# widget-kit (npm): 2 repositories of 2 teams')
+    expect(text).toContain('# widget-kit (npm): a direct dependency of 2 repositories of 2 teams')
     expect(text).not.toContain('## team shapes\n- `work:shapes/square`')
     expect(text).toContain(
       'Also imported, without a resolved registry version (an own workspace, a replaced module or no lockfile entry):\n- `work:shapes/square` (team shapes) — ^1.2.0, 3 uses in 2 files',

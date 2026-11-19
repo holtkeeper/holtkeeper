@@ -136,6 +136,27 @@ describe('resolveRules', () => {
     expect(block?.source).toBe('1 of 2 learned rules')
   })
 
+  test('with files, learned rules about them come first', () => {
+    const resolved = resolveRules({
+      repo,
+      agent: 'task',
+      rules: [],
+      repoFiles: [],
+      files: ['src/features/widgetPanel/WidgetPanel.tsx', 'src/assets/banner.png'],
+      learnings: [
+        learning('used', 'Keep round handlers small.', { actedOn: 4 }),
+        learning('asset', 'Ship a webp next to every image.'),
+        learning('panel', 'A widget panel takes its store through props.'),
+      ],
+      budget: { learnings: LEARNED_HEADER.length + 125 },
+    })
+    const block = resolved.blocks.at(-1)
+    expect(block?.text).toBe(
+      `${LEARNED_HEADER}\n- A widget panel takes its store through props. [learn:panel]\n- Ship a webp next to every image. [learn:asset]`,
+    )
+    expect(resolved.warnings.at(-1)).toContain('those least about the files touched first')
+  })
+
   test('input order does not change the text', () => {
     const rules = [rule('a'), rule('b', { scope: { teams: ['widgets'] } }), rule('c')]
     const one = resolveRules({ repo, agent: 'review', rules, repoFiles: [], learnings: [] })

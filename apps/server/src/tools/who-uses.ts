@@ -101,7 +101,7 @@ function renderLibraryUsers(
     for (const version of used) versions.set(version, (versions.get(version) ?? 0) + 1)
   }
   const lines = [
-    `# ${name} (${ecosystem}${options.internal ? ', internal package' : ''}): ${repos.size} repositor${repos.size === 1 ? 'y' : 'ies'} of ${byTeam.size} team${byTeam.size === 1 ? '' : 's'}${options.latest ? `, latest ${options.latest}` : ''}`,
+    `# ${name} (${ecosystem}${options.internal ? ', internal package' : ''}): a direct dependency of ${repos.size} repositor${repos.size === 1 ? 'y' : 'ies'} of ${byTeam.size} team${byTeam.size === 1 ? '' : 's'}${options.latest ? `, latest ${options.latest}` : ''}`,
     `Versions: ${[...versions]
       .toSorted((a, b) => b[1] - a[1])
       .map(([version, count]) => `${version} (${count})`)

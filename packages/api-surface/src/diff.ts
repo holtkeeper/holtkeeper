@@ -1,5 +1,6 @@
 import { isPseudoVersion } from '@holtkeeper/go-source'
 
+import { declaredMembers } from './members.ts'
 import type { ApiEcosystem, ApiPackage, ApiSymbol, ApiSymbolKind } from './model.ts'
 
 /** How one exported name differs between two versions. */
@@ -10,6 +11,8 @@ export interface ApiChange {
   change: 'added' | 'removed' | 'changed' | 'deprecated'
   before?: string
   after?: string
+  /** For a changed declaration: members (fields, properties, methods) the new one no longer has. */
+  removedMembers?: string[]
 }
 
 /** The smallest version bump a set of changes calls for. */
@@ -26,8 +29,10 @@ export interface PackageDiff {
   removed: number
   /** Declarations that differ; they may or may not break callers. */
   changed: number
+  /** Changed declarations that lost members, which breaks the code reading them. */
+  breaking: number
   deprecated: number
-  /** What the changes call for: `major` when something was removed. */
+  /** What the changes call for: `major` when something was removed or lost members. */
   required: Bump
   /** What the version numbers did; `undefined` when either is missing or not semver. */
   bumped?: Bump
@@ -92,9 +97,17 @@ export function diffPackage(
     const now = next.get(key)
     const base = { subpath: symbol.subpath, name: symbol.name, kind: now?.kind ?? symbol.kind }
     if (!now) changes.push({ ...base, change: 'removed', before: symbol.signature })
-    else if (normalizeSignature(now.signature) !== normalizeSignature(symbol.signature))
-      changes.push({ ...base, change: 'changed', before: symbol.signature, after: now.signature })
-    else if (symbol.deprecated === undefined && now.deprecated !== undefined)
+    else if (normalizeSignature(now.signature) !== normalizeSignature(symbol.signature)) {
+      const kept = declaredMembers(now.signature)
+      const lost = [...declaredMembers(symbol.signature)].filter((member) => !kept.has(member))
+      changes.push({
+        ...base,
+        change: 'changed',
+        before: symbol.signature,
+        after: now.signature,
+        ...(lost.length && { removedMembers: lost }),
+      })
+    } else if (symbol.deprecated === undefined && now.deprecated !== undefined)
       changes.push({ ...base, change: 'deprecated', after: now.signature })
   }
   for (const [key, symbol] of next)
@@ -118,14 +131,19 @@ export function diffPackage(
   const changed = count('changed')
   const added = count('added')
   const deprecated = count('deprecated')
-  const required: Bump = removed ? 'major' : added || changed || deprecated ? 'minor' : 'none'
+  const breaking = changes.filter((change) => change.removedMembers?.length).length
+  const required: Bump =
+    removed || breaking ? 'major' : added || changed || deprecated ? 'minor' : 'none'
   const from = before?.version
   const to = after?.version
   const bumped = before && after ? versionBump(from, to) : undefined
   const zero = parseSemver(to)?.[0] === 0
   const semverWarning =
     bumped !== undefined && rank[bumped] < rank[required] && required === 'major'
-      ? `${removed} export${removed === 1 ? '' : 's'} removed, but ${from} → ${to} is not a ${zero ? 'minor (0.x)' : 'major'} bump`
+      ? `${[
+          ...(removed ? [`${removed} export${removed === 1 ? '' : 's'} removed`] : []),
+          ...(breaking ? [`${breaking} declaration${breaking === 1 ? '' : 's'} lost members`] : []),
+        ].join(' and ')}, but ${from} → ${to} is not a ${zero ? 'minor (0.x)' : 'major'} bump`
       : undefined
   const ecosystem = after?.ecosystem ?? before?.ecosystem
   return {
@@ -136,6 +154,7 @@ export function diffPackage(
     added,
     removed,
     changed,
+    breaking,
     deprecated,
     required,
     ...(bumped ? { bumped } : {}),

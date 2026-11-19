@@ -192,6 +192,8 @@ export interface SearchFilters {
   limit?: number
   /** Also count facets over every match before the filters above apply. */
   facets?: boolean
+  /** Leaves out the hits it answers `true` for, before `limit` applies. */
+  hide?: (hit: PublicApiSymbolHit) => boolean
 }
 
 /** What `ApiCatalog.symbol` looks up. */
@@ -648,7 +650,8 @@ export function createApiCatalog(options: ApiCatalogOptions) {
         (!filters.kind || hit.symbol.kind === filters.kind) &&
         (!filters.repo || repoKey(hit.repo) === filters.repo) &&
         (!filters.subpath || hit.subpath === filters.subpath) &&
-        (!filters.match || hit.match === filters.match)
+        (!filters.match || hit.match === filters.match) &&
+        !filters.hide?.(hit)
       const found: PublicApiSymbolHit[] = []
       const all = needle ? await visible(filter) : []
       const byRecord = new Map<string, { record: IndexedRecord; names: Set<string> }>()

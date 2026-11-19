@@ -50,16 +50,27 @@ export function eventOf(name: string): string | undefined {
 /**
  * Matches attribute names against configured test attributes: a name counts when its bare name
  * (binding syntax stripped) equals a configured one or extends it with `-`, case-insensitively, so
- * `data-test` covers `data-test-id` and `data-test-state`. Returns the configured name that matched.
+ * `data-test` covers `data-test-id` and `data-test-state`. A dashed name also matches its camel
+ * case prop form, so `data-test` covers the props `dataTest`, `dataTestId` and `dataTestSpot` a
+ * component passes on. Returns the configured name that matched.
  */
 export function createAttributeMatcher(attributes: readonly string[]) {
   const exact = new Set(attributes)
   const lower = attributes.map((name) => [name.toLowerCase(), name] as const)
+  // The same names written as component props: `data-test` as `dataTest`, `dataTestId`, `dataTestSpot`.
+  const camel = attributes
+    .filter((name) => name.includes('-'))
+    .map((name) => [name.replaceAll('-', '').toLowerCase(), name] as const)
   return (name: string): string | undefined => {
     const bare = bareName(name)
     if (exact.has(bare)) return bare
     const key = bare.toLowerCase()
-    return lower.find(([prefix]) => key === prefix || key.startsWith(`${prefix}-`))?.[1]
+    const dashed = lower.find(([prefix]) => key === prefix || key.startsWith(`${prefix}-`))?.[1]
+    if (dashed || bare.includes('-')) return dashed
+    return camel.find(
+      ([prefix]) =>
+        key === prefix || (key.startsWith(prefix) && /[A-Z]/.test(bare.charAt(prefix.length))),
+    )?.[1]
   }
 }
 

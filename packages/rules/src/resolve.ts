@@ -111,6 +111,46 @@ export function scopeSource(
   return parts.join(' · ') || 'No repositories'
 }
 
+/** Words a kind of file brings to mind, so a rule about them ranks up for such a file. */
+const EXTENSION_WORDS: Readonly<Record<string, readonly string[]>> = {
+  tsx: ['component', 'react', 'jsx', 'props', 'hook', 'styled'],
+  jsx: ['component', 'react', 'jsx', 'props', 'hook'],
+  ts: ['typescript', 'type'],
+  go: ['go', 'golang', 'package'],
+  css: ['style', 'css', 'class'],
+  scss: ['style', 'css', 'class'],
+  png: ['image', 'asset', 'webp'],
+  jpg: ['image', 'asset', 'webp'],
+  jpeg: ['image', 'asset', 'webp'],
+  svg: ['svg', 'icon', 'asset'],
+  json: ['config', 'json'],
+}
+
+const IGNORED_WORDS = new Set(['src', 'index', 'lib', 'app', 'main', 'internal', 'pkg', 'cmd'])
+
+/** The words of the paths a task touches: folders, file names (camel case split) and kinds. */
+function fileWords(files: readonly string[]): Set<string> {
+  const words = new Set<string>()
+  for (const file of files) {
+    const extension = /\.([a-z0-9]+)$/i.exec(file)?.[1]?.toLowerCase()
+    for (const word of EXTENSION_WORDS[extension ?? ''] ?? []) words.add(word)
+    if (/\.(test|spec)\./.test(file) || file.includes('__tests__')) words.add('test')
+    for (const part of file.replace(/\.[^/.]+$/, '').split(/[/._-]+/))
+      for (const word of part.split(/(?<=[a-z0-9])(?=[A-Z])/))
+        if (word.length >= 3 && !IGNORED_WORDS.has(word.toLowerCase()))
+          words.add(word.toLowerCase())
+  }
+  return words
+}
+
+/** How many of `words` a learned rule mentions. */
+const mentionedWords = (learning: Learning, words: ReadonlySet<string>) => {
+  const text = `${learning.text} ${learning.reason ?? ''}`.toLowerCase()
+  let count = 0
+  for (const word of words) if (text.includes(word)) count += 1
+  return count
+}
+
 const appliesTo = (globs: readonly string[] | undefined, files: readonly string[] | undefined) =>
   globs?.length && files === undefined
     ? ` (applies to ${globs.map((glob) => `\`${glob}\``).join(', ')})`
@@ -236,9 +276,12 @@ export function resolveRules(input: ResolveRulesInput): ResolvedRules {
   for (const candidate of [...always, ...rootFiles, ...scoped, ...scopedFiles, ...policies])
     place(candidate)
 
+  const words = files ? fileWords(files) : undefined
+  const relevance = (learning: Learning) =>
+    words ? (learning.files?.length ? 100 : 0) + mentionedWords(learning, words) : 0
   const learned = input.learnings
     .filter((learning) => learningApplies(learning, input.repo, input.agent, files))
-    .toSorted(byLearningRank)
+    .toSorted((a, b) => relevance(b) - relevance(a) || byLearningRank(a, b))
   if (learned.length) {
     const room = Math.min(budget.learnings, budget.total - used)
     const lines: string[] = []
@@ -266,7 +309,10 @@ export function resolveRules(input: ResolveRulesInput): ResolvedRules {
       cut,
     })
     used += text.length
-    if (cut) warnings.push(`${learned.length - lines.length} learned rules were left out for room.`)
+    if (cut)
+      warnings.push(
+        `${learned.length - lines.length} learned rules were left out for room${words ? ', those least about the files touched first' : ''}; search_knowledge finds them by topic.`,
+      )
   }
 
   const parts = blocks.map((block) => block.text).filter(Boolean)

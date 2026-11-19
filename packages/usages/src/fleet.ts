@@ -1,3 +1,4 @@
+import { declaredMembers } from '@holtkeeper/api-surface'
 import { compareVersions } from '@holtkeeper/depgraph'
 import { libraryOfModule } from '@holtkeeper/go-source'
 
@@ -11,6 +12,7 @@ import {
   type UsedPackage,
   usageKinds,
 } from './model.ts'
+import { anonymous } from './types.ts'
 
 /** The newest `usages` data of one repository; `origin` identifies it, e.g. `forge:path`. */
 export interface UsageEntry<Origin = string> {
@@ -257,7 +259,8 @@ const memberMatches = (member: string | undefined, wanted: string) => {
 
 /**
  * Sites matching `query` across the newest records, with snippets, ordered by repository then
- * file. Only kept sites can be returned; `total` counts every matching use, including those a
+ * file; when there are more than `limit`, uses through an import are kept before those reached
+ * only through another package's types. Only kept sites can be returned; `total` counts every matching use, including those a
  * record left out of its sites, when the query does not narrow below an export.
  */
 export function findSites<Origin>(
@@ -294,7 +297,19 @@ export function findSites<Origin>(
         })
     }
   }
-  return { sites: found.slice(0, limit), total, more: Math.max(0, found.length - limit) }
+  // Uses reached only through another package's types (`styled.div` typed by React) say little
+  // about how the package itself is used: they come after the imports.
+  const weight = (item: FoundSite<Origin>) =>
+    (item.export === anonymous ? 2 : 0) + (item.site.typed ? 1 : 0)
+  const kept = new Set(
+    found
+      .map((item, index) => ({ index, weight: weight(item) }))
+      .toSorted((a, b) => a.weight - b.weight || a.index - b.index)
+      .slice(0, limit)
+      .map((item) => item.index),
+  )
+  const sites = found.filter((_, index) => kept.has(index))
+  return { sites, total, more: Math.max(0, found.length - limit) }
 }
 
 /** The part of an API diff `upgradeImpact` reads; `PackageDiff` changes of api-surface fit. */
@@ -401,53 +416,7 @@ export interface UntypedUser<Origin = string> {
   reason?: string
 }
 
-const memberLine = /^\s*(?:readonly\s+)?(?:get\s+|set\s+)?([A-Za-z_$][\w$]*)\??\s*[:(<]/
-
 const goIdent = '[\\p{L}_][\\p{L}\\p{N}_]*'
-const goDeclaration = new RegExp(
-  `^type\\s+${goIdent}(?:\\[[^\\]]*\\])?\\s+(?:struct|interface)\\s*\\{`,
-  'u',
-)
-const goMethod = new RegExp(`^\\s*(${goIdent})\\s*\\(`, 'u')
-const goFields = new RegExp(`^\\s*(${goIdent}(?:\\s*,\\s*${goIdent})*)\\s+[^\\s/]`, 'u')
-const goEmbedded = new RegExp(
-  `^\\s*\\*?(?:${goIdent}\\.)?(${goIdent})(?:\\[.*\\])?\\s*(?:\x60[^\x60]*\x60)?\\s*$`,
-  'u',
-)
-
-/** Member names one line of a Go struct or interface body declares: fields, methods or embeds. */
-function goMembers(line: string): string[] {
-  if (/^\s*(?:\/\/|~)/.test(line)) return []
-  const method = goMethod.exec(line)?.[1]
-  if (method) return [method]
-  const fields = goFields.exec(line)?.[1]
-  if (fields) return fields.split(',').map((name) => name.trim())
-  const embedded = goEmbedded.exec(line)?.[1]
-  return embedded ? [embedded] : []
-}
-
-/**
- * Names of the members a declaration lists one per line, e.g. an interface's properties; for a Go
- * `type X struct {…}` or `type X interface {…}`, its field names (embedded types by their type
- * name) and interface methods.
- */
-export function declaredMembers(signature: string | undefined): Set<string> {
-  const names = new Set<string>()
-  if (!signature) return names
-  const go = goDeclaration.test(signature)
-  let depth = 0
-  for (const line of signature.split('\n')) {
-    if (depth === 1 && go) for (const name of goMembers(line)) names.add(name)
-    const match = depth === 1 && !go ? memberLine.exec(line) : null
-    if (match?.[1]) names.add(match[1])
-    for (const char of line) {
-      if (char === '{') depth += 1
-      else if (char === '}') depth -= 1
-    }
-  }
-  return names
-}
-
 const goInterface = new RegExp(`^type\\s+${goIdent}(?:\\[[^\\]]*\\])?\\s+interface\\s*\\{`, 'u')
 
 const bodyLines = (signature: string) =>

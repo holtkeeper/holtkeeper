@@ -70,6 +70,31 @@ test('diffPackage classifies changes and warns about removals without a major bu
   expect(diffPackage(before, { ...after, version: '2.0.0' }).semverWarning).toBeUndefined()
 })
 
+test('a declaration that loses a member is breaking, in TypeScript and in Go', () => {
+  const before = pkg('1.1.0', [
+    symbol('Shape', 'interface Shape {\n  size: number\n  color?: string\n}'),
+    symbol('Round', 'type Round struct {\n\tScore int\n\tSide string\n}'),
+  ])
+  const after = pkg('1.2.0', [
+    symbol('Shape', 'interface Shape {\n  size: number\n}'),
+    symbol('Round', 'type Round struct {\n\tWonScore, LostScore int\n\tSide string\n}'),
+  ])
+  const diff = diffPackage(before, after)
+  expect(diff).toMatchObject({ removed: 0, changed: 2, breaking: 2, required: 'major' })
+  expect(diff.changes.map((change) => change.removedMembers)).toEqual([['Score'], ['color']])
+  expect(diff.semverWarning).toBe(
+    '2 declarations lost members, but 1.1.0 → 1.2.0 is not a major bump',
+  )
+  const widened = diffPackage(
+    before,
+    pkg('1.2.0', [
+      symbol('Shape', 'interface Shape {\n  size: number\n  color?: string\n  tone?: string\n}'),
+      symbol('Round', 'type Round struct {\n\tScore int\n\tSide string\n}'),
+    ]),
+  )
+  expect(widened).toMatchObject({ breaking: 0, required: 'minor' })
+})
+
 test('diffApi leaves out unchanged packages and covers added ones', () => {
   const same = pkg('1.0.0', [symbol('a', 'function a(): void')])
   const other = { ...same, name: 'other' }

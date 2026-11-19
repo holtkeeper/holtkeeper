@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
 import { bareName, createAttributeMatcher, createClassifier, eventOf } from './classify.ts'
 import {
@@ -74,4 +74,16 @@ test('a configured attribute covers its dash-extended family', () => {
   expect(
     ['data-test-id', ':data-test-state', 'DATA-TEST', 'testid', 'data-testid'].map(match),
   ).toEqual(['data-test', 'data-test', 'data-test', 'testID', undefined])
+})
+
+describe('createAttributeMatcher props', () => {
+  test('a dashed attribute also matches its camel case prop forms', () => {
+    const match = createAttributeMatcher(['data-test', 'testId'])
+    expect(match('dataTestId')).toBe('data-test')
+    expect(match('dataTestSpot')).toBe('data-test')
+    expect(match('dataTest')).toBe('data-test')
+    expect(match('testId')).toBe('testId')
+    expect(match('dataTestament')).toBeUndefined()
+    expect(match('dataTests')).toBeUndefined()
+  })
 })

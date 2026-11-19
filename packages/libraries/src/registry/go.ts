@@ -57,6 +57,9 @@ export function goPrivateMatcher(patterns: readonly string[]): (path: string) =>
 }
 
 const maxMajor = 100
+
+/** The major a module path names: `n` for `…/vN`, else 1. */
+const majorOfPath = (path: string) => Number(/\/v(\d+)$/.exec(path)?.[1] ?? 1)
 const maxFileSize = 1_000_000
 const maxSourceBytes = 100_000_000
 const infoConcurrency = 8
@@ -208,19 +211,36 @@ export function goRegistry(options: GoRegistryOptions = {}): LibraryRegistry {
     return importUrl ? repositoryOf(importUrl, directory) : undefined
   }
 
-  const library = async (ref: LibraryRef): Promise<PublishedLibrary | undefined> => {
+  const library = async (
+    ref: LibraryRef,
+    inUse: readonly string[] = [],
+  ): Promise<PublishedLibrary | undefined> => {
     const name = ref.name
     if (isPrivate(name)) return undefined
     const majors: { path: string; versions: string[] }[] = []
     const base = await listOf(name)
     if (base.exists) majors.push({ path: name, versions: base.versions })
     if (!name.startsWith('gopkg.in/')) {
-      for (let major = 2; major <= maxMajor; major++) {
-        const path = `${name}/v${major}`
-        const found = await listOf(path)
-        if (!found.exists) break
-        majors.push({ path, versions: found.versions })
-      }
+      const probed = new Set<number>()
+      // Majors are walked up from each start until one is missing; versions in use start a walk
+      // too, since a module may skip majors (v6 after v1) and the plain walk stops at the gap.
+      const starts = [
+        2,
+        ...inUse
+          .filter((version) => !version.endsWith('+incompatible'))
+          .map((version) => Number(/^v(\d+)\./.exec(version)?.[1] ?? 0))
+          .filter((major) => major >= 2),
+      ]
+      for (const start of [...new Set(starts)].toSorted((a, b) => a - b))
+        for (let major = start; major <= maxMajor && !probed.has(major); major++) {
+          probed.add(major)
+          const path = `${name}/v${major}`
+          // oxlint-disable-next-line no-await-in-loop -- one major after another until a gap
+          const found = await listOf(path)
+          if (!found.exists) break
+          majors.push({ path, versions: found.versions })
+        }
+      majors.sort((a, b) => majorOfPath(a.path) - majorOfPath(b.path))
     }
     if (majors.length === 0) return undefined
 

@@ -967,6 +967,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-js": "workspace:*",

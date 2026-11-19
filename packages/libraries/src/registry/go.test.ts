@@ -61,6 +61,22 @@ describe('goRegistry.library', () => {
     expect(withV2.calls).toContain(`${proxy}/github.com/!acme/lib/v3/@v/list`)
   })
 
+  test('finds a major past a gap through the versions in use, and takes the newest as latest', async () => {
+    const { fetch, calls } = fakeFetch({
+      [`${proxy}/github.com/acme/env/@v/list`]: 'v1.0.0\nv3.5.0+incompatible\n',
+      [`${proxy}/github.com/acme/env/@latest`]: JSON.stringify({ Version: 'v3.5.0+incompatible' }),
+      [`${proxy}/github.com/acme/env/v11/@v/list`]: 'v11.0.0\nv11.3.1\n',
+      [`${proxy}/github.com/acme/env/v12/@v/list`]: 'v12.0.0\n',
+    })
+    const registry = goRegistry({ fetch, proxyUrl: proxy })
+    const ref = { ecosystem: 'Go' as const, name: 'github.com/acme/env' }
+    const lib = await registry.library(ref, ['v11.3.1'])
+    expect(lib?.latest).toBe('v12.0.0')
+    expect(lib?.versions.map((v) => v.version)).toContain('v11.3.1')
+    expect(calls).toContain(`${proxy}/github.com/acme/env/v13/@v/list`)
+    expect((await registry.library(ref))?.latest).toBe('v3.5.0+incompatible')
+  })
+
   test('maps a sub-module of a GitHub repository to its directory', async () => {
     const { fetch } = fakeFetch({
       [`${proxy}/github.com/acme/mono/tools/@v/list`]: 'v0.1.0\n',

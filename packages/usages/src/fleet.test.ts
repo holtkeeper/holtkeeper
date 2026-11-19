@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
+import { declaredMembers } from '@holtkeeper/api-surface'
+
 import {
   addedInterfaceMethods,
-  declaredMembers,
   findSites,
   narrowImpact,
   packageUsage,
@@ -448,5 +449,58 @@ describe('narrowImpact', () => {
     expect(narrowed.impact.unaffected).toEqual([])
     expect(narrowed.impact.items).toHaveLength(1)
     expect(narrowed.impact.items[0]).toMatchObject({ count: 2, repos: [{ origin: 'a' }] })
+  })
+})
+
+const typedSite = (line: number, typed?: boolean) => ({
+  file: 'src/a.tsx',
+  line,
+  kind: 'member' as const,
+  snippet: 'x',
+  ...(typed && { typed: true }),
+})
+
+describe('findSites with uses reached through types', () => {
+  test('keeps imports first when the limit cuts, in repository order', () => {
+    const records = [
+      {
+        origin: 'a',
+        data: {
+          packages: [
+            {
+              name: 'some-lib',
+              versions: ['1.0.0'],
+              ranges: [],
+              exports: [
+                {
+                  name: '(anonymous)',
+                  subpath: '.',
+                  count: 2,
+                  files: 1,
+                  kinds: { member: 2 },
+                  members: [],
+                  props: [],
+                  spread: 0,
+                  sites: [typedSite(1, true), typedSite(2, true)],
+                },
+                {
+                  name: 'useWidget',
+                  subpath: '.',
+                  count: 1,
+                  files: 1,
+                  kinds: { call: 1 },
+                  members: [],
+                  props: [],
+                  spread: 0,
+                  sites: [typedSite(3)],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]
+    const found = findSites(records as never, { package: 'some-lib', limit: 2 })
+    expect(found.sites.map((item) => item.site.line)).toEqual([1, 3])
   })
 })

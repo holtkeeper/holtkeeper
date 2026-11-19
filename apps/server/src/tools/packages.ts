@@ -111,6 +111,9 @@ function reversed(older: string, newer: string) {
  * parts are asked for; the changelog keeps its own 20 000 limit of whole blocks. Together about
  * 76 000, under the MCP cap, so a large upgrade keeps every part instead of losing the last.
  */
+/** A Go import path inside an `internal` directory, importable only from its own module. */
+const GO_INTERNAL = /(^|\/)internal(\/|$)/
+
 const SECTION_CHARS = { api: 24_000, impact: 32_000 } as const
 
 /**
@@ -483,6 +486,15 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     return { ref, external, packages }
   }
 
+  /**
+   * Whether Go would let the working repository import a package: an `internal/` package only
+   * from inside its own repository.
+   */
+  const importable = (pkg: { name: string; ecosystem?: string | undefined; repo: RepoRef }) =>
+    pkg.ecosystem !== 'Go' ||
+    !GO_INTERNAL.test(pkg.name) ||
+    repoKey(pkg.repo) === readableRepo(canRead, context.defaultRepo)
+
   const symbolHits = async (
     query: string,
     filters: { package?: string; kind?: ApiSymbolKind; limit: number },
@@ -491,6 +503,9 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
       ...(filters.package ? { package: filters.package } : {}),
       ...(filters.kind ? { kind: filters.kind } : {}),
       limit: filters.limit,
+      ...(!filters.package && {
+        hide: (hit) => !importable({ name: hit.package, ecosystem: hit.ecosystem, repo: hit.repo }),
+      }),
     })
     return {
       more: result.more,
@@ -804,7 +819,9 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
                 : []),
             ].join('\n')
           }
-          const packages = await catalog.packages(canRead, query)
+          const listedPackages = await catalog.packages(canRead, query)
+          const packages = listedPackages.filter((pkg) => importable(pkg))
+          const hidden = listedPackages.length - packages.length
           const line = (pkg: (typeof packages)[number]) =>
             `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.ecosystem === 'Go' ? ` (Go${pkg.module && pkg.module !== pkg.name ? `, module ${pkg.module}` : ''}${pkg.private ? ', internal' : ''})` : pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded${pkg.removed ? `\n  ${removalNote(pkg.name, pkg.repo, pkg.removed)}` : ''}`
           if (!query) {
@@ -844,6 +861,11 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             ...(matching.length > shown
               ? [`…and ${matching.length - shown} more packages; narrow the query.`]
               : []),
+            ...(hidden
+              ? [
+                  `${hidden} internal Go package${hidden === 1 ? '' : 's'} of other repositories left out: Go lets only their own module import them.`,
+                ]
+              : []),
           ].join('\n')
           const exportLines = exported.lines.length
             ? [
@@ -857,7 +879,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             : []
           const sections = [
             ...(kind ? exportLines : []),
-            ...(matching.length ? [packageLines] : []),
+            ...(matching.length || hidden ? [packageLines] : []),
             ...(libraries.length
               ? [
                   [
@@ -921,10 +943,19 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           const { found, used } = latest
             ? await atConsumerVersion(name, latest, consumer, version)
             : { found: undefined, used: undefined }
-          const note =
-            found && latest && used && consumer
+          const note = [
+            ...(found && latest && used && consumer
               ? [consumerNote(name, consumer, used, found, latest)]
-              : []
+              : []),
+            ...(found &&
+            found.package.ecosystem === 'Go' &&
+            GO_INTERNAL.test(name) &&
+            consumer !== repoKey(found.record.repo)
+              ? [
+                  `**Internal package:** Go lets only code inside module ${found.package.module ?? `\`${repoKey(found.record.repo)}\``} import ${name}; other repositories cannot use it.`,
+                ]
+              : []),
+          ]
           if (found && symbol)
             return [...note, ownSymbol(found, name, symbol, subpath)].join('\n\n')
           if (found && query) {
@@ -1243,7 +1274,9 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           code: z
             .boolean()
             .optional()
-            .describe('Return the code of the uses instead of the summary'),
+            .describe(
+              'true: the code of the uses; false with `repo`: the summary of that repository; default code once anything narrows',
+            ),
           ecosystem: ecosystemArg,
           limit: z.number().int().min(1).max(100).optional().describe('Uses to show; default 30'),
         }),
@@ -1259,7 +1292,12 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           ecosystem,
           limit,
         }) => {
-          if (exported || member || prop || kind || repo || code) {
+          if (code === false && repo && !(exported || member || prop || kind)) {
+            const entries = (await usages.entries(canRead)).filter((entry) => entry.origin === repo)
+            if (!entries.length) throw new ToolError(`No usage record of ${repo} you can read.`)
+            return renderPackageUsage(packageUsage(entries, name), { originLabel: String, teamOf })
+          }
+          if (code !== false && (exported || member || prop || kind || repo || code)) {
             const entries = await usages.entries(canReadSnippets)
             if (repo && !entries.some((entry) => entry.origin === repo))
               throw new ToolError(`No usage record of ${repo} you can read.`)

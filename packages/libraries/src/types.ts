@@ -35,8 +35,12 @@ export type ArchiveFiles = Map<string, Uint8Array>
 
 /** A package registry: npm, the Go module proxy, or a fake in tests. */
 export interface LibraryRegistry {
-  /** `undefined` when the registry does not know the library. */
-  library(ref: LibraryRef): Promise<PublishedLibrary | undefined>
+  /**
+   * `undefined` when the registry does not know the library. `inUse` are versions repositories
+   * resolve, so a registry can look where they point (Go: a `/vN` module path past a gap in the
+   * majors); registries that need no hint ignore it.
+   */
+  library(ref: LibraryRef, inUse?: readonly string[]): Promise<PublishedLibrary | undefined>
   /** The published archive of one version, unpacked; `undefined` when it does not exist. */
   archive(ref: LibraryRef, version: string): Promise<ArchiveFiles | undefined>
   /**

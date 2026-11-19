@@ -104,12 +104,18 @@ export function renderPackage(
 export function renderDiff(diff: PackageDiff): string {
   const lines = [
     `# ${diff.name}: ${diff.from ?? 'new'} → ${diff.to ?? 'removed'}`,
-    `${diff.removed} removed, ${diff.changed} changed, ${diff.deprecated} deprecated, ${diff.added} added. Calls for a ${diff.required} release${diff.bumped ? `; the version got a ${diff.bumped} bump` : ''}.`,
+    `${diff.removed} removed, ${diff.changed} changed${diff.breaking ? ` (${diff.breaking} breaking)` : ''}, ${diff.deprecated} deprecated, ${diff.added} added. Calls for a ${diff.required} release${diff.bumped ? `; the version got a ${diff.bumped} bump` : ''}.`,
     ...(diff.semverWarning ? [`**Semver:** ${diff.semverWarning}.`] : []),
   ]
   for (const change of diff.changes) {
     const name = `${importPath(diff.name, change.subpath)} → ${change.name}`
-    lines.push(`## ${change.change}: \`${name}\` (${change.kind})`)
+    lines.push(
+      `## ${change.change}${change.removedMembers?.length ? ' (breaking)' : ''}: \`${name}\` (${change.kind})`,
+    )
+    if (change.removedMembers?.length)
+      lines.push(
+        `Members removed: ${change.removedMembers.map((member) => `\`${member}\``).join(', ')}.`,
+      )
     if (change.change === 'changed' && change.before && change.after)
       lines.push(
         `Before:\n\n${fence(change.before, diff.ecosystem)}`,

@@ -30,6 +30,6 @@ The rules every agent run follows on a repository, and the rules Holtkeeper lear
 2. root repository rules files;
 3. file-scoped panel rules, then nested and file-scoped repository files, that match the touched `files` (without `files`, all of them, each titled with the paths it applies to);
 4. policies;
-5. active learnings that apply, under `LEARNED_HEADER`, best ranked first.
+5. active learnings that apply, under `LEARNED_HEADER`, best ranked first. With `files`, learned rules are ordered first by how much they are about the touched files (scoped by `files` globs, then how many path words and words of the file kinds they mention: `.tsx` brings component, react, props, ...) and only then by score.
 
-The text starts with `RULES_HEADER`; agents cite `[rule:<id>]` and `[learn:<id>]`. `DEFAULT_RULE_BUDGET`: 12 000 characters in all, rules files at most 4 800 together (cut at a line break with `[… truncated, see <file>]`), learnings at most 3 000 and dropped whole. A block with less than 200 characters of room is left out. Every cut adds a warning. The result lists every block with `chars`, `fullChars` and `cut` (the effective-prompt view), and the `requested` rules.
+The text starts with `RULES_HEADER`; agents cite `[rule:<id>]` and `[learn:<id>]`. `DEFAULT_RULE_BUDGET`: 12 000 characters in all, rules files at most 4 800 together (cut at a line break with `[… truncated, see <file>]`), learnings at most 3 000 and dropped whole (the cut warning says how many and that `search_knowledge` finds them by topic). A block with less than 200 characters of room is left out. Every cut adds a warning. The result lists every block with `chars`, `fullChars` and `cut` (the effective-prompt view), and the `requested` rules.

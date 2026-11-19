@@ -1675,7 +1675,13 @@ describe('Go packages', () => {
     expect(versions.content[0]?.text).toContain(`- v1.3.0 as ${geomModule} tag \`v1.3.0\``)
 
     const listed = await callTool('find_packages', { query: 'internal/calc' }, asAdmin)
-    expect(listed.content[0]?.text).toContain(`(Go, module ${v2}, internal)`)
+    expect(listed.content[0]?.text).toContain(
+      '1 internal Go package of other repositories left out: Go lets only their own module import them.',
+    )
+    const internal = await callTool('package_api', { package: `${v2}/internal/calc` }, asAdmin)
+    expect(internal.content[0]?.text).toContain(
+      `**Internal package:** Go lets only code inside module ${v2}`,
+    )
 
     const search = await callTool('find_packages', { query: 'Skew' }, asAdmin)
     expect(search.content[0]?.text).toContain('```go\nfunc Skew')

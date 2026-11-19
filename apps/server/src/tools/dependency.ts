@@ -153,13 +153,16 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
         return `  - ${code(origin)}${origin === query.repo ? ' (yours)' : ''}: ${details.join('; ')}`
       })
     lines.push(
-      `- Used by ${users.size} repositor${users.size === 1 ? 'y' : 'ies'}${teams.size ? ` of ${teams.size} team${teams.size === 1 ? '' : 's'}` : ''}:`,
+      `- A direct dependency of ${users.size} repositor${users.size === 1 ? 'y' : 'ies'}${teams.size ? ` of ${teams.size} team${teams.size === 1 ? '' : 's'}` : ''} (the license and bundle sections also count repositories that get it through another package):`,
       ...rows.slice(0, 30),
       ...(rows.length > 30
         ? [`  - …and ${rows.length - 30} more; package_usage lists them by team.`]
         : []),
     )
-  } else if (!internal.length) lines.push('- No repository you can read uses it.')
+  } else if (!internal.length)
+    lines.push(
+      '- No repository you can read depends on it directly (the license section below counts every version resolved, also through other packages).',
+    )
   return lines
 }
 
@@ -259,7 +262,11 @@ export async function evaluateDependency(
     `# ${query.package}${query.version ? `@${query.version}` : ''} (${query.ecosystem})`,
     ['## In the organization', ...fleet].join('\n'),
     ['## Vulnerabilities', ...vulnerabilities].join('\n'),
-    ['## Licenses', ...licenses].join('\n'),
+    [
+      '## Licenses',
+      'Every version a repository resolves, also through another package.',
+      ...licenses,
+    ].join('\n'),
     ...(bundles.length ? [['## Bundle size', ...bundles].join('\n')] : []),
     `## Team rules\n\n${knowledge}`,
   ].join('\n\n')

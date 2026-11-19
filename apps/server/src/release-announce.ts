@@ -7,6 +7,7 @@ import {
   apiSurfaceDataSchema,
   diffPackage,
 } from '@holtkeeper/api-surface'
+import { declaredMembers } from '@holtkeeper/api-surface'
 import type { RepoRef, TagRecord } from '@holtkeeper/forge'
 import {
   type AnnouncedTag,
@@ -32,7 +33,6 @@ import {
 } from '@holtkeeper/release'
 import { resolveSetting } from '@holtkeeper/settings'
 import { type Job, type KvStore, type SettingEntry, keepKv, updateKv } from '@holtkeeper/store'
-import { declaredMembers } from '@holtkeeper/usages'
 import { webPaths, webUrl } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
