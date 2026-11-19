@@ -27,10 +27,8 @@ describe('MCP wiring', () => {
       'mcp__holtkeeper__code_grep',
       'mcp__holtkeeper__code_outline',
       'mcp__holtkeeper__code_symbol',
-      'mcp__holtkeeper__code_references',
       'mcp__holtkeeper__code_read',
-      'mcp__holtkeeper__code_dependents',
-      'mcp__holtkeeper__code_dependencies',
+      'mcp__holtkeeper__code_imports',
       'mcp__holtkeeper__docs_package',
     ])
   })

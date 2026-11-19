@@ -78,12 +78,13 @@ const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'packages']
  * Chat replies run without a checkout, so they mount no `code` or `docs`.
  * `git` (read-only history of the checkout) is for reviews, their thread replies and the
  * verification of their findings (`review-verify`). The verification checks a finding against the
- * checkout, so it skips the cross-repository `stack`.
+ * checkout, so it skips the cross-repository `stack`. Both leave out `docs`: dependencies are not
+ * installed in their checkouts, and `packages` answers for them.
  * `ask` answers one question of an MCP caller without a checkout, read-only.
  */
 const TASK_TOOLSETS: Record<string, readonly string[]> = {
-  review: [...BASE_TOOLSETS, 'git', 'stack', 'assets'],
-  'review-verify': [...BASE_TOOLSETS, 'git'],
+  review: ['code', 'knowledge', 'packages', 'git', 'stack', 'assets'],
+  'review-verify': ['code', 'knowledge', 'packages', 'git'],
   'review-plan': [],
   chat: ['knowledge', 'packages', 'stack', 'rules', 'assets', 'releases', 'ops'],
   ask: ['knowledge', 'packages', 'stack', 'rules', 'assets'],

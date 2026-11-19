@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 
 import type { SgNode } from '@ast-grep/napi'
-import type { AgentTool } from '@holtkeeper/agent'
+import type { AgentTool, ToolContext } from '@holtkeeper/agent'
 import { z } from 'zod'
 
 import { type Budget, clip, limitLines, renderBlocks } from '../budget.ts'
@@ -122,79 +122,88 @@ function checkName(name: string): void {
   if (!IDENTIFIER.test(name)) throw new Error(`${name} is not an identifier`)
 }
 
-/** `code.symbol`: where a name is defined. */
-export function symbolTool(budget: Budget): AgentTool {
-  return defineTool({
-    name: 'code.symbol',
-    description:
-      'Find definitions of a name (function, class, interface, type, enum, variable, method, property) across TypeScript/JavaScript files. Returns "file:start-end signature" per definition.',
-    input: z.object({ name: z.string().min(1), paths }),
-    async run({ name, paths: globs }, { dir, signal }) {
-      checkName(name)
-      const rule = {
-        rule: {
-          any: DEFINITION_KINDS.map((kind) => ({ kind })),
-          has: { field: 'name', regex: exactName(name) },
-        },
-      }
-      const lines: string[] = []
-      for await (const file of scriptFiles(dir, name, globs, signal)) {
-        for (const node of file.root.findAll(rule)) {
-          const { start, end } = linesOf(node)
-          const head = headOf(statementOf(node), budget.maxLineLength)
-          lines.push(`${file.path}:${start === end ? start : `${start}-${end}`} ${head}`)
-        }
-      }
-      if (lines.length === 0) return `no definitions of ${name}`
-      return limitLines(
-        lines,
-        Math.min(budget.maxResultLines, budget.maxHits + 1),
-        'definitions',
-      ).join('\n')
-    },
-  })
-}
-
 function isDefinitionName(node: SgNode): boolean {
   const parent = node.parent()
   if (!parent || !DEFINITION_KINDS.includes(String(parent.kind()))) return false
   return parent.field('name')?.id() === node.id()
 }
 
-/** `code.references`: where a name is used, definitions excluded. */
-export function referencesTool(budget: Budget): AgentTool {
+async function definitionsOf(
+  name: string,
+  globs: string[] | undefined,
+  budget: Budget,
+  { dir, signal }: Pick<ToolContext, 'dir' | 'signal'>,
+): Promise<string> {
+  const rule = {
+    rule: {
+      any: DEFINITION_KINDS.map((kind) => ({ kind })),
+      has: { field: 'name', regex: exactName(name) },
+    },
+  }
+  const lines: string[] = []
+  for await (const file of scriptFiles(dir, name, globs, signal)) {
+    for (const node of file.root.findAll(rule)) {
+      const { start, end } = linesOf(node)
+      const head = headOf(statementOf(node), budget.maxLineLength)
+      lines.push(`${file.path}:${start === end ? start : `${start}-${end}`} ${head}`)
+    }
+  }
+  if (lines.length === 0) return `no definitions of ${name}`
+  return limitLines(lines, Math.min(budget.maxResultLines, budget.maxHits + 1), 'definitions').join(
+    '\n',
+  )
+}
+
+async function referencesOf(
+  name: string,
+  globs: string[] | undefined,
+  budget: Budget,
+  { dir, signal }: Pick<ToolContext, 'dir' | 'signal'>,
+): Promise<string> {
+  const rule = {
+    rule: { any: REFERENCE_KINDS.map((kind) => ({ kind })), regex: exactName(name) },
+  }
+  const blocks: string[][] = []
+  let total = 0
+  for await (const file of scriptFiles(dir, name, globs, signal)) {
+    const lines = splitLines(file.text)
+    const seen = new Set<number>()
+    for (const node of file.root.findAll(rule)) {
+      if (isDefinitionName(node)) continue
+      seen.add(linesOf(node).start)
+    }
+    if (seen.size === 0) continue
+    total += seen.size
+    blocks.push([
+      file.path,
+      ...[...seen]
+        .toSorted((a, b) => a - b)
+        .map((line) => `  ${line}: ${clip((lines[line - 1] ?? '').trim(), budget.maxLineLength)}`),
+    ])
+  }
+  if (blocks.length === 0) return `no references to ${name}`
+  return `${total} lines in ${blocks.length} files\n${renderBlocks(blocks, { ...budget, maxResultLines: budget.maxResultLines - 1 }, 'files with references')}`
+}
+
+/**
+ * `code.symbol`: where a name is defined, or with `references` where it is used (definitions
+ * excluded).
+ */
+export function symbolTool(budget: Budget): AgentTool {
   return defineTool({
-    name: 'code.references',
+    name: 'code.symbol',
     description:
-      'Find usages of a name (identifier matches in TypeScript/JavaScript, imports included, definitions excluded). Returns "line: code" grouped by file. Strings and comments do not count; use code.grep for those.',
-    input: z.object({ name: z.string().min(1), paths }),
-    async run({ name, paths: globs }, { dir, signal }) {
+      'Find a name (function, class, interface, type, enum, variable, method, property) across TypeScript/JavaScript files. By default its definitions, as "file:start-end signature". With `references: true` its usages instead (identifier matches, imports included, definitions excluded), as "line: code" grouped by file; strings and comments do not count, search those as text.',
+    input: z.object({
+      name: z.string().min(1),
+      references: z.boolean().optional().describe('Usages instead of definitions'),
+      paths,
+    }),
+    run({ name, references, paths: globs }, ctx) {
       checkName(name)
-      const rule = {
-        rule: { any: REFERENCE_KINDS.map((kind) => ({ kind })), regex: exactName(name) },
-      }
-      const blocks: string[][] = []
-      let total = 0
-      for await (const file of scriptFiles(dir, name, globs, signal)) {
-        const lines = splitLines(file.text)
-        const seen = new Set<number>()
-        for (const node of file.root.findAll(rule)) {
-          if (isDefinitionName(node)) continue
-          seen.add(linesOf(node).start)
-        }
-        if (seen.size === 0) continue
-        total += seen.size
-        blocks.push([
-          file.path,
-          ...[...seen]
-            .toSorted((a, b) => a - b)
-            .map(
-              (line) => `  ${line}: ${clip((lines[line - 1] ?? '').trim(), budget.maxLineLength)}`,
-            ),
-        ])
-      }
-      if (blocks.length === 0) return `no references to ${name}`
-      return `${total} lines in ${blocks.length} files\n${renderBlocks(blocks, { ...budget, maxResultLines: budget.maxResultLines - 1 }, 'files with references')}`
+      return references
+        ? referencesOf(name, globs, budget, ctx)
+        : definitionsOf(name, globs, budget, ctx)
     },
   })
 }

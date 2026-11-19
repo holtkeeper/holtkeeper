@@ -15,7 +15,7 @@ const IGNORED_DIRECTORIES: ReadonlySet<string> = new Set([
   '.cache',
 ])
 
-/** Files larger than this are not searched; `code.read` still reads them in slices. */
+/** Files larger than this are not searched; they can still be read in slices. */
 export const MAX_FILE_BYTES = 1_000_000
 
 /** Files larger than this are not read at all. */
@@ -155,8 +155,8 @@ export function skippedForSize(files: readonly { path: string; size: number }[])
     .join(', ')
   const more = files.length > 5 ? ` and ${files.length - 5} more` : ''
   const hint = files.some((file) => isLockfile(file.path))
-    ? 'query lockfiles with lockfiles.resolve instead, read other files in parts with code.read'
-    : 'read them in parts with code.read'
+    ? 'query lockfiles with lockfiles.resolve instead, read other files in parts'
+    : 'read them in parts'
   return `not searched: ${files.length} ${files.length === 1 ? 'file' : 'files'} over ${formatSize(MAX_FILE_BYTES)}: ${shown}${more}; ${hint}`
 }
 

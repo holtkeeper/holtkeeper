@@ -6,7 +6,7 @@ import { z } from 'zod'
 
 import { commandAllowed } from './commands.ts'
 import { resolveInside } from './paths.ts'
-import type { AgentCapability, AgentTool, ToolContext } from './types.ts'
+import type { AgentCapability, AgentTool, ExternalFiles, ToolContext } from './types.ts'
 
 /** Limits of the built-in file and command tools of adapters that run their own tool loop. */
 export interface LocalToolLimits {
@@ -69,7 +69,9 @@ async function files(dir: string, root: string, pattern: string, signal: AbortSi
  * The tools a capability grants in adapters with their own tool loop, confined to the task
  * directory: `read` → `read_file`, `glob`; `search` → `grep`; `edit` → `edit_file`,
  * `write_file`; `run` → `run_command`, only with a `runner` (without one `run` grants nothing).
- * Paths outside the directory (symlinks resolved) are refused with an error result.
+ * Paths outside the directory (symlinks resolved) are refused with an error result. With
+ * `external`, a `read_file` that cannot read its file answers with `external.read` when that has
+ * something, and a `glob` or `grep` that finds nothing with `external.hint`.
  */
 export function localTools(
   capabilities: readonly AgentCapability[],
@@ -78,12 +80,14 @@ export function localTools(
     limits?: Partial<LocalToolLimits>
     commands?: readonly string[]
     env?: Record<string, string>
+    external?: ExternalFiles
   } = {},
 ): AgentTool[] {
   const limits = { ...DEFAULT_LOCAL_TOOL_LIMITS, ...options.limits }
   const granted = new Set(capabilities)
   const tools: AgentTool[] = []
   const clip = (text: string) => clipOutput(text, limits.maxOutputChars)
+  const { external } = options
 
   if (granted.has('read')) {
     tools.push(
@@ -97,7 +101,15 @@ export function localTools(
           limit: z.number().int().min(1).optional(),
         }),
         async run({ path, offset = 1, limit = limits.maxReadLines }, { dir }) {
-          const lines = (await readFile(resolveInside(dir, path), 'utf8')).split(/\r?\n/)
+          let text: string
+          try {
+            text = await readFile(resolveInside(dir, path), 'utf8')
+          } catch (error) {
+            const stand = await external?.read(path, { offset, limit })
+            if (stand === undefined) throw error
+            return clip(stand)
+          }
+          const lines = text.split(/\r?\n/)
           const slice = lines.slice(offset - 1, offset - 1 + limit)
           const body = slice.map((line, index) => `${offset + index}\t${line}`).join('\n')
           const rest = lines.length - (offset - 1 + slice.length)
@@ -114,7 +126,8 @@ export function localTools(
         }),
         async run({ pattern, path = '.' }, { dir, signal }) {
           const found = await files(dir, resolveInside(dir, path), pattern, signal)
-          if (!found.length) return 'no files found'
+          if (!found.length)
+            return external?.hint(path === '.' ? pattern : `${path}/${pattern}`) ?? 'no files found'
           const shown = found.slice(0, limits.maxEntries)
           const more = found.length - shown.length
           return clip([...shown, ...(more > 0 ? [`… ${more} more files`] : [])].join('\n'))
@@ -128,7 +141,7 @@ export function localTools(
       tool({
         name: 'grep',
         description:
-          'Search file contents with a regular expression. Returns "path:line: text" for each match.',
+          'Search file contents with a regular expression. Returns "path:line: text" for each match. Files over 1 MB are not searched and are named in the result.',
         input: z.object({
           pattern: z.string().min(1).describe('JavaScript regular expression'),
           glob: z.string().optional().describe('Files to search, default "**/*"'),
@@ -138,6 +151,7 @@ export function localTools(
         async run({ pattern, glob = '**/*', path = '.', ignoreCase }, { dir, signal }) {
           const regex = new RegExp(pattern, ignoreCase ? 'i' : undefined)
           const matches: string[] = []
+          const tooLarge: string[] = []
           const root = resolveInside(dir, path)
           const searched = (await stat(root)).isFile()
             ? [relativeTo(dir, root)]
@@ -146,7 +160,10 @@ export function localTools(
             if (matches.length >= limits.maxEntries) break
             const absolute = resolveInside(dir, file)
             // oxlint-disable-next-line no-await-in-loop -- stops early once enough matches are found
-            if ((await stat(absolute)).size > MAX_GREP_BYTES) continue
+            if ((await stat(absolute)).size > MAX_GREP_BYTES) {
+              tooLarge.push(file)
+              continue
+            }
             // oxlint-disable-next-line no-await-in-loop -- see above
             const text = await readFile(absolute, 'utf8')
             if (text.slice(0, 8000).includes('\0')) continue
@@ -156,10 +173,19 @@ export function localTools(
               if (matches.length >= limits.maxEntries) break
             }
           }
-          if (!matches.length) return 'no matches'
+          const skipped = tooLarge.length
+            ? [
+                `not searched: ${tooLarge.length} ${tooLarge.length === 1 ? 'file' : 'files'} over 1 MB (${tooLarge.slice(0, 5).join(', ')}${tooLarge.length > 5 ? ', …' : ''}); read them in parts with read_file, so no match here proves nothing about them`,
+              ]
+            : []
+          if (!matches.length)
+            return (
+              external?.hint(path === '.' ? glob : `${path}/${glob}`) ??
+              ['no matches', ...skipped].join('\n')
+            )
           const full =
             matches.length >= limits.maxEntries ? ['… more matches; narrow the search'] : []
-          return clip([...matches, ...full].join('\n'))
+          return clip([...skipped, ...matches, ...full].join('\n'))
         },
       }),
     )

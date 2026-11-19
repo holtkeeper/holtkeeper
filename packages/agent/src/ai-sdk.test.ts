@@ -521,6 +521,61 @@ describe('createAiSdkAgent', () => {
     })
   })
 
+  test('an answer handed to a tool that does not exist ends the run with it', async () => {
+    const answer = { verdict: 'ok' as const, notes: ['fine'] }
+    const { languageModel, model } = scripted(
+      {
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'c1',
+            toolName: 'json',
+            input: JSON.stringify({ json: JSON.stringify(answer) }),
+          },
+        ],
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage,
+        warnings: [],
+      },
+      say('never asked'),
+    )
+    const result = await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'p',
+      output: z.object({ verdict: z.enum(['ok', 'bad']), notes: z.array(z.string()) }),
+    })
+    expect(result.output).toEqual(answer)
+    expect(result.turns).toBe(1)
+    expect(model.doGenerateCalls).toHaveLength(1)
+  })
+
+  test('an answer of the wrong shape handed to such a tool comes back with the mismatches', async () => {
+    const { languageModel, model } = scripted(
+      {
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'c1',
+            toolName: 'final_answer',
+            input: '{"verdict":"maybe","notes":[]}',
+          },
+        ],
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage,
+        warnings: [],
+      },
+      say('{"verdict":"bad","notes":[]}'),
+    )
+    const result = await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'p',
+      output: z.object({ verdict: z.enum(['ok', 'bad']), notes: z.array(z.string()) }),
+    })
+    expect(result.output).toEqual({ verdict: 'bad', notes: [] })
+    expect(lastToolOutput(model)).toContain('final_answer is not a tool')
+    expect(lastToolOutput(model)).toContain('verdict')
+  })
+
   test('the transcript keeps reasoning and calls of unknown tools as errors', async () => {
     const { languageModel } = scripted(
       {

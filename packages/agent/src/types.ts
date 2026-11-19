@@ -83,6 +83,12 @@ export interface AgentTask<Output = unknown> {
    * before anything run-specific, so repeated runs share a cacheable prefix.
    */
   context?: string
+  /**
+   * Stands in for files the checkout lacks: a read of such a file returns `externalFiles.read`,
+   * a search under such a path that finds nothing its `hint`. Adapters with their own file tools
+   * refuse the call with the `hint` instead.
+   */
+  externalFiles?: ExternalFiles
   /** In-process tools mounted for this task; their tools are allowed in addition to `capabilities`. */
   toolsets?: readonly Toolset[]
   /** External MCP servers by name. Every tool of a listed server is allowed; no other server is loaded. */
@@ -126,6 +132,25 @@ export interface AgentResult<Output = unknown> {
   runtime?: AgentRuntime
   /** Where the run's transcript was stored (an artifact id), when the caller stored one. */
   transcriptRef?: string
+}
+
+/**
+ * Answers for paths a checkout does not hold but something else knows, such as dependencies
+ * that are not installed. The file tools of an adapter ask it instead of failing.
+ */
+export interface ExternalFiles {
+  /**
+   * Text that stands in for the file at `path` (as the agent wrote it), with what it comes from
+   * said in its first line; `undefined` when the path is not one it answers for. Adapters call
+   * it only for files the checkout lacks.
+   */
+  read(path: string, lines?: { offset?: number; limit?: number }): Promise<string | undefined>
+  /**
+   * What to call instead of reading or searching `path` (a file path or a glob), for searches
+   * and for adapters whose file tools cannot return other content; `undefined` when the path is
+   * not one it answers for.
+   */
+  hint(path: string): string | undefined
 }
 
 /** What a tool may use while it runs: the checkout it is confined to and the task's abort signal. */

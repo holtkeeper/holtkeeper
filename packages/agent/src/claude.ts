@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 
 import {
@@ -22,7 +23,14 @@ import {
   type TierModels,
 } from './tiers.ts'
 import type { TranscriptSink, TranscriptToolCall } from './transcript.ts'
-import type { Agent, AgentCapability, AgentResult, AgentTask, AgentUsage } from './types.ts'
+import type {
+  Agent,
+  AgentCapability,
+  AgentResult,
+  AgentTask,
+  AgentUsage,
+  ExternalFiles,
+} from './types.ts'
 
 /**
  * Where Claude Code sends model requests. `anthropic` is the Anthropic API (optionally at another
@@ -84,6 +92,9 @@ const ANTHROPIC_API_HOST = 'api.anthropic.com'
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path'] as const
 
+/** Claude Code's file tools, whose calls `AgentTask.externalFiles` may answer with a hint. */
+const FILE_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep'])
+
 /** Tool names for a capability set, in a stable order without duplicates. */
 export function toolsFor(capabilities: readonly AgentCapability[]): string[] {
   return [...new Set(capabilities.flatMap((capability) => CAPABILITY_TOOLS[capability]))]
@@ -106,6 +117,7 @@ function permissionGate(
   tools: readonly string[],
   prefixes: readonly string[] = [],
   commands?: readonly string[],
+  external?: ExternalFiles,
 ): CanUseTool {
   const allowed = new Set(tools)
   return async (toolName, input) => {
@@ -121,6 +133,16 @@ function permissionGate(
         behavior: 'deny',
         message: `Only these commands may run, with plain arguments: ${commands.join(', ')}`,
       }
+    if (external && FILE_TOOLS.has(toolName)) {
+      const asked = [input['file_path'], input['path'], input['pattern'], input['glob']].filter(
+        (value): value is string => typeof value === 'string',
+      )
+      const missing = toolName !== 'Read' || !asked.some((path) => existsSync(resolve(dir, path)))
+      const hint = missing
+        ? asked.map((path) => external.hint(path)).find((text) => text !== undefined)
+        : undefined
+      if (hint) return { behavior: 'deny', message: hint }
+    }
     for (const key of PATH_KEYS) {
       const value = input[key]
       if (typeof value === 'string' && !isInside(dir, value)) {
@@ -260,7 +282,13 @@ export function claudeOptionsFor(
     effort: task.effort ?? TIERS[tier].effort,
     tools,
     allowedTools: [...mcpTools],
-    canUseTool: permissionGate(dir, [...tools, ...mcpTools], prefixes, task.commands),
+    canUseTool: permissionGate(
+      dir,
+      [...tools, ...mcpTools],
+      prefixes,
+      task.commands,
+      task.externalFiles,
+    ),
     permissionMode: 'default',
     systemPrompt: {
       type: 'preset',

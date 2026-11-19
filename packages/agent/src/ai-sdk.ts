@@ -24,6 +24,7 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import {
   APICallError,
   NoOutputGeneratedError,
+  NoSuchToolError,
   type LanguageModel,
   type LanguageModelUsage,
   type ModelMessage,
@@ -47,7 +48,12 @@ import {
   localTools,
 } from './local-tools.ts'
 import { mcpToolName, toolsetGuidance } from './mcp.ts'
-import { AgentOutputError, parseAgentOutput } from './output.ts'
+import {
+  AgentOutputError,
+  answerInToolCall,
+  parseAgentOutput,
+  validateAgentOutput,
+} from './output.ts'
 import type { AiProviderPlugin } from './plugin.ts'
 import { type AiSdkPackage, costFromPricing, mapModel, type ModelPricing } from './provider.ts'
 import { DEFAULT_TIER, TIERS, type TierModels } from './tiers.ts'
@@ -292,6 +298,7 @@ function toolLoopTools(
       }),
       ...(task.commands && { commands: task.commands }),
       ...(task.env && { env: task.env }),
+      ...(task.externalFiles && { external: task.externalFiles }),
     }),
     ...(task.toolsets ?? []).flatMap((toolset) => toolset.tools),
   ]
@@ -542,6 +549,9 @@ const UNPRICED_FALLBACK = {
  * budget or quota fails the run with `BudgetExceededError`, and so does reaching
  * `task.maxCostUsd`: the loop stops after the step that reached it. A model `pricing` does not
  * price is costed at `UNPRICED_FALLBACK`, so caps and budgets still hold. An identical repeat of
+ * A call of a tool that does not exist whose arguments hold a valid answer of a task with `output`
+ * ends the run with that answer; arguments that look like an answer but do not match come back with
+ * the mismatches (`answerInToolCall`).
  * an earlier read-only tool call with no `edit_file`, `write_file` or `run_command` in between is
  * answered with an error instead of running, and three steps of nothing but repeats end the loop
  * early. When the loop ends on tool calls (turn limit or repeats) under the cost cap, one more
@@ -572,6 +582,9 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
       const mark = movingBreakpoint(
         task.trimToolResults ? toolResultTrimmer(task.trimToolResults) : undefined,
       )
+      let submitted: { text: string; output: Output } | undefined
+      let rejected: string | undefined
+      const { output: outputSchema } = task
       const set = toolSet(tools, ctx, maxChars)
       const sink = task.transcript
       const costOf = (sum: AgentUsage) =>
@@ -639,13 +652,35 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             model,
             system,
             messages: finishing ? mark(input) : input,
-            ...(tools.size && { tools: set, toolCallConcurrency: 1 }),
+            ...(tools.size && {
+              tools: set,
+              toolCallConcurrency: 1,
+              ...(outputSchema && {
+                repairToolCall: async ({ toolCall, error }) => {
+                  if (!NoSuchToolError.isInstance(error)) return null
+                  const found = answerInToolCall(toolCall.toolName, toolCall.input, outputSchema)
+                  if (found && 'answer' in found)
+                    submitted = {
+                      text: JSON.stringify(found.answer),
+                      output: validateAgentOutput(found.answer, outputSchema),
+                    }
+                  else if (found) rejected = found.problem
+                  return null
+                },
+              }),
+            }),
             ...(finishing && tools.size && { toolChoice: 'none' as const }),
             ...(!finishing && {
               prepareStep: ({ messages: current }: { messages: ModelMessage[] }) => ({
                 messages: mark(current),
               }),
-              stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap, overSoft, repeating],
+              stopWhen: [
+                stepCountIs(Math.max(maxTurns - turns, 1)),
+                overCap,
+                overSoft,
+                repeating,
+                () => submitted !== undefined || rejected !== undefined,
+              ],
             }),
             reasoning: task.effort ?? TIERS[tier].effort,
             abortSignal: signal,
@@ -756,6 +791,17 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- each request continues the same conversation
           let result = await step(messages)
+          if (submitted) return finish(submitted.text, submitted.output)
+          if (rejected !== undefined && turns < maxTurns && !capped()) {
+            messages = [
+              ...messages,
+              ...result.responseMessages,
+              { role: 'user', content: rejected },
+            ]
+            rejected = undefined
+            continue
+          }
+          rejected = undefined
           toolCalls += result.steps.reduce((sum, s) => sum + s.toolCalls.length, 0)
           if (result.finishReason === 'tool-calls') {
             if (capped()) return useFallback(overBudget())

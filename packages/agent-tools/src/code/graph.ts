@@ -74,43 +74,35 @@ function walk(edges: Map<string, string[]>, from: string, depth: number): Map<st
   return found
 }
 
-function graphTool(
-  name: 'code.dependents' | 'code.dependencies',
-  graph: (dir: string) => Promise<ModuleIndex>,
-  budget: Budget,
-): AgentTool {
-  const dependents = name === 'code.dependents'
+/** `code.imports` over one lazily built graph: who imports a file, or what it imports. */
+export function importsTool(budget: Budget, load: ModuleGraphLoader = jsModuleGraph): AgentTool {
+  const graph = cachedModuleGraph(load)
   return defineTool({
-    name,
-    description: dependents
-      ? "Modules that import a file (from the repository import graph; files under workspaces' src/, type-only imports excluded). depth > 1 adds indirect importers. Use it to find the blast radius of a change without grepping."
-      : 'Modules a file imports (from the repository import graph; files under workspaces\' src/, type-only imports excluded; other workspace packages show as "package <name>"). depth > 1 follows imports further.',
+    name: 'code.imports',
+    description:
+      'The import graph around a file (files under workspaces\' src/, type-only imports excluded). `importers` (default): the modules that import it, the blast radius of a change, without grepping. `imports`: the modules it imports (other workspace packages show as "package <name>"). depth > 1 follows the graph further.',
     input: z.object({
       path: z.string().min(1).describe('File path relative to the repository root'),
+      direction: z
+        .enum(['importers', 'imports'])
+        .optional()
+        .describe('Who imports the file (default) or what it imports'),
       depth: z.number().int().min(1).max(3).optional().describe('1 (default) to 3'),
     }),
-    async run({ path, depth = 1 }, { dir }) {
+    async run({ path, direction = 'importers', depth = 1 }, { dir }) {
+      const importers = direction === 'importers'
       const id = relativePath(dir, insideDir(dir, path))
       const index = await graph(dir)
       if (!index.labels.has(id))
         return `${id} is not in the module graph (only files under each workspace's src/ are indexed)`
-      const found = walk(dependents ? index.in : index.out, id, depth)
+      const found = walk(importers ? index.in : index.out, id, depth)
       if (found.size === 0)
-        return dependents ? `nothing imports ${id}` : `${id} imports no indexed modules`
+        return importers ? `nothing imports ${id}` : `${id} imports no indexed modules`
       const lines = [...found]
         .toSorted(([a, la], [b, lb]) => la - lb || (a < b ? -1 : 1))
         .map(([node, level]) => `${depth > 1 ? `${level} ` : ''}${index.labels.get(node) ?? node}`)
-      const header = `${found.size} ${dependents ? 'dependents' : 'dependencies'} of ${id}`
+      const header = `${found.size} ${importers ? 'dependents' : 'dependencies'} of ${id}`
       return [header, ...limitLines(lines, budget.maxResultLines - 1, 'modules')].join('\n')
     },
   })
-}
-
-/** `code.dependents` and `code.dependencies` over one shared, lazily built graph. */
-export function graphTools(budget: Budget, load: ModuleGraphLoader = jsModuleGraph): AgentTool[] {
-  const graph = cachedModuleGraph(load)
-  return [
-    graphTool('code.dependents', graph, budget),
-    graphTool('code.dependencies', graph, budget),
-  ]
 }

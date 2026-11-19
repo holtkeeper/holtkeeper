@@ -292,7 +292,6 @@ describe('mcpToolsets', () => {
   test('internal tasks mount packages everywhere but one-shots, a checkout-free set for chat and ask', () => {
     expect(taskToolsets('review')).toEqual([
       'code',
-      'docs',
       'knowledge',
       'packages',
       'git',

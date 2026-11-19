@@ -53,23 +53,22 @@ The server uses the defaults; there is no setting for them.
 
 ## Tools
 
-### `code` — `codeTools({ budget?, moduleGraph? })`
+### `code` — `codeTools({ budget?, moduleGraph?, files? })`
 
-| Tool                | Input                                                        | Output                                                                                                      |
-| ------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `code.search`       | `pattern`, `language`, `paths?`                              | `file:line` + snippet (≤ `snippetLines`) per ast-grep match                                                 |
-| `code.grep`         | `query`, `regex?`, `ignoreCase?`, `context?` (0–3), `paths?` | `N matches in M files`, then `line: text` / `line- context` grouped by file                                 |
-| `code.outline`      | `path`                                                       | `start-end signature` per import block, function, class (+members), interface, type, enum, variable, export |
-| `code.symbol`       | `name`, `paths?`                                             | `file:start-end signature` per definition                                                                   |
-| `code.references`   | `name`, `paths?`                                             | `line: code` per usage, grouped by file; definitions, strings and comments excluded                         |
-| `code.read`         | `path`, `start?`, `end?`                                     | Numbered lines, at most `maxResultLines - 2`, then `continue with start=N`                                  |
-| `code.dependents`   | `path`, `depth?` (1–3)                                       | Files importing the file (transitively with `depth`)                                                        |
-| `code.dependencies` | `path`, `depth?` (1–3)                                       | Files and workspace packages the file imports                                                               |
+| Tool           | Input                                                         | Output                                                                                                                                                 |
+| -------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `code.search`  | `pattern`, `language`, `paths?`                               | `file:line` + snippet (≤ `snippetLines`) per ast-grep match                                                                                            |
+| `code.grep`    | `query`, `regex?`, `ignoreCase?`, `context?` (0–3), `paths?`  | `N matches in M files`, then `line: text` / `line- context` grouped by file                                                                            |
+| `code.outline` | `path`                                                        | `start-end signature` per import block, function, class (+members), interface, type, enum, variable, export                                            |
+| `code.symbol`  | `name`, `references?`, `paths?`                               | `file:start-end signature` per definition; with `references: true`, `line: code` per usage grouped by file, definitions, strings and comments excluded |
+| `code.read`    | `path`, `start?`, `end?`                                      | Numbered lines, at most `maxResultLines - 2`, then `continue with start=N`                                                                             |
+| `code.imports` | `path`, `direction?` (`importers`, `imports`), `depth?` (1–3) | `importers` (default): files importing the file; `imports`: files and workspace packages it imports; transitively with `depth`                         |
 
-- Languages: the parsers built into `@ast-grep/napi` — `typescript`, `tsx`, `javascript`, `css`, `html` for `code.search`; outline, symbol and references cover the JavaScript family. No dynamic languages are registered, so this package never conflicts with another package's one-time `registerDynamicLanguage` call.
+- `files: false` leaves out `code.grep` and `code.read`, for an agent that already has file tools of its own (the server passes it for tasks with the `read` and `search` capabilities, so the agent does not get two of each).
+- Languages: the parsers built into `@ast-grep/napi` — `typescript`, `tsx`, `javascript`, `css`, `html` for `code.search`; outline and symbol cover the JavaScript family. No dynamic languages are registered, so this package never conflicts with another package's one-time `registerDynamicLanguage` call.
 - Files are walked from the task directory; `node_modules`, `.git`, `dist`, `build`, `coverage`, `vendor`, hidden directories, symlinks and binary files are skipped. Paths are resolved with symlinks and refused outside the checkout.
-- Files over 1 MB (`MAX_FILE_BYTES`) are not searched, but never silently: `code.grep` and `code.search` name them in a `not searched: N files over 1.0 MB: <path> (<size>), …` line (first line after the match count, or after `no matches`), pointing lockfiles (`LOCKFILE_NAMES`: `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `go.sum`) at `lockfiles.resolve` and other files at `code.read`. `code.read` reads files up to 32 MB (`MAX_READ_BYTES`) in slices; for one over 1 MB its first line says so (and names `lockfiles.resolve` for a lockfile). It fails with `<path> is missing`, `<path> is binary` or `<path> is <size>, too large to read`.
-- `code.dependents`/`code.dependencies` use the module layer of `@holtkeeper/depgraph-js` (files under each workspace's `src/`, type-only imports excluded). It is built on first use and cached for the toolset's lifetime: create one toolset per run. `moduleGraph` replaces the loader.
+- Files over 1 MB (`MAX_FILE_BYTES`) are not searched, but never silently: `code.grep` and `code.search` name them in a `not searched: N files over 1.0 MB: <path> (<size>), …` line (first line after the match count, or after `no matches`), pointing lockfiles (`LOCKFILE_NAMES`: `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `go.sum`) at `lockfiles.resolve` and tells to read other files in parts. `code.read` reads files up to 32 MB (`MAX_READ_BYTES`) in slices; for one over 1 MB its first line says so (and names `lockfiles.resolve` for a lockfile). It fails with `<path> is missing`, `<path> is binary` or `<path> is <size>, too large to read`.
+- `code.imports` uses the module layer of `@holtkeeper/depgraph-js` (files under each workspace's `src/`, type-only imports excluded). It is built on first use and cached for the toolset's lifetime: create one toolset per run. `moduleGraph` replaces the loader.
 
 ### `lockfiles` — `lockfileTools()`
 
@@ -121,7 +120,7 @@ Third-party library docs have no toolset here: the server's `packages` toolset (
 ## Why this saves tokens
 
 - **Structure first.** `code.outline` costs one line per declaration; the agent then reads a 20-line range with `code.read` instead of a 600-line file.
-- **Matches, not files.** `code.search`, `code.symbol` and `code.references` return locations with a few lines of context, so locating code does not mean reading it.
+- **Matches, not files.** `code.search` and `code.symbol` (definitions or, with `references`, usages) return locations with a few lines of context, so locating code does not mean reading it.
 - **Exact versions.** `docs.package` answers from what is installed and only for the version step that matters, instead of the agent opening `node_modules` or relying on stale training data.
 - **Graph lookups.** Blast radius comes from the prebuilt import graph instead of repeated greps.
 - **Bounded output.** Every result is capped and marks truncation, so a broad query costs at most `maxResultLines` and tells the agent to narrow it.

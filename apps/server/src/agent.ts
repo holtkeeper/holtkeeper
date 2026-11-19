@@ -66,6 +66,7 @@ import { z } from 'zod'
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
 import { repoTarget, teamLabeler } from './context.ts'
+import { externalFiles } from './external-files.ts'
 import {
   agentSummarize,
   githubClientFor,
@@ -86,6 +87,12 @@ import { type RulesAccess, rulesToolset, testIdsReader } from './tools/rules.ts'
 import { stackToolset } from './tools/stack.ts'
 import { storeTranscript } from './transcripts.ts'
 import { crossTeamOf } from './visibility.ts'
+
+/**
+ * Capabilities that give an agent file tools of its own (also what a task without `capabilities`
+ * gets); with both, the `code` toolset leaves out its own read and grep.
+ */
+const OWN_FILE_TOOLS = ['read', 'search'] as const
 
 /** `taskKind` used for rules and reporting when a task sets none. */
 const DEFAULT_TASK_KIND = 'agent'
@@ -206,7 +213,8 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
 /**
  * `agent` with what server tasks get: the toolsets `taskToolsets` names for the task kind out of
  * `code`, `docs`, `knowledge`, `packages` (when `packages` is given), `rules` (when `rules` is given), `releases` (when `releases` is given), `ops` (when `ops` is given) and `assets` (when `assets` is given), then the task's own toolsets (one of the same name wins); every tool result
- * stays within `RESULT_CAPS`. A task without its own `context` gets the repository's resolved
+ * stays within `RESULT_CAPS`. Tasks that mount `packages` also get `externalFiles` over it, so
+ * reads of dependencies the checkout does not hold are answered from the package index. A task without its own `context` gets the repository's resolved
  * rules for its task kind (`ruleAgentOf`) as `context`; a task that brings a `context` (the
  * review, which resolves rules with the files of its checkout) keeps it as is. No external MCP server is added. `budgets` may deny a run before it starts and caps the cost of the runs it allows
  * (`maxCostUsd`). With `artifacts`, every run that reached the provider stores its JSONL
@@ -312,7 +320,12 @@ export function withServerDefaults(
         const own = task.context?.trim()
         const context = own || (await resolveRules({ repo, agent: ruleAgentOf(taskKind) })).text
         const available = [
-          codeTools({ budget: { maxHits: RESULT_CAPS.maxSnippets } }),
+          codeTools({
+            budget: { maxHits: RESULT_CAPS.maxSnippets },
+            files: !OWN_FILE_TOOLS.every((capability) =>
+              (task.capabilities ?? OWN_FILE_TOOLS).includes(capability),
+            ),
+          }),
           docsTools(options.runner ? { runner: options.runner } : {}),
           gitTools({ runner: options.runner ?? localRunner }),
           ...knowledgeOf(taskKind),
@@ -341,10 +354,16 @@ export function withServerDefaults(
             }))
           : mounted
         if (context) onEvidence?.({ source: 'context', text: context })
+        const external =
+          task.externalFiles ??
+          (options.packages && taskToolsets(taskKind).includes('packages')
+            ? externalFiles(options.packages)
+            : undefined)
         prepared = {
           ...capped,
           taskKind,
           toolsets,
+          ...(external && { externalFiles: external }),
           ...(context && { context }),
           ...(transcript && { transcript }),
         }

@@ -143,7 +143,7 @@ describe('reviewSystemPrompt', () => {
     expect(prompt).toContain('report it with `unverified: true`')
     expect(prompt).toContain('Investigate every suspicious pattern')
     expect(prompt).toContain('Before saying tests are missing')
-    expect(prompt).toContain('code.references')
+    expect(prompt).toContain('code.symbol with `references: true`')
     const noTests = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)], { tests: false }))
     expect(noTests).not.toContain('Before saying tests are missing')
   })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -98,6 +98,41 @@ describe('createClaudeAgent', () => {
     expect(options.tools).toEqual(['Read', 'Glob', 'Bash'])
     expect(options.pathToClaudeCodeExecutable).toBe('/bin/claude')
     expect(options.sandbox?.enabled).toBe(true)
+  })
+
+  test('the gate answers file tools on dependencies the checkout lacks with the hint', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hk-agent-'))
+    try {
+      await mkdir(join(dir, 'src'))
+      await writeFile(join(dir, 'src', 'a.ts'), 'export const a = 1')
+      const { query, calls } = fakeQuery([success('ok')])
+      await createClaudeAgent({ apiKey: 'k' }, { query }).run({
+        dir,
+        prompt: 'p',
+        externalFiles: {
+          read: async () => undefined,
+          hint: (path) => (path.includes('node_modules') ? 'call package_api' : undefined),
+        },
+      })
+      const gate = calls[0]?.options.canUseTool
+      if (!gate) throw new Error('no gate')
+      const ask = (tool: string, input: Record<string, unknown>) =>
+        gate(tool, input, { signal, toolUseID: 't', requestId: 'r' })
+
+      expect(await ask('Read', { file_path: 'node_modules/some-lib/index.d.ts' })).toEqual({
+        behavior: 'deny',
+        message: 'call package_api',
+      })
+      expect(await ask('Grep', { pattern: 'fooUtil', path: 'node_modules' })).toMatchObject({
+        behavior: 'deny',
+      })
+      expect(await ask('Glob', { pattern: '**/node_modules/some-lib/**' })).toMatchObject({
+        behavior: 'deny',
+      })
+      expect(await ask('Read', { file_path: 'src/a.ts' })).toMatchObject({ behavior: 'allow' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   test('permission gate denies other tools and paths outside dir', async () => {

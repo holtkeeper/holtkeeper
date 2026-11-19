@@ -180,7 +180,9 @@ describe('settingsAgentFor', () => {
     expect(options?.effort).toBe('medium')
     expect(Object.keys(options?.mcpServers ?? {})).toEqual(['holtkeeper'])
     expect(options?.allowedTools).toContain('mcp__holtkeeper__code_search')
-    expect(options?.allowedTools).toContain('mcp__holtkeeper__docs_package')
+    expect(options?.allowedTools).not.toContain('mcp__holtkeeper__docs_package')
+    expect(options?.allowedTools).not.toContain('mcp__holtkeeper__code_read')
+    expect(options?.allowedTools).toContain('mcp__holtkeeper__code_imports')
     expect(options?.allowedTools).toContain('mcp__holtkeeper__search_knowledge')
     expect(options?.allowedTools).toContain('mcp__holtkeeper__package_usage')
     expect(options?.allowedTools).toContain('mcp__holtkeeper__evaluate_dependency')
@@ -753,7 +755,6 @@ describe('withServerDefaults', () => {
     const [review, triage] = seen.map((task) => task.toolsets ?? [])
     expect(review?.map((toolset) => toolset.name)).toEqual([
       'code',
-      'docs',
       'knowledge',
       'packages',
       'git',
@@ -766,6 +767,12 @@ describe('withServerDefaults', () => {
       'knowledge',
       'packages',
     ])
+    expect(
+      review?.find((toolset) => toolset.name === 'code')?.tools.map((tool) => tool.name),
+    ).toEqual(['code.search', 'code.outline', 'code.symbol', 'code.imports'])
+    expect(seen[0]?.externalFiles?.hint('node_modules/some-lib/index.d.ts')).toContain(
+      'package_api { "package": "some-lib" }',
+    )
     const mounted = review?.find((toolset) => toolset.name === 'packages')
     expect(mounted?.instructions).toContain('find_packages')
     expect(mounted?.tools.map((tool) => tool.name)).toEqual([

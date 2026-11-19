@@ -118,7 +118,7 @@ describe('code.outline', () => {
   })
 })
 
-describe('code.symbol and code.references', () => {
+describe('code.symbol', () => {
   test('finds definitions', async () => {
     expect(await run('code.symbol', { name: 'formatName' })).toBe(
       'src/util.ts:2-4 export function formatName(name: string): string',
@@ -137,7 +137,7 @@ describe('code.symbol and code.references', () => {
   })
 
   test('finds usages without definitions, comments or strings', async () => {
-    expect(await run('code.references', { name: 'formatName' })).toBe(
+    expect(await run('code.symbol', { name: 'formatName', references: true })).toBe(
       [
         '2 lines in 1 files',
         'src/index.ts',
@@ -145,7 +145,7 @@ describe('code.symbol and code.references', () => {
         '  6: return greeter.greet(formatName(user.name))',
       ].join('\n'),
     )
-    const id = await run('code.references', { name: 'Id' })
+    const id = await run('code.symbol', { name: 'Id', references: true })
     expect(id).toContain('src/model.ts\n  2: id: Id')
     expect(id).not.toContain('6: export type Id')
   })
@@ -188,21 +188,19 @@ describe('code.read', () => {
   })
 })
 
-describe('code.dependents and code.dependencies', () => {
+describe('code.imports', () => {
   test('walk the import graph', async () => {
-    expect(await run('code.dependents', { path: 'src/util.ts' })).toBe(
+    expect(await run('code.imports', { path: 'src/util.ts' })).toBe(
       '1 dependents of src/util.ts\nsrc/index.ts',
     )
-    expect(await run('code.dependents', { path: 'src/util.ts', depth: 2 })).toBe(
+    expect(await run('code.imports', { path: 'src/util.ts', depth: 2 })).toBe(
       '2 dependents of src/util.ts\n1 src/index.ts\n2 src/view.tsx',
     )
-    expect(await run('code.dependencies', { path: 'src/view.tsx', depth: 2 })).toBe(
-      '2 dependencies of src/view.tsx\n1 src/index.ts\n2 src/util.ts',
-    )
-    expect(await run('code.dependents', { path: 'src/view.tsx' })).toBe(
-      'nothing imports src/view.tsx',
-    )
-    expect(await run('code.dependents', { path: 'README.md' })).toContain('not in the module graph')
+    expect(
+      await run('code.imports', { path: 'src/view.tsx', direction: 'imports', depth: 2 }),
+    ).toBe('2 dependencies of src/view.tsx\n1 src/index.ts\n2 src/util.ts')
+    expect(await run('code.imports', { path: 'src/view.tsx' })).toBe('nothing imports src/view.tsx')
+    expect(await run('code.imports', { path: 'README.md' })).toContain('not in the module graph')
   })
 
   test('build the graph once per toolset', async () => {
@@ -212,8 +210,27 @@ describe('code.dependents and code.dependencies', () => {
       return jsModuleGraph(dir)
     }
     const tools = codeTools({ moduleGraph: counting })
-    await call(tools, 'code.dependents', { path: 'src/util.ts' }, fixture.ctx)
-    await call(tools, 'code.dependencies', { path: 'src/index.ts' }, fixture.ctx)
+    await call(tools, 'code.imports', { path: 'src/util.ts' }, fixture.ctx)
+    await call(tools, 'code.imports', { path: 'src/index.ts', direction: 'imports' }, fixture.ctx)
     expect(loads).toBe(1)
+  })
+})
+
+describe('codeTools', () => {
+  test('leaves out its file tools for agents that have their own', () => {
+    expect(codeTools().tools.map((tool) => tool.name)).toEqual([
+      'code.search',
+      'code.grep',
+      'code.outline',
+      'code.symbol',
+      'code.read',
+      'code.imports',
+    ])
+    expect(codeTools({ files: false }).tools.map((tool) => tool.name)).toEqual([
+      'code.search',
+      'code.outline',
+      'code.symbol',
+      'code.imports',
+    ])
   })
 })

@@ -100,4 +100,33 @@ describe('localTools', () => {
       [['sh', '-c', 'bun test'], repo],
     ])
   })
+
+  test('external files stand in for what the checkout lacks', async () => {
+    await checkout()
+    const asked: string[] = []
+    const tools = byName(
+      localTools(['read', 'search'], {
+        external: {
+          read: async (path, lines) => {
+            asked.push(`${path}@${lines?.offset}`)
+            return path.includes('node_modules') ? 'from the index' : undefined
+          },
+          hint: (path) => (path.includes('node_modules') ? `use the tools for ${path}` : undefined),
+        },
+      }),
+    )
+    expect(await call(tools, 'read_file', { path: 'node_modules/some-lib/index.d.ts' })).toBe(
+      'from the index',
+    )
+    expect(await call(tools, 'read_file', { path: 'src/a.ts' })).toContain('export const a = 1')
+    expect(await call(tools, 'read_file', { path: 'src/none.ts' })).toContain('ENOENT')
+    expect(asked).toEqual(['node_modules/some-lib/index.d.ts@1', 'src/none.ts@1'])
+    expect(await call(tools, 'glob', { pattern: '**/node_modules/some-lib/*.ts' })).toBe(
+      'use the tools for **/node_modules/some-lib/*.ts',
+    )
+    expect(await call(tools, 'glob', { pattern: 'src/*.md' })).toBe('no files found')
+    expect(await call(tools, 'grep', { pattern: 'fooUtil', glob: 'node_modules/**' })).toBe(
+      'use the tools for node_modules/**',
+    )
+  })
 })
