@@ -88,9 +88,28 @@ export async function pendingReplies(options: {
  */
 export type ReplyKind = 'ack' | 'fixed' | 'discuss'
 
+const stances = ['will-change', 'changed', 'stays', 'asks'] as const
+
 const triageSchema = z.object({
-  threads: z.array(z.object({ id: z.string(), kind: z.enum(['ack', 'fixed', 'discuss']) })),
+  threads: z.array(z.object({ id: z.string(), code: z.enum(stances) })),
 })
+
+const kindOfStance: Record<(typeof stances)[number], ReplyKind> = {
+  'will-change': 'ack',
+  changed: 'fixed',
+  stays: 'discuss',
+  asks: 'discuss',
+}
+
+/** The system prompt of `triageReplies`. */
+export const TRIAGE_SYSTEM = [
+  'People replied to your code review comments. For each thread, say what the replies since your comment mean for the code:',
+  '- `will-change`: they promise to change the code as the comment asks, later or in another merge request ("will fix", "good catch, will do"), and ask nothing.',
+  '- `changed`: they say they already changed it, it is already there, or it is no longer in the code ("done", "fixed", "added", "removed", "it is there"), and ask nothing.',
+  '- `stays`: the code stays as it is: they say it is fine, ok, normal, intended, not needed, the same as elsewhere or moved over from another service, or that they keep it, in any language and however short, or they explain why the comment is wrong or does not apply.',
+  '- `asks`: a question, a request, or anything else.',
+  'Only an explicit promise to change the code is `will-change`. "Ok", "fine" or "all good" about the code itself means it stays.',
+].join('\n')
 
 const MAX_TRIAGE_TEXT = 1500
 
@@ -98,9 +117,10 @@ const clip = (text: string) =>
   text.length > MAX_TRIAGE_TEXT ? `${text.slice(0, MAX_TRIAGE_TEXT)}\n[...]` : text
 
 /**
- * Sorts replies by what they ask for with one call of the `fast` tier without tools. Anything the
- * call leaves out, and everything when it fails, is `discuss`, so a doubtful reply always gets a
- * full answer.
+ * Sorts replies by what they ask for with one call of the `fast` tier without tools: the call says
+ * what each thread's replies mean for the code, and only an explicit promise to change it is
+ * `ack`; a reply that keeps the code is `discuss`, so it always gets an answer. Anything the call
+ * leaves out, and everything when it fails, is `discuss`.
  */
 export async function triageReplies(options: {
   agent: Agent
@@ -121,14 +141,7 @@ export async function triageReplies(options: {
       {
         dir: scratch,
         capabilities: [],
-        system: [
-          'People replied in code review threads. Sort each reply by what it asks of the reviewer.',
-          '- `ack`: nothing to answer: the person accepts the comment: thanks, "noted", a promise to fix it later.',
-          '- `fixed`: the reply only says the problem is already fixed or no longer in the code, and asks nothing.',
-          '- `discuss`: everything else: a question, a disagreement, an explanation why the comment is wrong or does not apply, a request, or a reply that says it is fixed and also asks or argues something.',
-          '- A reply that waves the comment off, however short ("it is fine", "not needed", "we keep it", "works as is"), declines it: that is `discuss`, never `ack`.',
-          'When in doubt answer `discuss`.',
-        ].join('\n'),
+        system: TRIAGE_SYSTEM,
         prompt: options.pending
           .map((pending) => {
             const comment = pending.discussion.notes.find((note) => !note.system)
@@ -147,7 +160,8 @@ export async function triageReplies(options: {
       },
       options.usage,
     )
-    for (const { id, kind } of result.output?.threads ?? []) if (kinds.has(id)) kinds.set(id, kind)
+    for (const { id, code } of result.output?.threads ?? [])
+      if (kinds.has(id)) kinds.set(id, kindOfStance[code])
   } catch (error) {
     options.log?.(
       `sorting replies failed, answering all in full: ${error instanceof Error ? error.message : String(error)}`,

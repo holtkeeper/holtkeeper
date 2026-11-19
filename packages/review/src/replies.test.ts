@@ -6,7 +6,7 @@ import type { Discussion } from '@holtkeeper/forge'
 import { HEAD, fakeAgent, fakeForge } from '../test/fakes.ts'
 import { findingMarker } from './dedupe.ts'
 import { replyBody } from './format.ts'
-import { answerReplies, pendingReplies, repliedThreads } from './replies.ts'
+import { TRIAGE_SYSTEM, answerReplies, pendingReplies, repliedThreads } from './replies.ts'
 import type { ReviewUsage } from './schema.ts'
 
 const repo = { forge: 'work', path: 'shapes/circle' }
@@ -108,9 +108,9 @@ describe('answerReplies', () => {
       triage: [
         {
           threads: [
-            { id: 'd1', kind: 'discuss' },
-            { id: 'd2', kind: 'discuss' },
-            { id: 'd3', kind: 'ack' },
+            { id: 'd1', code: 'stays' },
+            { id: 'd2', code: 'asks' },
+            { id: 'd3', code: 'will-change' },
           ],
         },
       ],
@@ -133,7 +133,7 @@ describe('answerReplies', () => {
       ['triage', 'fast'],
       ['review', 'main'],
     ])
-    expect(tasks[0]?.system).toContain('declines it: that is `discuss`, never `ack`')
+    expect(tasks[0]?.system).toBe(TRIAGE_SYSTEM)
     expect(tasks[1]?.prompt).toContain('## Thread d1 on src/area.ts:2')
     expect(tasks[1]?.prompt).toContain('## Thread d2 on src/area.ts:2')
     expect(tasks[1]?.prompt).not.toContain('Unused import')
@@ -220,7 +220,7 @@ describe('answerReplies', () => {
     ])
     const { forge } = fakeForge({ files: [], discussions: [summary, settled, open] })
     const { agent, tasks } = fakeAgent({
-      triage: [{ threads: [{ id: 's', kind: 'discuss' }] }],
+      triage: [{ threads: [{ id: 's', code: 'stays' }] }],
       review: [{ action: 'explain', body: 'One open thread remains.', resolve: false }],
     })
     await run(forge, agent)
@@ -246,8 +246,8 @@ describe('answerReplies', () => {
       triage: [
         {
           threads: [
-            { id: 'd1', kind: 'fixed' },
-            { id: 'd2', kind: 'fixed' },
+            { id: 'd1', code: 'changed' },
+            { id: 'd2', code: 'changed' },
           ],
         },
         {
@@ -282,7 +282,7 @@ describe('answerReplies', () => {
     })
     const { agent, tasks } = fakeAgent({
       triage: [
-        { threads: [{ id: 'd1', kind: 'fixed' }] },
+        { threads: [{ id: 'd1', code: 'changed' }] },
         { threads: [{ id: 'd1', status: 'unclear', note: 'Cannot tell.' }] },
       ],
       review: [{ action: 'explain', body: 'The check is in another branch.', resolve: false }],
