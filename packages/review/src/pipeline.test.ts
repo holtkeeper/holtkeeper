@@ -243,6 +243,33 @@ describe('reviewMergeRequest', () => {
     expect(submissions[0]?.summary).not.toContain('The review took')
   })
 
+  test('posted notes show citations through cite, the stored record keeps them as written', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const { agent } = fakeAgent({
+      review: [
+        review([
+          {
+            path: 'src/price.ts',
+            line: 2,
+            severity: 'major',
+            category: 'bug',
+            title: 'Rounding missing',
+            body: 'Money must be rounded to cents [rule:r1].',
+          },
+        ]),
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        cite: async (text) => text.replace('[rule:r1]', '(cited)'),
+      }),
+    )
+    expect(submissions[0]?.comments[0]?.body).toContain('rounded to cents (cited).')
+    expect(data.comments[0]?.body).toBe('Money must be rounded to cents [rule:r1].')
+  })
+
   test('applies REVIEW.md path rules and posts the walkthrough and effort', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'review-paths-'))
     try {

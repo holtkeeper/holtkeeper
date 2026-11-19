@@ -51,6 +51,8 @@ export interface ReplyToThreadOptions {
    * so the answer is dropped instead of posted next to it.
    */
   stillPending?: () => Promise<boolean>
+  /** Shows the rule citations of the answer before it is posted (`citationRenderer`). */
+  cite?: (text: string) => Promise<string>
   signal?: AbortSignal
 }
 
@@ -196,14 +198,14 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
  * markup, and resolves the thread when the answer says so and the forge can.
  */
 export async function postThreadAnswer(
-  options: Pick<ReplyToThreadOptions, 'forge' | 'repo' | 'mr'>,
+  options: Pick<ReplyToThreadOptions, 'forge' | 'repo' | 'mr' | 'cite'>,
   discussion: Discussion,
   answer: ThreadAnswer,
 ): Promise<{ resolved: boolean }> {
   const { forge, repo, mr } = options
   if (!forge.replyToDiscussion) throw new Error(`forge ${forge.kind} cannot reply to discussions`)
   const position = discussion.position
-  let body = answer.body.trim()
+  let body = options.cite ? await options.cite(answer.body.trim()) : answer.body.trim()
   const suggestion = answer.suggestion
   if (answer.action === 'update' && suggestion && position && suggestion.line === position.line) {
     const above = suggestion.startLine ? Math.max(0, suggestion.line - suggestion.startLine) : 0

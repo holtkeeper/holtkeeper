@@ -32,6 +32,7 @@ import {
   findingId,
   reviewCheckNames,
 } from './checks.ts'
+import type { CitationStyle } from './cite.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
 import { dependencySection } from './dependencies.ts'
 import { DEFAULT_REVIEW_DEPTH, type ReviewDepth, resolveReviewDepth } from './depth.ts'
@@ -119,6 +120,8 @@ export interface ReviewOptions {
   maxDiffLines: number
   language?: string
   instructions?: string
+  /** How posted notes show the rules and learnings they cite; `link` unless set. */
+  citations?: CitationStyle
   /** Answer the replies people left in our threads instead of reviewing. */
   replies?: boolean
   /** Reviews added or changed images with the injected `MediaReviewer`. */
@@ -203,6 +206,11 @@ export interface ReviewRun {
   agent?: Agent
   analyses?: AnalysisStore
   options: ReviewOptions
+  /**
+   * Shows the rule citations of a note before it is posted (`citationRenderer`); stored records
+   * keep the text as the agent wrote it. Without it notes are posted as written.
+   */
+  cite?: (text: string) => Promise<string>
   checks?: Partial<Record<ReviewCheckName, QualityCheck>>
   /**
    * Resolves the rules of the review from the checkout's rules files and the changed files in
@@ -804,14 +812,19 @@ const recheck: ReviewSteps['recheck'] = async (run, loaded, planned, usage) => {
 
 const post: ReviewSteps['post'] = async (run, loaded, data) => {
   const toPost = data.comments
-  const comments: ReviewComment[] = toPost.map((finding) => ({
-    path: finding.path,
-    line: finding.line,
-    ...(finding.startLine ? { startLine: finding.startLine } : {}),
-    side: 'new',
-    body: commentBody(finding),
-    ...(finding.suggestion ? { suggestion: { replacement: finding.suggestion.replacement } } : {}),
-  }))
+  const cite = run.cite ?? (async (text: string) => text)
+  const comments: ReviewComment[] = await Promise.all(
+    toPost.map(async (finding) => ({
+      path: finding.path,
+      line: finding.line,
+      ...(finding.startLine ? { startLine: finding.startLine } : {}),
+      side: 'new' as const,
+      body: await cite(commentBody(finding)),
+      ...(finding.suggestion
+        ? { suggestion: { replacement: finding.suggestion.replacement } }
+        : {}),
+    })),
+  )
   const approve = data.approved
   const worthPosting =
     data.mode === 'full' ||
@@ -823,9 +836,13 @@ const post: ReviewSteps['post'] = async (run, loaded, data) => {
   const outcome = await run.forge.submitReview(run.repo.path, loaded.mr.id, {
     refs: loaded.diff.refs,
     comments,
-    summary: summaryNote(
-      run.options.showCost === false ? { ...data, usage: undefined, durationMs: undefined } : data,
-      run.messages,
+    summary: await cite(
+      summaryNote(
+        run.options.showCost === false
+          ? { ...data, usage: undefined, durationMs: undefined }
+          : data,
+        run.messages,
+      ),
     ),
     event: approve ? 'approve' : 'comment',
   })

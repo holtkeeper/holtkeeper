@@ -186,7 +186,7 @@ describe('review analyzer texts', () => {
     const { forge, events, submissions, notes } = noteForge()
     await run(forge)
     // The note says it is posting, then goes away.
-    expect(events).toEqual(['post', 'review', 'update', 'delete'])
+    expect(events).toEqual(['post', 'update', 'review', 'delete'])
     expect(notes.size).toBe(0)
     expect(submissions[0]?.summary).toContain('Holtkeeper learns from your answers')
   })

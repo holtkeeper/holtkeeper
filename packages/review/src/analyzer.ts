@@ -16,6 +16,8 @@ import { z } from 'zod'
 
 import { reviewAnalysis } from './analysis.ts'
 import { type ReviewCheckName, reviewCheckNames } from './checks.ts'
+import type { CitedRule } from './citations.ts'
+import { type CitedRuleInfo, citationRenderer, citationStyles } from './cite.ts'
 import { DEFAULT_DEEP_FROM_MINUTES, DEFAULT_REVIEW_DEPTH, reviewDepths } from './depth.ts'
 import { GO_GUIDELINES_TAG, type GoGuidelineSet } from './go-guidelines/schema.ts'
 import { bundledGoGuidelines } from './go-guidelines/snapshot.ts'
@@ -107,6 +109,12 @@ export const reviewOptionsSchema = z.object({
   maxDiffLines: z.coerce.number().int().positive().default(3000),
   language: z.string().min(1).optional(),
   instructions: z.string().optional(),
+  citations: z
+    .enum(citationStyles)
+    .default('link')
+    .describe(
+      'How comments show the rules they cite: link (a link to the rule with its text as tooltip), details (also the rule text in a collapsed block) or off (not shown).',
+    ),
   replies: flag.default(false),
   media: flag.default(true),
   releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
@@ -180,6 +188,15 @@ export interface ReviewAnalyzerDeps {
    * rule may apply); they become the agent's stable context, and their sources are stored with the
    * review as `ruleSources`. Without it the review follows the rules files alone.
    */
+  /**
+   * What notes show for the rules and learnings they cite, keyed by `citationKey`: title, text
+   * and where people edit it. Ids it does not know are left out. Without it, and with
+   * `citations: 'off'`, citations are not shown.
+   */
+  citedRulesFor?: (
+    repo: RepoRef,
+    cited: readonly CitedRule[],
+  ) => Promise<ReadonlyMap<string, CitedRuleInfo>>
   guideFor?: (
     repo: RepoRef,
     request: { repoFiles: readonly RepoRuleFile[]; files?: readonly string[] },
@@ -420,6 +437,11 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         ? undefined
         : await startTexts(context, deps, forge, mr, botUsername)
       // A failed run must not leave the progress note saying the review is running.
+      const { citedRulesFor } = deps
+      const cite = citationRenderer(
+        options.citations ?? 'link',
+        citedRulesFor && ((cited) => citedRulesFor(repo, cited)),
+      )
       const workspaceAt = async () => {
         const dir = await headCheckout(context, mr.headSha)
         const knowledge = deps.knowledge
@@ -489,6 +511,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             },
             ...(botUsername ? { botUsername } : {}),
             ...(options.language ? { language: options.language } : {}),
+            cite,
             usage,
             ...(context.log ? { log: context.log } : {}),
             ...(context.signal ? { signal: context.signal } : {}),
@@ -555,6 +578,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           ...(context.agent ? { agent: context.agent } : {}),
           ...(context.history ? { analyses: context.history.analyses } : {}),
           options,
+          cite,
           ...(checks ? { checks } : {}),
           ...(guideFor
             ? { guide: (repoFiles, files) => guideFor(repo, { repoFiles, files }) }

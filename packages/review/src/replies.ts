@@ -270,6 +270,8 @@ export interface AnswerRepliesOptions {
   messages?: () => Promise<ReviewMessages>
   botUsername?: string
   language?: string
+  /** Shows the rule citations of an answer in words before it is posted (`citationRenderer`). */
+  cite?: (text: string) => Promise<string>
   usage: ReviewUsage
   log?: (line: string) => void
   signal?: AbortSignal
@@ -456,6 +458,7 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
       ...(options.botUsername ? { botUsername: options.botUsername } : {}),
       ...(options.language ? { language: options.language } : {}),
       usage: options.usage,
+      ...(options.cite ? { cite: options.cite } : {}),
       stillPending: async () => (await latestNotes()).get(item.discussion.id) === item.reply.id,
       ...(options.signal ? { signal: options.signal } : {}),
     })
@@ -510,7 +513,7 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
       }
       // oxlint-disable-next-line no-await-in-loop
       const { resolved } = await postThreadAnswer(
-        { forge, repo, mr: mr.id },
+        { forge, repo, mr: mr.id, ...(options.cite ? { cite: options.cite } : {}) },
         item.discussion,
         answer,
       )

@@ -48,7 +48,12 @@ import {
   releaseSettingsDefinition,
 } from '@holtkeeper/release'
 import type { AnalysisKind } from '@holtkeeper/report'
-import { createReviewAnalyzer, reviewGuideOf } from '@holtkeeper/review'
+import {
+  type CitedRuleInfo,
+  citationKey,
+  createReviewAnalyzer,
+  reviewGuideOf,
+} from '@holtkeeper/review'
 import { createRuleMinerAnalyzer } from '@holtkeeper/rule-miner'
 import { testIdOverridesFor, testIdsSettingKey } from '@holtkeeper/rules'
 import { secretReportsDefinition } from '@holtkeeper/secret-reports'
@@ -357,6 +362,42 @@ export async function startServer(
     knowledge: {
       access: knowledge,
       teamsOf: (repo) => repoTarget(config, repo).teams,
+    },
+    async citedRulesFor(_repo, cited) {
+      const panel = server.publicUrl?.replace(/\/+$/, '')
+      const found = await Promise.all(
+        cited.map(async (item): Promise<[string, CitedRuleInfo] | undefined> => {
+          if (item.kind === 'rule') {
+            const rule = await store.rules.get(item.id)
+            return (
+              rule && [
+                citationKey(item),
+                {
+                  title: rule.title,
+                  text: rule.body,
+                  ...(panel && {
+                    url: `${panel}/knowledge/rules?rule=${encodeURIComponent(rule.id)}`,
+                  }),
+                },
+              ]
+            )
+          }
+          const learning = await store.learnings.get(item.id)
+          return (
+            learning && [
+              citationKey(item),
+              {
+                title: learning.text.length > 60 ? `${learning.text.slice(0, 59)}…` : learning.text,
+                text: learning.reason ? `${learning.text}\n\n${learning.reason}` : learning.text,
+                ...(panel && {
+                  url: `${panel}/knowledge/learnings?learning=${encodeURIComponent(learning.id)}`,
+                }),
+              },
+            ]
+          )
+        }),
+      )
+      return new Map(found.filter((entry) => entry !== undefined))
     },
     async guideFor(repo, { repoFiles, files }) {
       const resolved = await resolveRules({
