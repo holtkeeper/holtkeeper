@@ -5,6 +5,7 @@ import {
   ToolError,
   defineTool,
 } from '@holtkeeper/agent-tools'
+import { kindOfPath } from '@holtkeeper/assets'
 import {
   type CommitConventions,
   type ConventionsForge,
@@ -37,7 +38,8 @@ import {
 import { z } from 'zod'
 
 import { applyingEntry } from '../setting-rules.ts'
-import { type ReleaseRulesAccess, releaseRulesTool } from './releases.ts'
+import { type AssetToolsAccess, assetPolicy } from './assets.ts'
+import { type ReleaseRulesAccess, releaseRules } from './releases.ts'
 
 /** Commit conventions as the rules tools read them, for one caller. */
 export interface CommitConventionsAccess {
@@ -95,7 +97,7 @@ export function commitConventionsReader(deps: CommitConventionsDeps) {
 }
 
 /** Rules as `repo_rules` and `get_rule` read them, for one caller. */
-interface RepoRulesAccess {
+export interface RepoRulesAccess {
   /**
    * The resolved rules of `repo` (`forge:path`) for an agent run touching `files`, from the same
    * resolver internal agents use; `undefined` when the caller may not read that repository's
@@ -153,16 +155,27 @@ export function testIdsReader(deps: { store: Pick<Store, 'analyses' | 'settings'
   }
 }
 
-/** What the `rules` toolset reads; each part adds its tools. */
+/** What the `rules` toolset reads; each part adds its tools and topics. */
 export interface RulesAccess {
-  /** `commit_conventions` and `check_commit_message`. */
+  /** `check_commit_message` and the `commits` topic of `repo_rules`. */
   commits?: CommitConventionsAccess
-  /** `repo_rules` and `get_rule`. */
+  /** The rules of `repo_rules`, and `get_rule`. */
   rules?: RepoRulesAccess
-  /** `test_ids` and `suggest_test_ids`. */
+  /** `test_ids` and the `test-ids` topic of `repo_rules`. */
   testIds?: TestIdsAccess
-  /** `release_rules` (the MCP endpoint; internal agents get it from the `releases` toolset). */
+  /** The `releases` topic of `repo_rules`. */
   releases?: ReleaseRulesAccess
+  /** The `assets` topic of `repo_rules`. */
+  assets?: AssetToolsAccess
+}
+
+/** Options of `rulesToolset`. */
+export interface RulesToolsetOptions {
+  /**
+   * Whether `get_rule` is offered (default). The MCP endpoint leaves it out: its
+   * `search_knowledge` reads a rule in full by `id`.
+   */
+  reader?: boolean
 }
 
 const repoArg = z.string().min(1).describe('The repository, as forge:path')
@@ -179,11 +192,11 @@ const renderBlocks = (blocks: readonly RuleBlock[]): string =>
     ),
   ].join('\n')
 
-const renderRequested = (resolved: ResolvedRules): string[] =>
+const renderRequested = (resolved: ResolvedRules, readWith: string): string[] =>
   resolved.requested.length
     ? [
         [
-          'Rules to read with get_rule when they fit the work:',
+          `Rules to read with ${readWith} when they fit the work:`,
           ...resolved.requested.map(
             (rule) =>
               `- \`${rule.id}\`${rule.title === rule.id ? '' : ` ${rule.title}`}${rule.source === rule.id ? '' : ` (${rule.source})`}: ${rule.description}`,
@@ -194,12 +207,143 @@ const renderRequested = (resolved: ResolvedRules): string[] =>
 
 const stripCitation = (id: string) => id.trim().replace(/^\[|\]$/g, '')
 
-function repoRulesTools(access: RepoRulesAccess): RegistryTool[] {
+/**
+ * One rule in full as Markdown: a panel rule (`rule:<id>` or a bare id), a learned rule
+ * (`learn:<id>`) with its sources and counters, or a rules file of `repo` by path. Throws a
+ * `ToolError` when the caller may read none of that name.
+ */
+export async function readRule(
+  access: RepoRulesAccess,
+  id: string,
+  repo?: string,
+): Promise<string> {
+  const key = stripCitation(id)
+  if (key.startsWith('learn:')) {
+    const learning = await access.learning(key.slice('learn:'.length))
+    if (!learning) throw new ToolError(`No learned rule ${key} you may read.`)
+    return [
+      `# [learn:${learning.id}] Learned rule (${learning.status})`,
+      learning.text,
+      ...(learning.reason ? [`Why: ${learning.reason}`] : []),
+      [
+        `- applies to: ${scopeSource(learning.scope)}${learning.files?.length ? `, files ${learning.files.map((glob) => `\`${glob}\``).join(', ')}` : ''}`,
+        `- origin: ${learning.origin}; used ${learning.uses}×, fixed ${learning.actedOn}×, 👍 ${learning.votesUp} 👎 ${learning.votesDown}`,
+        ...learning.sources.map(
+          (source) =>
+            `- source: ${source.url ?? `${source.repo ?? ''}${source.mergeRequest ? `!${source.mergeRequest}` : ''}`} (${source.at.slice(0, 10)})`,
+        ),
+      ].join('\n'),
+    ].join('\n\n')
+  }
+  const ruleId = key.startsWith('rule:') ? key.slice('rule:'.length) : key
+  const rule = repo && !key.startsWith('rule:') ? undefined : await access.rule(ruleId)
+  if (rule)
+    return [
+      `# [rule:${rule.id}] ${rule.title}`,
+      [
+        `- applies to: ${scopeSource(rule.scope)}${rule.files?.length ? `, files ${rule.files.map((glob) => `\`${glob}\``).join(', ')}` : ''}`,
+        ...(rule.agents?.length ? [`- read by: ${rule.agents.join(', ')}`] : []),
+        ...(rule.description ? [`- when: ${rule.description}`] : []),
+        `- version ${rule.version}, updated ${rule.updatedAt.slice(0, 10)}`,
+      ].join('\n'),
+      rule.body.trim(),
+    ].join('\n\n')
+  if (repo) {
+    const file = await access.repoFile(repo, key)
+    if (file) return `# ${file.path} (${repo})\n\n${file.text.trim()}`
+  }
+  throw new ToolError(
+    repo
+      ? `No rule or rules file ${key} in \`${repo}\`.`
+      : `No rule ${key} you may read; pass repo for a rules file path.`,
+  )
+}
+
+/** A convention `repo_rules` adds in full on request. */
+interface RulesTopic {
+  name: string
+  /** What the topic covers, for the argument description. */
+  covers: string
+  render(repo: string, files: readonly string[]): Promise<string>
+}
+
+function topicsOf(access: RulesAccess): RulesTopic[] {
+  const { commits, releases, assets, testIds } = access
+  return [
+    ...(commits
+      ? [
+          {
+            name: 'commits',
+            covers: 'commit message, branch name and merge request title conventions with examples',
+            render: async (repo: string) => {
+              const found = await commits.conventions(repo)
+              if (!found) throw noRepo(repo)
+              return renderCommitConventions(found)
+            },
+          },
+        ]
+      : []),
+    ...(releases
+      ? [
+          {
+            name: 'releases',
+            covers: 'how the repository releases: branches, tags, version bumps, gates',
+            render: (repo: string) => releaseRules(releases, repo),
+          },
+        ]
+      : []),
+    ...(assets
+      ? [
+          {
+            name: 'assets',
+            covers: 'formats, size and dimension limits for images, fonts, audio and video',
+            render: (repo: string, files: readonly string[]) =>
+              assetPolicy(
+                assets,
+                repo,
+                files.filter((file) => kindOfPath(file) !== 'other').slice(0, 10),
+              ),
+          },
+        ]
+      : []),
+    ...(testIds
+      ? [
+          {
+            name: 'test-ids',
+            covers: 'the test id attribute and naming convention',
+            render: async (repo: string) => {
+              const snapshot = await testIds.testIds(repo)
+              if (!snapshot) throw noRepo(repo)
+              const convention = conventionOf(snapshot)
+              return convention
+                ? renderTestIdConvention(convention)
+                : `\`${repo}\` uses no test attributes${snapshot.data ? '' : ' yet: the testids analysis has not run there'}.`
+            },
+          },
+        ]
+      : []),
+  ]
+}
+
+const topicTitles: Record<string, string> = {
+  commits: 'Commit conventions',
+  releases: 'Release rules',
+  assets: 'Asset policy',
+  'test-ids': 'Test ids',
+}
+
+function repoRulesTools(
+  access: RulesAccess,
+  options: { reader: boolean; readWith: string },
+): RegistryTool[] {
+  const rules = access.rules
+  const topics = topicsOf(access)
+  const [first, ...rest] = topics.map((topic) => topic.name)
+  if (!rules && !first) return []
   return [
     defineTool({
       name: 'repo_rules',
-      description:
-        "The rules agents follow in a repository, resolved as Holtkeeper's own agents get them: rules people wrote in the panel for the organization, teams and repositories, the repository's rules files (AGENTS.md, CLAUDE.md, REVIEW.md, .github/instructions, .cursor/rules, ... including nested ones), policies such as commit conventions, then learned rules, ranked below. Pass the files you change so path-scoped rules apply. Lists the blocks it used and rules to read on demand with get_rule. Call it before changing code in a repository.",
+      description: `The rules agents follow in a repository, resolved as Holtkeeper's own agents get them: rules people wrote in the panel for the organization, teams and repositories, the repository's rules files (AGENTS.md, CLAUDE.md, REVIEW.md, .github/instructions, .cursor/rules, ... including nested ones), policies, then learned rules, ranked below. Pass the files you change so path-scoped rules apply. Lists the blocks it used and rules to read on demand with ${options.readWith}.${first ? ' Add `topics` for a convention in full before you rely on it.' : ''} Call it before changing code in a repository.`,
       input: z.object({
         repo: repoArg,
         files: z
@@ -215,84 +359,75 @@ function repoRulesTools(access: RepoRulesAccess): RegistryTool[] {
           .describe(
             'What you are doing: task (writing code, the default), review, chat or release',
           ),
+        ...(first
+          ? {
+              topics: z
+                .array(z.enum([first, ...rest]))
+                .optional()
+                .describe(
+                  `Conventions to add in full: ${topics.map((topic) => `${topic.name} (${topic.covers})`).join('; ')}`,
+                ),
+            }
+          : {}),
       }),
-      run: async ({ repo, files, agent }) => {
-        const resolved = await access.resolve(repo, {
-          agent: agent ?? 'task',
-          ...(files && { files }),
-        })
-        if (!resolved) throw noRepo(repo)
-        if (!resolved.text.trim() && !resolved.requested.length)
-          return `No rules apply to \`${repo}\` yet; follow its existing code.`
-        return [
-          `# Rules for \`${repo}\``,
-          ...(resolved.text.trim() ? [resolved.text.trim()] : []),
-          ...renderRequested(resolved),
-          renderBlocks(resolved.blocks),
-          ...(resolved.warnings.length ? [`Notes: ${resolved.warnings.join(' ')}`] : []),
-        ].join('\n\n')
+      run: async (input) => {
+        const { repo, files, agent } = input
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `topics` is in the schema only when there are topics
+        const wanted = (input as { topics?: string[] }).topics ?? []
+        const sections: string[] = []
+        if (rules) {
+          const resolved = await rules
+            .resolve(repo, { agent: agent ?? 'task', ...(files && { files }) })
+            .catch((error: unknown) => {
+              if (wanted.length && error instanceof ToolError) return error
+              throw error
+            })
+          if (!resolved && !wanted.length) throw noRepo(repo)
+          if (!resolved) sections.push(`You may not read the rules of \`${repo}\`.`)
+          else if (resolved instanceof ToolError) sections.push(resolved.message)
+          else if (!resolved.text.trim() && !resolved.requested.length)
+            sections.push(`No rules apply to \`${repo}\` yet; follow its existing code.`)
+          else
+            sections.push(
+              `# Rules for \`${repo}\``,
+              ...(resolved.text.trim() ? [resolved.text.trim()] : []),
+              ...renderRequested(resolved, options.readWith),
+              renderBlocks(resolved.blocks),
+              ...(resolved.warnings.length ? [`Notes: ${resolved.warnings.join(' ')}`] : []),
+            )
+        }
+        for (const topic of topics.filter((item) => wanted.includes(item.name)))
+          sections.push(
+            `# ${topicTitles[topic.name] ?? topic.name} of \`${repo}\``,
+            // oxlint-disable-next-line no-await-in-loop -- a few topics, kept in order
+            await topic.render(repo, files ?? []),
+          )
+        return sections.join('\n\n')
       },
       subject: ({ repo }) => repo,
     }),
-    defineTool({
-      name: 'get_rule',
-      description:
-        'One rule in full: a panel rule ([rule:<id>]), a learned rule ([learn:<id>]) with its sources and counters, or a rules file of a repository by path (pass repo) such as one repo_rules offers to read on demand.',
-      input: z.object({
-        id: z
-          .string()
-          .min(1)
-          .describe('rule:<id>, learn:<id>, a rule id, or a repository rules file path'),
-        repo: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('The repository, as forge:path, for a rules file path'),
-      }),
-      run: async ({ id, repo }) => {
-        const key = stripCitation(id)
-        if (key.startsWith('learn:')) {
-          const learning = await access.learning(key.slice('learn:'.length))
-          if (!learning) throw new ToolError(`No learned rule ${key} you may read.`)
-          return [
-            `# [learn:${learning.id}] Learned rule (${learning.status})`,
-            learning.text,
-            ...(learning.reason ? [`Why: ${learning.reason}`] : []),
-            [
-              `- applies to: ${scopeSource(learning.scope)}${learning.files?.length ? `, files ${learning.files.map((glob) => `\`${glob}\``).join(', ')}` : ''}`,
-              `- origin: ${learning.origin}; used ${learning.uses}×, fixed ${learning.actedOn}×, 👍 ${learning.votesUp} 👎 ${learning.votesDown}`,
-              ...learning.sources.map(
-                (source) =>
-                  `- source: ${source.url ?? `${source.repo ?? ''}${source.mergeRequest ? `!${source.mergeRequest}` : ''}`} (${source.at.slice(0, 10)})`,
-              ),
-            ].join('\n'),
-          ].join('\n\n')
-        }
-        const ruleId = key.startsWith('rule:') ? key.slice('rule:'.length) : key
-        const rule = repo && !key.startsWith('rule:') ? undefined : await access.rule(ruleId)
-        if (rule)
-          return [
-            `# [rule:${rule.id}] ${rule.title}`,
-            [
-              `- applies to: ${scopeSource(rule.scope)}${rule.files?.length ? `, files ${rule.files.map((glob) => `\`${glob}\``).join(', ')}` : ''}`,
-              ...(rule.agents?.length ? [`- read by: ${rule.agents.join(', ')}`] : []),
-              ...(rule.description ? [`- when: ${rule.description}`] : []),
-              `- version ${rule.version}, updated ${rule.updatedAt.slice(0, 10)}`,
-            ].join('\n'),
-            rule.body.trim(),
-          ].join('\n\n')
-        if (repo) {
-          const file = await access.repoFile(repo, key)
-          if (file) return `# ${file.path} (${repo})\n\n${file.text.trim()}`
-        }
-        throw new ToolError(
-          repo
-            ? `No rule or rules file ${key} in \`${repo}\`.`
-            : `No rule ${key} you may read; pass repo for a rules file path.`,
-        )
-      },
-      subject: ({ id, repo }) => repo ?? id,
-    }),
+    ...(rules && options.reader
+      ? [
+          defineTool({
+            name: 'get_rule',
+            description:
+              'One rule in full: a panel rule ([rule:<id>]), a learned rule ([learn:<id>]) with its sources and counters, or a rules file of a repository by path (pass repo) such as one repo_rules offers to read on demand.',
+            input: z.object({
+              id: z
+                .string()
+                .min(1)
+                .describe('rule:<id>, learn:<id>, a rule id, or a repository rules file path'),
+              repo: z
+                .string()
+                .min(1)
+                .optional()
+                .describe('The repository, as forge:path, for a rules file path'),
+            }),
+            run: ({ id, repo }) => readRule(rules, id, repo),
+            subject: ({ id, repo }) => repo ?? id,
+          }),
+        ]
+      : []),
   ]
 }
 
@@ -313,11 +448,38 @@ function testIdTools(access: TestIdsAccess): RegistryTool[] {
     if (!snapshot) throw noRepo(repo)
     return snapshot
   }
+  const suggest = async (repo: string, file: string, content: string) => {
+    const convention = conventionOf(await snapshotOf(repo))
+    if (!convention) return `\`${repo}\` uses no test attributes, so new elements need none.`
+    if (convention.exclude.some((glob) => new Bun.Glob(glob).match(file)))
+      return `\`${file}\` is left out of test ids by the team's settings.`
+    const found = await findUntaggedInText({
+      file,
+      text: content,
+      attributes: convention.attributes,
+      naming: convention.naming,
+      ...(convention.elements && { tags: convention.elements }),
+    })
+    if (!found.length) return `Every interactive element of \`${file}\` has a test id.`
+    const line = (element: (typeof found)[number]) =>
+      `- L${element.line} \`<${element.tag}>\`${element.as && element.as !== element.tag ? ` (renders \`<${element.as}>\`)` : ''}, ${element.reason}: \`${convention.attribute}="${element.suggestion ?? ''}"\``
+    const missing = found.filter((element) => element.status === 'missing')
+    const unverified = found.filter((element) => element.status === 'unverified')
+    return [
+      `Test ids for \`${file}\` use \`${convention.attribute}\`.`,
+      ...(missing.length ? [`Missing:\n${missing.map(line).join('\n')}`] : []),
+      ...(unverified.length
+        ? [
+            `Spread props that may already pass one; check the callers:\n${unverified.map(line).join('\n')}`,
+          ]
+        : []),
+    ].join('\n\n')
+  }
   return [
     defineTool({
       name: 'test_ids',
       description:
-        "A repository's test id convention (attribute, naming, which elements get ids; learned from its code, team settings on top) and the existing test ids per component, for writing end-to-end tests or new UI. Narrow with path: a component file, a folder or a component name.",
+        "A repository's test id convention (attribute, naming, which elements get ids; learned from its code, team settings on top) and the existing test ids per component, for writing end-to-end tests or new UI. Narrow with `path`: a component file, a folder or a component name. With `file` and `content` instead: the interactive elements of that one file that have no test id yet, each with an id suggested in the repository's naming style (deterministic; pass the file's current text, saved or not).",
       input: z.object({
         repo: repoArg,
         path: z
@@ -332,9 +494,24 @@ function testIdTools(access: TestIdsAccess): RegistryTool[] {
           .max(50)
           .optional()
           .describe('Components to list; default 20'),
+        file: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('To suggest ids: path of the file, e.g. src/cart/CartRow.tsx'),
+        content: z
+          .string()
+          .max(400_000)
+          .optional()
+          .describe("To suggest ids: the file's current text"),
       }),
       defaultLimit: 20,
-      run: async ({ repo, path, limit }) => {
+      run: async ({ repo, path, limit, file, content }) => {
+        if (file !== undefined || content !== undefined) {
+          if (!file || content === undefined)
+            throw new ToolError('Pass both `file` and `content` to get suggested test ids.')
+          return suggest(repo, file, content)
+        }
         const snapshot = await snapshotOf(repo)
         const convention = conventionOf(snapshot)
         if (!snapshot.data && !convention)
@@ -369,75 +546,16 @@ function testIdTools(access: TestIdsAccess): RegistryTool[] {
       },
       subject: ({ repo }) => repo,
     }),
-    defineTool({
-      name: 'suggest_test_ids',
-      description:
-        "Lists the interactive elements of one component file that have no test id yet, each with an id suggested in the repository's naming style. Deterministic: pass the file's current text, saved or not.",
-      input: z.object({
-        repo: repoArg,
-        file: z
-          .string()
-          .min(1)
-          .describe('Path of the file in the repository, e.g. src/cart/CartRow.tsx'),
-        content: z.string().max(400_000).describe("The file's current text"),
-      }),
-      run: async ({ repo, file, content }) => {
-        const snapshot = await snapshotOf(repo)
-        const convention = conventionOf(snapshot)
-        if (!convention) return `\`${repo}\` uses no test attributes, so new elements need none.`
-        if (convention.exclude.some((glob) => new Bun.Glob(glob).match(file)))
-          return `\`${file}\` is left out of test ids by the team's settings.`
-        const found = await findUntaggedInText({
-          file,
-          text: content,
-          attributes: convention.attributes,
-          naming: convention.naming,
-          ...(convention.elements && { tags: convention.elements }),
-        })
-        if (!found.length) return `Every interactive element of \`${file}\` has a test id.`
-        const line = (element: (typeof found)[number]) =>
-          `- L${element.line} \`<${element.tag}>\`${element.as && element.as !== element.tag ? ` (renders \`<${element.as}>\`)` : ''}, ${element.reason}: \`${convention.attribute}="${element.suggestion ?? ''}"\``
-        const missing = found.filter((element) => element.status === 'missing')
-        const unverified = found.filter((element) => element.status === 'unverified')
-        return [
-          `Test ids for \`${file}\` use \`${convention.attribute}\`.`,
-          ...(missing.length ? [`Missing:\n${missing.map(line).join('\n')}`] : []),
-          ...(unverified.length
-            ? [
-                `Spread props that may already pass one; check the callers:\n${unverified.map(line).join('\n')}`,
-              ]
-            : []),
-        ].join('\n\n')
-      },
-      subject: ({ repo }) => repo,
-    }),
   ]
 }
 
 function commitTools(access: CommitConventionsAccess): RegistryTool[] {
-  const conventionsOf = async (repo: string, limit?: number) => {
-    const found = await access.conventions(repo, limit)
+  const conventionsOf = async (repo: string) => {
+    const found = await access.conventions(repo)
     if (!found) throw noRepo(repo)
     return found
   }
   return [
-    defineTool({
-      name: 'commit_conventions',
-      description:
-        'How commit messages and branch names of a repository should look: a template, rules with where each comes from (team setting, forge push rules, commitlint, recent history), real examples that follow them and team notes. Use before committing, naming a branch or titling a merge request.',
-      input: z.object({
-        repo: repoArg,
-        commits: z
-          .number()
-          .int()
-          .min(20)
-          .max(500)
-          .optional()
-          .describe('Recent commits of the default branch to learn from; default 100'),
-      }),
-      run: async ({ repo, commits }) => renderCommitConventions(await conventionsOf(repo, commits)),
-      subject: ({ repo }) => repo,
-    }),
     defineTool({
       name: 'check_commit_message',
       description:
@@ -470,45 +588,38 @@ function commitTools(access: CommitConventionsAccess): RegistryTool[] {
 }
 
 /**
- * The `rules` toolset: `repo_rules` and `get_rule` (with `rules`),
- * `commit_conventions` and `check_commit_message` (with `commits`), `test_ids` and
- * `suggest_test_ids` (with `testIds`) and `release_rules` (with `releases`), over the repositories
- * `access` lets the caller read.
- * `undefined` when `access` has no part.
+ * The `rules` toolset over the repositories `access` lets the caller read: `repo_rules` (the
+ * resolved rules with `rules`, plus the topics `commits`, `releases`, `assets` and `test-ids`
+ * for the parts given), `get_rule` (with `rules`, unless `reader: false`), `check_commit_message`
+ * (with `commits`) and `test_ids` (with `testIds`). `undefined` when `access` has no part.
  */
-export function rulesToolset(access: RulesAccess): RegistryToolset | undefined {
+export function rulesToolset(
+  access: RulesAccess,
+  options: RulesToolsetOptions = {},
+): RegistryToolset | undefined {
+  const reader = options.reader ?? true
   const tools = [
-    ...(access.rules ? repoRulesTools(access.rules) : []),
+    ...repoRulesTools(access, {
+      reader,
+      readWith: reader ? 'get_rule' : 'search_knowledge (pass `id`)',
+    }),
     ...(access.commits ? commitTools(access.commits) : []),
     ...(access.testIds ? testIdTools(access.testIds) : []),
-    ...(access.releases ? [releaseRulesTool(access.releases)] : []),
   ]
   if (!tools.length) return undefined
   const instructions = [
     ...(access.rules
       ? [
-          'Call repo_rules before changing code in a repository, with the files you change: it returns the rules agents must follow there; get_rule reads one in full.',
+          `Call repo_rules with the files you change before changing code in a repository${reader ? '; get_rule reads one rule in full' : ''}.`,
         ]
+      : []),
+    ...(topicsOf(access).length
+      ? ['Add its `topics` before committing, releasing or adding assets.']
       : []),
     ...(access.commits
-      ? [
-          [
-            'Before writing a commit message, branch name or merge request title for a repository, call',
-            'commit_conventions for its template, rules and real examples, and check_commit_message to',
-            'verify the result.',
-          ].join(' '),
-        ]
+      ? ['check_commit_message verifies commit messages, branch names and merge request titles.']
       : []),
-    ...(access.testIds
-      ? [
-          'For end-to-end tests and new UI, test_ids gives the test id convention and existing ids, and suggest_test_ids proposes ids for a file.',
-        ]
-      : []),
-    ...(access.releases
-      ? [
-          'release_rules explains how a repository releases: branches, tag format and how commits bump the version.',
-        ]
-      : []),
+    ...(access.testIds ? ['test_ids lists and suggests test ids.'] : []),
   ]
   return { name: 'rules', instructions: instructions.join(' '), tools }
 }

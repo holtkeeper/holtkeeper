@@ -483,7 +483,7 @@ describe('removed packages', () => {
     const detail = await get<PublicApiPackageDetail>('/api/api-surface/package?name=@acme/ui')
     expect(detail.removed?.renamedTo).toBe('@acme/kit')
 
-    const packages = await callTool('list_packages', {}, asAdmin)
+    const packages = await callTool('find_packages', {}, asAdmin)
     const text = packages.content[0]?.text ?? ''
     expect(text.indexOf('Removed from their repositories')).toBeLessThan(
       text.indexOf('**@acme/ui**'),
@@ -491,7 +491,7 @@ describe('removed packages', () => {
     expect(text).toContain(
       '**Removed:** `work:libs/ui` dropped @acme/ui on 2026-10-25; do not use it in new code',
     )
-    const api = await callTool('get_package_api', { package: '@acme/ui' }, asAdmin)
+    const api = await callTool('package_api', { package: '@acme/ui' }, asAdmin)
     expect(api.content[0]?.text).toStartWith('**Removed:**')
   })
 
@@ -584,41 +584,27 @@ describe('MCP endpoint', () => {
       result: { tools: { name: string }[] }
     }
     expect(list.result.tools.map((t) => t.name)).toEqual([
-      'list_packages',
-      'get_package_api',
-      'search_symbols',
-      'get_symbol',
-      'list_versions',
-      'diff_versions',
+      'find_packages',
+      'package_api',
+      'package_changes',
       'package_usage',
-      'find_usages',
-      'upgrade_impact',
-      'repo_packages',
       'evaluate_dependency',
-      'who_uses',
-      'repo_stack',
       'search_knowledge',
       'propose_learning',
       'repo_rules',
-      'get_rule',
-      'commit_conventions',
       'check_commit_message',
       'test_ids',
-      'suggest_test_ids',
-      'release_rules',
-      'asset_policy',
-      'repo_assets',
-      'review_status',
+      'code_review',
       'report_secret_exposure',
     ])
 
-    const reached = await callTool('list_packages', {}, bearer)
+    const reached = await callTool('find_packages', {}, bearer)
     expect(reached.content[0]?.text).toContain('**@acme/ui**@1.1.0')
     await crossTeam('off')
-    const packages = await callTool('list_packages', {}, bearer)
+    const packages = await callTool('find_packages', {}, bearer)
     expect(packages.content[0]?.text).toContain('**@games/engine**@0.1.0')
     expect(packages.content[0]?.text).not.toContain('@acme/ui')
-    const hidden = await callTool('get_package_api', { package: '@acme/ui' }, bearer)
+    const hidden = await callTool('package_api', { package: '@acme/ui' }, bearer)
     expect(hidden.isError).toBe(true)
     const rules = await callTool('repo_rules', { repo: 'work:games/a' }, bearer)
     expect(rules.isError).toBe(true)
@@ -630,6 +616,7 @@ describe('MCP endpoint', () => {
     expect(proposal.isError).toBe(true)
     expect(await store.learnings.list()).toEqual([])
     const testIds = await callTool('test_ids', { repo: 'work:games/a' }, bearer)
+    expect(await callTool('test_ids', { repo: 'games/a' }, bearer)).toEqual(testIds)
     expect(testIds.content[0]?.text).toContain('No test id catalog for `work:games/a` yet')
     expect((await callTool('test_ids', { repo: 'work:libs/ui' }, bearer)).isError).toBe(true)
 
@@ -660,10 +647,15 @@ describe('MCP endpoint', () => {
       body: JSON.stringify({ name: 'releaser', scopes: ['release'] }),
     })
     const releaser = (await created.json()) as CreateMcpTokenResult
-    expect(
-      (await releaseToolsOf({ authorization: `Bearer ${releaser.secret}` })).map((t) => t.name),
-    ).toEqual(['release_rules'])
-    expect((await releaseToolsOf(asAdmin)).map((t) => t.name)).not.toContain('release_step')
+    const bearer = { authorization: `Bearer ${releaser.secret}` }
+    expect(await releaseToolsOf(bearer)).toEqual([])
+    expect(await releaseToolsOf(asAdmin)).toEqual([])
+    const rules = await callTool(
+      'repo_rules',
+      { repo: 'work:games/a', topics: ['releases'] },
+      bearer,
+    )
+    expect(rules.content[0]?.text).toContain('# Release rules of `work:games/a`')
   })
 
   test('tokens serve the toolsets their owner picks, QA tasks off unless turned on', async () => {
@@ -680,7 +672,9 @@ describe('MCP endpoint', () => {
       })
     ).json()) as CreateMcpTokenResult
     expect(plain.token.toolsets).not.toContain('qa')
-    expect(plain.token.toolsets).toContain('catalog')
+    expect(plain.token.toolsets).toContain('packages')
+    expect(plain.token.toolsets).toContain('ask')
+    expect(plain.token.toolsets).not.toContain('assets')
     const plainTools = await toolNamesOf({ authorization: `Bearer ${plain.secret}` })
     expect(plainTools.filter((name) => name.startsWith('qa_'))).toEqual([])
     // Signed-in browsers read the whole reference.
@@ -696,7 +690,7 @@ describe('MCP endpoint', () => {
     expect(tester.token.toolsets).toEqual(['reviews', 'qa'])
     const bearer = { authorization: `Bearer ${tester.secret}` }
     expect(await toolNamesOf(bearer)).toEqual([
-      'review_status',
+      'code_review',
       'qa_tasks',
       'qa_task',
       'report_secret_exposure',
@@ -714,65 +708,59 @@ describe('MCP endpoint', () => {
     expect(
       (await put(asGames, { toolsets: [] }, '/api/api-surface/mcp/tokens/missing/toolsets')).status,
     ).toBe(404)
-    expect((await put(asGames, { toolsets: ['catalog'] })).status).toBe(204)
+    expect((await put(asGames, { toolsets: ['catalog'] })).status).toBe(400)
+    expect((await put(asGames, { toolsets: ['packages'] })).status).toBe(204)
     expect((await toolNamesOf(bearer)).filter((name) => !name.startsWith('report_'))).toEqual([
-      'list_packages',
-      'get_package_api',
-      'search_symbols',
-      'get_symbol',
-      'list_versions',
-      'diff_versions',
+      'find_packages',
+      'package_api',
+      'package_changes',
       'package_usage',
-      'find_usages',
-      'upgrade_impact',
-      'repo_packages',
       'evaluate_dependency',
-      'who_uses',
     ])
     const tokens = await get<McpTokenList>('/api/api-surface/mcp/tokens', asGames)
     expect(tokens.tokens.find((token) => token.id === tester.token.id)?.toolsets).toEqual([
-      'catalog',
+      'packages',
+    ])
+    expect((await put(asGames, { toolsets: ['assets'] })).status).toBe(204)
+    expect((await toolNamesOf(bearer)).filter((name) => !name.startsWith('report_'))).toEqual([
+      'repo_assets',
     ])
     const events = await store.audit.list({ action: 'mcp_token.toolsets' })
-    expect(events.events.map((event) => event.details)).toEqual([{ toolsets: ['catalog'] }])
+    expect(events.events.map((event) => event.details)).toContainEqual({ toolsets: ['packages'] })
   })
 
   test('tools render APIs, versions and diffs, and usage is counted', async () => {
-    const api = await callTool(
-      'get_package_api',
-      { package: '@acme/ui', version: '1.0.0' },
-      asAdmin,
-    )
+    const api = await callTool('package_api', { package: '@acme/ui', version: '1.0.0' }, asAdmin)
     expect(api.content[0]?.text).toContain('# @acme/ui@1.0.0')
     expect(api.content[0]?.text).toContain('Other recorded versions: head, 1.1.0.')
 
-    const symbol = await callTool('get_symbol', { package: '@acme/ui', name: 'card' }, asAdmin)
+    const symbol = await callTool('package_api', { package: '@acme/ui', symbol: 'card' }, asAdmin)
     expect(symbol.content[0]?.text).toContain("import { card } from '@acme/ui'")
 
-    const versions = await callTool('list_versions', { package: '@acme/ui' }, asAdmin)
+    const versions = await callTool('package_changes', { package: '@acme/ui' }, asAdmin)
     expect(versions.content[0]?.text).toContain(
       '- 1.1.0 tag `v1.1.0`, 2026-10-10, 2 exports — since 1.0.0: 1 removed, 0 changed, 1 added',
     )
 
     const diff = await callTool(
-      'diff_versions',
+      'package_changes',
       { package: '@acme/ui', from: '1.1.0', to: 'head' },
       asAdmin,
     )
     expect(diff.content[0]?.text).toContain('## added: `@acme/ui → dialog` (function)')
 
-    const missing = await callTool('get_package_api', { package: 'ui' }, asAdmin)
+    const missing = await callTool('package_api', { package: 'ui' }, asAdmin)
     expect(missing).toMatchObject({ isError: true })
     expect(missing.content[0]?.text).toContain('Similar: @acme/ui')
 
     const usage = await get<McpUsageOverview>('/api/api-surface/mcp/usage?days=7')
     expect(usage.totals).toEqual({ calls: 5, errors: 1, people: 1 })
     expect(usage.days.at(-1)).toEqual({ date: '2026-10-30', calls: 5, errors: 1 })
-    expect(usage.tools[0]).toEqual({ tool: 'get_package_api', calls: 2, errors: 1 })
+    expect(usage.tools[0]).toEqual({ tool: 'package_api', calls: 3, errors: 1 })
     expect(usage.packages[0]).toEqual({ name: '@acme/ui', calls: 4 })
     expect(usage.clients).toEqual([{ client: 'claude-code/2.1.0', calls: 5 }])
     expect(usage.recent[0]).toMatchObject({
-      tool: 'get_package_api',
+      tool: 'package_api',
       ok: false,
       principal: 'header:jane',
     })
@@ -792,12 +780,12 @@ describe('MCP endpoint', () => {
     })
     const { secret, token } = (await created.json()) as CreateMcpTokenResult
     const bearer = { authorization: `Bearer ${secret}` }
-    await callTool('list_packages', {}, bearer)
-    expect(await callTool('get_package_api', { package: 'nope' }, bearer)).toMatchObject({
+    await callTool('find_packages', {}, bearer)
+    expect(await callTool('package_api', { package: 'nope' }, bearer)).toMatchObject({
       isError: true,
     })
-    await callTool('list_packages', {}, asGames)
-    await callTool('list_packages', {}, asAdmin)
+    await callTool('find_packages', {}, asGames)
+    await callTool('find_packages', {}, asAdmin)
 
     const own = await get<McpUsageOverview>('/api/api-surface/mcp/usage?days=7', asGames)
     const bob = {
@@ -807,8 +795,8 @@ describe('MCP endpoint', () => {
       errors: 1,
       lastAt: '2026-10-30T12:00:00.000Z',
       tools: [
-        { tool: 'list_packages', calls: 2 },
-        { tool: 'get_package_api', calls: 1 },
+        { tool: 'find_packages', calls: 2 },
+        { tool: 'package_api', calls: 1 },
       ],
       packages: [{ name: 'nope', calls: 1 }],
       clients: [{ client: 'claude-code/2.1.0', calls: 3 }],
@@ -981,20 +969,38 @@ describe('usage routes and tools', () => {
     ).toEqual([['breaking', 'link', 'games/a']])
 
     const text = await callTool(
-      'upgrade_impact',
+      'package_changes',
       { package: '@acme/ui', from: '1.0.0', to: '1.1.0' },
       asAdmin,
     )
-    expect(text.content[0]?.text).toContain('## breaking: removed `@acme/ui` → link (1 uses)')
-    expect(text.content[0]?.text).toContain("link('/home')")
+    const changes = text.content[0]?.text ?? ''
+    expect(changes).toStartWith('@acme/ui 1.0.0 → 1.1.0 (organization package, `work:libs/ui`)')
+    expect(changes).toContain('## removed: `@acme/ui → link`')
+    expect(changes).not.toContain('## Changelog and migration notes')
+    const affected = changes.slice(changes.indexOf('## Uses the upgrade affects'))
+    expect(affected).toContain('## breaking: removed `@acme/ui` → link (1 uses)')
+    expect(affected).toContain("link('/home')")
+    const apiOnly = await callTool(
+      'package_changes',
+      { package: '@acme/ui', from: '1.0.0', to: '1.1.0', include: ['api'] },
+      asAdmin,
+    )
+    expect(apiOnly.content[0]?.text).not.toContain('## Uses the upgrade affects')
 
     const used = await callTool('package_usage', { package: '@acme/ui' }, asAdmin)
     expect(used.content[0]?.text).toContain(
       '- `work:games/a` (team games) — 1.0.0, 3 uses in 2 files, 2 exports',
     )
-    const found = await callTool('find_usages', { package: '@acme/ui', export: 'button' }, asAdmin)
+    expect(used.content[0]?.text).not.toContain('`src/hud.tsx:9`')
+    const found = await callTool(
+      'package_usage',
+      { package: '@acme/ui', export: 'button' },
+      asAdmin,
+    )
     expect(found.content[0]?.text).toContain('`src/hud.tsx:9` — jsx props `variant`')
-    const packages = await callTool('repo_packages', { repo: 'work:games/a' }, asAdmin)
+    const code = await callTool('package_usage', { package: '@acme/ui', code: true }, asAdmin)
+    expect(code.content[0]?.text).toContain('`src/hud.tsx:9`')
+    const packages = await callTool('find_packages', { repo: 'work:games/a' }, asAdmin)
     expect(packages.content[0]?.text).toContain(
       '- **@acme/ui** 1.0.0 — 3 uses in 2 files, 2 exports',
     )
@@ -1093,7 +1099,7 @@ describe('knowledge tools', () => {
 })
 
 describe('rules tools', () => {
-  test('repo_rules resolves panel rules and get_rule reads one', async () => {
+  test('repo_rules resolves panel rules and search_knowledge reads one by id', async () => {
     await entry('assets', {
       title: 'Scene assets',
       body: 'Scenes own their assets.',
@@ -1101,8 +1107,9 @@ describe('rules tools', () => {
     })
     const rules = await callTool('repo_rules', { repo: 'work:games/a' }, asAdmin)
     expect(rules.content[0]?.text).toContain('Scenes own their assets.')
-    const rule = await callTool('get_rule', { id: 'rule:assets' }, asReader)
+    const rule = await callTool('search_knowledge', { id: 'rule:assets' }, asReader)
     expect(rule.content[0]?.text).toContain('# [rule:assets] Scene assets')
+    expect((await callTool('get_rule', { id: 'rule:assets' }, asReader)).isError).toBe(true)
     expect((await callTool('repo_rules', { repo: 'work:games/a' }, asGames)).isError).toBe(true)
   })
 })
@@ -1304,8 +1311,13 @@ describe('commit conventions', () => {
       secret: false,
       updatedAt: now.toISOString(),
     })
-    const listed = await callTool('commit_conventions', { repo: 'work:games/a' }, asGames)
+    const listed = await callTool(
+      'repo_rules',
+      { repo: 'work:games/a', topics: ['commits'] },
+      asGames,
+    )
     const text = listed.content[0]?.text ?? ''
+    expect(text).toContain('# Commit conventions of `work:games/a`')
     expect(text).toContain('Template: `<type>(<scope>): [<TICKET>] <subject>`')
     expect(text).toContain('- Title at most 50 characters _(team setting)_')
     expect(text).toContain('`feat(scene): [GAME-0] add level 0`')
@@ -1319,9 +1331,10 @@ describe('commit conventions', () => {
     expect(checked.content[0]?.text).toContain('error: The branch name must match `^(feat|fix)/`')
     expect(checked.content[0]?.text).toContain('warning: The title must look like')
 
-    expect((await callTool('commit_conventions', { repo: 'work:libs/ui' }, asGames)).isError).toBe(
-      true,
-    )
+    expect(
+      (await callTool('repo_rules', { repo: 'work:libs/ui', topics: ['commits'] }, asGames))
+        .isError,
+    ).toBe(true)
   })
 })
 
@@ -1456,33 +1469,33 @@ describe('Go packages', () => {
   })
 
   test('MCP tools read Go packages from the catalog with Go imports and fences', async () => {
-    const api = await callTool('get_package_api', { package: v2, ecosystem: 'Go' }, asAdmin)
+    const api = await callTool('package_api', { package: v2, ecosystem: 'Go' }, asAdmin)
     expect(api.isError).toBeUndefined()
     expect(api.content[0]?.text).toContain(`import "${v2}"`)
     expect(api.content[0]?.text).toContain('```go')
 
-    const symbol = await callTool('get_symbol', { package: v2, name: 'Mirror' }, asAdmin)
+    const symbol = await callTool('package_api', { package: v2, symbol: 'Mirror' }, asAdmin)
     expect(symbol.content[0]?.text).toContain(`import "${v2}"\n\n// geom.Mirror`)
     expect(symbol.content[0]?.text).toContain('```go\nfunc Mirror(s Shape) float64')
 
-    const versions = await callTool('list_versions', { package: v2 }, asAdmin)
+    const versions = await callTool('package_changes', { package: v2 }, asAdmin)
     expect(versions.content[0]?.text).toContain('- head (default branch),')
     expect(versions.content[0]?.text).toContain(`- v1.3.0 as ${geomModule} tag \`v1.3.0\``)
 
-    const listed = await callTool('list_packages', { query: 'internal/calc' }, asAdmin)
+    const listed = await callTool('find_packages', { query: 'internal/calc' }, asAdmin)
     expect(listed.content[0]?.text).toContain(`(Go, module ${v2}, internal)`)
 
-    const search = await callTool('search_symbols', { query: 'Skew' }, asAdmin)
+    const search = await callTool('find_packages', { query: 'Skew' }, asAdmin)
     expect(search.content[0]?.text).toContain('```go\nfunc Skew')
 
-    const missing = await callTool('get_package_api', { package: `${v2}/shapes` }, asAdmin)
+    const missing = await callTool('package_api', { package: `${v2}/shapes` }, asAdmin)
     expect(missing.isError).toBe(true)
     expect(missing.content[0]?.text).toContain(`Module ${v2} has 2 indexed packages`)
   })
 
   test('upgrade impact joins a Go API diff with the uses of that package', async () => {
     const text = await callTool(
-      'upgrade_impact',
+      'package_changes',
       { package: geomModule, from: 'v1.2.0', to: 'v1.3.0' },
       asAdmin,
     )
@@ -1560,7 +1573,7 @@ describe('Go packages', () => {
     expect(upgrade.impact?.affected).toEqual(['work:games/b'])
   })
 
-  test('dependency views, who_uses and evaluate_dependency count Go uses as Go', async () => {
+  test('dependency views, package_usage and evaluate_dependency count Go uses as Go', async () => {
     const upgrade = await get<DependencyUpgrade>(
       `/api/dependencies/upgrade?ecosystem=Go&name=${geomModule}&from=v1.2.0&to=v1.3.0`,
     )
@@ -1572,7 +1585,7 @@ describe('Go packages', () => {
       'Go call sites in `work:games/a` (go: syntactic only) were read without types: methods called on values the package returns are not seen there.',
     ])
 
-    const who = await callTool('who_uses', { subject: geomModule }, asAdmin)
+    const who = await callTool('package_usage', { package: geomModule }, asAdmin)
     expect(who.content[0]?.text).toContain(`# ${geomModule} (Go, internal package)`)
     expect(who.content[0]?.text).toContain('`work:games/a` v1.2.0')
 

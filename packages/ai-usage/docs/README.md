@@ -54,7 +54,7 @@ Other splits come straight from the store's aggregate (`AiUsageStore.aggregate`)
 
 ## Features
 
-`@holtkeeper/ai-usage/features` (also re-exported from the package root) is dependency-free so the web app imports it too. `featureTaskKinds` lists the task kinds of each named feature (`reviews`, `tasks`, `chat`, `knowledge`, `releases`), `featureOf(taskKind)` maps a kind back (`other` for any kind no list names, and for an empty one), `featureLabel` names them, and `filterableFeatures` / `isFilterableFeature` are the features a filter can narrow to (every one but `other`). The server turns `feature=` into `AiUsageFilter.taskKinds`; the web labels runs and breakdowns with the same map (see [the web docs](../../../apps/web/docs/spend.md)).
+`@holtkeeper/ai-usage/features` (also re-exported from the package root) is dependency-free so the web app imports it too. `featureTaskKinds` lists the task kinds of each named feature (`reviews`, `tasks`, `chat`, `knowledge`, `releases`; `chat` also covers `ask`, the answers of the MCP tool), `featureOf(taskKind)` maps a kind back (`other` for any kind no list names, and for an empty one), `featureLabel` names them, and `filterableFeatures` / `isFilterableFeature` are the features a filter can narrow to (every one but `other`). The server turns `feature=` into `AiUsageFilter.taskKinds`; the web labels runs and breakdowns with the same map (see [the web docs](../../../apps/web/docs/spend.md)).
 
 ## Pure helpers
 

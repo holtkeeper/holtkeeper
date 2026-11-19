@@ -33,7 +33,7 @@ export const settingsSections: Readonly<
   ai: {
     label: 'AI',
     description: 'The provider agents use, the weekly budget and AI credentials',
-    keys: ['llm.provider', 'llm.tiers', 'llm.budget', 'agent.tools'],
+    keys: ['llm.provider', 'llm.tiers', 'llm.budget', 'mcp.ask', 'agent.tools'],
   },
   integrations: {
     label: 'Integrations',

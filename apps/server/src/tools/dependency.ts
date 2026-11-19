@@ -87,7 +87,7 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
   }
   for (const pkg of published.values())
     lines.push(
-      `- Published by ${code(repoKey(pkg.repo))}${pkg.version ? ` at ${pkg.version}` : ''}: an internal ${pkg.ecosystem === 'Go' ? `Go ${pkg.name === query.package ? 'package' : `module (${pkg.module})`}` : 'package'}, see get_package_api.${pkg.removed ? ' **Removed** from its repository: do not add it.' : ''}`,
+      `- Published by ${code(repoKey(pkg.repo))}${pkg.version ? ` at ${pkg.version}` : ''}: an internal ${pkg.ecosystem === 'Go' ? `Go ${pkg.name === query.package ? 'package' : `module (${pkg.module})`}` : 'package'}, see package_api.${pkg.removed ? ' **Removed** from its repository: do not add it.' : ''}`,
     )
 
   const [record, versions, fleet, latest] = await Promise.all([
@@ -156,7 +156,7 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
       `- Used by ${users.size} repositor${users.size === 1 ? 'y' : 'ies'}${teams.size ? ` of ${teams.size} team${teams.size === 1 ? '' : 's'}` : ''}:`,
       ...rows.slice(0, 30),
       ...(rows.length > 30
-        ? [`  - …and ${rows.length - 30} more; who_uses lists them by team.`]
+        ? [`  - …and ${rows.length - 30} more; package_usage lists them by team.`]
         : []),
     )
   } else if (!internal.length) lines.push('- No repository you can read uses it.')

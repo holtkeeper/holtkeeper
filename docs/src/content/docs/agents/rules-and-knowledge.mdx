@@ -12,13 +12,14 @@ A repository's conventions live in several places: its own rules files (`AGENTS.
 
 ## Call order
 
-| Before the agent…                             | It calls                                                 |
-| --------------------------------------------- | -------------------------------------------------------- |
-| changes code in a repository                  | `repo_rules`                                             |
-| solves a problem the team may have solved     | `search_knowledge`, then `get_rule`                      |
-| writes a commit message, branch or MR title   | `commit_conventions`, then `check_commit_message`        |
-| writes end-to-end tests or new UI             | `test_ids`, `suggest_test_ids`                           |
-| adds or changes images, fonts, audio or video | `asset_policy`; `repo_assets` for what already breaks it |
+| Before the agent…                             | It calls                                                                   |
+| --------------------------------------------- | -------------------------------------------------------------------------- |
+| changes code in a repository                  | `repo_rules`                                                               |
+| solves a problem the team may have solved     | `search_knowledge`, then again with `id` to read one in full               |
+| writes a commit message, branch or MR title   | `repo_rules` with topic `commits`, then `check_commit_message`             |
+| writes end-to-end tests or new UI             | `test_ids`                                                                 |
+| adds or changes images, fonts, audio or video | `repo_rules` with topic `assets`; `repo_assets` for what already breaks it |
+| prepares a release                            | `repo_rules` with topic `releases`                                         |
 
 The server tells MCP clients this order in its instructions, so agents usually follow it unprompted. A line in your own `CLAUDE.md` or `AGENTS.md` such as "call `repo_rules` before editing" makes it certain.
 
@@ -32,13 +33,14 @@ The server tells MCP clients this order in its instructions, so agents usually f
 4. Policies turned into sentences, such as commit conventions, test ids and the asset policy.
 5. Learned rules: active learnings, labelled and ranked below everything above.
 
-Rules that only have a description are listed by title and description at the end; the agent reads one with `get_rule` when it fits the task.
+Rules that only have a description are listed by title and description at the end; the agent reads one with `search_knowledge` (`id`) when it fits the task.
 
 | Argument | Meaning                                                                                               |
 | -------- | ----------------------------------------------------------------------------------------------------- |
 | `repo`   | The repository as `forge:path`.                                                                       |
 | `files`  | Optional repository-relative paths the agent is about to touch; file-scoped rules apply only to them. |
 | `agent`  | What the agent is doing: `task` (writing code, the default), `review`, `chat` or `release`.           |
+| `topics` | Conventions to add in full: `commits`, `releases`, `assets`, `test-ids` (see the sections below).     |
 
 ```text
 ● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", files: ["src/cart/total.ts"])
@@ -55,7 +57,7 @@ Rules that only have a description are listed by title and description at the en
     - [rule:r7p0] Migrating to @acme/widget-kit 5: read when touching widget-kit imports.
 ```
 
-`get_rule` reads one rule in full by its id or citation (`[rule:<id>]`). Agents cite what they followed as `[rule:<id>]` and `[learn:<id>]`.
+`search_knowledge` with `id` reads one rule or learning in full by its id or citation (`[rule:<id>]`, `[learn:<id>]`), or a rules file of the repository by its path. Agents cite what they followed as `[rule:<id>]` and `[learn:<id>]`.
 
 ### Proposing a learning: propose_learning
 
@@ -72,11 +74,14 @@ When an agent notices a lasting convention that is missing, `propose_learning` p
 
 ## Commit conventions
 
-`commit_conventions` explains how commit messages and branch names should look, combining four sources, strongest first: the team's `commits.conventions` setting, the forge's push rules, a commitlint config on the default branch, and the last commits and branches. It returns a template, every rule with where it comes from, and real examples that follow them.
+The `commits` topic of `repo_rules` explains how commit messages and branch names should look, combining four sources, strongest first: the team's `commits.conventions` setting, the forge's push rules, a commitlint config on the default branch, and the last commits and branches. It returns a template, every rule with where it comes from, and real examples that follow them.
 
 ```text
-● holtkeeper - commit_conventions (repo: "gitlab:acme/checkout-web")
-  ⎿ Commit template: <type>(<scope>): [<TICKET>] <subject>
+● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", topics: ["commits"])
+  ⎿ # Rules for `gitlab:acme/checkout-web`
+    …
+    # Commit conventions of `gitlab:acme/checkout-web`
+    Commit template: <type>(<scope>): [<TICKET>] <subject>
     - types: feat, fix, chore, refactor, test, docs (commitlint)
     - ticket: required, bracket after the type, ABC-123 (team setting)
     - maxLength: 72 (history)
@@ -96,11 +101,11 @@ Errors break configured or enforced rules; warnings only differ from what recent
 
 For end-to-end tests and new UI, `test_ids` returns the repository's test id convention (attribute, naming, which elements get ids; learned from its code, with team settings on top) and the existing ids per component. Narrow with `path`: a file, a folder (`src/cart`) or a component name (`CartRow`).
 
-`suggest_test_ids` takes one component file's current text, saved or not, and lists the interactive elements without a test id, each with an id in the repository's style. It is deterministic: the same file always gives the same ids.
+With `file` and `content` instead, `test_ids` takes one component file's current text, saved or not, and lists the interactive elements without a test id, each with an id in the repository's style. It is deterministic: the same file always gives the same ids.
 
 ```text
-● holtkeeper - suggest_test_ids (repo: "gitlab:acme/checkout-web",
-                                  file: "src/cart/CartRow.tsx", content: "…")
+● holtkeeper - test_ids (repo: "gitlab:acme/checkout-web",
+                          file: "src/cart/CartRow.tsx", content: "…")
   ⎿ Convention: data-qa, kebab-case, component prefix
     - line 18 <button onClick={remove}> → data-qa="cart-row-remove-button"
     - line 24 <input name="quantity"> → data-qa="cart-row-quantity-input"
@@ -110,13 +115,15 @@ Teams set the attribute and which elements need ids in the `analyzers.testids` s
 
 ## Asset policy
 
-`asset_policy` returns what a repository allows for images, fonts and media: required modern formats, allowed formats, size limits per kind, the dimension limit, ignored globs and budgets. With `path`, what applies to that one file. `repo_assets` lists files that already break the policy or could be smaller, from the newest assets analysis, with the best conversion and the expected saving (`severity`: `error`, `warning` (default) or `all`).
+The `assets` topic of `repo_rules` returns what a repository allows for images, fonts and media: required modern formats, allowed formats, size limits per kind, the dimension limit, ignored globs and budgets, and for each asset file among `files` what applies to it. `repo_assets` (in the Assets toolset, off for new tokens) lists files that already break the policy or could be smaller, from the newest assets analysis, with the best conversion and the expected saving (`severity`: `error`, `warning` (default) or `all`).
 
 ```text
-● holtkeeper - asset_policy (repo: "gitlab:acme/checkout-web", path: "public/hero.png")
-  ⎿ # Asset policy of `gitlab:acme/checkout-web`, from team widgets
+● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", files: ["public/hero.png"],
+                            topics: ["assets"])
+  ⎿ …
+    # Asset policy of `gitlab:acme/checkout-web`
     - raster images: WebP required; warn above 500 kB, error above 1 MB; at most 2560 px
-    ## This file
+    ## `public/hero.png`
     - not allowed as PNG: ship public/hero.webp
 ```
 
@@ -124,7 +131,7 @@ The policy is the `assets.policy` setting; prose rules such as which image compo
 
 ## Search: search_knowledge
 
-`search_knowledge` searches rules and active learnings by their words, best match first. With `repo`, only those that apply there.
+`search_knowledge` searches rules and active learnings by their words, best match first. With `repo`, only those that apply there. With `id` instead of `query` it returns that one rule or learning in full.
 
 ```text
 ● holtkeeper - search_knowledge (query: "date library", repo: "gitlab:acme/checkout-web")

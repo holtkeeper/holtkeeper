@@ -150,7 +150,7 @@ describe('reviewSystemPrompt', () => {
 
   test('points dependency versions at the manifests of the languages in scope', () => {
     const npm = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3), fileOf('README.md', 1)]))
-    expect(npm).toContain('from package.json, lockfiles.resolve or repo_packages')
+    expect(npm).toContain('from package.json, lockfiles.resolve)')
     const go = reviewSystemPrompt(inputOf([fileOf('shapes/circle.go', 3), fileOf('go.sum', 1)]))
     expect(go).toContain('from the go.mod of the module owning the file (go.sum')
     expect(go).not.toContain('package.json')
@@ -158,17 +158,17 @@ describe('reviewSystemPrompt', () => {
     expect(mixed).toContain('package.json, lockfiles.resolve (Go code: the go.mod')
   })
 
-  test('sends version changes and public API changes to the catalog tools', () => {
+  test('sends version changes and public API changes to the package tools', () => {
     const npm = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)]))
-    expect(npm).toContain('call upgrade_impact with `package`, `from` = a, `to` = b')
-    expect(npm).toContain('library_changes between the two versions')
-    expect(npm).toContain('call package_usage or find_usages for the changed export')
-    expect(npm).toContain('search_symbols for an organization package that already offers it')
+    expect(npm).toContain('call package_changes with `package`, `from` = a and `to` = b')
+    expect(npm).toContain('for a third-party library its changelog')
+    expect(npm).toContain('call package_usage for the package, then with `export`')
+    expect(npm).toContain('find_packages for an organization package that already offers it')
     expect(npm).not.toContain('Go: packages under `internal/`')
     const go = reviewSystemPrompt(inputOf([fileOf('shapes/circle.go', 3)]))
     expect(go).toContain('Go: packages under `internal/` and `main` packages cannot be imported')
     expect(go).toContain('adding a method to an exported interface breaks every type')
-    expect(go).toContain('Pass it as `version` to get_package_api and get_symbol')
+    expect(go).toContain('Pass it as `version` to package_api')
   })
 
   test('forbids lockfile claims the computed section or lockfiles.resolve does not back', () => {

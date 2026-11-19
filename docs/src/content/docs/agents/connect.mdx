@@ -174,15 +174,15 @@ The rest of the screen fills in as the agent works:
 
 ## Troubleshooting
 
-| Symptom                                            | Cause and fix                                                                                                                        |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `401` with `WWW-Authenticate: Bearer`              | No token, or the token is wrong, expired or revoked. Create a new one.                                                               |
-| `405` from the endpoint                            | The client sent `GET` or `DELETE`. The endpoint is stateless and takes `POST` only; pick the HTTP transport, not SSE.                |
-| A tool answers with a missing permission           | Your account lacks it on that repository. The answer names the permission; ask an admin, see [Permissions](/reference/permissions/). |
-| Fewer tools than a colleague                       | Some tools depend on the instance and your access, for example the library tools need the library index.                             |
-| No `start_task` or `release_step` tool             | MCP has no tools that start tasks or run release steps. Start tasks in Chat or **Ops › Tasks**, run releases in **Releases**.        |
-| No `jobs`, `release_status` or `security_findings` | MCP serves developer tools only. Jobs, release state, findings, licenses and stack usage are in the panel and in Chat.               |
-| "Tokens are unavailable" in the panel              | The instance runs without a key–value store. Ask whoever runs it.                                                                    |
+| Symptom                                            | Cause and fix                                                                                                                          |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `401` with `WWW-Authenticate: Bearer`              | No token, or the token is wrong, expired or revoked. Create a new one.                                                                 |
+| `405` from the endpoint                            | The client sent `GET` or `DELETE`. The endpoint is stateless and takes `POST` only; pick the HTTP transport, not SSE.                  |
+| A tool answers with a missing permission           | Your account lacks it on that repository. The answer names the permission; ask an admin, see [Permissions](/reference/permissions/).   |
+| Fewer tools than a colleague                       | Some tools depend on the instance and your access, for example `package_docs` needs the library index and `ask` the `mcp.ask` setting. |
+| No `start_task` or `release_step` tool             | MCP has no tools that start tasks or run release steps. Start tasks in Chat or **Ops › Tasks**, run releases in **Releases**.          |
+| No `jobs`, `release_status` or `security_findings` | MCP serves developer tools only. Jobs, release state, findings, licenses and stack usage are in the panel and in Chat.                 |
+| "Tokens are unavailable" in the panel              | The instance runs without a key–value store. Ask whoever runs it.                                                                      |
 
 ## Related
 

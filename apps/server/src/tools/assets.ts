@@ -126,7 +126,7 @@ function renderRepoAssets(
 ): string {
   const { summary } = view
   if (!summary)
-    return `No assets analysis of ${repo} yet; asset_policy still tells what the policy expects.`
+    return `No assets analysis of ${repo} yet; its asset policy still tells what is expected.`
   const lines = [
     `# Assets of \`${repo}\`: ${summary.files} files, ${formatBytes(summary.totalBytes)}${view.createdAt ? `, checked ${view.createdAt.slice(0, 10)}` : ''}${view.ref ? ` on ${view.ref}` : ''}`,
     `By kind: ${summary.totals.map((total) => `${total.kind} ${formatBytes(total.bytes)} (${total.count})`).join(', ')}`,
@@ -163,48 +163,68 @@ function renderRepoAssets(
 }
 
 /**
- * The read-only `assets` toolset: `asset_policy` (the effective asset policy of a repository,
- * optionally for one path) and `repo_assets` (files of a repository breaking the policy or worth
- * optimizing, from its newest assets analysis). Limited to what `access` serves; never runs an
- * analysis or an LLM.
+ * The effective asset policy of a repository as Markdown, with what applies to each of `paths`.
+ * Throws a `ToolError` for a repository the caller may not read.
  */
-export function assetsToolset(access: AssetToolsAccess): RegistryToolset {
+export async function assetPolicy(
+  access: AssetToolsAccess,
+  repo: string,
+  paths: readonly string[] = [],
+): Promise<string> {
+  const effective = await access.policy(repo)
+  if (!effective) throw new ToolError(`No repository ${repo} you can read.`)
+  return [
+    `# Asset policy of \`${repo}\`, from ${fromText(effective.source, access.teamLabel ?? ((key) => key))}`,
+    assetsPolicyFacts(effective.policy),
+    ...paths.flatMap((path) => [
+      '',
+      `## \`${path}\``,
+      ...pathFacts(path, effective.policy).map((fact) => `- ${fact}`),
+    ]),
+  ].join('\n')
+}
+
+/**
+ * The read-only `assets` toolset: `asset_policy` (the effective asset policy of a repository,
+ * optionally for one path; left out with `policy: false`, where `repo_rules` serves it as a
+ * topic) and `repo_assets` (files of a repository breaking the policy or worth optimizing, from
+ * its newest assets analysis). Limited to what `access` serves; never runs an analysis or an LLM.
+ */
+export function assetsToolset(
+  access: AssetToolsAccess,
+  options: { policy?: boolean } = {},
+): RegistryToolset {
+  const policy = options.policy ?? true
   return {
     name: 'assets',
-    instructions: [
-      'Before adding or changing images, fonts, audio or video in a repository, call asset_policy',
-      'for the formats, size and dimension limits it allows; repo_assets lists files of a repository',
-      'that break the policy or could be smaller.',
-    ].join(' '),
+    instructions: policy
+      ? [
+          'Before adding or changing images, fonts, audio or video in a repository, call asset_policy',
+          'for the formats, size and dimension limits it allows; repo_assets lists files of a repository',
+          'that break the policy or could be smaller.',
+        ].join(' ')
+      : 'repo_assets lists files of a repository that break its asset policy or could be smaller.',
     tools: [
-      defineTool({
-        name: 'asset_policy',
-        description:
-          'The effective asset policy of a repository: required modern formats, allowed formats, size limits per kind, dimension limit, ignored globs and budgets. With `path`, what applies to that one file.',
-        input: z.object({
-          repo: z.string().min(1).describe('Repository as forge:path'),
-          path: z.string().min(1).optional().describe('Repository-relative file path'),
-        }),
-        run: async ({ repo, path }) => {
-          const effective = await access.policy(repo)
-          if (!effective) throw new ToolError(`No repository ${repo} you can read.`)
-          const lines = [
-            `# Asset policy of \`${repo}\`, from ${fromText(effective.source, access.teamLabel ?? ((key) => key))}`,
-            assetsPolicyFacts(effective.policy),
-            ...(path
-              ? [
+      ...(policy
+        ? [
+            defineTool({
+              name: 'asset_policy',
+              description:
+                'The effective asset policy of a repository: required modern formats, allowed formats, size limits per kind, dimension limit, ignored globs and budgets. With `path`, what applies to that one file.',
+              input: z.object({
+                repo: z.string().min(1).describe('Repository as forge:path'),
+                path: z.string().min(1).optional().describe('Repository-relative file path'),
+              }),
+              run: async ({ repo, path }) =>
+                [
+                  await assetPolicy(access, repo, path ? [path] : []),
                   '',
-                  '## This file',
-                  ...pathFacts(path, effective.policy).map((fact) => `- ${fact}`),
-                ]
-              : []),
-            '',
-            "Prose rules (components to use, where files go) are in repo_rules' assets section.",
+                  "Prose rules (components to use, where files go) are in repo_rules' assets section.",
+                ].join('\n'),
+              subject: ({ repo, path }) => (path ? `${repo} ${path}` : repo),
+            }),
           ]
-          return lines.join('\n')
-        },
-        subject: ({ repo, path }) => (path ? `${repo} ${path}` : repo),
-      }),
+        : []),
       defineTool({
         name: 'repo_assets',
         description:

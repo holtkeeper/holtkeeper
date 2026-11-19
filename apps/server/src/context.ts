@@ -23,6 +23,7 @@ import type { Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import type { z } from 'zod'
 
+import type { AskAgentFor } from './ask.ts'
 import type { AuditEnrichment } from './audit.ts'
 import type { ChatAgentFor } from './chat-threads.ts'
 import type { MediaEngine } from './media/engine.ts'
@@ -90,6 +91,11 @@ export interface ServerDeps {
    * of the person who asked. Without it the chat answers that no AI provider is configured.
    */
   chatAgentFor?: ChatAgentFor
+  /**
+   * The agent that answers `ask` questions of MCP callers (`AskAgentFor`); its runs are
+   * interactive work of the person who asked. Without it the MCP endpoint offers no `ask`.
+   */
+  askAgentFor?: AskAgentFor
   /** Replaces the AI SDK models of `ai-sdk` credential tests; for tests. */
   languageModel?: LanguageModelFactory
   /** Replaces `fetch` of the agent-loop probe of Anthropic credential tests; for tests. */

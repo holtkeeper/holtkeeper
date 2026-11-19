@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { ForbiddenToolError, repoKey } from '../context.ts'
 import { LEARNING_TEXT_MAX, addLearning } from '../learnings.ts'
 import { policyOfLearning } from '../rules.ts'
+import { type RepoRulesAccess, readRule } from './rules.ts'
 
 /** Rules and learnings as the knowledge tools read and propose to them, for one caller. */
 export interface KnowledgeToolsContext {
@@ -196,28 +197,52 @@ const proposalText = (outcome: Awaited<ReturnType<typeof proposeLearning>>, repo
 
 /**
  * The `knowledge` toolset of the MCP endpoint: `search_knowledge` and `propose_learning`, limited
- * to what `context` lets the caller read.
+ * to what `context` lets the caller read. With `reader`, `search_knowledge` also reads one rule,
+ * learned rule or rules file in full by `id`.
  */
-export function knowledgeToolset(context: KnowledgeToolsContext): RegistryToolset {
+export function knowledgeToolset(
+  context: KnowledgeToolsContext,
+  reader?: RepoRulesAccess,
+): RegistryToolset {
   return {
     name: 'knowledge',
-    instructions: [
-      'Team rules people wrote and rules Holtkeeper learned from reviews:',
-      'search_knowledge before solving a problem the team may have solved, cite rules as [rule:<id>] and learned rules as [learn:<id>],',
-      'and propose_learning for a lasting convention you learned (it waits for an approval delay before agents rely on it).',
-    ].join(' '),
+    instructions:
+      'search_knowledge before solving a problem the team may have solved and cite what you use as [rule:<id>] or [learn:<id>]; propose_learning for a lasting convention you learned.',
     tools: [
       defineTool({
         name: SEARCH_KNOWLEDGE_TOOL,
-        description:
-          'Searches the rules people wrote in the panel and the active rules Holtkeeper learned, best match first, bodies trimmed. With `repo`, only those that apply to that repository. Repository rules files (AGENTS.md, ...) are not searched: repo_rules returns them.',
+        description: `Searches the rules people wrote in the panel and the active rules Holtkeeper learned, best match first, bodies trimmed. With \`repo\`, only those that apply to that repository. Repository rules files (AGENTS.md, ...) are not searched: repo_rules returns them.${reader ? ' With `id` instead of `query`: that one rule in full, a learned rule with its sources and counters, or a rules file of `repo` by path.' : ''}`,
         input: z.object({
-          query: z.string().min(1).describe('Words to match, e.g. an API name or error message'),
+          query: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('Words to match, e.g. an API name or error message'),
+          ...(reader
+            ? {
+                id: z
+                  .string()
+                  .min(1)
+                  .optional()
+                  .describe(
+                    'Read one in full: rule:<id>, learn:<id>, or a rules file path with repo',
+                  ),
+              }
+            : {}),
           repo: z.string().optional().describe('The repository you work in, as forge:path'),
           limit: z.number().int().min(1).max(30).optional().describe('Default 10'),
         }),
         defaultLimit: 10,
-        run: (input) => searchKnowledge(context, input),
+        run: (input) => {
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `id` is in the schema only with a reader
+          const id = (input as { id?: string }).id
+          if (reader && id) return readRule(reader, id, input.repo)
+          if (!input.query)
+            throw new ToolError(
+              reader ? 'Pass `query` to search or `id` to read.' : 'Pass `query`.',
+            )
+          return searchKnowledge(context, { ...input, query: input.query })
+        },
         subject: (input) => input.repo ?? input.query,
       }),
       defineTool({

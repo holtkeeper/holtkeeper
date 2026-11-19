@@ -33,7 +33,7 @@ export const testIdsOptionsSchema = z.object({
   /** Glob patterns of files to leave out. */
   exclude: list([]),
   /**
-   * Native tags that need a test id, for the review check and `suggest_test_ids`; unset, they are
+   * Native tags that need a test id, for the review check and the suggestions of `test_ids`; unset, they are
    * learned from the catalog. The catalog itself ignores it.
    */
   elements: z.preprocess(split, z.array(z.string().min(1))).optional(),

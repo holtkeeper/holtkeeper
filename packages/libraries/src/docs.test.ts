@@ -112,7 +112,7 @@ describe('libraryDocs', () => {
     expect(await docs.versions({ package: 'nope' })).toContain('nope (npm) is not indexed')
   })
 
-  test('an organization package missing from the index points to the catalog tools', async () => {
+  test('an organization package missing from the index points to the package tools', async () => {
     const docs = libraryDocs({
       store: await seed(),
       artifacts: memoryArtifactStore(),
@@ -121,7 +121,8 @@ describe('libraryDocs', () => {
     })
     const direct = await docs.search({ package: '@acme/widgets', query: 'Button' })
     expect(direct).toContain('@acme/widgets is a package of this organization')
-    expect(direct).toContain('get_package_api @acme/widgets')
+    expect(direct).toContain('package_api @acme/widgets')
+    expect(direct).toContain('package_source')
     expect(direct).not.toContain('not indexed')
     expect(await docs.versions({ package: '@acme/widgets/lib/button/Round' })).toContain(
       '@acme/widgets/lib/button/Round belongs to @acme/widgets, which is a package of this organization',

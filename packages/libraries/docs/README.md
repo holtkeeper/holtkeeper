@@ -2,7 +2,7 @@
 
 Version-exact documentation of the third-party libraries the fleet depends on, for agents: a server-side indexer keeps, per library, a small matrix of versions (the ones in use and the ones an upgrade would land on) with their docs, release notes, API surface and, on demand, a source snapshot; `libraryDocs` answers questions about them as compact Markdown. The design is [docs/library-docs.md](../../../docs/library-docs.md).
 
-The server wires it up (setting `libraries`, the indexing duty, the Dependencies and library index admin routes, MCP tools and the agents' `libraries` toolset): see [Libraries](../../../apps/server/docs/README.md#libraries) in the server docs.
+The server wires it up (setting `libraries`, the indexing duty, the Dependencies and library index admin routes, and the `packages` toolset of MCP and internal agents): see [Libraries](../../../apps/server/docs/README.md#libraries) in the server docs.
 
 Everything lives in a `LibraryStore` (`@holtkeeper/store`) and an `ArtifactStore` (`@holtkeeper/artifacts`); registries and GitHub are injected, so tests run without network.
 
@@ -54,8 +54,8 @@ Each per-version source returns a `SourceOutcome { status: LibrarySourceStatus, 
 
 ### Answers
 
-- `libraryDocs({ store, artifacts, issues?, source?, maxChars?, ownPackage?, ownSource? }): LibraryDocs` — the interface of `access.ts`, used by the MCP server and agent tools. `issues` is `libraryIssues(...)` from `src/issues`; `source` is a `sourceSnapshots(...)`. `ownPackage(name)` names the organization package a name (or a deep import path into it) belongs to; a library missing from the index that has one is answered with a pointer to the catalog tools (`search_symbols`, `get_symbol`, `get_package_api <package>`) instead of "not indexed". With `ownSource`, `source` for such a package is answered by it (called with the package name `ownPackage` gave), so the organization's own code is readable too.
-- `libraryApi({ store, artifacts }): LibraryApi` — `get(ref, version): Promise<ApiPackage[] | undefined>` and `versions(ref): Promise<string[]>` (versions with an API, highest first), so `get_package_api`, `diff_versions` and `upgrade_impact` can fall back to external packages.
+- `libraryDocs({ store, artifacts, issues?, source?, maxChars?, ownPackage?, ownSource? }): LibraryDocs` — the interface of `access.ts`, used by the MCP server and agent tools. `issues` is `libraryIssues(...)` from `src/issues`; `source` is a `sourceSnapshots(...)`. `ownPackage(name)` names the organization package a name (or a deep import path into it) belongs to; a library missing from the index that has one is answered with a pointer to `package_api <package>` and `package_source` instead of "not indexed". With `ownSource`, `source` for such a package is answered by it (called with the package name `ownPackage` gave), so the organization's own code is readable too.
+- `libraryApi({ store, artifacts }): LibraryApi` — `get(ref, version): Promise<ApiPackage[] | undefined>` and `versions(ref): Promise<string[]>` (versions with an API, highest first), so `package_api` and `package_changes` can answer for external packages.
 - `thirdParty(origin, text)`, `fenceFor(text)` — the marker every answer wraps library text in.
 
 ## Version matrix

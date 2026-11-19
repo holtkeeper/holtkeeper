@@ -554,6 +554,7 @@ export async function startServer(
       settingsAgent ? settingsAgent(repo, { interactive: true }) : agentFor(repo),
     chatAgentFor: async (target, run) =>
       settingsAgent ? settingsAgent(target, run) : agentFor(target),
+    askAgentFor: async (target, run) => (settingsAgent ? settingsAgent(target, run) : undefined),
     automaticAgentFor: async (repo, actor = 'agent:learning') =>
       settingsAgent ? settingsAgent(repo, { interactive: false, actor }) : agentFor(repo),
     ...(options.media ? { media: options.media } : {}),

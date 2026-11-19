@@ -721,7 +721,7 @@ const OWN_SOURCE_LINES = 400
 /**
  * `LibraryDocs.source` for organization packages: the package folder in its own repository, read
  * through the forge at the commit the catalog recorded for the version (`version` as
- * `get_package_api` takes it, default the newest release; the default branch for `head`). A path
+ * `package_api` takes it, default the newest release; the default branch for `head`). A path
  * is relative to the package folder; a file comes back as numbered lines, a folder as a listing.
  * Answers with a short explanation instead of throwing.
  */

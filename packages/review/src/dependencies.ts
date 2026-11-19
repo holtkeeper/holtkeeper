@@ -488,7 +488,7 @@ function requireChanges(head: GoMod, base: GoMod | undefined): string[] {
         ...listed([...direct, ...indirect], MAX_LIST, 'changes'),
         ...(bumped.length
           ? [
-              `Check what these version changes do to this module's uses with upgrade_impact (organization modules) or library_changes (third-party ones): ${bumped.slice(0, MAX_LIST).join('; ')}.`,
+              `Check what these version changes do to this module's uses with package_changes (pass from and to): ${bumped.slice(0, MAX_LIST).join('; ')}.`,
             ]
           : []),
       ]

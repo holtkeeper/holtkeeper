@@ -71,7 +71,9 @@ export function renderPackageUsage<Origin>(
     if (item.members.length) lines.push(`  members: ${counts(item.members)}`)
   }
   if (usage.exports.length > limit)
-    lines.push(`…and ${usage.exports.length - limit} more exports; pass \`export\` to find_usages.`)
+    lines.push(
+      `…and ${usage.exports.length - limit} more exports; pass \`export\` for the code of one.`,
+    )
   return lines.join('\n')
 }
 

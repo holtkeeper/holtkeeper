@@ -8,7 +8,7 @@ sidebar:
 
 import { Card, Cards } from '@ui'
 
-Holtkeeper gives coding agents (Claude Code, Cursor or any MCP client) what a developer needs from the fleet while working in one repository: which packages exist and how they are used, which libraries and versions the repository runs, the team's rules and knowledge, and Holtkeeper's review of their merge request. Agents read all of it over one MCP endpoint before and after they change code; fleet-wide views, release state and jobs stay in the panel and in Chat. Over MCP an agent reads, and proposes knowledge and rules for people to review; changes Holtkeeper makes itself, tasks and release steps, are started by people in the panel and in Chat.
+Holtkeeper gives coding agents (Claude Code, Cursor or any MCP client) what a developer needs from the fleet while working in one repository: which packages exist and how they are used, which libraries and versions the repository runs, the team's rules and knowledge, and Holtkeeper's review of their merge request. Agents read all of it over one MCP endpoint before and after they change code; fleet-wide views, release state and jobs stay in the panel and in Chat. Over MCP an agent reads, asks for a review of its merge request, and proposes knowledge and rules for people to review; changes Holtkeeper makes itself, tasks and release steps, are started by people in the panel and in Chat.
 
 ## What an agent gets
 
@@ -17,15 +17,16 @@ Holtkeeper gives coding agents (Claude Code, Cursor or any MCP client) what a de
 | Your packages            | Every export of every internal package with its doc comment, per released version, and what changed between them. |
 | Usage across the fleet   | Who uses a package, which exports, props and members, the code of those uses and what an upgrade would break.     |
 | Third-party libraries    | Version-exact docs, changelogs, migration notes, known issues and source of the npm and Go libraries in use.      |
-| Dependencies and stack   | What the organization knows about a dependency before adding it, and the runtimes and images a repository runs.   |
+| Dependencies             | What the organization knows about a dependency before adding it: users, advisories, licenses and bundle share.    |
 | Team rules and knowledge | The repository's rules and rules files, learnings, commit and release conventions, test ids and asset limits.     |
-| Reviews                  | Holtkeeper's review of a merge request: what to fix, which threads are open, whether a new review is coming.      |
+| Reviews                  | Ask for Holtkeeper's review of a merge request and read it: what to fix and which threads are still open.         |
+| Whole questions          | Where `ask` is turned on: one question answered over all of the above, every statement with a checked source.     |
 
 ## How it fits together
 
 1. **A person creates a token** in **Account › Connect agents**. The token acts as that person, cut down to reading: it never sees more than its owner may.
-2. **The agent reads over MCP.** Before it edits a repository it calls `repo_rules`; before it adds a dependency, `evaluate_dependency`; before it commits, `commit_conventions`. The server tells clients when to use which tool, so most agents pick the right one without prompting.
-3. **Changes go through tasks, started by people.** A task group opens one draft merge request per repository on a shared branch. People start it from a Chat task card, **Roll out** in **Supply chain › Libraries** or **Ops › Tasks**; the agent can follow a task's merge request with `review_status` on its branch. No MCP tool starts a task or runs a release step.
+2. **The agent reads over MCP.** Before it edits a repository it calls `repo_rules`; before it adds a dependency, `evaluate_dependency`; before it commits, `repo_rules` with the `commits` topic. The server tells clients when to use which tool, so most agents pick the right one without prompting.
+3. **Changes go through tasks, started by people.** A task group opens one draft merge request per repository on a shared branch. People start it from a Chat task card, **Roll out** in **Supply chain › Libraries** or **Ops › Tasks**; the agent can follow a task's merge request with `code_review` on its branch. No MCP tool starts a task or runs a release step.
 4. **Lessons come back as proposals.** Agents propose learnings; they wait in **Knowledge › Learnings** for the approval delay, and people may reject them before any agent relies on them.
 
 :::note
@@ -51,8 +52,8 @@ Nothing an agent does over MCP is a decision on behalf of a person. No tool star
     Rules, learnings, commit conventions, test ids and the asset policy.
   </Card>
   <Card title="The review agent" href="/agents/review-agent/" icon="quality">
-    How Holtkeeper reviews merge requests, answers in its threads, and how your agent reads the
-    review with `review_status`.
+    How Holtkeeper reviews merge requests, answers in its threads, and how your agent asks for a
+    review and reads it with `code_review`.
   </Card>
 </Cards>
 

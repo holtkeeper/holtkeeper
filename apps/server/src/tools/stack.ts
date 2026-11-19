@@ -21,7 +21,7 @@ export interface StackToolsContext {
 }
 
 /** One use of a tool by one repository, with the tool and the repository's forge. */
-export interface StackUseRow {
+interface StackUseRow {
   forge: string
   toolId: string
   toolName: string
@@ -41,7 +41,7 @@ const supportLabel: Record<StackUse['support'], string> = {
 }
 
 /** Every use of every tool across the views, one per repository, tool and file. */
-export function stackUseRows(views: readonly StackTeamView[]): StackUseRow[] {
+function stackUseRows(views: readonly StackTeamView[]): StackUseRow[] {
   const rows = new Map<string, StackUseRow>()
   for (const view of views)
     for (const tool of view.tools)
@@ -60,7 +60,7 @@ export function stackUseRows(views: readonly StackTeamView[]): StackUseRow[] {
 }
 
 /** Whether a tool id or name matches what the caller typed: exact, or the part after `image:`. */
-export const matchesTool = (row: Pick<StackUseRow, 'toolId' | 'toolName'>, query: string) => {
+const matchesTool = (row: Pick<StackUseRow, 'toolId' | 'toolName'>, query: string) => {
   const wanted = query.trim().toLowerCase()
   const id = row.toolId.toLowerCase()
   return id === wanted || row.toolName.toLowerCase() === wanted || id === `image:${wanted}`
@@ -81,7 +81,7 @@ const ownerText = (owner: readonly string[]) => (owner.length ? owner.join(', ')
  * optionally narrowed to one version or release line, grouped by team with support status. At
  * most `MAX_ROWS` rows are listed; the rest are counted.
  */
-export function renderStackUsage(
+function renderStackUsage(
   rows: readonly StackUseRow[],
   ownerOf: (repo: RepoRef) => string[],
   query: { tool: string; version?: string | undefined },
@@ -210,26 +210,19 @@ function stackUsageTool(context: StackToolsContext): RegistryTool {
  * The `stack` toolset over the newest stack records: `stack_usage` (which repositories use a
  * runtime, image or tool, at which versions, with end-of-life status) and `repo_stack` (one
  * repository's runtimes, images, conventions status and key dependencies). Read-only, deterministic,
- * limited to what `context` lets the caller see; every row names its team. With `fleet: false`
- * only `repo_stack` (people's MCP clients need one repository, not the fleet).
+ * limited to what `context` lets the caller see; every row names its team.
  */
-export function stackToolset(
-  context: StackToolsContext,
-  options: { fleet?: boolean } = {},
-): RegistryToolset {
-  const fleet = options.fleet ?? true
+export function stackToolset(context: StackToolsContext): RegistryToolset {
   return {
     name: 'stack',
-    instructions: fleet
-      ? [
-          'Holtkeeper records which runtimes, package managers, base images and charts every repository',
-          'uses: stack_usage shows who uses a tool at which version with end-of-life status (copy what',
-          'the organization already uses when writing a Dockerfile or CI config); repo_stack shows one',
-          'repository’s stack, conventions status and key dependencies.',
-        ].join(' ')
-      : 'repo_stack shows one repository’s runtimes, images, conventions status and key dependencies.',
+    instructions: [
+      'Holtkeeper records which runtimes, package managers, base images and charts every repository',
+      'uses: stack_usage shows who uses a tool at which version with end-of-life status (copy what',
+      'the organization already uses when writing a Dockerfile or CI config); repo_stack shows one',
+      'repository’s stack, conventions status and key dependencies.',
+    ].join(' '),
     tools: [
-      ...(fleet ? [stackUsageTool(context)] : []),
+      stackUsageTool(context),
       defineTool({
         name: 'repo_stack',
         description:

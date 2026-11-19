@@ -6,7 +6,12 @@ import {
   can,
   scopeCoversRepo,
 } from '@holtkeeper/access'
-import { type RegistryToolset, ToolError, mountToolsets } from '@holtkeeper/agent-tools'
+import {
+  type RegistryTool,
+  type RegistryToolset,
+  ToolError,
+  mountToolsets,
+} from '@holtkeeper/agent-tools'
 import type { McpToolsetName } from '@holtkeeper/api'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
@@ -28,39 +33,43 @@ import { analyzerOffFilter } from '../repo-analyzers.ts'
 import type { RulesResolver } from '../rules.ts'
 import { repoDependencies, stackTeamViews } from '../stack.ts'
 import { reachOf } from '../visibility.ts'
+import { type AskAccess, askToolset } from './ask.ts'
 import { type AssetToolsAccess, assetsToolset } from './assets.ts'
-import { type CatalogToolsContext, catalogToolset } from './catalog.ts'
 import { knowledgeToolset } from './knowledge.ts'
-import { type LibraryIndex, libraryToolset } from './libraries.ts'
+import { type PackageToolsContext, packagesToolset } from './packages.ts'
 import { type QaToolsAccess, qaToolset } from './qa.ts'
 import type { SupplyToolsAccess } from './repos.ts'
-import { type ReviewToolsAccess, reviewsToolset } from './reviews.ts'
+import { CODE_REVIEW_TOOL, type ReviewToolsAccess, reviewsToolset } from './reviews.ts'
 import { type RulesAccess, type TestIdsSnapshot, rulesToolset } from './rules.ts'
-import { type StackToolsContext, stackToolset } from './stack.ts'
+import type { StackToolsContext } from './stack.ts'
 
 /** Toolsets the MCP endpoint serves, in the order clients list them. */
 const MCP_TOOLSETS = [
-  'catalog',
-  'stack',
+  'packages',
   'knowledge',
   'rules',
   'assets',
-  'libraries',
   'reviews',
   'qa',
+  'ask',
   'security',
 ]
 
 /**
  * The only tools that write which the MCP endpoint offers: learned rules, which wait for the
- * approval delay before agents rely on them, and secret reports administrators act on. Every other tool with
+ * approval delay before agents rely on them, review requests, which queue at most one review per
+ * merge request head, and secret reports administrators act on. Every other tool with
  * `readOnly: false` stays off MCP, so a new write tool is never exposed to people's clients by
  * accident.
  */
-const MCP_WRITE_TOOLS: ReadonlySet<string> = new Set(['propose_learning', REPORT_TOOL])
+const MCP_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'propose_learning',
+  CODE_REVIEW_TOOL,
+  REPORT_TOOL,
+])
 
 /** Toolsets every internal task mounts. */
-const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
+const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'packages']
 
 /**
  * Extra toolsets by task kind; tool schemas cost prompt tokens, so tasks mount only what they use.
@@ -69,13 +78,15 @@ const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'libraries']
  * Chat replies run without a checkout, so they mount no `code` or `docs`.
  * `git` (read-only history of the checkout) is for reviews, their thread replies and the
  * verification of their findings (`review-verify`). The verification checks a finding against the
- * checkout, so it skips the cross-repository `catalog` and `stack`, the largest schemas.
+ * checkout, so it skips the cross-repository `stack`.
+ * `ask` answers one question of an MCP caller without a checkout, read-only.
  */
 const TASK_TOOLSETS: Record<string, readonly string[]> = {
-  review: [...BASE_TOOLSETS, 'git', 'catalog', 'stack', 'assets'],
+  review: [...BASE_TOOLSETS, 'git', 'stack', 'assets'],
   'review-verify': [...BASE_TOOLSETS, 'git'],
   'review-plan': [],
-  chat: ['knowledge', 'libraries', 'catalog', 'stack', 'rules', 'assets', 'releases', 'ops'],
+  chat: ['knowledge', 'packages', 'stack', 'rules', 'assets', 'releases', 'ops'],
+  ask: ['knowledge', 'packages', 'stack', 'rules', 'assets'],
   'chat-summary': [],
   learning: [],
   'release-notes': [],
@@ -92,12 +103,19 @@ export function taskToolsets(taskKind: string): readonly string[] {
 }
 
 /** What the MCP toolsets read for one caller. */
-export interface McpToolsetsContext
-  extends Omit<CatalogToolsContext, 'library' | 'supply'>, RulesAccess {
-  /** The third-party library index; without it the `libraries` toolset is not offered. */
-  library?: LibraryIndex
-  /** Asset policies and assets records; without it the `assets` toolset is not offered. */
+export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>, RulesAccess {
+  /**
+   * Asset policies and assets records; without it the `assets` toolset and the `assets` topic of
+   * `repo_rules` are not offered.
+   */
   assets?: AssetToolsAccess
+  /** Answers questions with an agent; without it (no provider, `mcp.ask` off) `ask` is not offered. */
+  ask?: AskAccess
+  /**
+   * Turns a `repo` argument as the caller wrote it (a bare path, a git remote URL) into
+   * `forge:path`; without it tools take `forge:path` only.
+   */
+  resolveRepo?: (value: string) => string
   /** Merge request review state; without it the `reviews` toolset is not offered. */
   reviews?: ReviewToolsAccess
   /**
@@ -117,27 +135,26 @@ export interface McpToolsetsContext
 
 /**
  * The toolsets the MCP endpoint serves to one caller, picked for developers at work in one
- * repository: `catalog`, `stack` (with `stack`, `repo_stack` only), `knowledge`, `rules` (with any
- * of `rules`, `commits`, `testIds`, `releases`), `assets` (with `assets`), `libraries`
- * (with `library`), `reviews` (with `reviews`), `qa` (with `qa`) and `security` (with
- * `secretReports`), every one limited by the caller's grants and, but `security`, to the token's
- * `toolsets`. Fleet, operations and release tools stay with the web panel and chat. Tools that
- * write are left out unless `MCP_WRITE_TOOLS` names them; a toolset left without tools is not
- * offered.
+ * repository: `packages`, `knowledge` (reading one
+ * rule in full by `id` with `rules`), `rules` (with any of `rules`, `commits`, `testIds`,
+ * `releases`, `assets`; no `get_rule`), `assets` (with `assets`, `repo_assets` only), `reviews`
+ * (with `reviews`), `qa` (with `qa`), `ask` (with `ask`) and `security` (with `secretReports`),
+ * every one limited by the caller's grants and, but `security`, to the token's `toolsets`. Stack,
+ * fleet, operations and release tools stay with the web panel and chat. Tools that write are left out
+ * unless `MCP_WRITE_TOOLS` names them; a toolset left without tools is not offered.
  */
 export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
-  const { library, assets, reviews, secretReports, qa, toolsets } = context
-  const rules = rulesToolset(context)
+  const { assets, reviews, secretReports, qa, ask, toolsets } = context
+  const rules = rulesToolset(context, { reader: false })
   const mounted = mountToolsets(
     [
-      catalogToolset(context),
-      ...(context.stack ? [stackToolset(context.stack, { fleet: false })] : []),
-      knowledgeToolset(context.knowledge),
+      packagesToolset(context),
+      knowledgeToolset(context.knowledge, context.rules),
       ...(rules ? [rules] : []),
-      ...(assets ? [assetsToolset(assets)] : []),
-      ...(library ? [libraryToolset(library, context.canRead)] : []),
+      ...(assets ? [assetsToolset(assets, { policy: false })] : []),
       ...(reviews ? [reviewsToolset(reviews)] : []),
       ...(qa ? [qaToolset(qa)] : []),
+      ...(ask ? [askToolset(ask)] : []),
       ...(secretReports ? [secretReportsToolset(secretReports)] : []),
     ],
     toolsets
@@ -146,12 +163,37 @@ export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
         )
       : MCP_TOOLSETS,
   )
+  const { resolveRepo } = context
   return mounted.flatMap((toolset) => {
-    const tools = toolset.tools.filter(
-      (tool) => tool.readOnly !== false || MCP_WRITE_TOOLS.has(tool.name),
-    )
+    const tools = toolset.tools
+      .filter((tool) => tool.readOnly !== false || MCP_WRITE_TOOLS.has(tool.name))
+      .map((tool) => (resolveRepo ? withRepoResolved(tool, resolveRepo) : tool))
     return tools.length ? [{ ...toolset, tools }] : []
   })
+}
+
+const REPO_HINT = 'its path such as acme/app (forge:path and a git remote URL work too)'
+
+/**
+ * `tool` taking its `repo` argument in any form `resolve` understands: the argument is resolved
+ * before the tool and its usage subject see it, and its description says what may be passed.
+ * Tools without a `repo` argument are returned as they are.
+ */
+function withRepoResolved(tool: RegistryTool, resolve: (value: string) => string): RegistryTool {
+  const field = tool.input.shape['repo']
+  if (!field) return tool
+  const resolved = (input: Record<string, unknown>) =>
+    typeof input['repo'] === 'string' ? { ...input, repo: resolve(input['repo']) } : input
+  return {
+    ...tool,
+    input: tool.input.extend({
+      repo: field.describe(
+        (field.description ?? 'The repository').replace('forge:path', REPO_HINT),
+      ),
+    }),
+    run: (input, ctx) => tool.run(resolved(input), ctx),
+    ...(tool.subject && { subject: (input) => tool.subject?.(resolved(input)) }),
+  }
 }
 
 /**
@@ -208,7 +250,8 @@ export interface AgentCatalogOptions {
 }
 
 /**
- * The `catalog` context of an internal agent working on `repo`, with the `stack` tools. Without a
+ * The `packages` context of an internal agent working on `repo`, with the `stack` tools; calls
+ * without a `repo` are made for `repo`. Without a
  * `requester`, the agent reads every repository's packages, usages, stack and shared notes while
  * `policy` is not `off` (usage snippets only under `snippets`), and only repositories sharing a
  * an owner team with `repo` when it is `off`. With a `requester` (chat), reach is exactly theirs:
@@ -216,7 +259,7 @@ export interface AgentCatalogOptions {
  * limited to `repo` (and the requester's `audits:read` and `knowledge:read`); with `supply`, a
  * requester also gets the fleet's findings and licenses exactly as the HTTP endpoints answer them.
  */
-export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsContext {
+export function agentCatalogContext(options: AgentCatalogOptions): PackageToolsContext {
   const { store, repo, artifacts, requester, policy, targetOf } = options
   const { settings } = store
   const key = repoKey(repo)
@@ -238,6 +281,7 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     catalog: options.catalog,
     usages: options.usages,
     store,
+    defaultRepo: key,
     knowledge: {
       store,
       config: options.config,

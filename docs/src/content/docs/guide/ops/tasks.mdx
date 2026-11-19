@@ -31,7 +31,7 @@ import {
 
 Approve, follow and retry agent tasks that change code in one or many repositories, each ending in a draft merge request, and decide whether agents may write code at all.
 
-A **task** is one request ("bump `@acme/widget-kit` to 6.0 and fix the breaking calls"). It becomes one task per repository, and each opens a draft merge request. Tasks come from Chat, from <Ui>Roll out</Ui> in Supply chain › Libraries, from the API and from Holtkeeper itself (fixes and upgrades). Coding agents cannot start or follow task groups over MCP; they read Holtkeeper's review of a task's merge request with `review_status` on its branch.
+A **task** is one request ("bump `@acme/widget-kit` to 6.0 and fix the breaking calls"). It becomes one task per repository, and each opens a draft merge request. Tasks come from Chat, from <Ui>Roll out</Ui> in Supply chain › Libraries, from the API and from Holtkeeper itself (fixes and upgrades). Coding agents cannot start or follow task groups over MCP; they ask for and read Holtkeeper's review of a task's merge request with `code_review` on its branch.
 
 <Screen title="Ops › Tasks" caption="Groups land in sections by state; the Ended section folds into one row in the Open view.">
   <Toolbar title="Tasks" crumbs={['Ops']}>
@@ -211,7 +211,7 @@ The ⋯ menu has <Ui>Open the chat thread</Ui> for chat requests and <Ui>Copy li
 
 <Ui>New task in Chat</Ui> opens [Chat](/guide/chat/threads/), where you describe the change and
 Holtkeeper proposes the task. Coding agents cannot start tasks over MCP; they follow a task's merge
-request with the read-only `review_status` tool on its branch ([Agent tasks](/agents/tasks/)).
+request with the `code_review` tool on its branch ([Agent tasks](/agents/tasks/)).
 <Ui>Configure</Ui> opens [Settings › AI](/guide/settings/ai/).
 
 :::note

@@ -22,7 +22,7 @@ Non-goals: a general web search engine; documentation of languages and platforms
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `@holtkeeper/usages`, `depgraph`       | Which external packages each repository uses, at which resolved versions, and which exports, members and props |
 | `@holtkeeper/api-surface`              | API extraction from published `.d.ts` files, diffs between versions, Markdown for agents                       |
-| `/mcp` (`apps/server/src/api-surface`) | Tokens, access checks, usage counting, `upgrade_impact` over the usage index — today for our own packages only |
+| `/mcp` (`apps/server/src/api-surface`) | Tokens, access checks, usage counting, upgrade impact over the usage index — today for our own packages only   |
 | `docs.package` in `agent-tools`        | Changelog `from..to`, migration sections, readme and `.d.ts` outline parsing — today only from `node_modules`  |
 | `@holtkeeper/release`                  | `parsePackageTag` for monorepo tags (`name@1.2.3`, `path/v1.2.3`)                                              |
 | `libraries:latest`, `stack`            | Latest versions of libraries (library index runs) and of runtimes and images                                   |
@@ -93,19 +93,14 @@ Packages can be excluded or pinned by a scoped setting `libraries` (`exclude`, `
 
 ## MCP tools
 
-Added to `/mcp` and to the in-process toolset of agents (a `libraries` toolset in `agent-tools`). `version` defaults to what the asking repository resolves, when the client passes `repo` or the agent runs in one; otherwise to `latest`.
+Served by the `packages` toolset, to `/mcp` and to Holtkeeper's own agents alike, under the same tools as the organization's own packages. `version` defaults to what the asking repository resolves, when the client passes `repo` or the agent runs in one; otherwise to `latest`.
 
-| Tool                    | Input                                                      | Output                                                                               |
-| ----------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `library_versions`      | `package`, `repo?`                                         | The matrix with roles, dates, deprecations, and which repositories use which version |
-| `get_package_api`       | existing tool, now also for external packages and versions | The API of one version                                                               |
-| `diff_versions`         | existing tool, now also for external packages              | Removed, changed, deprecated exports between two versions                            |
-| `upgrade_impact`        | existing tool, now also for external packages              | What the diff breaks in the fleet's code, with snippets                              |
-| `search_library_docs`   | `package?`, `version?`, `query`, `limit?`                  | Matching chunks, each with library, versions, source and URL                         |
-| `read_library_doc`      | `package`, `version`, `path`, `heading?`                   | One document or section                                                              |
-| `library_changes`       | `package`, `from`, `to`                                    | Changelog and release notes in `(from, to]`, migration sections for crossed majors   |
-| `search_library_issues` | `package`, `query`, `version?`                             | Issue digests, then live search hits; each with state, fix version and link          |
-| `library_source`        | `package`, `version`, `path?`                              | A file listing or a file of the source snapshot (made on first request)              |
+| Tool              | Input                                                            | Output                                                                                                                                                                                        |
+| ----------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package_api`     | `package`, `version?`, `symbol?`, `query?`                       | The API of one version, one export or the matching exports                                                                                                                                    |
+| `package_changes` | `package`, `from?`, `to?`, `include?`                            | Without versions: the matrix with roles, dates, deprecations and who uses which. Between two: API diff, changelog and migration sections in `(from, to]`, and what breaks in the fleet's code |
+| `package_docs`    | `package?`, `query?`, `issues?`, `path?`, `heading?`, `version?` | Matching chunks; issue digests then live search hits with `issues`; one document or section; the document list                                                                                |
+| `package_source`  | `package`, `version?`, `path?`, `start?`, `end?`                 | A file listing or a file of the source snapshot (made on first request)                                                                                                                       |
 
 Results follow the existing budgets: capped, with `… N more` and a hint to narrow. Text from libraries, repositories and issues is third-party content: tool output marks it as such, and nothing in it is treated as an instruction.
 
@@ -137,10 +132,10 @@ Error messages are matched literally (quoted phrases, stack frame names), since 
 
 ## Phases
 
-1. **Matrix and API.** Library and version rows, the matrix job, archive fetching, `extractApi` over archives; `library_versions` and the existing API tools working for external npm packages. Done when `upgrade_impact` answers for a third-party package with fleet snippets.
-2. **Docs.** Chunks from archives and repositories at tags, releases, full-text search; `search_library_docs`, `read_library_doc`, `library_changes`. `docs.package` reads from the index when the server is reachable and falls back to `node_modules`.
+1. **Matrix and API.** Library and version rows, the matrix job, archive fetching, `extractApi` over archives; the version matrix and the existing API tools working for external npm packages. Done when the upgrade impact answers for a third-party package with fleet snippets.
+2. **Docs.** Chunks from archives and repositories at tags, releases, full-text search, document reads and changes between versions (today `package_docs` and `package_changes`). `docs.package` reads from the index when the server is reachable and falls back to `node_modules`.
 3. **Go.** Module zips, `go doc`, major paths joined.
-4. **Source snapshots.** `library_source` and `code.*` tools over a snapshot.
+4. **Source snapshots.** `package_source` and `code.*` tools over a snapshot.
 5. **Issues.** Index, live search, optional digests and knowledge proposals.
 6. **Fallbacks.** Docs sites via `llms.txt`/sitemap, a crawler setting for the rest, DeepWiki as an MCP server mounted per task.
 
@@ -164,4 +159,4 @@ Where the server differs from the design above:
 - Tarballs are streamed: npm and GitHub downloads stop at a size limit (50 MB npm, 100 MB repository docs, 200 MB source snapshots) and tar entries that are not kept are skipped without being held in memory.
 - Request budgets are the GitHub client's own rate-limit handling, not the distributed limiter: REST `GET`s are conditional (`ETag` in `Store.kv`, so unchanged tags, releases and repository metadata cost nothing), and an index run waits for the hourly reset when every token is exhausted instead of failing its sources.
 - Issue digests run through the agent of the caller's repository, so an MCP call without `repo` gets no digests. Knowledge proposals from digests are not wired.
-- `upgrade_impact` for third-party packages covers npm only (the usage index reads TypeScript and JavaScript).
+- The upgrade impact of `package_changes` for third-party packages covers npm only (the usage index reads TypeScript and JavaScript).

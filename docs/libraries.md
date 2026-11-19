@@ -114,31 +114,30 @@ kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
 
 3. Ask in terms of your code; the agent picks the tools:
 
-| Tool                                                                  | Use it for                                                                                                       |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `library_versions`                                                    | Which versions are indexed, which repositories use which, deprecations                                           |
-| `search_library_docs`                                                 | Finding the section about an option, an API or an error, in one library or across all                            |
-| `read_library_doc`                                                    | Reading one document or section; without `path`, the list of documents of the version                            |
-| `library_changes`                                                     | Changelog, release notes and migration guide sections between two versions                                       |
-| `search_library_issues`                                               | Known bugs and their fixes for an error message, indexed first, then a live GitHub search                        |
-| `library_source`                                                      | Browsing and reading the library's source at the exact version; organization packages from their own repository  |
-| `get_package_api`, `list_versions`, `diff_versions`, `upgrade_impact` | The public API of a version, what changed between versions, and which of your call sites an upgrade breaks (npm) |
+| Tool              | Use it for                                                                                                                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `package_docs`    | Finding the section about an option, an API or an error, in one library or across all; reading one document or section; with `issues`, known bugs and their fixes for an error message, indexed first, then a live GitHub search |
+| `package_changes` | Which versions are indexed and which repositories use which; between two versions the API diff, changelog, release notes and migration guide sections, and which of your call sites the upgrade breaks                           |
+| `package_api`     | The public API of a version, one export or the exports matching a name                                                                                                                                                           |
+| `package_source`  | Browsing and reading the library's source at the exact version; organization packages from their own repository                                                                                                                  |
 
-Every library tool takes an optional `repo` (`forge:path`, e.g. `work:games/app`). With it, the version defaults to the one that repository uses, so "how does `useQuery` handle retries" is answered for your version, not the newest. Without it, the newest indexed version is used. `ecosystem` is Go for a module path such as `github.com/acme/lib` and npm otherwise; a Go module path with its `/v2` suffix or a package path inside the module finds the module. Go modules get their package docs (`doc.go` and package comments) besides the README, release notes and changelog from GitHub for `github.com` modules (and vanity paths that point there), and `library_source` reads the exact module zip.
+The same tools answer for your organization's own packages, so an agent does not need to know which kind a package is.
+
+Every one of them takes an optional `repo` (`forge:path`, e.g. `work:games/app`). With it, the version defaults to the one that repository uses, so "how does `useQuery` handle retries" is answered for your version, not the newest. Without it, the newest indexed version is used. `ecosystem` is Go for a module path such as `github.com/acme/lib` and npm otherwise; a Go module path with its `/v2` suffix or a package path inside the module finds the module. Go modules get their package docs (`doc.go` and package comments) besides the README, release notes and changelog from GitHub for `github.com` modules (and vanity paths that point there), and `package_source` reads the exact module zip.
 
 Examples of prompts that use them well:
 
-- "We are on react-router 6 in work:shop/web. What do we have to change to move to 7?" → `library_changes` and `upgrade_impact`.
-- "`TypeError: Cannot read properties of undefined (reading 'getState')` after upgrading zustand, is this a known bug?" → `search_library_issues`.
-- "How is retry backoff implemented in github.com/cenkalti/backoff v4?" → `library_source`.
+- "We are on react-router 6 in work:shop/web. What do we have to change to move to 7?" → `package_changes` with `from` and `to`.
+- "`TypeError: Cannot read properties of undefined (reading 'getState')` after upgrading zustand, is this a known bug?" → `package_docs` with `issues`.
+- "How is retry backoff implemented in github.com/cenkalti/backoff v4?" → `package_source`.
 
 Text coming from libraries, repositories and issues is marked in the answers as third-party content, so agents treat it as data, not instructions.
 
 ### From Holtkeeper's own agents
 
-Review, port, propagate and other agent tasks get the same tools as `libraries.versions`, `libraries.search`, `libraries.read`, `libraries.changes`, `libraries.issues` and `libraries.source`, with the task's repository as the default version. Nothing to configure.
+Review, port, propagate and other agent tasks get the same `packages` tools, with the task's repository as the default for versions. Nothing to configure.
 
-The library index covers third-party packages only. Asked about one of your organization's own packages (or a deep import path into one), the library tools answer that it is an internal package and point to the API catalog tools (`search_symbols`, `get_symbol`, `get_package_api`) instead of saying it is not indexed. Reviews also run on a checkout without `node_modules`, so their prompt sends dependency questions to these tools.
+The library index covers third-party packages only. Asked about one of your organization's own packages (or a deep import path into one), `package_docs` answers that it is an internal package without indexed docs and points to `package_api` and `package_source` instead of saying it is not indexed. Reviews also run on a checkout without `node_modules`, so their prompt sends dependency questions to these tools.
 
 ## Issue digests
 

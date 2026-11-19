@@ -3,9 +3,10 @@ import { type RegistryToolset, ToolError, capText } from '@holtkeeper/agent-tool
 import type { ForbiddenError } from '@holtkeeper/api'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
-import type { z } from 'zod'
+import { z } from 'zod'
 
 import { ForbiddenException, ForbiddenToolError } from '../context.ts'
+import { ASK_TOOL } from '../tools/ask.ts'
 import { type McpToolsetsContext, mcpToolsets } from '../tools/registry.ts'
 import type { McpUsage } from './usage.ts'
 
@@ -13,7 +14,7 @@ import type { McpUsage } from './usage.ts'
 const maxText = 80_000
 
 const narrowHint =
-  'pass `subpath`, `docs: false` or use search_symbols / get_symbol for single names'
+  'narrow the request, e.g. package_api with `subpath`, `symbol`, `query` or `docs: false`'
 
 const text = (value: string) => ({
   content: [{ type: 'text' as const, text: capText(value, maxText, narrowHint) }],
@@ -41,7 +42,9 @@ export interface McpCaller {
  * reaches the client as it is, other failures as `Failed: <message>`; a missing permission
  * (`ForbiddenToolError`, `ForbiddenException`) also carries the `ForbiddenError` body as
  * `structuredContent`. Every call is recorded in `caller.usage` except calls of
- * `caller.unrecorded` tools.
+ * `caller.unrecorded` tools. A tool gets the request's abort signal and, when the client sent a
+ * progress token, a `progress` that reaches it as `notifications/progress` (on streamed
+ * responses only).
  */
 export function registryServer(toolsets: readonly RegistryToolset[], caller: McpCaller): McpServer {
   const server = new McpServer(
@@ -63,6 +66,14 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
     },
     callback: (
       args: Record<string, unknown>,
+      extra: {
+        signal: AbortSignal
+        _meta?: { progressToken?: string | number }
+        sendNotification: (notification: {
+          method: 'notifications/progress'
+          params: { progressToken: string | number; progress: number; message: string }
+        }) => Promise<void>
+      },
     ) => Promise<
       ReturnType<typeof text> & { isError?: boolean; structuredContent?: ForbiddenError }
     >,
@@ -76,8 +87,23 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
         inputSchema: tool.input.shape,
         annotations: { readOnlyHint: tool.readOnly ?? true, openWorldHint: false },
       },
-      async (args) => {
+      async (args, extra) => {
         const started = performance.now()
+        // oxlint-disable-next-line no-underscore-dangle -- the field's name in the MCP protocol
+        const progressToken = extra._meta?.progressToken
+        let steps = 0
+        const progress =
+          progressToken === undefined
+            ? undefined
+            : (message: string) => {
+                steps += 1
+                void extra
+                  .sendNotification({
+                    method: 'notifications/progress',
+                    params: { progressToken, progress: steps, message },
+                  })
+                  .catch(() => {})
+              }
         let ok = true
         const record = () => {
           const subject = tool.subject?.(args)
@@ -95,7 +121,11 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
         }
         try {
           return text(
-            await tool.run(args, { dir: process.cwd(), signal: new AbortController().signal }),
+            await tool.run(args, {
+              dir: process.cwd(),
+              signal: extra.signal,
+              ...(progress && { progress }),
+            }),
           )
         } catch (error) {
           ok = false
@@ -121,24 +151,50 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
 /** Everything the MCP endpoint needs for one request. */
 export type McpRequestContext = McpToolsetsContext & McpCaller
 
+/** Tools slow enough that their calls are answered as an event stream carrying progress. */
+const STREAMED_TOOLS: ReadonlySet<string> = new Set([ASK_TOOL])
+
+/** Whether `request` is a single call of a streamed tool by a client that accepts event streams. */
+async function wantsStream(request: Request): Promise<boolean> {
+  if (!request.headers.get('accept')?.includes('text/event-stream')) return false
+  const body: unknown = await request
+    .clone()
+    .json()
+    .catch(() => undefined)
+  const parsed = z
+    .object({ method: z.literal('tools/call'), params: z.object({ name: z.string() }) })
+    .safeParse(body)
+  return parsed.success && STREAMED_TOOLS.has(parsed.data.params.name)
+}
+
 /**
- * Answers one request to the MCP endpoint (Streamable HTTP, stateless, JSON responses): a fresh
- * server per request with the registry's MCP toolsets, limited to the repositories the caller may
- * read. Every tool call is counted in `usage`.
+ * Answers one request (Streamable HTTP, stateless) with a fresh server over `toolsets`.
+ * Responses are JSON, except calls of `STREAMED_TOOLS`, which are answered as an event stream so
+ * progress reaches the client while the tool runs.
  */
-export async function handleMcpRequest(
+export async function serveToolsets(
   request: Request,
-  context: McpRequestContext,
+  toolsets: readonly RegistryToolset[],
+  caller: McpCaller,
 ): Promise<Response> {
-  const server = registryServer(mcpToolsets(context), context)
+  const server = registryServer(toolsets, caller)
+  const stream = await wantsStream(request)
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
-    enableJsonResponse: true,
+    enableJsonResponse: !stream,
   })
   await server.connect(transport)
   try {
     return await transport.handleRequest(request)
   } finally {
-    void server.close()
+    // A streamed response is still being written; its transport ends with the stream.
+    if (!stream) void server.close()
   }
 }
+
+/**
+ * Answers one request to the MCP endpoint with the registry's MCP toolsets, limited to the
+ * repositories the caller may read (`serveToolsets`). Every tool call is counted in `usage`.
+ */
+export const handleMcpRequest = (request: Request, context: McpRequestContext): Promise<Response> =>
+  serveToolsets(request, mcpToolsets(context), context)

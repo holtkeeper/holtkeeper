@@ -36,21 +36,23 @@ describe('mcp token status', () => {
 
 describe('mcp token toolsets', () => {
   const all = mcpToolsetCatalog.map((toolset) => toolset.name)
-  const defaults = all.filter((name) => name !== 'qa')
+  const defaults = mcpToolsetCatalog
+    .filter((toolset) => toolset.defaultOn)
+    .map((toolset) => toolset.name)
 
   test('labels defaults, all, none and a count', () => {
     expect(toolsetsLabel(defaults, mcpToolsetCatalog)).toBe('Default tools')
     expect(toolsetsLabel(all, mcpToolsetCatalog)).toBe('All tools')
     expect(toolsetsLabel([], mcpToolsetCatalog)).toBe('No tools')
-    expect(toolsetsLabel(['catalog', 'qa'], mcpToolsetCatalog)).toBe(`2 of ${all.length} tools`)
+    expect(toolsetsLabel(['packages', 'qa'], mcpToolsetCatalog)).toBe(`2 of ${all.length} tools`)
   })
 
   test('toggles keep catalog order', () => {
-    expect(toggleToolset(['reviews'], 'catalog', true, mcpToolsetCatalog)).toEqual([
-      'catalog',
+    expect(toggleToolset(['reviews'], 'packages', true, mcpToolsetCatalog)).toEqual([
+      'packages',
       'reviews',
     ])
-    expect(toggleToolset(['catalog', 'reviews'], 'catalog', false, mcpToolsetCatalog)).toEqual([
+    expect(toggleToolset(['packages', 'reviews'], 'packages', false, mcpToolsetCatalog)).toEqual([
       'reviews',
     ])
   })

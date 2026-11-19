@@ -348,7 +348,7 @@ export function chatStoreTests(store: () => Store) {
         costUsd: 0.5,
         toolTrace: [
           { tool: 'repo_rules', calls: 1 },
-          { tool: 'who_uses', calls: 2 },
+          { tool: 'package_usage', calls: 2 },
         ],
         refs: [{ kind: 'job', id: 'job-1', repo: 'gl:acme/sprocket' }],
       }),
@@ -361,9 +361,9 @@ export function chatStoreTests(store: () => Store) {
       costUsd: 0.75,
       repos: ['gl:acme/widget-kit', 'gl:acme/gadget', 'gl:acme/sprocket'],
       tools: [
+        { tool: 'package_usage', calls: 2 },
         { tool: 'repo_rules', calls: 2 },
         { tool: 'search_knowledge', calls: 2 },
-        { tool: 'who_uses', calls: 2 },
       ],
       participants: [
         { id: 'user-2', messages: 2 },

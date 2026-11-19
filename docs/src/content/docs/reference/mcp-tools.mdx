@@ -5,87 +5,79 @@ sidebar:
   order: 2
 ---
 
-The MCP endpoint (`POST /mcp`) serves the tools below, in this order. Every tool reads stored data only, unless marked **writes**. Arguments marked `?` are optional; repositories are always `forge:path` (`gitlab:acme/checkout-web`). Only `propose_learning` writes, and it leaves a pending learning people may reject, plus `report_secret_exposure`, which files a [secret report](/guide/supply-chain/secret-reports/); no tool starts tasks, runs release steps or approves anything. Fleet-wide tools (security findings, licenses, stack usage), release state and job tools are not served over MCP; people find them in the panel and in [Chat](/guide/chat/threads/). Which tools a client sees depends on its owner's access; **Account › Connect agents › Tool reference** shows the live list with every argument's description.
+The MCP endpoint (`POST /mcp`) serves the tools below, in this order. Every tool reads stored data only, unless marked **writes**. Arguments marked `?` are optional; a repository is its path (`acme/checkout-web`), a git remote URL or the full `forge:path` (`gitlab:acme/checkout-web`); answers name repositories as `forge:path`. Three tools write: `propose_learning` leaves a pending learning people may reject, `code_review` asks for a review of a merge request (at most one per head) and `report_secret_exposure` files a [secret report](/guide/supply-chain/secret-reports/); no tool starts tasks, runs release steps or approves anything. `ask` runs an AI agent and spends the AI budget; every other tool is a plain lookup. Fleet-wide tools (security findings, licenses), stack tools, release state and job tools are not served over MCP; people find them in the panel and in [Chat](/guide/chat/threads/). Which tools a client sees depends on its owner's access; **Account › Connect agents › Tool reference** shows the live list with every argument's description.
 
 For a walkthrough with example calls, see [What agents can ask](/agents/tools/).
 
-## Packages and usage (catalog)
+## Packages
 
-The public API of the organization's packages and how every repository uses its dependencies. `version` is a version, a tag, `latest` (newest release, the default) or `head` (default branch). `repo` picks one of several repositories with a package of the same name; for third-party packages, the repository whose version is the default. `ecosystem` is `npm` or `Go` (default: Go for a name with a `/` and no `@scope`, else npm).
+The organization's own packages and the third-party libraries its repositories depend on answer through the same tools; every result says which it is. `package` is a package name (`@acme/ui`, `zod`) or a Go import path (`example.com/kit/log`, `github.com/spf13/cobra`); a Go module path with its `/vN` suffix or a package path inside the module finds the module. `version` defaults to the version `repo` uses, else the newest release; `head` is the default branch of an organization package. `repo` is the repository you work in; it also picks one of several repositories that publish a package of the same name. `ecosystem` is `npm` or `Go` (default: Go for a name with a `/` and no `@scope`, else npm). `package_docs` and `package_source` are offered when the instance indexes library docs.
 
-| Tool                  | Description                                                                                                              | Arguments                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `list_packages`       | Indexed packages (newest version of each) with repository, description, entry points and recorded versions.              | `query?` (substring of name, description or repository)                                  |
-| `get_package_api`     | The public API of one package version: every entry point with every export, its doc comment and declaration.             | `package`, `version?`, `subpath?`, `docs?` (default true), `repo?`, `ecosystem?`         |
-| `search_symbols`      | Finds exports by name (exact, prefix, substring) or doc comment text across the newest version of every package.         | `query`, `package?`, `kind?`, `limit?` (1–50, default 20)                                |
-| `get_symbol`          | One export in full: doc comment, declaration, source location and the import statement to use.                           | `package`, `name` (`default` for the default export), `version?`, `subpath?`, `repo?`    |
-| `list_versions`       | Recorded versions, newest first, with tag, date, export count and how the API changed from the version before.           | `package`, `repo?`, `ecosystem?`                                                         |
-| `diff_versions`       | Removed, changed, deprecated and added exports between two versions, and whether the bump matches semver.                | `package`, `from?`, `to?`, `repo?`, `ecosystem?`                                         |
-| `package_usage`       | Who uses a package: versions per repository, every export used, how, JSX props passed and members read.                  | `package`                                                                                |
-| `find_usages`         | The code of the uses: file, line and snippet, grouped by repository.                                                     | `package`, `export?`, `member?`, `prop?`, `kind?`, `repo?`, `limit?` (1–100, default 30) |
-| `upgrade_impact`      | What an upgrade breaks: the API diff joined with the uses, as `breaking`, `check` or `deprecated`, with the code.        | `package`, `from?`, `to?`, `repo?`, `ecosystem?`                                         |
-| `repo_packages`       | The packages one repository imports, with versions, ranges and uses; without `repo`, the repositories with a record.     | `repo?`                                                                                  |
-| `evaluate_dependency` | Everything known about a dependency before adding or upgrading it: users, advisories, licenses, bundle share, knowledge. | `package`, `ecosystem?`, `version?`, `repo?`                                             |
-| `who_uses`            | Which teams and repositories use a library, internal package or stack tool, at which versions and how far behind.        | `subject` (`npm:date-fns`, `Go:example.com/kit`, `tool:node` or a bare name)             |
+| Tool                  | Description                                                                                                                                                                                                            | Arguments                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `find_packages`       | Packages and exports matching `query`: organization packages, indexed libraries, then exports by name or doc comment. With `repo` alone, what that repository imports; with nothing, every organization package.       | `query?`, `repo?`, `kind?`, `limit?` (1–50, default 20)                                                                  |
+| `package_api`         | The public API of one package version: every entry point with every export, its doc comment and declaration. With `symbol`, one export in full with its import statement; with `query`, the matching exports.          | `package`, `symbol?`, `query?`, `kind?`, `subpath?`, `docs?` (default true), `version?`, `ecosystem?`, `repo?`, `limit?` |
+| `package_changes`     | Without `from` and `to`: recorded versions, newest first, with how the API changed between them. Between two versions: the API diff, for libraries the changelog and migration notes, and the uses the upgrade breaks. | `package`, `from?`, `to?`, `include?` (`api`, `notes`, `impact`), `ecosystem?`, `repo?`                                  |
+| `package_usage`       | Who uses a package: teams and repositories with versions and how far behind, every export used, JSX props and members. With a narrowing argument or `code`, the code of the uses.                                      | `package`, `export?`, `member?`, `prop?`, `kind?`, `repo?`, `code?`, `ecosystem?`, `limit?` (1–100, default 30)          |
+| `package_docs`        | Docs of third-party libraries: full-text search with `query`, known issues with `issues`, one document by `path` (a section by `heading`), or the document list.                                                       | `package?`, `query?`, `issues?`, `path?`, `heading?`, `version?`, `ecosystem?`, `repo?`, `limit?`                        |
+| `package_source`      | A file listing or one file with line numbers: a library from its published snapshot (made on first request), an organization package from its repository, paths relative to the package folder.                        | `package`, `path?`, `start?`, `end?`, `version?`, `ecosystem?`, `repo?`                                                  |
+| `evaluate_dependency` | Everything known about a dependency before adding or upgrading it: users, advisories, licenses, bundle share, knowledge.                                                                                               | `package`, `ecosystem?`, `version?`, `repo?`                                                                             |
 
-Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type`, `variable`, `enum`, `namespace` or `reexport`. `find_usages` `kind` is `call`, `new`, `jsx`, `member`, `type`, `extends`, `reexport`, `reference` or `import`. Go packages of the organization's repositories are named by their full import path (`example.com/kit/log`); the catalog answers for them first, then the library index. `package_usage` takes a Go module path (all its packages) or a package import path, and `upgrade_impact` covers Go too, from syntactic uses and, when the usages job has the `go` toolchain, the methods and fields reached through values (`typed: true` sites).
-
-## Stack
-
-| Tool         | Description                                                                                                          | Arguments |
-| ------------ | -------------------------------------------------------------------------------------------------------------------- | --------- |
-| `repo_stack` | One repository's runtimes, tools and images with support status, its conventions status and key direct dependencies. | `repo`    |
+Enumerations: `find_packages` and `package_api` `kind` is `function`, `class`, `interface`, `type`, `variable`, `enum`, `namespace` or `reexport`. `package_usage` `kind` is `call`, `new`, `jsx`, `member`, `type`, `extends`, `reexport`, `reference` or `import`. `package_docs` with `issues` needs `package` and `query`; its `limit` is 1–30 (default 10, for issues at most 20, default 5). Organization packages have no indexed docs: read `package_api` and `package_source`. `package_usage` takes a Go module path (all its packages) or a package import path, and the upgrade impact of `package_changes` covers Go too, from syntactic uses and, when the usages job has the `go` toolchain, the methods and fields reached through values (`typed: true` sites). The uses a `package_changes` upgrade affects come as `breaking`, `check` or `deprecated`, with the code.
 
 ## Knowledge
 
-| Tool               | Description                                                                                                     | Arguments                            |
-| ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `search_knowledge` | Full-text search over rules and active learnings, best match first; with `repo`, only those that apply there.   | `query`, `repo?`                     |
-| `get_rule`         | One rule in full: body, scope, files, agents and description.                                                   | `id` (or its citation `[rule:<id>]`) |
-| `propose_learning` | **Writes.** Proposes a one-sentence learning; it activates after the approval delay unless a person rejects it. | `repo`, `text`, `reason?`, `files?`  |
+| Tool               | Description                                                                                                                                                                  | Arguments                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `search_knowledge` | Full-text search over rules and active learnings, best match first; with `repo`, only those that apply there. With `id`: one rule, learning or rules file of `repo` in full. | `query?`, `id?` (`rule:<id>`, `learn:<id>` or a rules file path), `repo?`, `limit?` |
+| `propose_learning` | **Writes.** Proposes a one-sentence learning; it activates after the approval delay unless a person rejects it.                                                              | `repo`, `text`, `reason?`, `files?`                                                 |
 
-A proposal that repeats an existing learning adds a source to it instead of a new learning.
+Pass `query` or `id`. A proposal that repeats an existing learning adds a source to it instead of a new learning.
 
 ## Rules
 
-| Tool                   | Description                                                                                                            | Arguments                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `repo_rules`           | The rules for a repository: panel rules, its rules files, policies, then learned rules; on-request rules listed last.  | `repo`, `files?`, `agent?`                                              |
-| `test_ids`             | The test id convention and existing test ids per component.                                                            | `repo`, `path?` (file, folder or component name), `limit?` (default 20) |
-| `suggest_test_ids`     | Interactive elements of one component file without a test id, each with a suggested id. Deterministic.                 | `repo`, `file`, `content` (the file's current text)                     |
-| `commit_conventions`   | How commit messages and branch names should look: template, rules with their source, real examples, team notes.        | `repo`, `commits?` (history to learn from, default 100)                 |
-| `check_commit_message` | Checks a commit message or merge request title and a branch name; errors break enforced rules, warnings history.       | `repo`, `message?`, `branch?`                                           |
-| `release_rules`        | How a repository releases, in plain language: branches, flow, tag format, bump rules, acceptance, gates, environments. | `repo`                                                                  |
+| Tool                   | Description                                                                                                                                                               | Arguments                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `repo_rules`           | The rules for a repository: panel rules, its rules files, policies, then learned rules; on-request rules listed last. `topics` add one convention in full.                | `repo`, `files?`, `agent?`, `topics?`                                                                       |
+| `check_commit_message` | Checks a commit message or merge request title and a branch name; errors break enforced rules, warnings history.                                                          | `repo`, `message?`, `branch?`                                                                               |
+| `test_ids`             | The test id convention and existing test ids per component. With `file` and `content`: the interactive elements of that file without a test id, each with a suggested id. | `repo`, `path?` (file, folder or component name), `limit?` (default 20), `file?`, `content?` (current text) |
 
-`release_rules` needs `releases:read` on the repository. `repo_rules` `agent` is `task` (default), `review`, `chat` or `release`; `files` are repository-relative paths the agent is about to touch.
+`repo_rules` `agent` is `task` (default), `review`, `chat` or `release`; `files` are repository-relative paths the agent is about to touch. `topics` is any of:
+
+| Topic      | Adds                                                                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commits`  | How commit messages and branch names should look: template, rules with their source, real examples, team notes.                                                               |
+| `releases` | How the repository releases, in plain language: branches, flow, tag format, bump rules, acceptance, gates, environments.                                                      |
+| `assets`   | The effective asset policy: required and allowed formats, size limits per kind, dimension limit, ignored globs, budgets; for asset files among `files`, what applies to each. |
+| `test-ids` | The test id attribute and naming convention.                                                                                                                                  |
+
+The `releases` topic needs `releases:read` on the repository. The suggestions of `test_ids` are deterministic: no model runs.
 
 ## Assets
 
-| Tool           | Description                                                                                                                                                      | Arguments                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `asset_policy` | The effective asset policy: required and allowed formats, size limits per kind, dimension limit, ignored globs, budgets. With `path`, what applies to that file. | `repo`, `path?`                                             |
-| `repo_assets`  | Files that break the policy or could be smaller, with the best conversion and expected saving, plus totals and budgets.                                          | `repo`, `severity?` (`error`, `warning` (default) or `all`) |
+Off for new tokens; turn it on in a token's tools. The asset policy itself is the `assets` topic of `repo_rules`.
 
-## Third-party libraries
-
-`package` is the library (`zod`, `github.com/spf13/cobra`); a Go module path with its `/vN` suffix or a package path inside the module finds the module, and `ecosystem` defaults to Go for such paths, else npm. `version` defaults to the version `repo` uses, else the newest indexed one. Go modules carry their package docs, and `library_source` reads the module zip. Offered when the instance indexes library docs.
-
-| Tool                    | Description                                                                                                                                                                      | Arguments                                                                           |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `library_versions`      | Indexed versions with roles (used, latest, patch, minor, major, first), dates, deprecations, docs sources and users.                                                             | `package`, `ecosystem?`, `repo?`                                                    |
-| `search_library_docs`   | Full-text search over shipped docs, repository docs at the version tag and release notes.                                                                                        | `query`, `package?`, `ecosystem?`, `version?`, `limit?` (1–30, default 10), `repo?` |
-| `read_library_doc`      | One document by path, or one section by heading; without `path`, the list of documents.                                                                                          | `package`, `ecosystem?`, `version?`, `path?`, `heading?`, `repo?`                   |
-| `library_changes`       | Changelog sections and release notes in (`from`, `to`], with migration guides for every major crossed.                                                                           | `package`, `ecosystem?`, `from`, `to`                                               |
-| `search_library_issues` | Known issues and answered discussions matching an error message or symptom, with state, fix version and link.                                                                    | `package`, `ecosystem?`, `query`, `version?`, `limit?` (1–20, default 5), `repo?`   |
-| `library_source`        | A file listing or one file with line numbers; the snapshot is made on first request. Organization packages are read from their repository, paths relative to the package folder. | `package`, `ecosystem?`, `version?`, `path?`, `start?`, `end?`, `repo?`             |
+| Tool          | Description                                                                                                             | Arguments                                                   |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `repo_assets` | Files that break the policy or could be smaller, with the best conversion and expected saving, plus totals and budgets. | `repo`, `severity?` (`error`, `warning` (default) or `all`) |
 
 ## Reviews
 
-| Tool            | Description                                                                                                                                                 | Arguments                                                   |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `review_status` | Holtkeeper's review of a merge request: verdict and summary of the newest run, findings with file and line, open threads, earlier runs and what to do next. | `repo`, `branch?` (source branch), `mergeRequest?` (number) |
+| Tool          | Description                                                                                                                                                                                                                    | Arguments                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `code_review` | **Writes.** Asks for Holtkeeper's review of a merge request and reports how it stands: verdict and summary of the newest run, findings with file and line, open threads, earlier runs and what to do next. One call does both. | `repo`, `branch?` (source branch), `mergeRequest?` (number) |
 
-Pass `branch` or `mergeRequest`; one of them is required. With `branch`, the tool takes the branch's open merge request, else its newest one. The answer ends with a **Next** section: what to fix, whether a review is queued or running, why none will start by itself, or "Nothing left to fix." It needs `analyses:read` on the repository. See [Follow a review from your agent](/agents/review-agent/#follow-a-review-from-your-agent).
+Pass `branch` or `mergeRequest`; one of them is required, and there is nothing else to set. With `branch`, the tool takes the branch's open merge request, else its newest one; without a merge request it says to open one, and it says so when Holtkeeper's forge user cannot read the repository's merge requests. When no review covers the newest commit, it makes sure one is coming: it queues an ordinary review unless one is queued or running already, and where reviews start by themselves on new commits it leaves the first minute to them, so a review never starts twice. Nothing is queued for a closed or merged merge request, a frozen repository or a repository whose reviews are off. The answer ends with a **Next** section: call again in a few minutes, what to fix, or "Nothing left to fix." It needs `analyses:read` on the repository. See [Ask for a review from your agent](/agents/review-agent/#ask-for-a-review-from-your-agent).
+
+## Ask
+
+Offered only while an administrator has turned on the `mcp.ask` setting and an AI provider is configured; a token's owner can turn it off for that token.
+
+| Tool  | Description                                                                                                                               | Arguments                     |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `ask` | One question answered by an agent that reads the other tools with your access; every statement names its source, listed again at the end. | `question`, `repo?`, `files?` |
+
+Sources are written as `[rule:<id>]`, `[learn:<id>]`, `[pkg:<name>@<version> <export>]`, `[file:<repo> <path>:<line>]`, `[doc:<name>@<version> <path>]` or `[url:<link>]`. Each one is checked against what the agent actually read: a source nothing backs is replaced by `[unverified]`, and an answer left without any backed source is not returned (`No grounded answer`, with the tools it looked at). It answers only from what Holtkeeper indexed: it cannot read your working tree and does not search repository source across repositories. An answer takes up to 90 seconds and spends the AI budget; clients that accept event streams get progress while it runs. Limits come from `mcp.ask`: a spend cap per answer, questions per person per day and a weekly spend for all questions. The same question from the same person within ten minutes is answered from memory and not counted. See [What agents can ask](/agents/tools/#ask-a-whole-question).
 
 ## Security
 
@@ -101,7 +93,7 @@ The tool refuses, and stores nothing for, text fields that look like a secret va
 
 ## Errors
 
-A tool that needs a permission you lack answers with an error result whose text names it, with the missing action and repository as structured content. Other failures start with `Failed:`. Answers longer than about 80 000 characters are cut with a hint to narrow the request (`subpath`, `docs: false`, or `search_symbols` and `get_symbol` for single names).
+A tool that needs a permission you lack answers with an error result whose text names it, with the missing action and repository as structured content. Other failures start with `Failed:`. Answers longer than about 80 000 characters are cut with a hint to narrow the request (for `package_api`: `subpath`, `docs: false`, `symbol` or `query`).
 
 ## Related
 

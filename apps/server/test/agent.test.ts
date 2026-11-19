@@ -517,7 +517,7 @@ describe('settingsAgentFor', () => {
 describe('withServerDefaults', () => {
   const target = { ...repo, teams: ['games'] }
 
-  test('adds the libraries toolset with the task repository', async () => {
+  test('the packages toolset asks library docs as the task repository', async () => {
     const seen: AgentTask[] = []
     const inner: Agent = {
       name: 'fake',
@@ -529,28 +529,52 @@ describe('withServerDefaults', () => {
     const asked: (string | undefined)[] = []
     const answer = async (_input: unknown, caller?: { repo?: string }) => {
       asked.push(caller?.repo)
-      return 'zod@3.22.0'
+      return 'some-lib@3.22.0'
     }
+    const packages = agentCatalogContext({
+      catalog: createApiCatalog({ analyses: store.analyses }),
+      usages: createUsageIndex({ analyses: store.analyses }),
+      store,
+      config,
+      repo: target,
+      targetOf: (other) => ({ ...other, teams: [] }),
+      policy: 'metadata',
+      now,
+    })
     const agent = withServerDefaults(inner, {
       repo: target,
       store,
       config,
       now,
-      libraries: {
-        versions: answer,
-        search: answer,
-        read: answer,
-        changes: answer,
-        issues: answer,
-        source: answer,
+      packages: {
+        ...packages,
+        library: {
+          api: { versions: async () => [], get: async () => undefined },
+          store: memoryStore().libraries as NonNullable<Store['libraries']>,
+          docs: {
+            versions: answer,
+            search: answer,
+            read: answer,
+            changes: answer,
+            issues: answer,
+            source: answer,
+          },
+        },
       },
     })
     await agent.run({ dir: '/r', prompt: 'p' })
-    const toolset = seen[0]?.toolsets?.find((item) => item.name === 'libraries')
-    expect(toolset?.instructions).toContain('catalog tools')
-    const versions = toolset?.tools.find((tool) => tool.name === 'libraries.versions')
-    await versions?.run({ package: 'zod' }, { dir: '/r', signal: new AbortController().signal })
-    expect(asked).toEqual([`${repo.forge}:${repo.path}`])
+    const toolset = seen[0]?.toolsets?.find((item) => item.name === 'packages')
+    expect(toolset?.instructions).toContain('find_packages')
+    const signal = new AbortController().signal
+    const tool = (name: string) => toolset?.tools.find((item) => item.name === name)
+    await tool('package_docs')?.run({ package: 'some-lib' }, { dir: '/r', signal })
+    await tool('package_source')?.run({ package: 'some-lib' }, { dir: '/r', signal })
+    expect(asked).toEqual([`${repo.forge}:${repo.path}`, `${repo.forge}:${repo.path}`])
+    await tool('package_docs')?.run(
+      { package: 'some-lib', repo: 'gitlab:acme/other' },
+      { dir: '/r', signal },
+    )
+    expect(asked.at(-1)).toBe('gitlab:acme/other')
   })
 
   test('hands the task estimate to the budget check; a bootstrap task mounts no toolsets', async () => {
@@ -688,7 +712,7 @@ describe('withServerDefaults', () => {
     expect(String(errors[0])).toContain('bucket down')
   })
 
-  test('reviews mount the catalog toolset; every tool result is capped', async () => {
+  test('reviews mount the packages toolset; every tool result is capped', async () => {
     const seen: AgentTask[] = []
     const inner: Agent = {
       name: 'fake',
@@ -702,7 +726,7 @@ describe('withServerDefaults', () => {
       store,
       config,
       now,
-      catalog: agentCatalogContext({
+      packages: agentCatalogContext({
         catalog: createApiCatalog({ analyses: store.analyses }),
         usages: createUsageIndex({ analyses: store.analyses }),
         store,
@@ -731,21 +755,30 @@ describe('withServerDefaults', () => {
       'code',
       'docs',
       'knowledge',
+      'packages',
       'git',
-      'catalog',
       'stack',
       'gadgets',
     ])
-    expect(triage?.map((toolset) => toolset.name)).toEqual(['code', 'docs', 'knowledge'])
-    expect(review?.find((toolset) => toolset.name === 'catalog')?.instructions).toContain(
-      'search_symbols',
-    )
+    expect(triage?.map((toolset) => toolset.name)).toEqual([
+      'code',
+      'docs',
+      'knowledge',
+      'packages',
+    ])
+    const mounted = review?.find((toolset) => toolset.name === 'packages')
+    expect(mounted?.instructions).toContain('find_packages')
+    expect(mounted?.tools.map((tool) => tool.name)).toEqual([
+      'find_packages',
+      'package_api',
+      'package_changes',
+      'package_usage',
+      'evaluate_dependency',
+    ])
 
     const signal = new AbortController().signal
-    const listPackages = review
-      ?.find((toolset) => toolset.name === 'catalog')
-      ?.tools.find((tool) => tool.name === 'list_packages')
-    expect(await listPackages?.run({}, { dir: '/r', signal })).toBe('No package is indexed yet.')
+    const findPackages = mounted?.tools.find((tool) => tool.name === 'find_packages')
+    expect(await findPackages?.run({}, { dir: '/r', signal })).toBe('No package is indexed yet.')
     const dumped = await review?.at(-1)?.tools[0]?.run({}, { dir: '/r', signal })
     expect(dumped?.length).toBeLessThan(RESULT_CAPS.maxChars + 100)
     expect(dumped).toContain('output cut at about 4000 tokens')

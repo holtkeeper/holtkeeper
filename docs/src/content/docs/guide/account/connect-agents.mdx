@@ -170,8 +170,8 @@ The **curl check** tab is a `curl` command that asks the endpoint for its tool l
 
 **Tools you called most**
 
-<Meter value={100} label="search_symbols · 402" tone="ok" />
-<Meter value={61} label="get_package_api · 246" tone="ok" />
+<Meter value={100} label="find_packages · 402" tone="ok" />
+<Meter value={61} label="package_api · 246" tone="ok" />
 <Meter value={33} label="repo_rules · 131" tone="ok" />
 
     </Stack>
@@ -192,17 +192,17 @@ The **curl check** tab is a `curl` command that asks the endpoint for its tool l
   </Split>
 </Screen>
 
-A daily chart shows answered over failed calls. Tool calls do not call a model, so they cost nothing from the AI budget. With `ai:read`, a link leads to everyone's usage on [Ops › AI spend](/guide/ops/ai-spend/).
+A daily chart shows answered over failed calls. Tool calls do not call a model, so they cost nothing from the AI budget; the exception is `ask`, whose answers are AI runs with their own limits. With `ai:read`, a link leads to everyone's usage on [Ops › AI spend](/guide/ops/ai-spend/).
 
 ## Browse the tool reference
 
-**Tool reference** is read live from the endpoint, so it lists exactly the tools you get. Tools are split into **Your packages** (exports, versions, usages and upgrade impact of what your repositories publish), **Third-party libraries** (whether to add or upgrade a dependency, and the docs, changes, issues and source of libraries at the version each repository uses) and **Team knowledge**. Each tool shows its description and arguments, and the list can be filtered.
+**Tool reference** is read live from the endpoint, so it lists exactly the tools you get. Tools are split into **Packages** (API, docs, source, versions, changes and usages of your own packages and of third-party libraries at the version each repository uses), **Repository** (rules and conventions, test ids, assets, code review), **Team knowledge**, **Ask** (where the `mcp.ask` setting is on) and **QA tasks**. Each tool shows its description and arguments, and the list can be filtered.
 
 <Screen title="Account › Connect agents › Tool reference">
   <Stack>
     <Facts
       items={[
-        ['search_symbols', 'Find exported names across your packages · q, package, repo, kind'],
+        ['find_packages', 'Find packages and exports · query, repo, kind, limit'],
         [
           'evaluate_dependency',
           'What the organization knows about a dependency before adding or upgrading it',
@@ -214,7 +214,7 @@ A daily chart shows answered over failed calls. Tool calls do not call a model, 
 </Screen>
 
 :::note
-Agents can propose learnings, and people may reject them in Knowledge › Learnings before they activate. No MCP tool starts or approves tasks, runs release steps or makes other [Inbox](/guide/home/inbox/) decisions. Agents can read Holtkeeper's review of a merge request, a task's included, with `review_status`.
+Agents can propose learnings, and people may reject them in Knowledge › Learnings before they activate. No MCP tool starts or approves tasks, runs release steps or makes other [Inbox](/guide/home/inbox/) decisions. Agents can ask for Holtkeeper's review of a merge request, a task's included, and read it with `code_review`; it queues at most one review per commit.
 :::
 
 ## Related

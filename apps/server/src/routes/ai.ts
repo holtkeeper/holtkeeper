@@ -1,5 +1,5 @@
 import { type Principal, type Scope, can } from '@holtkeeper/access'
-import { codeTools, docsTools, knowledgeTools, libraryTools } from '@holtkeeper/agent-tools'
+import { codeTools, docsTools, knowledgeTools } from '@holtkeeper/agent-tools'
 import {
   type PeriodKind,
   type PeriodRange,
@@ -57,8 +57,8 @@ import {
 } from '../context.ts'
 import { reviewAnalytics } from '../review-analytics.ts'
 import { assetsToolset } from '../tools/assets.ts'
-import { catalogToolset } from '../tools/catalog.ts'
 import { opsToolset } from '../tools/ops.ts'
+import { packagesToolset } from '../tools/packages.ts'
 import { mcpToolsets, taskToolsets } from '../tools/registry.ts'
 import { releasesToolset } from '../tools/releases.ts'
 import { rulesToolset } from '../tools/rules.ts'
@@ -217,8 +217,7 @@ function agentToolRegistry(): AgentToolView[] {
     codeTools(),
     docsTools(),
     knowledgeTools({ access: inert, repo: inert, taskKind: 'review', actor: 'registry' }),
-    libraryTools({ access: inert, repo: 'registry:registry' }),
-    catalogToolset(inert),
+    packagesToolset(inert),
     stackToolset(inert),
     rulesToolset(inert),
     releasesToolset(inert),

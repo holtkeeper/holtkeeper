@@ -13,7 +13,6 @@ export {
 export { gitTools, type GitToolsOptions } from './git.ts'
 export { insideDir, listFiles, LOCKFILE_NAMES } from './files.ts'
 export * from './knowledge.ts'
-export * from './libraries.ts'
 export { lockfileTools } from './lockfiles.ts'
 export * from './registry.ts'
 export { defineTool, ToolError, type RegistryTool, type RegistryToolset } from './tool.ts'

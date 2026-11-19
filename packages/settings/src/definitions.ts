@@ -470,6 +470,38 @@ Tasks run only on dedicated write workers (\`serve --pool write\`, with \`jobs.e
   schema: tasksWriteSchema,
 })
 
+/** Value of `mcp.ask`; every field has a default, so `{ enabled: true }` is enough. */
+export const mcpAskSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Spend cap of one answer. */
+  perAnswerUsd: z.number().positive().max(2).default(0.3),
+  /** Questions one person may ask a day over all their tokens. */
+  perPersonPerDay: z.number().int().min(1).max(500).default(30),
+  /** Spend of `ask` per week; no question is answered once it is reached. */
+  weeklyUsd: z.number().positive().max(150).default(15),
+})
+
+export type McpAsk = z.infer<typeof mcpAskSchema>
+
+export const mcpAsk = defineSetting({
+  key: 'mcp.ask',
+  label: 'Ask over MCP',
+  description:
+    'Whether the MCP endpoint offers `ask`: one question answered by an agent over the other tools, with sources. Off until an admin turns it on.',
+  section: 'AI',
+  global: true,
+  help: `\`ask\` lets a developer's agent put one question to Holtkeeper instead of chaining several tools. An agent answers it read-only, with the asker's own reach, and every statement names its source: a rule, a package version, a file, a document or a link. Sources nothing the run read backs are marked \`[unverified]\`, and an answer left without any source is not returned.
+
+- **enabled** (default off): the switch for the whole instance. It also needs an AI provider.
+- **perAnswerUsd** (default 0.3): spend cap of one answer.
+- **perPersonPerDay** (default 30): questions one person may ask a day, over all their tokens. Repeating a question within ten minutes is answered from memory and not counted.
+- **weeklyUsd** (default 15): what \`ask\` may spend a week, inside the AI budget; once reached, questions are refused until Monday.
+
+A token's owner can still turn the Ask toolset off for that token.`,
+  default: mcpAskSchema.parse({}),
+  schema: mcpAskSchema,
+})
+
 /** Levels of `access.crossTeam`, from narrowest to widest. */
 export const crossTeamLevels = ['off', 'metadata', 'snippets'] as const
 
@@ -489,7 +521,7 @@ export const accessCrossTeam = defineSetting({
 
 - **off**: only the repositories a person's grants cover. Agents working without an asker stay within the teams of the repository they work on.
 - **metadata**: anyone who may read some repository also reads every repository's package and version inventory, public API, stack and tool versions, usage counts. Agents (reviews, chat, Guide, MCP tokens) get the same reach; chat replies stay within what the asker may read.
-- **snippets** (default): metadata plus the code of how other teams use a package (\`find_usages\`, upgrade call sites).
+- **snippets** (default): metadata plus the code of how other teams use a package (\`package_usage\` with code, upgrade call sites).
 
 The level applies to every person, team and agent alike; there are no per-team exceptions. Pages show your teams first and fold other teams into a collapsed section.`,
   default: defaultCrossTeam,
@@ -518,4 +550,5 @@ export const builtinSettings: SettingDefinition[] = [
   mergeRequestComments,
   accessCrossTeam,
   tasksWrite,
+  mcpAsk,
 ]

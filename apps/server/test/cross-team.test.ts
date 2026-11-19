@@ -20,7 +20,6 @@ import { createApp } from '../src/app.ts'
 import { repoTarget } from '../src/context.ts'
 import { agentCatalogContext, storedStackTools } from '../src/tools/registry.ts'
 import { stackToolset } from '../src/tools/stack.ts'
-import { parseSubject } from '../src/tools/who-uses.ts'
 import {
   canReadShared,
   canSeeCatalog,
@@ -255,18 +254,24 @@ const shapesOnly = (other: { forge: string; path: string }) =>
   repoTarget(config, other).teams.includes('shapes')
 
 describe('MCP cross-team tools', () => {
-  test('who_uses lists teams, repositories and versions', async () => {
-    const result = await callTool('who_uses', { subject: 'npm:widget-kit' }, asShapes)
+  test('package_usage lists teams, repositories and versions', async () => {
+    const result = await callTool(
+      'package_usage',
+      { package: 'widget-kit', ecosystem: 'npm' },
+      asShapes,
+    )
     expect(result.text).toContain('# widget-kit (npm): 2 repositories of 2 teams, latest 3.0.0')
     expect(result.text).toContain('## team colors\n- `work:colors/red` 3.0.0')
     expect(result.text).toContain('## team shapes\n- `work:shapes/circle` 1.2.0 (2 majors behind)')
-    const tool = await callTool('who_uses', { subject: 'node' }, asShapes)
-    expect(tool.text).toContain('# Node.js: 2 uses, latest 26.1.0')
+    const tool = await callTool('package_usage', { package: 'node' }, asShapes)
+    expect(tool.text).not.toContain('Node.js')
+    const go = await callTool('package_usage', { package: 'widget-kit', ecosystem: 'Go' }, asShapes)
+    expect(go.text).not.toContain('# widget-kit (npm)')
   })
 
-  test('who_uses stays within the caller when the policy is off', async () => {
+  test('package_usage stays within the caller when the policy is off', async () => {
     await crossTeam('off')
-    const result = await callTool('who_uses', { subject: 'widget-kit' }, asShapes)
+    const result = await callTool('package_usage', { package: 'widget-kit' }, asShapes)
     expect(result.text).toContain('1 repository of 1 team')
     expect(result.text).not.toContain('colors/red')
   })
@@ -289,30 +294,36 @@ describe('MCP cross-team tools', () => {
     expect(viaMcp.text).toContain('Tool stack_usage not found')
   })
 
-  test('repo_stack shows runtimes, conventions and key dependencies', async () => {
-    const result = await callTool('repo_stack', { repo: 'work:colors/red' }, asShapes)
-    expect(result.text).toContain('# `work:colors/red` (team colors)')
-    expect(result.text).toContain('- Node.js 26 (latest 26.1.0)')
-    expect(result.text).toContain('- `.editorconfig`: matches')
-    expect(result.text).toContain('- widget-kit 3.0.0 (npm)')
-    await crossTeam('off')
-    expect((await callTool('repo_stack', { repo: 'work:colors/red' }, asShapes)).isError).toBe(true)
+  test('repo_stack shows runtimes, conventions and key dependencies; MCP leaves it out', async () => {
+    const repoStack = stackToolset(
+      storedStackTools(store.analyses, {
+        canRead: () => true,
+        canDetail: () => true,
+        teamsOf: (other) => repoTarget(config, other).teams,
+      }),
+    ).tools.find((tool) => tool.name === 'repo_stack')!
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const text = await repoStack.run({ repo: 'work:colors/red' }, ctx)
+    expect(text).toContain('# `work:colors/red` (team colors)')
+    expect(text).toContain('- Node.js 26 (latest 26.1.0)')
+    expect(text).toContain('- `.editorconfig`: matches')
+    expect(text).toContain('- widget-kit 3.0.0 (npm)')
+    const hidden = stackToolset(
+      storedStackTools(store.analyses, {
+        canRead: shapesOnly,
+        canDetail: shapesOnly,
+        teamsOf: (other) => repoTarget(config, other).teams,
+      }),
+    ).tools.find((tool) => tool.name === 'repo_stack')!
+    expect(hidden.run({ repo: 'work:colors/red' }, ctx)).rejects.toThrow('No stack record')
+    const viaMcp = await callTool('repo_stack', { repo: 'work:colors/red' }, asShapes)
+    expect(viaMcp.text).toContain('Tool repo_stack not found')
   })
 
   test('callers without any read grant reach nothing', async () => {
-    const result = await callTool('who_uses', { subject: 'widget-kit' }, asOutsider)
-    expect(result.text).toContain('No repository you can see uses widget-kit')
-  })
-
-  test('subjects name packages or tools', () => {
-    expect(parseSubject('npm:@scope/kit')).toEqual({
-      kind: 'package',
-      ecosystem: 'npm',
-      name: '@scope/kit',
-    })
-    expect(parseSubject('go:example.com/kit')).toMatchObject({ ecosystem: 'Go' })
-    expect(parseSubject('tool:node')).toEqual({ kind: 'tool', name: 'tool:node' })
-    expect(parseSubject('widget-kit')).toEqual({ kind: 'package', name: 'widget-kit' })
+    const result = await callTool('package_usage', { package: 'widget-kit' }, asOutsider)
+    expect(result.text).not.toContain('# widget-kit (npm)')
+    expect(result.text).not.toContain('work:')
   })
 })
 

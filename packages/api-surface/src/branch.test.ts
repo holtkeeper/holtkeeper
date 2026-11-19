@@ -92,7 +92,7 @@ test.skipIf(noGit)(
     )
     expect(section).toContain('**major**')
     expect(section).toContain('did not change (1.2.0)')
-    expect(section).toContain('call package_usage or find_usages')
+    expect(section).toContain('call package_usage (with `export` for the code of the uses)')
     const worktrees = (await git('worktree', 'list')).stdout.trim().split('\n')
     expect(worktrees).toHaveLength(1)
   },

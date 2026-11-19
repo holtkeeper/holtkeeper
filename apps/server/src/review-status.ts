@@ -80,12 +80,29 @@ export interface MergeRequestReviewStatus {
 }
 
 /** What `mergeRequestReviewStatus` reads. */
-export interface ReviewStatusDeps {
+interface ReviewStatusDeps {
   store: Pick<Store, 'analyses' | 'jobs' | 'settings'>
   config: HoltkeeperConfig
   /** The forge client of the repository's forge. */
   forge: GitForge
 }
+
+/** What `reviewToolsAccess` needs to answer and to queue reviews. */
+export interface ReviewToolsDeps {
+  store: ReviewStatusDeps['store'] & Partial<Pick<Store, 'kv'>>
+  config: HoltkeeperConfig
+  /** Repositories Holtkeeper must not change; no review is queued for them. */
+  readOnly?: (repo: RepoRef) => Promise<boolean>
+  /** Told about a queued review job. */
+  onQueued?: (job: Job) => void
+  now?: () => Date
+}
+
+/**
+ * How long a request waits for the automatic review of new commits before it queues one itself,
+ * so a webhook that is seconds away and the request do not both start a review.
+ */
+const AUTOMATIC_REVIEW_GRACE_MS = 60_000
 
 const firstLine = (text: string) =>
   text
@@ -252,33 +269,95 @@ async function mergeRequestReviewStatus(
   }
 }
 
+const parseRepo = (value: string): RepoRef | undefined => {
+  const separator = value.indexOf(':')
+  return separator > 0 && separator < value.length - 1
+    ? { forge: value.slice(0, separator), path: value.slice(separator + 1) }
+    : undefined
+}
+
 /**
- * `review_status` for one caller: repositories the caller may read analyses of (`canRead`) on a
+ * `code_review` for one caller: repositories the caller may read analyses of (`canRead`) on a
  * configured forge, merge requests found through the forge, the state from
- * `mergeRequestReviewStatus`. Anything else is a `ToolError` the agent can act on.
+ * `mergeRequestReviewStatus`. `review` also makes sure a review of the head is coming: when the
+ * merge request is open, reviews are on, the repository is not read-only, no review job waits or
+ * runs and no run covers the head, it queues a plain review of the head (trigger `command`, the
+ * same job a webhook queues, so the two never run twice). While reviews start by themselves on
+ * new commits it first waits `AUTOMATIC_REVIEW_GRACE_MS` from the first request for that head
+ * (remembered in `store.kv`; without it the wait is skipped). Anything it cannot do is a
+ * `ToolError` the agent can act on.
  */
 export function reviewToolsAccess(
-  deps: { store: ReviewStatusDeps['store']; config: HoltkeeperConfig },
+  deps: ReviewToolsDeps,
   canRead: (target: RepoTarget) => boolean,
 ): ReviewToolsAccess {
+  const now = deps.now ?? (() => new Date())
+
+  const find = async (value: string, query: { mergeRequest?: number; branch?: string }) => {
+    const repo = parseRepo(value)
+    const forge = repo && deps.config.forges[repo.forge]?.create()
+    if (!repo || !forge || !canRead(repoTarget(deps.config, repo)))
+      throw new ToolError(`No repository ${value} you may read reviews of; pass forge:path.`)
+    const bot = deps.config.jobs?.botUsernames?.[repo.forge]
+    const mr = await findMergeRequest(forge, repo, query).catch((error: unknown) => {
+      throw new ToolError(
+        `Holtkeeper${bot ? ` (forge user ${bot})` : ''} could not read merge requests of ${value}: ${firstLine(error instanceof Error ? error.message : String(error))}. Ask a maintainer to give it access to the repository; it needs to read merge requests and comment on them.`,
+      )
+    })
+    if (!mr)
+      throw new ToolError(
+        query.branch === undefined
+          ? `Holtkeeper sees no merge request !${query.mergeRequest} in ${value}. Check the number, and that Holtkeeper${bot ? ` (forge user ${bot})` : ''} has access to the repository.`
+          : `Holtkeeper reviews merge requests, and there is none from branch ${query.branch} in ${value}. Push the branch, open a merge request and call code_review again.`,
+      )
+    return { repo, forge, mr }
+  }
+
+  const status: ReviewToolsAccess['status'] = async (value, query) => {
+    const { repo, forge, mr } = await find(value, query)
+    return mergeRequestReviewStatus({ ...deps, forge }, repo, mr)
+  }
+
   return {
-    async status(value, query) {
-      const separator = value.indexOf(':')
-      const repo =
-        separator > 0 && separator < value.length - 1
-          ? { forge: value.slice(0, separator), path: value.slice(separator + 1) }
-          : undefined
-      const forge = repo && deps.config.forges[repo.forge]?.create()
-      if (!repo || !forge || !canRead(repoTarget(deps.config, repo)))
-        throw new ToolError(`No repository ${value} you may read reviews of; pass forge:path.`)
-      const mr = await findMergeRequest(forge, repo, query)
-      if (!mr)
-        throw new ToolError(
-          query.branch === undefined
-            ? `No merge request !${query.mergeRequest} in ${value}.`
-            : `No merge request from branch ${query.branch} in ${value}; push it and open one first.`,
-        )
-      return mergeRequestReviewStatus({ ...deps, forge }, repo, mr)
+    status,
+    async review(value, query) {
+      const { repo, forge, mr } = await find(value, query)
+      const current = await mergeRequestReviewStatus({ ...deps, forge }, repo, mr)
+      const head = mr.headSha
+      const reviewed = current.runs[0]?.data.head
+      if (current.off || mr.state !== 'open' || current.active || !head || reviewed === head)
+        return { status: current }
+      if (await deps.readOnly?.(repo)) return { status: current, request: 'read-only' }
+
+      const { kv } = deps.store
+      if (current.automatic.enabled && kv) {
+        const key = `review-request:${repo.forge}:${repo.path}!${mr.id}:${head}`
+        const first = Number(await kv.get(key)) || 0
+        if (!first) {
+          await kv.set(key, now().getTime(), 24 * 60 * 60)
+          return { status: current, request: 'automatic' }
+        }
+        if (now().getTime() - first < AUTOMATIC_REVIEW_GRACE_MS)
+          return { status: current, request: 'automatic' }
+      }
+
+      const createdAt = now().toISOString()
+      const job = await deps.store.jobs.enqueue({
+        analyzer: deps.config.jobs?.commands?.review?.analyzer ?? 'review',
+        repo,
+        ref: head,
+        options: { mergeRequest: mr.id },
+        trigger: 'command',
+        createdAt,
+      })
+      deps.onQueued?.(job)
+      return {
+        status: {
+          ...current,
+          active: { id: job.id, status: 'queued', createdAt, ref: head },
+        },
+        request: 'queued',
+      }
     },
   }
 }

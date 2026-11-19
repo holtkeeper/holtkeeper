@@ -1,6 +1,6 @@
 ---
 title: The review agent
-description: How Holtkeeper's own agent reviews merge requests, which language it writes in, how its suggestions and threads work, how replies teach it rules, and how your agent reads the review with review_status.
+description: How Holtkeeper's own agent reviews merge requests, which language it writes in, how its suggestions and threads work, how replies teach it rules, and how your agent asks for a review and reads it with code_review.
 panel: Quality › Reviews
 route: /quality/reviews
 permission: analyses:read
@@ -83,14 +83,18 @@ Reply in one of the agent's threads and it answers that thread: it explains, con
 
 Every summary ends with this request: when a comment is wrong or misses the point, reply in its thread and say how it should be.
 
-## Follow a review from your agent
+## Ask for a review from your agent
 
-A coding agent connected over MCP reads the review of its own merge request with `review_status`, so it can fix findings without you copying them from the forge. After pushing a branch, it calls the tool with the repository and the branch, or the merge request number:
+A coding agent connected over MCP asks for a review of its own merge request and reads it with one tool, `code_review`, so it can fix findings without you copying them from the forge. After pushing a branch or opening a merge request it offers you a review, then calls the tool with the repository and the branch, or the merge request number. There is nothing else to set: it is the same review a push starts.
+
+- **It needs a merge request.** For a branch without one the tool says to push the branch and open a merge request first. It also says when Holtkeeper's forge user cannot read the repository's merge requests, so a maintainer can give it access.
+- **It makes sure a review is coming.** When no review covers the newest commit and none is queued or running, the tool queues one. Where reviews start by themselves on new commits, the first call only notes the request and leaves the next minute to the automatic review; a later call queues one if none came. Either way a commit is never reviewed twice.
+- **Call it again for the findings.** A review takes a few minutes; the same call then returns them.
 
 ```text
 > I pushed the fix. What does Holtkeeper say now?
 
-● holtkeeper - review_status (repo: "gitlab:acme/checkout-web", branch: "feat/ABC-512-coupons")
+● holtkeeper - code_review (repo: "gitlab:acme/checkout-web", branch: "feat/ABC-512-coupons")
   ⎿ ## gitlab:acme/checkout-web!412 feat(cart): [ABC-512] keep coupons after login
     open · `feat/ABC-512-coupons` → `main` · head 9a8b7c6d · https://gitlab.example.com/…
     **Review: Needs changes** (incremental, 2026-11-15T10:04:00Z, reviewed 9a8b7c6d)
@@ -99,7 +103,7 @@ A coding agent connected over MCP reads the review of its own merge request with
     ### Open Holtkeeper threads (1)
     - **minor** · naming · `src/cart/coupon.ts:12` — Rename the widget flag (1 reply)
     ### Next
-    - Fix the open threads or answer them on the merge request; after the push the next review re-checks them and resolves the fixed ones.
+    - Fix the open threads or answer them on the merge request, push, and call code_review again: the next review re-checks them and resolves the fixed ones.
 ```
 
 The answer has:
@@ -112,18 +116,18 @@ The answer has:
 - up to four earlier reviews;
 - **Next**: what to do now.
 
-| Next says                                                  | Meaning                                                                                                                                  |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Holtkeeper does not review this repository                 | **Merge request reviews** is off for it, or the review analyzer is turned off; the reason follows.                                       |
-| The merge request is closed or merged                      | Nothing more is reviewed.                                                                                                                |
-| A review is queued or running                              | Call `review_status` again in a few minutes.                                                                                             |
-| The last review job failed, hit the budget or was canceled | Comment `/holtkeeper review` on the merge request to try again.                                                                          |
-| No review yet                                              | One starts on the next push when a merge request trigger covers it; otherwise the reason and the advice to comment `/holtkeeper review`. |
-| New commits since the reviewed head                        | Nothing is queued for them; comment `/holtkeeper review` to ask for a review.                                                            |
-| Fix the open threads                                       | Fix them or answer in the thread; the next review re-checks them after the push and resolves fixed ones.                                 |
-| Nothing left to fix                                        | The newest review is clean and nothing is running.                                                                                       |
+| Next says                                  | Meaning                                                                                                               |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Holtkeeper does not review this repository | **Merge request reviews** is off for it, or the review analyzer is turned off; the reason follows.                    |
+| The merge request is closed or merged      | Nothing more is reviewed.                                                                                             |
+| A review was queued just now               | The tool queued it, after naming a last job that failed, hit the budget or was canceled. Call again in a few minutes. |
+| A review is on its way                     | Reviews start by themselves on new commits; call again in a few minutes.                                              |
+| A review is queued or running              | Call `code_review` again in a few minutes.                                                                            |
+| The repository is frozen                   | Holtkeeper may not change it, so no review was queued; a maintainer can lift the freeze.                              |
+| Fix the open threads                       | Fix them or answer in the thread, push and call again; the next review re-checks them and resolves fixed ones.        |
+| Nothing left to fix                        | The newest review is clean and nothing is running.                                                                    |
 
-Replies to the agent's threads and reviews that found nothing new are left out of the list of runs. `review_status` needs `analyses:read` on the repository; a repository you cannot read, a branch without a merge request or a call without `branch` and `mergeRequest` answers with an error.
+Replies to the agent's threads and reviews that found nothing new are left out of the list of runs. `code_review` needs `analyses:read` on the repository; a repository you cannot read, a branch without a merge request or a call without `branch` and `mergeRequest` answers with an error that says what to do.
 
 ## In the panel
 
@@ -183,4 +187,4 @@ Options are the `analyzers.review` setting, per repository, path pattern, team o
 - [Learnings](/guide/knowledge/learnings/) — rules taught in review replies.
 - [Settings › Analyzers](/guide/settings/analyzers/) — `analyzers.review` per scope.
 - [Review analyzer](/modules/review/) — the module behind it.
-- [MCP tools](/reference/mcp-tools/#reviews) — `review_status` and its arguments.
+- [MCP tools](/reference/mcp-tools/#reviews) — `code_review` and its arguments.

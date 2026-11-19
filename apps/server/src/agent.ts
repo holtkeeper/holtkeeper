@@ -18,6 +18,7 @@ import {
   type ProviderAgent,
   type RouteHealth,
   type RoutedAgent,
+  type ToolContext,
   type Toolset,
   createAgent,
   createLimiter,
@@ -30,7 +31,6 @@ import {
   resolveTierModels,
 } from '@holtkeeper/agent'
 import {
-  type LibraryDocsAccess,
   RESULT_CAPS,
   capToolsets,
   codeTools,
@@ -38,7 +38,6 @@ import {
   SEARCH_KNOWLEDGE_TOOL,
   gitTools,
   knowledgeTools,
-  libraryTools,
   mountToolsets,
 } from '@holtkeeper/agent-tools'
 import {
@@ -77,9 +76,9 @@ import {
 } from './libraries.ts'
 import { type RulesResolver, createRulesResolver, readForgeRuleFiles } from './rules.ts'
 import { type AssetToolsAccess, assetsToolset, storedAssetTools } from './tools/assets.ts'
-import { type CatalogToolsContext, catalogToolset } from './tools/catalog.ts'
 import { knowledgeAccessOf } from './tools/knowledge.ts'
 import { type OpsToolsAccess, opsToolset } from './tools/ops.ts'
+import { type PackageToolsContext, packagesToolset } from './tools/packages.ts'
 import { agentCatalogContext, agentRulesAccess, taskToolsets } from './tools/registry.ts'
 import { type ReleaseToolsAccess, releasesToolset } from './tools/releases.ts'
 import type { SupplyToolsAccess } from './tools/repos.ts'
@@ -94,7 +93,7 @@ const DEFAULT_TASK_KIND = 'agent'
 /** The rule agent a task kind reads rules as: reviews, chat, release notes, or tasks. */
 function ruleAgentOf(taskKind: string): RuleAgent {
   if (taskKind === 'review' || taskKind.startsWith('review-')) return 'review'
-  if (taskKind === 'chat' || taskKind.startsWith('chat-')) return 'chat'
+  if (taskKind === 'chat' || taskKind.startsWith('chat-') || taskKind === 'ask') return 'chat'
   if (taskKind === 'release-notes' || taskKind.startsWith('release')) return 'release'
   return 'task'
 }
@@ -113,6 +112,13 @@ interface AgentRunOrigin {
   subject?: string
   /** Merge request (iid) the runs work on, kept on usage records. */
   mergeRequest?: number
+}
+
+/** A text a run's model was given beyond its prompt. */
+export interface AgentEvidence {
+  /** `context` for the resolved rules, else the name of the tool that returned it. */
+  source: string
+  text: string
 }
 
 /** One finished (or budget-denied) agent run. Exactly one of `result` and `error` is set. */
@@ -156,10 +162,11 @@ export interface ServerDefaultsOptions {
    * when there is one. The `git` toolset falls back to `localRunner` without it.
    */
   runner?: CommandRunner
-  /** Third-party library docs; adds the `libraries` toolset with versions defaulting to `repo`'s. */
-  libraries?: LibraryDocsAccess
-  /** The organization's package catalog; adds the `catalog` toolset for task kinds that mount it. */
-  catalog?: CatalogToolsContext
+  /**
+   * The organization's packages and the third-party libraries it depends on; adds the `packages`
+   * toolset (and `stack` with `packages.stack`) for task kinds that mount them.
+   */
+  packages?: PackageToolsContext
   /** Other repositories' rules and test ids; adds the `rules` toolset for task kinds that mount it. */
   rules?: RulesAccess
   /** Release state of the repository and its teammates; adds the read-only `releases` toolset for task kinds that mount it. */
@@ -183,6 +190,12 @@ export interface ServerDefaultsOptions {
   onRun?: OnAgentRun
   /** Receives errors thrown by `onRun`. */
   onRunError?: (error: unknown) => void
+  /**
+   * Hears every text the model of a run is given beyond the prompt: the rules context the run
+   * starts with and each result a mounted tool returns, as capped. For callers that check an
+   * answer against what the run actually read.
+   */
+  onEvidence?: (evidence: AgentEvidence) => void
 }
 
 const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
@@ -192,8 +205,7 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
 
 /**
  * `agent` with what server tasks get: the toolsets `taskToolsets` names for the task kind out of
- * `code`, `docs`, `knowledge`, `libraries` (when `libraries` is given), `catalog` (when
- * `catalog` is given), `rules` (when `rules` is given), `releases` (when `releases` is given), `ops` (when `ops` is given) and `assets` (when `assets` is given), then the task's own toolsets (one of the same name wins); every tool result
+ * `code`, `docs`, `knowledge`, `packages` (when `packages` is given), `rules` (when `rules` is given), `releases` (when `releases` is given), `ops` (when `ops` is given) and `assets` (when `assets` is given), then the task's own toolsets (one of the same name wins); every tool result
  * stays within `RESULT_CAPS`. A task without its own `context` gets the repository's resolved
  * rules for its task kind (`ruleAgentOf`) as `context`; a task that brings a `context` (the
  * review, which resolves rules with the files of its checkout) keeps it as is. No external MCP server is added. `budgets` may deny a run before it starts and caps the cost of the runs it allows
@@ -304,19 +316,31 @@ export function withServerDefaults(
           docsTools(options.runner ? { runner: options.runner } : {}),
           gitTools({ runner: options.runner ?? localRunner }),
           ...knowledgeOf(taskKind),
-          ...(options.libraries
-            ? [libraryTools({ access: options.libraries, repo: `${repo.forge}:${repo.path}` })]
-            : []),
-          ...(options.catalog ? [catalogToolset(options.catalog)] : []),
-          ...(options.catalog?.stack ? [stackToolset(options.catalog.stack)] : []),
+          ...(options.packages ? [packagesToolset(options.packages)] : []),
+          ...(options.packages?.stack ? [stackToolset(options.packages.stack)] : []),
           ...(rules ? [rules] : []),
           ...(options.releases ? [releasesToolset(options.releases)] : []),
           ...(options.ops ? [opsToolset(options.ops, now)] : []),
           ...(options.assets ? [assetsToolset(options.assets)] : []),
         ]
-        const toolsets = capToolsets(
+        const { onEvidence } = options
+        const mounted = capToolsets(
           merge(mountToolsets(available, taskToolsets(taskKind)), task.toolsets),
         )
+        const toolsets = onEvidence
+          ? mounted.map((toolset) => ({
+              ...toolset,
+              tools: toolset.tools.map((tool) => ({
+                ...tool,
+                run: async (input: Parameters<typeof tool.run>[0], ctx: ToolContext) => {
+                  const text = await tool.run(input, ctx)
+                  onEvidence({ source: tool.name, text })
+                  return text
+                },
+              })),
+            }))
+          : mounted
+        if (context) onEvidence?.({ source: 'context', text: context })
         prepared = {
           ...capped,
           taskKind,
@@ -378,7 +402,7 @@ export interface SettingsAgentOptions {
   runner?: CommandRunner
   /**
    * Where the library index keeps API surfaces and source snapshots (with `store.libraries`,
-   * agents get the `libraries` toolset) and where every run stores its transcript.
+   * the `packages` toolset covers third-party libraries) and where every run stores its transcript.
    */
   artifacts?: ArtifactStore
   /**
@@ -447,11 +471,13 @@ async function anthropicCatalogPricing(
 }
 
 /** What a caller may tell `settingsAgentFor` about the job an agent is for. */
-interface AgentJob extends AgentRunOrigin {
+export interface AgentJob extends AgentRunOrigin {
   /** The job's command runner, e.g. the container runner. */
   runner?: CommandRunner
   /** The person the runs answer; tools then read only what they may read too. */
   requester?: Principal
+  /** See `ServerDefaultsOptions.onEvidence`. */
+  onEvidence?: (evidence: AgentEvidence) => void
 }
 
 /**
@@ -746,10 +772,10 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       ...(budgets && { budgets }),
       ...(options.artifacts && { artifacts: options.artifacts }),
       ...(runner && { runner }),
-      ...(libraries && { libraries }),
       ...(releases && { releases }),
       ...(ops && { ops }),
       ...(requester && { requester }),
+      ...(job?.onEvidence && { onEvidence: job.onEvidence }),
       assets: storedAssetTools(store, {
         targetOf: (other) => repoTarget(config, other),
         canRead: (other) =>
@@ -780,7 +806,10 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         },
         testIds,
       }),
-      catalog: catalogContext,
+      packages:
+        libraries && catalogContext.library
+          ? { ...catalogContext, library: { ...catalogContext.library, docs: libraries } }
+          : catalogContext,
       onRunError: (error) =>
         log(
           `agent: recording a run failed: ${error instanceof Error ? error.message : String(error)}`,

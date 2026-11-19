@@ -278,22 +278,24 @@ const renderPreview = (preview: ReleaseStepPreview, confirm: string | undefined)
 export type ReleaseRulesAccess = Pick<ReleaseToolsAccess, 'repoOf' | 'settings' | 'rules'>
 
 /**
- * `release_rules`: how a repository the caller may read releases, from its release settings and
- * the rules it resolves for release notes. The `releases` toolset carries it, and the MCP
- * `rules` toolset too.
+ * How a repository the caller may read releases, from its release settings and the rules it
+ * resolves for release notes, as Markdown. Throws a `ToolError` for a repository they may not read.
  */
-export function releaseRulesTool(access: ReleaseRulesAccess): RegistryTool {
+export async function releaseRules(access: ReleaseRulesAccess, repo: string): Promise<string> {
+  const target = access.repoOf(repo)
+  if (!target) throw noRepo(repo)
+  const [settings, rules] = await Promise.all([access.settings(target), access.rules(target)])
+  return renderReleaseRules(repo, settings, rules)
+}
+
+/** `release_rules` of the `releases` toolset: `releaseRules` as a tool. */
+function releaseRulesTool(access: ReleaseRulesAccess): RegistryTool {
   return defineTool({
     name: 'release_rules',
     description:
       "How a repository releases, in plain language: branches, merge request or trunk flow, tag format and version scheme, how the bump is derived from commit conventions, acceptance, gates, environments in order, and the team's rules for release notes.",
     input: z.object({ repo: repoArg }),
-    run: async ({ repo }) => {
-      const target = access.repoOf(repo)
-      if (!target) throw noRepo(repo)
-      const [settings, rules] = await Promise.all([access.settings(target), access.rules(target)])
-      return renderReleaseRules(repo, settings, rules)
-    },
+    run: ({ repo }) => releaseRules(access, repo),
     subject: ({ repo }) => repo,
   })
 }

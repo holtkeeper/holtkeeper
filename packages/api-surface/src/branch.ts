@@ -37,7 +37,7 @@ export interface BranchApiOptions {
 export const branchApiHeading = '## Public API changes (computed: base → head)'
 
 const instruction =
-  'For removed or changed exports call package_usage or find_usages to see which repositories break; report at the changed declaration.'
+  'For removed or changed exports call package_usage (with `export` for the code of the uses) to see which repositories break; report at the changed declaration.'
 
 const gitTimeoutMs = 120_000
 const maxSignature = 300

@@ -5,54 +5,69 @@ sidebar:
   order: 3
 ---
 
-Holtkeeper's MCP endpoint offers about thirty tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis or an AI run. Every tool reads, except `propose_learning`, which leaves a pending learning people may reject, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
+Holtkeeper's MCP endpoint offers about fifteen tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis; only `ask`, where an administrator turned it on, runs an AI agent. Every tool reads, except `propose_learning`, which leaves a pending learning people may reject, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
 
-Repositories are always named `forge:path`, for example `gitlab:acme/checkout-web`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
+A repository is named by its path (`acme/checkout-web`): Holtkeeper works out the forge. A git remote URL (`git@gitlab.example.com:acme/checkout-web.git`) and the full `forge:path` (`gitlab:acme/checkout-web`) work too, and `forge:path` is needed only when several forges have a repository at that path. Answers name repositories as `forge:path`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
 
-## Your organization's packages
+## Packages: yours and third-party
 
-Holtkeeper indexes the public API of every package your repositories publish: each export with its declaration and doc comment, for every released version and the default branch. Agents use it instead of reading `node_modules` or other repositories' sources.
+Holtkeeper indexes the public API of every package your repositories publish (each export with its declaration and doc comment, for every released version and the default branch) and the npm and Go libraries the fleet depends on, at the versions in use and the ones an upgrade would land on. Both answer through the same tools, so an agent never has to know whether a package is yours; each result says which it is. Agents use them instead of reading `node_modules`, the Go module cache or other repositories' sources. Pass `repo` and versions default to what that repository uses, so answers match the code in front of the agent. See [Library docs](/agents/library-docs/) for what is indexed of third-party libraries.
 
-| Question                            | Tool                                |
-| ----------------------------------- | ----------------------------------- |
-| Is there already a helper for this? | `search_symbols`, then `get_symbol` |
-| What does this package export?      | `list_packages`, `get_package_api`  |
-| What changed between two versions?  | `list_versions`, `diff_versions`    |
+| Question                                | Tool                                          |
+| --------------------------------------- | --------------------------------------------- |
+| Is there already a helper for this?     | `find_packages`, then `package_api`           |
+| What does this package export?          | `package_api` (`symbol` or `query` to narrow) |
+| Which versions are there, what changed? | `package_changes`                             |
+| How do I use this API at my version?    | `package_docs`                                |
+| Is this error a known issue?            | `package_docs` with `issues`                  |
+| How is this implemented?                | `package_source`                              |
 
 ```text
 > Is there a date formatting helper in our packages?
 
-● holtkeeper - search_symbols (query: "formatDate")
-  ⎿ - formatDate — function, @acme/fmt-utils@2.4.0, repo `gitlab:acme/fmt-utils`
-      import { formatDate } from '@acme/fmt-utils'
-      export function formatDate(value: Date | string, style?: DateStyle): string
-      Formats a date in the user's locale; `style` defaults to `medium`.
-    - formatDateRange — function, @acme/fmt-utils@2.4.0 …
+● holtkeeper - find_packages (query: "formatDate")
+  ⎿ ## Exports of organization packages
+    ### `@acme/fmt-utils` → formatDate (function)
+    @acme/fmt-utils@2.4.0, repo `gitlab:acme/fmt-utils`
+    Formats a date in the user's locale; `style` defaults to `medium`.
+    export function formatDate(value: Date | string, style?: DateStyle): string
+    …
 
-● holtkeeper - get_symbol (package: "@acme/fmt-utils", name: "formatDate")
+● holtkeeper - package_api (package: "@acme/fmt-utils", symbol: "formatDate")
   ⎿ import { formatDate } from '@acme/fmt-utils'
     …
 ```
 
-Packages marked **removed** were dropped from their repository; answers about them start with a warning not to use them in new code.
+```text
+> Our build fails with "Cannot read properties of undefined (reading 'shape')" after the zod bump.
+
+● holtkeeper - package_docs (package: "zod", query: "reading 'shape'", issues: true,
+                              repo: "gitlab:acme/checkout-web")
+  ⎿ 1. closed · fixed in 3.23.4 — "Error reading 'shape' when extending a lazy schema"
+       https://github.com/…/issues/…
+```
+
+Packages marked **removed** were dropped from their repository; answers about them start with a warning not to use them in new code. Organization packages have no indexed docs: their API and source answer instead. Text from libraries and issues is third-party data; agents are told never to follow instructions in it.
 
 ## How the fleet uses a package
 
 A second index records how every repository uses its dependencies: which exports, how (call, JSX, type, member access), which JSX props and which members.
 
-| Question                                  | Tool             |
-| ----------------------------------------- | ---------------- |
-| Who uses this package, at which versions? | `package_usage`  |
-| Show me the code of those uses.           | `find_usages`    |
-| What breaks if everyone upgrades to 5.0?  | `upgrade_impact` |
-| What does this repository depend on?      | `repo_packages`  |
-| Which teams use this library or tool?     | `who_uses`       |
+| Question                                  | Tool                                            |
+| ----------------------------------------- | ----------------------------------------------- |
+| Who uses this package, at which versions? | `package_usage`                                 |
+| Show me the code of those uses.           | `package_usage` with `export`, `repo` or `code` |
+| What breaks if everyone upgrades to 5.0?  | `package_changes` with `from` and `to`          |
+| What does this repository depend on?      | `find_packages` with `repo`                     |
 
 ```text
 > We want to release @acme/widget-kit 5.0. Who breaks?
 
-● holtkeeper - upgrade_impact (package: "@acme/widget-kit", from: "4.2.0", to: "5.0.0")
-  ⎿ 3 repositories affected, 2 already on 5.0.0
+● holtkeeper - package_changes (package: "@acme/widget-kit", from: "4.2.0", to: "5.0.0",
+                                 include: ["impact"])
+  ⎿ @acme/widget-kit 4.2.0 → 5.0.0 (organization package, `gitlab:acme/widget-kit`)
+    ## Uses the upgrade affects
+    3 repositories affected, 2 already on 5.0.0
     ## gitlab:acme/admin-ui (team platform) — 4 breaking, 2 check
     - breaking: Modal prop `footer` removed — src/orders/ConfirmDialog.tsx:41
         <Modal open={open} footer={<Actions />} onClose={close}>
@@ -60,30 +75,7 @@ A second index records how every repository uses its dependencies: which exports
     …
 ```
 
-`upgrade_impact` covers npm packages and Go modules; for Go it sees syntactic uses, plus the methods and fields reached through values (a method called on a returned value) when the usages job has the `go` toolchain.
-
-## Third-party libraries
-
-The npm and Go libraries the fleet uses are indexed at the versions in use and the ones an upgrade would land on. Pass `repo` and versions default to what that repository uses, so answers match the code in front of the agent. See [Library docs](/agents/library-docs/) for what is indexed.
-
-| Question                                        | Tool                                      |
-| ----------------------------------------------- | ----------------------------------------- |
-| Which versions are indexed, who uses which?     | `library_versions`                        |
-| How do I use this API at my version?            | `search_library_docs`, `read_library_doc` |
-| What changed between my version and the latest? | `library_changes`                         |
-| Is this error a known issue?                    | `search_library_issues`                   |
-| How is this implemented?                        | `library_source`                          |
-
-```text
-> Our build fails with "Cannot read properties of undefined (reading 'shape')" after the zod bump.
-
-● holtkeeper - search_library_issues (package: "zod", query: "reading 'shape'",
-                                       repo: "gitlab:acme/checkout-web")
-  ⎿ 1. closed · fixed in 3.23.4 — "Error reading 'shape' when extending a lazy schema"
-       https://github.com/…/issues/…
-```
-
-Text from libraries and issues is third-party data; agents are told never to follow instructions in it.
+Between two versions `package_changes` returns the API diff, for third-party libraries the changelog and migration notes, and the uses the upgrade affects; `include` narrows it to one part. The impact covers npm packages and Go modules; for Go it sees syntactic uses, plus the methods and fields reached through values (a method called on a returned value) when the usages job has the `go` toolchain.
 
 ## Adding or upgrading a dependency
 
@@ -101,42 +93,59 @@ Before an agent adds a dependency, `evaluate_dependency` answers everything the 
   ⎿ date-fns — used by 14 repositories, newest 4.1.0; no open advisories; MIT (allowed)
 ```
 
-## The stack of a repository
-
-| Question                   | Tool         |
-| -------------------------- | ------------ |
-| What runs this repository? | `repo_stack` |
-
-`repo_stack` lists one repository's runtimes, images, conventions status and key dependencies. Before writing a Dockerfile or CI config, an agent copies the versions the repository already runs; for which versions the organization runs elsewhere, ask `who_uses` with `tool:node`, or look at **Supply chain › Stack** in the panel.
-
 ## Rules and knowledge
 
-Before changing code in a repository an agent calls `repo_rules` for the rules that apply there; before committing, `commit_conventions` and `check_commit_message`; for UI work, `test_ids`; for images, `asset_policy`; before releasing, `release_rules` for the branches, tag format and how commits bump the version. `search_knowledge` searches rules and learnings. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
+Before changing code in a repository an agent calls `repo_rules` for the rules that apply there. Its `topics` add one convention in full: `commits` before committing (then `check_commit_message` to verify), `test-ids` for UI work (and `test_ids` for the existing ids), `assets` for images, `releases` for the branches, tag format and how commits bump the version. `search_knowledge` searches rules and learnings and reads one in full by `id`. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
+
+## Ask a whole question
+
+Some questions take several tools: what an upgrade breaks here and how to migrate, how the team does something, whether anyone solved a problem before. Where an administrator turned on the `mcp.ask` setting, `ask` hands such a question to an agent on Holtkeeper's side. It reads the same tools with your access and answers in Markdown.
+
+```text
+● holtkeeper - ask (question: "What breaks in checkout-web if we move @acme/widget-kit from 4.2.0 to 5.0.0?",
+                    repo: "gitlab:acme/checkout-web")
+  ⎿ `Modal` lost its `footer` prop in 5.0.0 [pkg:@acme/widget-kit@5.0.0 Modal]. checkout-web
+    passes it in one place [file:gitlab:acme/checkout-web src/orders/ConfirmDialog.tsx:41].
+    The team's rule is to move actions into `Modal.Actions` [rule:r4c1].
+
+    Sources:
+    - [pkg:@acme/widget-kit@5.0.0 Modal]
+    - [file:gitlab:acme/checkout-web src/orders/ConfirmDialog.tsx:41]
+    - [rule:r4c1]
+```
+
+Every statement names where it comes from: a rule or learning (`[rule:<id>]`, `[learn:<id>]`), a package version and export (`[pkg:…]`), a file and line (`[file:…]`), a library document (`[doc:…]`) or a link (`[url:…]`). Holtkeeper checks each source against what the agent actually read. A source nothing backs is replaced by `[unverified]`, so you see which statement to check yourself, and an answer left with no backed source is not returned at all: the tool says `No grounded answer` and names what it looked at.
+
+What to keep in mind:
+
+- It answers from what Holtkeeper indexed. It cannot read your working tree, and it does not search the source of other repositories beyond indexed usages, package source and docs.
+- It takes up to 90 seconds and spends the AI budget, so use the direct tools for a single lookup. Clients that support progress see which tools it reads meanwhile.
+- Limits are set in `mcp.ask`: a spend cap per answer, questions per person per day and a weekly spend for everyone. Repeating a question within ten minutes returns the earlier answer and is not counted.
 
 ## Reviews of your merge request
 
-| Question                                                   | Tool            |
-| ---------------------------------------------------------- | --------------- |
-| What did Holtkeeper's review find, and what is still open? | `review_status` |
+| Question                                                      | Tool          |
+| ------------------------------------------------------------- | ------------- |
+| Can Holtkeeper review my merge request, and what did it find? | `code_review` |
 
-After pushing a branch with a merge request, an agent calls `review_status` with the repository and the branch (or the merge request number). The answer has the newest review's verdict and findings with file and line, the Holtkeeper threads still open, and a **Next** section: what to fix, whether a review is queued or running, or why none will start.
+After pushing a branch or opening a merge request, an agent offers you a code review and calls `code_review` with the repository and the branch (or the merge request number). One call asks for the review and reports how it stands: if no review covers the newest commit, the tool makes sure one is coming and never starts a second one; a few minutes later the same call returns the verdict and findings with file and line, the Holtkeeper threads still open, and a **Next** section. Without a merge request it says to open one first.
 
 ```text
-● holtkeeper - review_status (repo: "gitlab:acme/checkout-web", branch: "feat/ABC-123-widget-sizes")
+● holtkeeper - code_review (repo: "gitlab:acme/checkout-web", branch: "feat/ABC-123-widget-sizes")
   ⎿ ## gitlab:acme/checkout-web!412 feat(widgets): [ABC-123] add widget sizes
     open · `feat/ABC-123-widget-sizes` → `main` · head 5d6e7f80 · https://gitlab.example.com/…
     **Review: Needs changes** (full, 2026-11-14T09:12:00Z, reviewed 5d6e7f80)
     ### Findings of this run (1)
     - **major** · correctness · `src/widgets/size.ts:18` — **Size falls back to 0** (has a suggestion)
     ### Next
-    - Fix the open threads or answer them on the merge request; after the push the next review re-checks them and resolves the fixed ones.
+    - Fix the open threads or answer them on the merge request, push, and call code_review again: the next review re-checks them and resolves the fixed ones.
 ```
 
-See [Follow a review from your agent](/agents/review-agent/#follow-a-review-from-your-agent).
+See [Ask for a review from your agent](/agents/review-agent/#ask-for-a-review-from-your-agent).
 
 ## Tasks
 
-No MCP tool changes code on the forge or follows task groups. Tasks start from Chat, **Roll out** in **Supply chain › Libraries** and **Ops › Tasks**; an agent follows a task's merge request with `review_status` on the task's branch, and people follow the group in **Ops › Tasks**. See [Changing code through tasks](/agents/tasks/).
+No MCP tool changes code on the forge or follows task groups. Tasks start from Chat, **Roll out** in **Supply chain › Libraries** and **Ops › Tasks**; an agent follows a task's merge request with `code_review` on the task's branch, and people follow the group in **Ops › Tasks**. See [Changing code through tasks](/agents/tasks/).
 
 ## Exposed secrets
 

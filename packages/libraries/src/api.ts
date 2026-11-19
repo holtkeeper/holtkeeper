@@ -2,7 +2,7 @@ import { type ApiPackage, apiSurfaceDataSchema } from '@holtkeeper/api-surface'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { LibraryRef, LibraryStore } from '@holtkeeper/store'
 
-/** API surfaces of indexed third-party library versions, for `get_package_api` and its kin. */
+/** API surfaces of indexed third-party library versions, for `package_api` and its kin. */
 export interface LibraryApi {
   /** The API of one version; `undefined` when the version or its API is not indexed. */
   get(ref: LibraryRef, version: string): Promise<ApiPackage[] | undefined>

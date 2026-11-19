@@ -33,7 +33,7 @@ const tool = (name: string, inputSchema: McpTool['inputSchema'] = {}): McpTool =
 test('toolParams lists required arguments first with readable types', () => {
   expect(
     toolParams(
-      tool('search_library_docs', {
+      tool('package_docs', {
         properties: {
           ecosystem: { type: 'string', enum: ['npm', 'go'] },
           limit: { type: 'integer', minimum: 1, maximum: 30, description: 'Default 10' },
@@ -49,24 +49,27 @@ test('toolParams lists required arguments first with readable types', () => {
     { name: 'limit', type: 'integer 1–30', required: false, description: 'Default 10' },
     { name: 'names', type: 'string[]', required: false },
   ])
-  expect(toolParams(tool('list_packages'))).toEqual([])
+  expect(toolParams(tool('find_packages'))).toEqual([])
 })
 
-test('groupTools splits package and library tools and drops empty groups', () => {
+test('groupTools splits tools by what they are about and drops empty groups', () => {
   expect(
     groupTools([
-      tool('list_packages'),
-      tool('library_source'),
+      tool('find_packages'),
+      tool('repo_rules'),
+      tool('package_source'),
       tool('search_knowledge'),
       tool('evaluate_dependency'),
-      tool('get_symbol'),
+      tool('ask'),
+      tool('code_review'),
       tool('qa_task'),
     ]).map((group) => [group.id, group.tools.map((t) => t.name)]),
   ).toEqual([
-    ['packages', ['list_packages', 'get_symbol']],
-    ['libraries', ['library_source', 'evaluate_dependency']],
+    ['packages', ['find_packages', 'package_source', 'evaluate_dependency']],
+    ['repository', ['repo_rules', 'code_review']],
     ['knowledge', ['search_knowledge']],
+    ['ask', ['ask']],
     ['qa', ['qa_task']],
   ])
-  expect(groupTools([tool('list_packages')]).map((group) => group.id)).toEqual(['packages'])
+  expect(groupTools([tool('find_packages')]).map((group) => group.id)).toEqual(['packages'])
 })

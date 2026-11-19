@@ -6,10 +6,9 @@ import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import type { UsageIndex } from '../api-surface/usages.ts'
 import { groupUses, libraryKeyOf } from '../dependencies.ts'
 import { fleetLibraryUses } from '../libraries.ts'
-import { type StackToolsContext, matchesTool, renderStackUsage, stackUseRows } from './stack.ts'
 
-/** What `whoUses` reads, limited to what one caller may see. */
-export interface WhoUsesContext {
+/** What `packageUsers` reads, limited to what one caller may see. */
+export interface PackageUsersContext {
   analyses: AnalysisStore
   catalog: ApiCatalog
   usages: UsageIndex
@@ -18,8 +17,6 @@ export interface WhoUsesContext {
   /** The owner teams of a repository. */
   ownerOf: (repo: RepoRef) => string[]
   latest?: Pick<LatestVersions, 'all'>
-  /** Stack tools, for subjects that name a runtime, image or tool. */
-  stack?: StackToolsContext
 }
 
 const MAX_ROWS = 40
@@ -27,27 +24,6 @@ const MAX_ROWS = 40
 const parseKey = (key: string): RepoRef => {
   const separator = key.indexOf(':')
   return { forge: key.slice(0, separator), path: key.slice(separator + 1) }
-}
-
-const ecosystemOf = (value: string): LibraryEcosystem | undefined =>
-  value === 'npm' ? 'npm' : value.toLowerCase() === 'go' ? 'Go' : undefined
-
-/** `npm:x`, `Go:x`, `tool:node` or a bare name, split into what it names. */
-export function parseSubject(
-  subject: string,
-):
-  | { kind: 'package'; ecosystem?: LibraryEcosystem; name: string }
-  | { kind: 'tool'; name: string } {
-  const value = subject.trim()
-  const separator = value.indexOf(':')
-  if (separator > 0) {
-    const prefix = value.slice(0, separator)
-    const rest = value.slice(separator + 1)
-    if (prefix === 'tool' || prefix === 'image') return { kind: 'tool', name: value }
-    const ecosystem = ecosystemOf(prefix)
-    if (ecosystem && rest) return { kind: 'package', ecosystem, name: rest }
-  }
-  return { kind: 'package', name: value }
 }
 
 /** The library key of the Go module `name` names: the module itself, else the longest module path prefixing a package import path. */
@@ -63,52 +39,47 @@ const goModuleKey = (keys: Iterable<string>, name: string) => {
 }
 
 /**
- * Markdown of who uses a library, an internal package or a stack tool: teams → repositories →
- * versions, with how far each is behind the latest release, in at most `MAX_ROWS` rows. A bare
- * name is looked up as an npm package, then a Go module (a name with a `/` and no `@scope` is
- * tried as Go first; a Go package import path counts as its module), then a stack tool. Reads
- * stored records only.
+ * Markdown of who uses a library or an internal package: teams → repositories → versions, with
+ * how far each is behind the latest release, in at most `MAX_ROWS` rows; `undefined` when no
+ * repository the caller can see uses it. Without `ecosystem`, the name is looked up as an npm
+ * package, then a Go module (a name with a `/` and no `@scope` is tried as Go first; a Go package
+ * import path counts as its module). Reads stored records only.
  */
-export async function whoUses(context: WhoUsesContext, subject: string): Promise<string> {
-  const parsed = parseSubject(subject)
-  const toolName = parsed.kind === 'tool' ? parsed.name.replace(/^tool:/, '') : parsed.name
-  if (parsed.kind === 'package') {
-    const fleet = await fleetLibraryUses(context.analyses, {
-      accept: context.canRead,
-      usages: context.usages,
-      catalog: context.catalog,
+export async function packageUsers(
+  context: PackageUsersContext,
+  name: string,
+  ecosystem?: LibraryEcosystem,
+): Promise<string | undefined> {
+  const fleet = await fleetLibraryUses(context.analyses, {
+    accept: context.canRead,
+    usages: context.usages,
+    catalog: context.catalog,
+  })
+  const libraries = groupUses(fleet.uses)
+  const goFirst = !name.startsWith('@') && name.includes('/')
+  const candidates: LibraryEcosystem[] = ecosystem
+    ? [ecosystem]
+    : goFirst
+      ? ['Go', 'npm']
+      : ['npm', 'Go']
+  for (const candidate of candidates) {
+    const key =
+      candidate === 'Go'
+        ? goModuleKey(libraries.keys(), name)
+        : libraryKeyOf({ ecosystem: candidate, name })
+    const users = libraries.get(key)
+    if (!users) continue
+    const internal = fleet.internal.has(key)
+    // oxlint-disable-next-line no-await-in-loop -- at most one lookup, the loop returns
+    const latest = internal ? fleet.defined.get(key) : (await context.latest?.all())?.get(key)
+    const latestVersion = typeof latest === 'string' ? latest : latest?.latest
+    return renderLibraryUsers(users.ref.name, candidate, users.repos, {
+      internal,
+      ...(latestVersion ? { latest: latestVersion } : {}),
+      ownerOf: context.ownerOf,
     })
-    const libraries = groupUses(fleet.uses)
-    const goFirst = !parsed.name.startsWith('@') && parsed.name.includes('/')
-    const candidates: LibraryEcosystem[] = parsed.ecosystem
-      ? [parsed.ecosystem]
-      : goFirst
-        ? ['Go', 'npm']
-        : ['npm', 'Go']
-    for (const ecosystem of candidates) {
-      const key =
-        ecosystem === 'Go'
-          ? goModuleKey(libraries.keys(), parsed.name)
-          : libraryKeyOf({ ecosystem, name: parsed.name })
-      const users = libraries.get(key)
-      if (!users) continue
-      const internal = fleet.internal.has(key)
-      // oxlint-disable-next-line no-await-in-loop -- at most one lookup, the loop returns
-      const latest = internal ? fleet.defined.get(key) : (await context.latest?.all())?.get(key)
-      const latestVersion = typeof latest === 'string' ? latest : latest?.latest
-      return renderLibraryUsers(users.ref.name, ecosystem, users.repos, {
-        internal,
-        ...(latestVersion ? { latest: latestVersion } : {}),
-        ownerOf: context.ownerOf,
-      })
-    }
   }
-  if (context.stack) {
-    const rows = stackUseRows(await context.stack.views())
-    if (parsed.kind === 'tool' || rows.some((row) => matchesTool(row, toolName)))
-      return renderStackUsage(rows, context.ownerOf, { tool: toolName })
-  }
-  return `No repository you can see uses ${subject}. Pass npm:<name>, Go:<module> or a stack tool such as node.`
+  return undefined
 }
 
 function renderLibraryUsers(
@@ -147,9 +118,5 @@ function renderLibraryUsers(
     }
   }
   if (repos.size > listed) lines.push('', `…and ${repos.size - listed} more repositories.`)
-  lines.push(
-    '',
-    'package_usage shows which exports they use; find_usages shows the code where your reach allows it.',
-  )
   return lines.join('\n')
 }

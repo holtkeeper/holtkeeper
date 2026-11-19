@@ -28,12 +28,12 @@ export interface LibraryDocsOptions {
   /**
    * The organization package that `name` (a package or a deep import path into one) belongs to,
    * when the API catalog has it; a library missing from the index is then answered with a pointer
-   * to the catalog tools instead of "not indexed".
+   * to the package tools instead of "not indexed".
    */
   ownPackage?: (name: string) => Promise<string | undefined>
   /**
    * Serves `source` for an organization package (`ownPackage` names it) from its own repository;
-   * without it such packages get the pointer to the catalog tools.
+   * without it such packages get the pointer to the package tools.
    */
   ownSource?: LibraryDocs['source']
 }
@@ -164,7 +164,7 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
     if (!library) {
       const own = await options.ownPackage?.(query.package.trim())
       if (own)
-        return `${query.package.trim()}${own === query.package.trim() ? '' : ` belongs to ${own}, which`} is a package of this organization, not a third-party library, so the library tools do not cover it. Its API is in the catalog: search_symbols by export name, then get_symbol or get_package_api ${own} with \`version\` set to the version this repository depends on (default is the newest release).`
+        return `${query.package.trim()}${own === query.package.trim() ? '' : ` belongs to ${own}, which`} is a package of this organization, so it has no indexed docs. Read its API with package_api ${own} (pass \`symbol\` or \`query\`) and its code with package_source.`
       const similar = (await store.listLibraries({ ecosystem: ref.ecosystem, query: ref.name }))
         .slice(0, 10)
         .map((item) => item.name)
@@ -275,7 +275,7 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
         hits = await store.searchChunks(query, filter, limit + 1)
       }
       if (!hits.length)
-        return `No documentation in ${scope} matches "${query}". Try fewer or other words, or library_versions to see what is indexed.`
+        return `No documentation in ${scope} matches "${query}". Try fewer or other words, or package_changes for the versions that are indexed.`
       const answer = new Answer(maxChars)
       const shown = hits.slice(0, limit)
       answer.add(

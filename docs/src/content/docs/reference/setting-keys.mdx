@@ -21,6 +21,7 @@ This page follows the current definitions in the code, which are still moving. T
 | `llm.budget`       | AI              | `{ weeklyUsd, reserveUsd, action, warnPercent }`; `action` is `block` or `warn`. Presets `default`, `learn`, `small-team`. | $150 a week, $25 reserve, `block`, warn at 80%                      | Settings › AI              |
 | `agent.tools`      | AI              | `{ knowledgeTokens }`: tokens of team knowledge in every agent task, `0` leaves it out.                                    | 1500                                                                | Settings › AI (Advanced)   |
 | `tasks.write`      | AI · global     | `{ enabled, perRepoUsd, perGroupUsd, weeklyUsd, maxRepos }`.                                                               | off; $1.50 per repository, $5 per task, $40 a week, 10 repositories | Ops › Tasks                |
+| `mcp.ask`          | AI · global     | `{ enabled, perAnswerUsd, perPersonPerDay, weeklyUsd }`: whether MCP offers `ask` and what it may spend.                   | off; $0.30 per answer, 30 questions per person a day, $15 a week    | Settings › AI              |
 | `access.crossTeam` | Access · global | `off`, `metadata` or `snippets`: what everyone reads of other teams' repositories.                                         | `snippets`                                                          | Settings › People & access |
 
 ## Knowledge

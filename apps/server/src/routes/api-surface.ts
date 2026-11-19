@@ -32,9 +32,12 @@ import { z } from 'zod'
 
 import { type RepoFilter, cachedCatalog, createApiCatalog } from '../api-surface/catalog.ts'
 import { handleMcpRequest } from '../api-surface/mcp.ts'
+import { repoArgResolver } from '../api-surface/repo-arg.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { type McpPersonCalls, mcpUsage } from '../api-surface/usage.ts'
 import { createUsageIndex } from '../api-surface/usages.ts'
+import { askService } from '../ask.ts'
+import { canReadRepo } from '../chat-threads.ts'
 import {
   type AppContext,
   type Env,
@@ -60,6 +63,7 @@ import {
   serverLibraryDocs,
   visibleLibraries,
 } from '../libraries.ts'
+import { noteReviewJob } from '../mr-status.ts'
 import { qaToolsAccess } from '../qa.ts'
 import { releaseToolsAccess } from '../release-steps.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
@@ -68,7 +72,7 @@ import { createRulesResolver, readForgeRuleFiles } from '../rules.ts'
 import { secretReportsFor } from '../secret-reports.ts'
 import { storedAssetTools } from '../tools/assets.ts'
 import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
-import type { LibraryIndex } from '../tools/libraries.ts'
+import type { LibraryIndex } from '../tools/packages.ts'
 import { repoRulesAccess, storedStackTools } from '../tools/registry.ts'
 import {
   type CommitConventionsAccess,
@@ -527,6 +531,19 @@ export function createApiSurface(deps: ServerDeps) {
     return c.json<McpUsageOverview>({ ...overview, people, me })
   })
 
+  const asks = askService({
+    config,
+    settings: store.settings,
+    aiUsage: store.aiUsage,
+    ...(store.kv && { kv: store.kv }),
+    ...(deps.askAgentFor && { agentFor: deps.askAgentFor }),
+    homeTeams: (principal) => homeTeamsOf(deps, principal),
+    canReadRepo: (principal, repo) => canReadRepo(config, principal, repo),
+    now: deps.now,
+  })
+
+  const resolveRepo = repoArgResolver(() => deps.config)
+
   const fromToken = new WeakMap<Principal, string>()
   const reportingOf = new WeakMap<Principal, SecretReportingMode>()
   const toolsetsOf = new WeakMap<Principal, readonly McpToolsetName[]>()
@@ -562,8 +579,11 @@ export function createApiSurface(deps: ServerDeps) {
     const reports = secretReports?.accessFor(principal, reporting)
     // Signed-in browsers (the tool reference) see every toolset.
     const toolsets = toolsetsOf.get(principal)
+    const ask = !toolsets || toolsets.includes('ask') ? await asks.accessFor(principal) : undefined
     return handleMcpRequest(c.req.raw, {
       ...(toolsets && { toolsets }),
+      ...(ask && { ask }),
+      resolveRepo,
       ...(!toolsets || toolsets.includes('qa') ? { qa: qaToolsAccess(deps, principal) } : {}),
       ...(reports && { secretReports: reports }),
       ...(reports?.mode === 'anonymous' && { unrecorded: anonymousReports }),
@@ -580,7 +600,16 @@ export function createApiSurface(deps: ServerDeps) {
         canRead: (target) => canSee(principal, 'releases:read', target),
         channel: 'mcp',
       }),
-      reviews: reviewToolsAccess(deps, (target) => canSee(principal, 'analyses:read', target)),
+      reviews: reviewToolsAccess(
+        {
+          store,
+          config,
+          ...(deps.readOnly && { readOnly: deps.readOnly }),
+          onQueued: (job) => noteReviewJob(deps, job),
+          now: deps.now,
+        },
+        (target) => canSee(principal, 'analyses:read', target),
+      ),
       assets: storedAssetTools(store, {
         targetOf: (repo) => repoTarget(config, repo),
         canRead: (target) => canSee(principal, 'analyses:read', target),

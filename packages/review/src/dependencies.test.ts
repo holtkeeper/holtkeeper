@@ -398,7 +398,7 @@ describe('Go', () => {
     expect(ok).toContain('- added `example.com/hue` v0.3.0 (indirect)')
     expect(ok).toContain('Consistency: OK. go.sum has entries for all 2 modules')
     expect(ok).toContain(
-      'with upgrade_impact (organization modules) or library_changes (third-party ones): `example.com/colors` v1.1.0 → v1.2.0.',
+      'with package_changes (pass from and to): `example.com/colors` v1.1.0 → v1.2.0.',
     )
     expect(ok).not.toContain('`example.com/hue` v0.3.0.')
     const missing = await section(

@@ -133,6 +133,8 @@ export interface ToolContext {
   /** Absolute checkout directory; tools must not read or write outside it. */
   dir: string
   signal: AbortSignal
+  /** Tells whoever waits for a long call what it is doing now; absent when nobody listens. */
+  progress?: (message: string) => void
 }
 
 /**

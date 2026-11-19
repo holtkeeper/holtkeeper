@@ -163,7 +163,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
     tests || requestedTests ? categories : categories.filter((name) => name !== 'tests')
   const parts = [
     `You review merge request !${input.mergeRequest.id} of ${input.repo}. The checkout is at the merge request head; use the read and search tools to look at surrounding code${tests ? ', callers and tests' : ' and callers'} instead of guessing.`,
-    `Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages are in the API catalog (search_symbols by export name, then get_symbol or get_package_api, passing \`version\` = the version this repository depends on, from ${dependencySources(input)} or repo_packages), third-party libraries in the library tools; library_source reads the code of both, so read the implementation when the behavior matters, not only the declaration. Packages defined in this checkout: read their source here; the catalog shows indexed versions, not this merge request.`,
+    `Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages and third-party libraries answer through the same tools (find_packages by export name, then package_api with \`symbol\` or \`query\`; versions default to what this repository uses, from ${dependencySources(input)}); package_docs has the docs of third-party libraries and package_source reads the code of both, so read the implementation when the behavior matters, not only the declaration. Packages defined in this checkout: read their source here; the package tools show indexed versions, not this merge request.`,
     [
       'Rules:',
       '- Report only real problems the change introduces or exposes. No praise, no restating the diff, no nitpicks a formatter or linter would catch.',
@@ -201,19 +201,19 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
   return parts.join('\n\n')
 }
 
-/** Prompt block on dependencies and public API: when to reach for the catalog tools and how. */
+/** Prompt block on dependencies and public API: when to reach for the package tools and how. */
 function packageRules(input: ReviewPromptInput): string {
   const paths = input.part?.files ?? input.files.map((file) => file.path)
   const go = paths.some((path) => GO_FILE.test(path))
   return [
     'Packages and public API:',
-    '- A dependency version change (the computed dependency section lists `a → b`): for an organization package call upgrade_impact with `package`, `from` = a, `to` = b and `repo` = this repository, and diff_versions for what changed; for a third-party library call library_changes between the two versions. Report the uses in this checkout the change breaks or that need a check, at the changed manifest line, with the affected files named. No comment when nothing used changed.',
-    '- A change to the public API of a package other repositories import (exports removed, renamed or with a new signature, a type or interface changed, behavior a caller relies on): call package_usage or find_usages for the changed export and say which repositories and how many uses break. Without users outside this repository, judge it as an internal change. A breaking change needs a major version bump; say so when the change ships under a minor or patch release.',
-    '- Before flagging code as reinventing something, search_symbols for an organization package that already offers it; report only an exact equivalent the repository could import, as `minor`.',
+    '- A dependency version change (the computed dependency section lists `a → b`): call package_changes with `package`, `from` = a and `to` = b: it returns the API diff, for a third-party library its changelog, and the uses the upgrade affects. Report the uses in this checkout the change breaks or that need a check, at the changed manifest line, with the affected files named. No comment when nothing used changed.',
+    '- A change to the public API of a package other repositories import (exports removed, renamed or with a new signature, a type or interface changed, behavior a caller relies on): call package_usage for the package, then with `export` for the code of the uses of the changed export, and say which repositories and how many uses break. Without users outside this repository, judge it as an internal change. A breaking change needs a major version bump; say so when the change ships under a minor or patch release.',
+    '- Before flagging code as reinventing something, find_packages for an organization package that already offers it; report only an exact equivalent the repository could import, as `minor`.',
     ...(go
       ? [
-          '- Go: packages under `internal/` and `main` packages cannot be imported by other modules, so their changes only reach callers in this module: find those with the search tools, not the catalog. Exported identifiers of other packages are public API: adding a method to an exported interface breaks every type outside the module that implements it, and removing or changing an exported function, method, field or constant breaks its callers. A new major version of a module changes its import path (`/v2`); a breaking change without it is a problem.',
-          '- Go: the version this repository uses is the `require` line of the go.mod that owns the file (a `replace` with a local path means the code is in this checkout). Pass it as `version` to get_package_api and get_symbol, so the signatures you check against are the ones this code compiles with.',
+          '- Go: packages under `internal/` and `main` packages cannot be imported by other modules, so their changes only reach callers in this module: find those with the search tools, not the package tools. Exported identifiers of other packages are public API: adding a method to an exported interface breaks every type outside the module that implements it, and removing or changing an exported function, method, field or constant breaks its callers. A new major version of a module changes its import path (`/v2`); a breaking change without it is a problem.',
+          '- Go: the version this repository uses is the `require` line of the go.mod that owns the file (a `replace` with a local path means the code is in this checkout). Pass it as `version` to package_api, so the signatures you check against are the ones this code compiles with.',
         ]
       : []),
   ].join('\n')

@@ -9,7 +9,7 @@ sidebar:
 
 import { Button, Screen, Scroll, Tag, Toolbar, Ui } from '@ui'
 
-An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner. Besides reading, it can only propose learnings, which people may reject before they activate, and report exposed secrets. It cannot start tasks, run release steps or approve anything.
+An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner. Besides reading, it can only propose learnings, which people may reject before they activate, ask for a review of a merge request (at most one per commit) and report exposed secrets. It cannot start tasks, run release steps or approve anything.
 
 ## What a token can see
 
@@ -43,7 +43,7 @@ See [Rules and knowledge](/agents/rules-and-knowledge/).
 
 Everything else that changes something stays with people:
 
-- **Tasks** start from Chat task cards, <Ui>Roll out</Ui> in **Supply chain › Libraries**, **Ops › Tasks** and `POST /api/task-groups`. An agent can follow a task's merge request with the read-only `review_status` on the task's branch; see [Changing code through tasks](/agents/tasks/).
+- **Tasks** start from Chat task cards, <Ui>Roll out</Ui> in **Supply chain › Libraries**, **Ops › Tasks** and `POST /api/task-groups`. An agent can follow a task's merge request with `code_review` on the task's branch; see [Changing code through tasks](/agents/tasks/).
 - **Release steps** run from the [Releases](/guide/releases/overview/) screen and from confirmations in Chat.
 
 ## Report exposed secrets
@@ -104,11 +104,11 @@ Every tool call except anonymous secret reports is recorded with the tool, what 
   </Toolbar>
   <Scroll>
 
-| Tools            | Calls | Packages           | Calls | Clients     | Calls |
-| ---------------- | ----- | ------------------ | ----- | ----------- | ----- |
-| `repo_rules`     | 96    | `@acme/widget-kit` | 71    | claude-code | 402   |
-| `package_usage`  | 71    | `date-fns`         | 18    | cursor      | 80    |
-| `search_symbols` | 54    | `@acme/forms`      | 12    | curl        | 3     |
+| Tools           | Calls | Packages           | Calls | Clients     | Calls |
+| --------------- | ----- | ------------------ | ----- | ----------- | ----- |
+| `repo_rules`    | 96    | `@acme/widget-kit` | 71    | claude-code | 402   |
+| `package_usage` | 71    | `date-fns`         | 18    | cursor      | 80    |
+| `find_packages` | 54    | `@acme/forms`      | 12    | curl        | 3     |
 
   </Scroll>
 </Screen>

@@ -3,14 +3,13 @@
  * Secret reports are not among them: each token's reporting choice governs that toolset.
  */
 export const mcpToolsetNames = [
-  'catalog',
-  'stack',
+  'packages',
   'knowledge',
   'rules',
   'assets',
-  'libraries',
   'reviews',
   'qa',
+  'ask',
 ] as const
 
 /** A toolset of the MCP endpoint a token can turn on or off. */
@@ -33,16 +32,10 @@ export interface McpToolsetInfo {
  */
 export const mcpToolsetCatalog: readonly McpToolsetInfo[] = [
   {
-    name: 'catalog',
-    label: 'Package catalog',
+    name: 'packages',
+    label: 'Packages',
     description:
-      'Exports, versions, usages and upgrade impact of the packages your repositories publish.',
-    defaultOn: true,
-  },
-  {
-    name: 'stack',
-    label: 'Stack',
-    description: 'Frameworks, tools and dependencies a repository uses.',
+      'API, docs, source, versions, changes and usages of your own packages and the third-party libraries your repositories depend on.',
     defaultOn: true,
   },
   {
@@ -55,25 +48,19 @@ export const mcpToolsetCatalog: readonly McpToolsetInfo[] = [
     name: 'rules',
     label: 'Repository rules',
     description:
-      'The rules agents follow in a repository, test ids, commit conventions and release rules.',
+      'The rules agents follow in a repository, with commit, release, asset and test id conventions.',
     defaultOn: true,
   },
   {
     name: 'assets',
     label: 'Assets',
-    description: 'Asset policies and the assets a repository ships.',
-    defaultOn: true,
-  },
-  {
-    name: 'libraries',
-    label: 'Third-party libraries',
-    description: 'Version-exact docs, changes, issues and source of the libraries in use.',
-    defaultOn: true,
+    description: 'Files of a repository that break its asset policy or could be smaller.',
+    defaultOn: false,
   },
   {
     name: 'reviews',
     label: 'Reviews',
-    description: 'How Holtkeeper’s review of a merge request stands.',
+    description: 'Ask for Holtkeeper’s review of a merge request and read its findings.',
     defaultOn: true,
   },
   {
@@ -82,6 +69,13 @@ export const mcpToolsetCatalog: readonly McpToolsetInfo[] = [
     description:
       'Tasks of Releases › QA: their changes, test attribute changes and stored test notes.',
     defaultOn: false,
+  },
+  {
+    name: 'ask',
+    label: 'Ask',
+    description:
+      'One question answered by an AI agent over the other tools, every claim backed by a source. Spends the AI budget; answers only while the `mcp.ask` setting is on.',
+    defaultOn: true,
   },
 ]
 

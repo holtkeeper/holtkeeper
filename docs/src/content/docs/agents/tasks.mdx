@@ -12,7 +12,7 @@ import { Button, Facts, Screen, Scroll, Sheet, Strip, Tabs, Tag, Toolbar, Ui } f
 
 An agent on your laptop edits the repository in front of it. When a change has to land in other repositories too, or should run on Holtkeeper's workers with the repository's own checks, it becomes a **task**: a task group with one draft merge request per repository on a shared branch. Holtkeeper never merges.
 
-Agents connected over MCP cannot start tasks. The MCP endpoint has no tool that queues code changes, approves a task group or asks for a review; people start tasks in the panel and in Chat. An agent can still help you write the plan you hand over, and follow a task's merge request with `review_status`.
+Agents connected over MCP cannot start tasks. The MCP endpoint has no tool that queues code changes or approves a task group; people start tasks in the panel and in Chat. An agent can still help you write the plan you hand over, and ask for and follow the review of a task's merge request with `code_review`.
 
 ## Where tasks start
 
@@ -46,7 +46,7 @@ When your agent finds that a change belongs in many repositories, let it do the 
 ● holtkeeper - package_usage (package: "@acme/widget-kit")
   ⎿ Badge with prop `variant`: gitlab:acme/checkout-web (9), gitlab:acme/admin-ui (14)
 
-● holtkeeper - commit_conventions (repo: "gitlab:acme/checkout-web")
+● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", topics: ["commits"])
   ⎿ Conventional Commits; types: feat, fix, refactor, …
 
 ● Holtkeeper's MCP tools cannot start tasks. Paste this into Holtkeeper Chat to
@@ -61,7 +61,7 @@ When your agent finds that a change belongs in many repositories, let it do the 
 Write the plan so the worker agent can follow it without your conversation: it sees the repository, its rules and the checks, not your chat.
 
 :::tip
-Ask the agent to call `commit_conventions` for each repository and to check the title with `check_commit_message`. The commit message is chosen from the title and the worker agent's suggestions, and the first candidate the repository's conventions accept wins.
+Ask the agent to call `repo_rules` with the `commits` topic for each repository and to check the title with `check_commit_message`. The commit message is chosen from the title and the worker agent's suggestions, and the first candidate the repository's conventions accept wins.
 :::
 
 ## In the panel
@@ -116,19 +116,19 @@ See [Ops › Tasks](/guide/ops/tasks/) for the whole screen.
 
 There is no MCP tool for task groups. People follow a group in **Ops › Tasks**: each repository's task, merge request, CI and spend. The task's sheet shows the shared branch, `holtkeeper/<task id>-<slug>`.
 
-With that branch, your agent follows a task's merge request like any other: `review_status` reads Holtkeeper's review of it, the open threads and what to fix next. It can also check out the branch and continue the work locally.
+With that branch, your agent follows a task's merge request like any other: `code_review` asks for Holtkeeper's review of it and reads the findings, the open threads and what to fix next. It can also check out the branch and continue the work locally.
 
 ```text
-● holtkeeper - review_status (repo: "gitlab:acme/checkout-web",
-                              branch: "holtkeeper/g5k2qd-refactor-rename-badge-variant-to-tone")
+● holtkeeper - code_review (repo: "gitlab:acme/checkout-web",
+                            branch: "holtkeeper/g5k2qd-refactor-rename-badge-variant-to-tone")
   ⎿ ## gitlab:acme/checkout-web!412 refactor: rename Badge variant to tone
     open, draft · `holtkeeper/g5k2qd-refactor-rename-badge-variant-to-tone` → `main` · …
     **Review:** none yet
     ### Next
-    - No review yet: draft merge requests are not reviewed automatically; comment `/holtkeeper review` on the merge request to ask for one.
+    - A review of 3c4d5e6f was queued just now; call code_review again in a few minutes for the findings.
 ```
 
-See [Follow a review from your agent](/agents/review-agent/#follow-a-review-from-your-agent).
+See [Ask for a review from your agent](/agents/review-agent/#ask-for-a-review-from-your-agent).
 
 ## What a task never does
 

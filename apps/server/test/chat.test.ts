@@ -395,7 +395,7 @@ describe('team chat threads', () => {
       task.transcript?.write({
         type: 'assistant',
         text: 'Looking it up.',
-        toolCalls: [{ id: '1', name: 'mcp__holtkeeper__search_symbols', input: {} }],
+        toolCalls: [{ id: '1', name: 'mcp__holtkeeper__find_packages', input: {} }],
       })
       task.transcript?.write({ type: 'tool-result', id: '1', output: 'WidgetBase' })
       return { text: 'WidgetBase is the shared base.', turns: 2, costUsd: 0.03 }
@@ -409,7 +409,7 @@ describe('team chat threads', () => {
     )
     expect(answer).toMatchObject({
       body: 'WidgetBase is the shared base.',
-      toolTrace: [{ tool: 'search_symbols', calls: 1 }],
+      toolTrace: [{ tool: 'find_packages', calls: 1 }],
     })
     expect(answer?.transcriptRef).toBeString()
     const transcript = await json<AgentTranscriptView>(

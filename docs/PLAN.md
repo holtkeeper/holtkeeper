@@ -221,11 +221,11 @@ Releases › QA lists only changes that name a real ticket key; changes without 
 
 ### MCP for developers
 
-The MCP endpoint serves developers at work in one repository: read tools (`repo_rules`, `get_rule`, `search_knowledge` over rules and learnings, ...) plus one write, `propose_learning` (a pending learning people may reject before it activates), and `review_status` for their merge requests. Open points:
+The MCP endpoint serves developers at work in one repository: read tools (`repo_rules`, `search_knowledge` over rules and learnings, the `packages` tools, ...), `ask` for whole questions where `mcp.ask` is on, plus two writes: `propose_learning` (a pending learning people may reject before it activates) and `code_review`, which asks for a review of their merge request (at most one per head) and reads its findings. Open points:
 
 - **Token scopes `release` and `tasks`.** The API still accepts them and old tokens keep them, but no MCP tool uses them and Account › Connect agents no longer offers them. Remove them from `McpTokenScope`, the stored tokens and the docs, or keep them in case write tools come back.
-- **Task merge requests.** `task_status` left MCP; `review_status` on the task's branch covers the review but not the CI status or the task group's spend. Decide whether `review_status` should show the pipeline status of the head.
-- **Agents in review threads.** Let a developer's agent answer Holtkeeper's review threads (explain why a finding is wrong, or say it is fixed) and get Holtkeeper's answer. Open: whether the agent posts through the developer's own forge access (honest authorship, Holtkeeper already answers replies) or through a Holtkeeper write tool (posts as the bot, which Holtkeeper ignores today); how agent-written replies are marked so 👍/👎 counts, review quality and review learnings keep measuring people; and how an agent waits for a review (`wait` on `review_status`, an MCP prompt) since MCP cannot wake it.
+- **Task merge requests.** `task_status` left MCP; `code_review` on the task's branch covers the review but not the CI status or the task group's spend. Decide whether `code_review` should show the pipeline status of the head.
+- **Agents in review threads.** Let a developer's agent answer Holtkeeper's review threads (explain why a finding is wrong, or say it is fixed) and get Holtkeeper's answer. Open: whether the agent posts through the developer's own forge access (honest authorship, Holtkeeper already answers replies) or through a Holtkeeper write tool (posts as the bot, which Holtkeeper ignores today); how agent-written replies are marked so 👍/👎 counts, review quality and review learnings keep measuring people; and how an agent waits for a review (`wait` on `code_review`, an MCP prompt) since MCP cannot wake it.
 
 ### Faster split reviews
 

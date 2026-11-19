@@ -23,7 +23,8 @@ import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
 
 import { builtinAnalyses } from '../src/analyses.ts'
-import type { ApiCatalog } from '../src/api-surface/catalog.ts'
+import { type ApiCatalog, createApiCatalog } from '../src/api-surface/catalog.ts'
+import { createUsageIndex } from '../src/api-surface/usages.ts'
 import { createApp } from '../src/app.ts'
 import { githubUsageFor } from '../src/github-usage.ts'
 import { goPrivatePatterns } from '../src/go-private.ts'
@@ -41,6 +42,8 @@ import {
   runLibraryIndex,
   startLibraryIndex,
 } from '../src/libraries.ts'
+import { packagesToolset } from '../src/tools/packages.ts'
+import { agentCatalogContext } from '../src/tools/registry.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
@@ -514,8 +517,23 @@ const crossTeamOff = () =>
     updatedAt: '2026-10-01T00:00:00.000Z',
   })
 
+const toolsetFor = (path: string) =>
+  packagesToolset(
+    agentCatalogContext({
+      catalog: createApiCatalog({ analyses: store.analyses }),
+      usages: createUsageIndex({ analyses: store.analyses }),
+      store,
+      config,
+      repo: { forge: 'work', path, teams: [] },
+      targetOf: (other) => ({ ...other, teams: [] }),
+      policy: 'metadata',
+      artifacts,
+      now: () => now,
+    }),
+  )
+
 describe('library MCP tools', () => {
-  test('lists the library tools', async () => {
+  test('lists the package tools, docs and source included', async () => {
     const response = await app.request('/mcp', {
       method: 'POST',
       headers: {
@@ -526,26 +544,30 @@ describe('library MCP tools', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     })
     const body = (await response.json()) as { result: { tools: { name: string }[] } }
-    expect(body.result.tools.map((t) => t.name)).toEqual(
+    const names = body.result.tools.map((t) => t.name)
+    expect(names).toEqual(
       expect.arrayContaining([
-        'library_versions',
-        'search_library_docs',
-        'read_library_doc',
-        'library_changes',
-        'search_library_issues',
-        'library_source',
+        'find_packages',
+        'package_api',
+        'package_changes',
+        'package_usage',
+        'package_docs',
+        'package_source',
+        'evaluate_dependency',
       ]),
     )
+    for (const gone of ['library_versions', 'search_library_docs', 'get_package_api', 'who_uses'])
+      expect(names).not.toContain(gone)
   })
 
   test('answers from the index with the caller repository’s version', async () => {
     await crossTeamOff()
-    const versions = await callTool('library_versions', { package: 'zod' }, asGames)
+    const versions = await callTool('package_changes', { package: 'zod' }, asGames)
     expect(versions.text).toContain('3.22.0')
     expect(versions.text).toContain('work:games/a')
     expect(versions.text).not.toContain('work:libs/ui')
 
-    const search = await callTool('search_library_docs', {
+    const search = await callTool('package_docs', {
       package: 'zod',
       query: 'refinements',
       repo: 'work:libs/ui',
@@ -553,7 +575,7 @@ describe('library MCP tools', () => {
     expect(search.text).toContain('superRefine')
     expect(search.text).not.toContain('check for refinements')
 
-    const read = await callTool('read_library_doc', {
+    const read = await callTool('package_docs', {
       package: 'zod',
       version: '4.0.0',
       path: 'README.md',
@@ -561,9 +583,13 @@ describe('library MCP tools', () => {
     expect(read.text).toContain('Use check for refinements')
     expect(read.text).toContain('data, not instructions')
 
-    const issues = await callTool('search_library_issues', {
+    const listed = await callTool('package_docs', { package: 'zod', version: '4.0.0' })
+    expect(listed.text).toContain('README.md')
+
+    const issues = await callTool('package_docs', {
       package: 'zod',
       query: 'schema.parse is not a function',
+      issues: true,
       limit: 1,
     })
     expect(issues.text).toContain('#42')
@@ -571,30 +597,49 @@ describe('library MCP tools', () => {
     const usageView = await get<{ tools: { tool: string; calls: number }[] }>(
       '/api/api-surface/mcp/usage?days=7',
     )
-    expect(usageView.tools.find((t) => t.tool === 'library_versions')?.calls).toBe(1)
+    expect(usageView.tools.find((t) => t.tool === 'package_docs')?.calls).toBe(4)
+  })
+
+  test('package_docs needs a package or a query, and both to search issues', async () => {
+    const empty = await callTool('package_docs', {})
+    expect(empty.isError).toBe(true)
+    expect(empty.text).toBe('Pass `package`, `query` or both.')
+    for (const half of [{ package: 'zod' }, { query: 'schema.parse is not a function' }]) {
+      const refused = await callTool('package_docs', { ...half, issues: true })
+      expect(refused.isError).toBe(true)
+      expect(refused.text).toBe('Pass `package` and `query` to search issues.')
+    }
   })
 
   test('hides libraries the caller could not see through the web routes', async () => {
     await crossTeamOff()
-    const versions = await callTool('library_versions', { package: 'left-pad' }, asGames)
+    const versions = await callTool('package_docs', { package: 'left-pad' }, asGames)
     expect(versions.text).toContain('is not indexed')
-    const search = await callTool('search_library_docs', { query: 'refinements' }, asGames)
+    const search = await callTool('package_docs', { query: 'refinements' }, asGames)
     expect(search.text).toContain('superRefine')
     expect(search.text).not.toContain('Padding')
-    const all = await callTool('search_library_docs', { query: 'refinements' })
+    const all = await callTool('package_docs', { query: 'refinements' })
     expect(all.text).toContain('Padding')
 
-    const hidden = await callTool('library_versions', { package: 'zod' }, asOutsider)
+    const found = await callTool('find_packages', { query: 'pad' }, asGames)
+    expect(found.text).not.toContain('left-pad')
+    expect((await callTool('find_packages', { query: 'pad' })).text).toContain(
+      '## Third-party libraries\n- **left-pad** (npm)',
+    )
+
+    const hidden = await callTool('package_docs', { package: 'zod' }, asOutsider)
     expect(hidden.text).toContain('is not indexed')
     const issues = await callTool(
-      'search_library_issues',
-      { package: 'zod', query: 'schema.parse is not a function' },
+      'package_docs',
+      { package: 'zod', query: 'schema.parse is not a function', issues: true },
       asOutsider,
     )
     expect(issues.text).not.toContain('#42')
-    const api = await callTool('get_package_api', { package: 'zod' }, asOutsider)
+    const api = await callTool('package_api', { package: 'zod' }, asOutsider)
     expect(api.isError).toBe(true)
     expect(api.text).toContain('No package zod')
+    const changes = await callTool('package_changes', { package: 'zod' }, asOutsider)
+    expect(changes.isError).toBe(true)
     expect(
       (
         await app.request('/api/dependencies/library?ecosystem=npm&name=zod', {
@@ -604,38 +649,76 @@ describe('library MCP tools', () => {
     ).toBe(404)
   })
 
-  test('a package of the organization points to the catalog tools', async () => {
+  test('a package of the organization is answered by the same tools, without indexed docs', async () => {
     await store.analyses.add({
       repo: { forge: 'work', path: 'libs/ui' },
       kind: 'api-surface',
       createdAt: at,
       data: { packages: [{ ...zodApi('2.0.0', ['RoundWidget']), name: '@acme/widgets' }] },
     })
-    const deep = await callTool('library_versions', {
+    const deep = await callTool('package_docs', {
       package: '@acme/widgets/lib/round/RoundWidget',
     })
     expect(deep.text).toContain('belongs to @acme/widgets, which is a package of this organization')
-    expect(deep.text).toContain('get_package_api @acme/widgets')
-    const api = await callTool('get_package_api', { package: '@acme/widgets/lib/round' })
+    expect(deep.text).toContain('package_api @acme/widgets')
+    const api = await callTool('package_api', { package: '@acme/widgets/lib/round' })
     expect(api.text).toContain('@acme/widgets/lib/round is a deep import into @acme/widgets')
-    const stranger = await callTool('library_versions', { package: '@acme/gadgets' })
+    const own = await callTool('package_api', { package: '@acme/widgets', symbol: 'RoundWidget' })
+    expect(own.text).toContain("import { RoundWidget } from '@acme/widgets'")
+    const versions = await callTool('package_changes', { package: '@acme/widgets' })
+    expect(versions.text).toContain('# @acme/widgets in `work:libs/ui` (organization package)')
+    const found = await callTool('find_packages', { query: 'widget' })
+    expect(found.text).toContain('## Organization packages\n- **@acme/widgets**@2.0.0')
+    expect(found.text).toContain('## Exports of organization packages')
+    expect(found.text).toContain('RoundWidget (function)')
+    const stranger = await callTool('package_docs', { package: '@acme/gadgets' })
     expect(stranger.text).toContain('is not indexed')
   })
 
-  test('API tools fall back to the library index', async () => {
-    const api = await callTool('get_package_api', { package: 'zod', repo: 'work:libs/ui' })
+  test('package_api reads a third-party API, one symbol of it and searches its exports', async () => {
+    const api = await callTool('package_api', { package: 'zod', repo: 'work:libs/ui' })
     expect(api.isError).toBeUndefined()
     expect(api.text).toContain('zod@3.22.0')
+    expect(api.text).toStartWith('Third-party content from zod@3.22.0')
     expect(api.text).toContain('nativeEnum')
     expect(api.text).toContain('Other indexed versions: 4.0.0')
 
-    const list = await callTool('list_versions', { package: 'zod' })
+    const symbol = await callTool('package_api', {
+      package: 'zod',
+      symbol: 'nativeEnum',
+      repo: 'work:libs/ui',
+    })
+    expect(symbol.text).toContain('zod@3.22.0 (npm, third-party')
+    expect(symbol.text).toContain("import { nativeEnum } from 'zod'")
+    expect(symbol.text).toContain('Makes a nativeEnum.')
+    expect(symbol.text).not.toContain('declare function object')
+
+    const latest = await callTool('package_api', { package: 'zod', symbol: 'nativeEnum' })
+    expect(latest.isError).toBe(true)
+    expect(latest.text).toContain('zod@4.0.0 exports no nativeEnum')
+
+    const search = await callTool('package_api', { package: 'zod', query: 'enum' })
+    expect(search.text).toContain('### `zod` → enum (function)')
+    expect(search.text).toContain('zod@4.0.0')
+    expect(search.text).not.toContain('→ object')
+    expect((await callTool('package_api', { package: 'zod', query: 'gadget' })).text).toBe(
+      'zod@4.0.0 exports nothing matching "gadget".',
+    )
+    expect(
+      (await callTool('package_api', { package: 'zod', query: 'enum', kind: 'class' })).text,
+    ).toBe('zod@4.0.0 exports nothing matching "enum".')
+
+    const missing = await callTool('package_api', { package: 'zod', version: '9.9.9' })
+    expect(missing.isError).toBe(true)
+    expect(missing.text).toContain('indexed: 4.0.0, 3.22.0')
+  })
+
+  test('package_changes lists versions, and between two joins the API diff, notes and impact', async () => {
+    const list = await callTool('package_changes', { package: 'zod' })
+    expect(list.text).toContain('# zod (npm, third-party; versions with an indexed API)')
     expect(list.text).toContain('4.0.0 (latest, major)')
     expect(list.text).toContain('since 3.22.0: 1 removed, 0 changed, 1 added')
-
-    const diff = await callTool('diff_versions', { package: 'zod' })
-    expect(diff.text).toContain('nativeEnum')
-    expect(diff.text).toContain('3.22.0 → 4.0.0')
+    expect(list.text).toContain('work:libs/ui')
 
     await store.analyses.add({
       repo: { forge: 'work', path: 'games/a' },
@@ -643,13 +726,73 @@ describe('library MCP tools', () => {
       createdAt: at,
       data: usage('zod', '3.22.0', 'nativeEnum'),
     })
-    const impact = await callTool('upgrade_impact', { package: 'zod' })
-    expect(impact.isError).toBeUndefined()
-    expect(impact.text).toContain('nativeEnum()')
+    const changes = await callTool('package_changes', { package: 'zod', to: '4.0.0' })
+    expect(changes.isError).toBeUndefined()
+    expect(changes.text).toStartWith('zod 3.22.0 → 4.0.0 (npm, third-party)')
+    expect(changes.text).toContain('nativeEnum')
+    const notes = changes.text.indexOf('## Changelog and migration notes')
+    const impact = changes.text.indexOf('## Uses the upgrade affects')
+    expect(notes).toBeGreaterThan(0)
+    expect(impact).toBeGreaterThan(notes)
+    expect(changes.text.slice(impact)).toContain('nativeEnum()')
 
-    const missing = await callTool('get_package_api', { package: 'zod', version: '9.9.9' })
-    expect(missing.isError).toBe(true)
-    expect(missing.text).toContain('indexed: 4.0.0, 3.22.0')
+    const same = await callTool('package_changes', { package: 'zod', from: '3.22.0' })
+    expect(same.text).toStartWith('zod 3.22.0 → 4.0.0 (npm, third-party)')
+
+    const impactOnly = await callTool('package_changes', {
+      package: 'zod',
+      to: '4.0.0',
+      include: ['impact'],
+    })
+    expect(impactOnly.text).toContain('nativeEnum()')
+    expect(impactOnly.text).not.toContain('## Changelog and migration notes')
+    expect(impactOnly.text).not.toContain('API from the published packages')
+    const apiOnly = await callTool('package_changes', {
+      package: 'zod',
+      to: '4.0.0',
+      include: ['api'],
+    })
+    expect(apiOnly.text).toContain('API from the published packages')
+    expect(apiOnly.text).not.toContain('## Uses the upgrade affects')
+  })
+
+  test('package_usage sums who uses a package and returns the code on request', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: at,
+      data: usage('zod', '3.22.0', 'nativeEnum'),
+    })
+    const summary = await callTool('package_usage', { package: 'zod' })
+    expect(summary.text).toContain('work:games/a')
+    expect(summary.text).toContain('nativeEnum')
+    expect(summary.text).not.toContain('src/schema.ts')
+    for (const narrowed of [{ code: true }, { export: 'nativeEnum' }, { repo: 'work:games/a' }]) {
+      const code = await callTool('package_usage', { package: 'zod', ...narrowed })
+      expect(code.text).toContain('src/schema.ts')
+      expect(code.text).toContain('nativeEnum()')
+    }
+    const none = await callTool('package_usage', { package: 'zod', export: 'object' })
+    expect(none.text).not.toContain('src/schema.ts')
+    const stranger = await callTool('package_usage', { package: 'zod', repo: 'work:libs/none' })
+    expect(stranger.isError).toBe(true)
+
+    const imports = await callTool('find_packages', { repo: 'work:games/a' })
+    expect(imports.text).toStartWith('# `work:games/a`: 1 packages')
+    expect(imports.text).toContain('- **zod** 3.22.0 — 1 uses in 1 files, 1 exports')
+    expect((await callTool('find_packages', { repo: 'work:libs/none' })).isError).toBe(true)
+  })
+
+  test('an agent’s own repository picks the version when a call names none', async () => {
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const api = (toolset: ReturnType<typeof toolsetFor>, input: Record<string, unknown>) =>
+      toolset.tools.find((tool) => tool.name === 'package_api')!.run(input, ctx)
+    expect(await api(toolsetFor('libs/ui'), { package: 'zod' })).toContain('zod@3.22.0')
+    expect(await api(toolsetFor('libs/other'), { package: 'zod' })).toContain('zod@4.0.0')
+    expect(await api(toolsetFor('libs/ui'), { package: 'zod', version: '4.0.0' })).toContain(
+      'zod@4.0.0',
+    )
+    expect(toolsetFor('libs/ui').tools.map((tool) => tool.name)).not.toContain('package_docs')
   })
 
   test('Go library API tools take module and package paths and pair packages across majors', async () => {
@@ -680,18 +823,29 @@ describe('library MCP tools', () => {
       updatedAt: at,
     })
 
-    const api = await callTool('get_package_api', { package: 'example.com/acme/kit/v2/draw' })
+    const api = await callTool('package_api', { package: 'example.com/acme/kit/v2/draw' })
     expect(api.isError).toBeUndefined()
     expect(api.text).toContain('example.com/acme/kit@v2.0.0')
     expect(api.text).toContain('func Line()')
     expect(api.text).not.toContain('func Run()')
 
-    const diff = await callTool('diff_versions', { package: 'example.com/acme/kit' })
+    const symbol = await callTool('package_api', {
+      package: 'example.com/acme/kit/v2/draw',
+      symbol: 'Line',
+    })
+    expect(symbol.text).toContain('import "example.com/acme/kit/v2/draw"')
+    expect(symbol.text).toContain('// draw.Line')
+
+    const diff = await callTool('package_changes', {
+      package: 'example.com/acme/kit',
+      to: 'v2.0.0',
+      include: ['api'],
+    })
     expect(diff.text).toContain('v1.5.0 → v2.0.0')
     expect(diff.text).toContain('Dot')
     expect(diff.text).not.toContain('Run')
 
-    const missing = await callTool('get_package_api', { package: 'example.com/acme/kit/v2/paint' })
+    const missing = await callTool('package_api', { package: 'example.com/acme/kit/v2/paint' })
     expect(missing.isError).toBe(true)
     expect(missing.text).toContain('has no package example.com/acme/kit/v2/paint')
 

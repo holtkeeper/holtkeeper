@@ -40,7 +40,7 @@ From the policy the analyzer takes `ignore` (left out of the inventory), `minSav
 - `policyViolations(assets, policy)` → `PolicyViolation { id, rule, severity, path?, kind?, format?, actual?, limit?, message }[]`, errors first then by path. Rules: `format` (error), `max-bytes` (warning above `warn`, error above `error`), `max-dimension` (warning; SVGs are not checked), `modern-format` (warning: a source PNG/JPEG/GIF family from 8 kB without the required siblings), `budget` (error, per kind or total). Ignored files are skipped and build files identical to a source file are checked once.
 - `parseAssetsPolicy(value)` — a stored value as a full policy; invalid or missing gives `defaultAssetsPolicy`.
 - `isIgnored`, `byteLimits(policy, kind)`, `formatAllowed`, `kindOfPath`, `requiredFormats(raster)` — single questions the reviewer and agent tools ask.
-- `assetsPolicyFacts(policy)` — the policy as Markdown bullets; the Guide adds them to the Assets section when an entry covers the repository, and `asset_policy` returns them.
+- `assetsPolicyFacts(policy)` — the policy as Markdown bullets; the Guide adds them to the Assets section when an entry covers the repository, and `asset_policy` and the `assets` topic of `repo_rules` return them.
 
 Prose rules (which component renders images, where files go) belong in the Guide's Assets section, not in the policy.
 

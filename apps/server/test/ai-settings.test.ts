@@ -153,7 +153,7 @@ describe('GET /api/ai/tools', () => {
       readOnly: true,
       usedBy: ['review', 'write-task'],
     })
-    expect(byName.get('review_status')?.usedBy).toEqual(['mcp'])
+    expect(byName.get('code_review')?.usedBy).toEqual(['mcp'])
     expect(byName.has('start_task')).toBeFalse()
     expect(byName.get('release_step')?.readOnly).toBeFalse()
     expect(byName.get('repo_rules')?.usedBy).toContain('chat')

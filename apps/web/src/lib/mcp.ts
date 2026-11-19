@@ -52,15 +52,8 @@ export const tokenLifetimes = [
   { id: '0', label: 'Never' },
 ] as const
 
-/** The MCP tools agents use to read indexed library docs. */
-export const libraryTools = [
-  'library_versions',
-  'search_library_docs',
-  'read_library_doc',
-  'library_changes',
-  'search_library_issues',
-  'library_source',
-] as const
+/** The MCP tools agents use to read indexed library docs, changes and source. */
+export const libraryTools = ['package_docs', 'package_changes', 'package_source'] as const
 
 interface JsonSchema {
   type?: string | string[]
@@ -109,47 +102,67 @@ export const toolParams = (tool: McpTool): McpToolParam[] => {
     .toSorted((a, b) => Number(b.required) - Number(a.required))
 }
 
+const packageTools = new Set([
+  'find_packages',
+  'package_api',
+  'package_changes',
+  'package_usage',
+  'package_docs',
+  'package_source',
+  'evaluate_dependency',
+])
 const knowledgeTools = new Set(['search_knowledge', 'propose_learning'])
 
-const isLibraryTool = (name: string) =>
-  name === 'evaluate_dependency' || (libraryTools as readonly string[]).includes(name)
-const isKnowledgeTool = (name: string) => knowledgeTools.has(name)
-const isQaTool = (name: string) => name.startsWith('qa_')
+type ToolGroup = 'packages' | 'repository' | 'knowledge' | 'ask' | 'qa'
+
+const groupOf = (name: string): ToolGroup => {
+  if (packageTools.has(name)) return 'packages'
+  if (knowledgeTools.has(name)) return 'knowledge'
+  if (name === 'ask') return 'ask'
+  if (name.startsWith('qa_')) return 'qa'
+  return 'repository'
+}
 
 /**
- * `tools` split into the catalog of the organization's packages, third-party libraries, the
- * knowledge base and QA tasks; empty groups are left out.
+ * `tools` split into packages (the organization's own and third-party ones), what applies to one
+ * repository, the knowledge base, `ask` and QA tasks; empty groups are left out.
  */
 export const groupTools = (tools: readonly McpTool[]) =>
-  [
-    {
-      id: 'packages',
-      label: 'Your packages',
-      description:
-        'Exports, versions, usages and upgrade impact of the packages your repositories publish.',
-      tools: tools.filter(
-        (tool) => !isLibraryTool(tool.name) && !isKnowledgeTool(tool.name) && !isQaTool(tool.name),
-      ),
-    },
-    {
-      id: 'libraries',
-      label: 'Third-party libraries',
-      description:
-        'Whether to add or upgrade a dependency, and the docs, changes, issues and source of the libraries your repositories depend on, at the version each repository uses.',
-      tools: tools.filter((tool) => isLibraryTool(tool.name)),
-    },
-    {
-      id: 'knowledge',
-      label: 'Team knowledge',
-      description:
-        'Rules agents follow in each repository and the learnings Holtkeeper picked up; proposed learnings wait in Knowledge › Learnings.',
-      tools: tools.filter((tool) => isKnowledgeTool(tool.name)),
-    },
-    {
-      id: 'qa',
-      label: 'QA tasks',
-      description:
-        'Changes, test ids and stored test notes of the tasks in Releases › QA. Off for new tokens; turn it on in a token’s tools.',
-      tools: tools.filter((tool) => isQaTool(tool.name)),
-    },
-  ].filter((group) => group.tools.length)
+  (
+    [
+      {
+        id: 'packages',
+        label: 'Packages',
+        description:
+          'API, docs, source, versions, changes and usages of your own packages and the third-party libraries your repositories depend on, at the version each repository uses.',
+      },
+      {
+        id: 'repository',
+        label: 'Repository',
+        description:
+          'Rules and conventions agents follow in a repository, its test ids and assets, and code reviews of its merge requests.',
+      },
+      {
+        id: 'knowledge',
+        label: 'Team knowledge',
+        description:
+          'Search team rules and the learnings Holtkeeper picked up, read one in full; proposed learnings wait in Knowledge › Learnings.',
+      },
+      {
+        id: 'ask',
+        label: 'Ask',
+        description:
+          'One question answered by an agent over the other tools, every statement with its source. Offered while the mcp.ask setting is on; spends the AI budget.',
+      },
+      {
+        id: 'qa',
+        label: 'QA tasks',
+        description:
+          'Changes, test ids and stored test notes of the tasks in Releases › QA. Off for new tokens; turn it on in a token’s tools.',
+      },
+    ] as const
+  )
+    .map((group) =>
+      Object.assign({ tools: tools.filter((tool) => groupOf(tool.name) === group.id) }, group),
+    )
+    .filter((group) => group.tools.length)

@@ -317,7 +317,7 @@ describe('reviewMergeRequest', () => {
     await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
     expect(tasks[0]?.system).toContain('node_modules or the module cache may be missing')
     expect(tasks[0]?.system).toContain('Packages defined in this checkout: read their source here')
-    expect(tasks[0]?.system).toContain('search_symbols by export name')
+    expect(tasks[0]?.system).toContain('find_packages by export name')
   })
 
   describe('modern Go guidelines', () => {
@@ -393,7 +393,7 @@ describe('reviewMergeRequest', () => {
       const npm = await runGo(files)
       expect(npm.pins).toEqual([])
       expect(npm.task?.prompt).not.toContain('Modern Go guidelines')
-      expect(npm.task?.system).toContain('from package.json, lockfiles.resolve or repo_packages')
+      expect(npm.task?.system).toContain('from package.json, lockfiles.resolve)')
 
       const off = await runGo(goFiles, { enabled: false })
       expect(off.pins).toEqual([])

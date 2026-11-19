@@ -56,7 +56,7 @@ import {
 import type { FleetCache } from '../fleet-cache.ts'
 import { fleetLibraryUses } from '../libraries.ts'
 import { analyzerOffFilter } from '../repo-analyzers.ts'
-import type { LibraryIndex } from '../tools/libraries.ts'
+import type { LibraryIndex } from '../tools/packages.ts'
 import { type CatalogReach, canSee } from '../visibility.ts'
 
 const DOCUMENT_CHUNKS = 100_000

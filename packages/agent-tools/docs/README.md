@@ -18,7 +18,7 @@ const result = await agent.run({
 
 ## Contract
 
-- `AgentTool { name; description; input: z.ZodObject; run(input, ctx: { dir, signal }) → string }` — `run` returns compact text and must stay inside `ctx.dir`. A thrown error is reported to the model as an error result; it does not fail the task.
+- `AgentTool { name; description; input: z.ZodObject; run(input, ctx: { dir, signal, progress? }) → string }` — `run` returns compact text and must stay inside `ctx.dir`; a long call may report what it is doing through `ctx.progress`, present only when someone listens (the MCP endpoint, for clients that sent a progress token). A thrown error is reported to the model as an error result; it does not fail the task.
 - `Toolset { name; tools }`. `defineTool({...})` infers `run`'s input type from the schema and returns a `RegistryTool` (see [Registry](#registry)).
 - `ToolError`: a failure whose message is meant for the agent as it is (the server's MCP adapter passes it on without a `Failed:` prefix).
 - `toMcpServer(toolsets, ctx, name = 'holtkeeper')` → `{ server, allowedTools }`: an SDK `createSdkMcpServer` instance (tools always loaded, not deferred behind tool search) and the qualified tool names. Dots become underscores: `code.search` is `mcp__holtkeeper__code_search`.
@@ -116,20 +116,7 @@ Rules people wrote and rules Holtkeeper learned, for one repository. `KnowledgeA
 
 `search_knowledge { query, limit? (default 5) }` (`SEARCH_KNOWLEDGE_TOOL`) prints `[rule:<id>] title (score)` or `[learn:<id>] …` with each body trimmed to its share of the budget. `propose_learning { text, reason?, files? }` (`PROPOSE_LEARNING_TOOL`) returns `proposed [learn:<id>] (<status>)` or the learning it repeats. The MCP endpoint serves tools of the same names.
 
-### `libraries` — `libraryTools({ access, repo?, budget? })`
-
-Its `instructions` limit it to third-party libraries and send the organization's own packages to the catalog tools (`search_symbols`, `get_symbol`, `get_package_api`). `LibraryDocsAccess` is injected (implemented by `libraryDocs(...)` in `@holtkeeper/libraries`, which this package does not depend on). Every method returns compact Markdown that names the versions it comes from and marks third-party text; `repo` (`forge:path` of the task repository) is passed as the caller `{ repo }`, so `version` defaults to what that repository resolves, else the newest indexed one. Results are cut to the toolset budget (lines clipped to `maxLineLength`, at most `maxResultLines` with `… N more lines`).
-
-| Tool                 | Input                                                          | Output                                                                                     |
-| -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `libraries.versions` | `package`, `ecosystem?`                                        | Indexed versions with dates, deprecations and which repositories use them                  |
-| `libraries.search`   | `query`, `package?`, `ecosystem?`, `version?`, `limit?`        | Matching doc chunks with library, version, source and URL; all libraries without `package` |
-| `libraries.read`     | `package`, `ecosystem?`, `version?`, `path?`, `heading?`       | One document or section; the document list without `path`                                  |
-| `libraries.changes`  | `package`, `ecosystem?`, `from`, `to`                          | Changelog and release notes in `(from, to]`, migration sections for crossed majors         |
-| `libraries.issues`   | `package`, `ecosystem?`, `query`, `version?`, `limit?`         | Issue digests, then live search hits                                                       |
-| `libraries.source`   | `package`, `ecosystem?`, `version?`, `path?`, `start?`, `end?` | A file listing or lines of one file of the source snapshot                                 |
-
-`ecosystem` is `npm` (default) or `Go`; `limit` is 1–20. The descriptions steer the model to these tools instead of web search or reading `node_modules`.
+Third-party library docs have no toolset here: the server's `packages` toolset (`apps/server/src/tools/packages.ts`) serves them together with the organization's own packages, to internal tasks and MCP clients alike.
 
 ## Why this saves tokens
 

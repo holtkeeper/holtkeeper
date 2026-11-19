@@ -67,7 +67,7 @@ export const commitConventionsSchema = z.object({
 /** Parsed `commits.conventions` value. */
 export type CommitConventionsSetting = z.infer<typeof commitConventionsSchema>
 
-const help = `How commit messages and branch names of a repository should look. Agents read the result through the MCP tools \`commit_conventions\` and \`check_commit_message\`.
+const help = `How commit messages and branch names of a repository should look. Agents read the result through the MCP tools \`repo_rules\` (topic \`commits\`) and \`check_commit_message\`.
 
 - Rules come from four places, strongest first: this setting, the forge's **push rules** (GitLab Premium), the repository's **commitlint** config, and the **recent history** of the default branch and its branches.
 - Fields set here replace the same field from the other sources; patterns from push rules always apply on top.

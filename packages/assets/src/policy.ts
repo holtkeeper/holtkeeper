@@ -21,7 +21,7 @@ export function parseAssetsPolicy(value: unknown): AssetsPolicy {
   return parsed.success ? parsed.data : defaultAssetsPolicy
 }
 
-const help = `What assets a repository may ship. The assets analysis checks every file against it, reviews flag new files that break it and agents read it through the MCP tool \`asset_policy\`.
+const help = `What assets a repository may ship. The assets analysis checks every file against it, reviews flag new files that break it and agents read it through the MCP tool \`repo_rules\` (topic \`assets\`).
 
 - **formats.raster**: the modern format every PNG, JPEG and GIF from 8 kB needs next to it (\`webp\` by default), or \`keep\`.
 - **formats.allowed**: when set, files of other extensions are errors.

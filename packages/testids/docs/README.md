@@ -2,7 +2,7 @@
 
 The `testids` analyzer and analysis kind: lists the test attributes (`data-test-id`, `data-test-state`, `data-qa`, ...) a checkout's frontend templates (JSX/TSX, Vue, Svelte, HTML and Angular templates) expose, per component, so end-to-end tests can be written against them. Static: nothing is built or run.
 
-Recommending test ids on new code is the job of the `testids` check (`testIdsCheck`), which the merge request review runs by default and hands to its agent, and of the MCP tools `test_ids` and `suggest_test_ids`. The analysis itself only catalogs what exists; the conventions those use are learned from the catalog (`learnTestIdOptions`), with the team's overrides from the `analyzers.testids` setting on top. People see them in the Guide's **Test ids** section, where the setting is edited too; there is no page of its own.
+Recommending test ids on new code is the job of the `testids` check (`testIdsCheck`), which the merge request review runs by default and hands to its agent, and of the MCP tool `test_ids` (existing ids, and suggestions for a file's text). The analysis itself only catalogs what exists; the conventions those use are learned from the catalog (`learnTestIdOptions`), with the team's overrides from the `analyzers.testids` setting on top. People see them in the Guide's **Test ids** section, where the setting is edited too; there is no page of its own.
 
 ## Public API
 
@@ -10,7 +10,7 @@ Recommending test ids on new code is the job of the `testids` check (`testIdsChe
   - `attributes: string[]` (`--attributes`) — test attribute names, case-insensitive; each also covers names extending it with `-`, so `data-test` covers `data-test-id` and `data-test-state`. Default `defaultAttributes`: `data-testid`, `data-test`, `data-qa`, `data-cy`, `testID`, `testId`. Set in the `analyzers.testids` setting, it also picks the attribute new ids use: the listed name the repository uses most (literal values first), or the first item when the repository uses none of them; order does not matter otherwise.
   - `sources: string[]` (`--sources`) — template sources by name from `builtinSources`: `jsx`, `vue`, `svelte`, `html`.
   - `exclude: string[]` (`--exclude`) — glob patterns of files to skip.
-  - `elements?: string[]` — native tags that need a test id, for the check and `suggest_test_ids`; unset, learned from the catalog. The catalog ignores it.
+  - `elements?: string[]` — native tags that need a test id, for the check and the suggestions of `test_ids`; unset, learned from the catalog. The catalog ignores it.
   - `presets` — `testIdPresets`: `testing-library` (`data-testid`), `cypress` (`data-cy`, `data-test`, `data-testid`), `react-native` (`testID`).
 - `testIdsAnalysis` — the `AnalysisKind` (`schema: testIdsDataSchema`, `summarize`, `toReport`); the report holds the headline numbers and the learned convention only.
 - `analyzeTestIds({ dir, sources?, attributes?, exclude?, signal? }): Promise<TestIdsData>` — the catalog.

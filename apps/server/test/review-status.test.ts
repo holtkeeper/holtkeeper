@@ -86,24 +86,37 @@ let store: Store
 const addReview = (createdAt: string, data: ReviewData) =>
   store.analyses.add({ repo, kind: 'review', ref: `!${mr.id}`, createdAt, data })
 
+let clock: Date
+const queued: string[] = []
+
 const statusText = async (
   args: Record<string, unknown>,
-  options: { onMergeRequest?: object; canRead?: boolean } = {},
+  options: { onMergeRequest?: object; canRead?: boolean; readOnly?: boolean } = {},
 ) => {
   const access = reviewToolsAccess(
-    { store, config: config(options.onMergeRequest) },
+    {
+      store,
+      config: config(options.onMergeRequest),
+      readOnly: async () => options.readOnly ?? false,
+      onQueued: (job) => void queued.push(job.id),
+      now: () => clock,
+    },
     (target) => (options.canRead ?? true) && target.teams.includes('shapes'),
   )
   const [tool] = reviewsToolset(access).tools
   return tool!.run(args, { dir: '.', signal: new AbortController().signal })
 }
 
+const reviewJobs = () => store.jobs.list({ repo, analyzer: 'review', limit: 50 })
+
 beforeEach(() => {
   store = memoryStore()
   discussions = []
+  clock = new Date('2026-11-10T14:00:00.000Z')
+  queued.length = 0
 })
 
-describe('review_status', () => {
+describe('code_review', () => {
   test('finds the merge request by branch and lists findings, open threads and what to do', async () => {
     await addReview('2026-11-10T10:00:00.000Z', review({}))
     discussions = [
@@ -141,8 +154,9 @@ describe('review_status', () => {
     expect(text).toContain('- **major** · bug · `src/widget.ts:12` — **Radius can be negative**')
     expect(text).toContain('### Open Holtkeeper threads (1)')
     expect(text).toContain('Radius can be negative (1 reply)')
-    expect(text).toContain('no review is queued for them; comment `/holtkeeper review`')
+    expect(text).toContain('Reviews start by themselves on new commits and one for bbbbbbbb')
     expect(text).toContain('Fix the open threads')
+    expect(await reviewJobs()).toHaveLength(0)
   })
 
   test('reports a running review, earlier runs and resolved threads after fixes', async () => {
@@ -181,11 +195,47 @@ describe('review_status', () => {
     expect(text).toContain('A review is queued for cccccccc')
   })
 
-  test('says how to ask for a review when none runs by itself', async () => {
-    const text = await statusText({ repo: 'work:shapes/widget', branch: 'feature/round-widgets' })
+  test('queues a plain review of the head once when none runs by itself', async () => {
+    const args = { repo: 'work:shapes/widget', branch: 'feature/round-widgets' }
+    const text = await statusText(args)
     expect(text).toContain('**Review:** none yet')
-    expect(text).toContain(
-      'No review yet: merge requests are not reviewed automatically; comment `/holtkeeper review`',
+    expect(text).toContain('A review of bbbbbbbb was queued just now; call code_review again')
+    const [job] = await reviewJobs()
+    expect(job).toMatchObject({
+      ref: mr.headSha,
+      options: { mergeRequest: 7 },
+      trigger: 'command',
+      status: 'queued',
+    })
+    expect(queued).toEqual([job!.id])
+
+    expect(await statusText(args)).toContain('A review is queued for bbbbbbbb')
+    expect(await reviewJobs()).toHaveLength(1)
+  })
+
+  test('leaves new commits to the automatic review, then queues one if it never came', async () => {
+    const args = { repo: 'work:shapes/widget', mergeRequest: 7 }
+    const options = { onMergeRequest: { analyzers: ['review'] } }
+    expect(await statusText(args, options)).toContain('Reviews start by themselves')
+    clock = new Date(clock.getTime() + 30_000)
+    expect(await statusText(args, options)).toContain('Reviews start by themselves')
+    expect(await reviewJobs()).toHaveLength(0)
+    clock = new Date(clock.getTime() + 31_000)
+    expect(await statusText(args, options)).toContain('was queued just now')
+    expect(await reviewJobs()).toHaveLength(1)
+  })
+
+  test('queues nothing for a frozen repository or a reviewed head', async () => {
+    const args = { repo: 'work:shapes/widget', mergeRequest: 7 }
+    expect(await statusText(args, { readOnly: true })).toContain('The repository is frozen')
+    await addReview('2026-11-10T12:00:00.000Z', review({ head: mr.headSha, comments: [] }))
+    expect(await statusText(args)).not.toContain('queued')
+    expect(await reviewJobs()).toHaveLength(0)
+  })
+
+  test('says so when Holtkeeper cannot read the merge request', async () => {
+    expect(statusText({ repo: 'work:shapes/widget', mergeRequest: 8 })).rejects.toThrow(
+      'Holtkeeper could not read merge requests of work:shapes/widget: not found. Ask a maintainer to give it access',
     )
   })
 
@@ -197,7 +247,7 @@ describe('review_status', () => {
       statusText({ repo: 'work:shapes/widget', branch: 'x' }, { canRead: false }),
     ).rejects.toThrow('you may read reviews of')
     expect(statusText({ repo: 'work:shapes/widget', branch: 'feature/none' })).rejects.toThrow(
-      'No merge request from branch feature/none',
+      'there is none from branch feature/none in work:shapes/widget. Push the branch, open a merge request',
     )
     expect(statusText({ repo: 'work:shapes/widget' })).rejects.toThrow(
       'Pass branch or mergeRequest.',
