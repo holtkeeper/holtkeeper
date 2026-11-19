@@ -23,6 +23,8 @@ interface AiUsageRow {
   actor: string
   interactive: number
   subject: string | null
+  merge_request: number | null
+  phase: string | null
   provider: string
   model: string
   input_tokens: number
@@ -50,6 +52,8 @@ const toRecord = (r: AiUsageRow): AiUsageRecord => ({
   actor: r.actor,
   interactive: r.interactive === 1,
   ...(r.subject !== null && { subject: r.subject }),
+  ...(r.merge_request !== null && { mergeRequest: r.merge_request }),
+  ...(r.phase !== null && { phase: r.phase }),
   provider: r.provider,
   model: r.model,
   inputTokens: r.input_tokens,
@@ -78,6 +82,8 @@ const dimensionSql: Record<AiUsageDimension, string> = {
   taskKind: 'r.task_kind',
   analyzer: `COALESCE(r.analyzer, '')`,
   origin: `CASE WHEN r.interactive = 1 THEN 'interactive' ELSE 'automatic' END`,
+  phase: `COALESCE(r.phase, '')`,
+  mergeRequest: `COALESCE(CAST(r.merge_request AS TEXT), '')`,
 }
 
 const number = (value: string | number | null | undefined) => Number(value ?? 0)
@@ -127,8 +133,8 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
     `INSERT INTO ai_usage (id, at, repo_forge, repo_path, teams, task_kind, analyzer, job_id,
        analysis_id, actor, interactive, subject, provider, model, input_tokens, output_tokens,
        cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error,
-       transcript_ref)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       transcript_ref, merge_request, phase)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
 
   function where(filter: AiUsageFilter): Where {
@@ -190,6 +196,8 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
         record.outcome,
         record.error ?? null,
         record.transcriptRef ?? null,
+        record.mergeRequest ?? null,
+        record.phase ?? null,
       )
       return storedAiUsage(record, id)
     },

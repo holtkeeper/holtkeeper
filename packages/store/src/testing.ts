@@ -1293,6 +1293,32 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(scoped[0]).toMatchObject({ runs: 1, costUsd: 2 })
     })
 
+    test('ai usage: keeps phase and merge request and groups by them', async () => {
+      await store.aiUsage.append(usage({ phase: 'initial', mergeRequest: 7, costUsd: 1 }))
+      await store.aiUsage.append(usage({ phase: 'reply', mergeRequest: 7, costUsd: 2 }))
+      await store.aiUsage.append(usage({ phase: 'initial', mergeRequest: 12, costUsd: 4 }))
+      await store.aiUsage.append(usage({ costUsd: 8 }))
+
+      const listed = await store.aiUsage.list({})
+      expect(listed.find((r) => r.costUsd === 2)).toMatchObject({ phase: 'reply', mergeRequest: 7 })
+      expect(listed.find((r) => r.costUsd === 8)?.phase).toBeUndefined()
+      expect(listed.find((r) => r.costUsd === 8)?.mergeRequest).toBeUndefined()
+
+      const phases = await store.aiUsage.aggregate({ groupBy: ['phase'] })
+      expect(phases.map((b) => [b.key.phase, b.costUsd])).toEqual([
+        ['', 8],
+        ['initial', 5],
+        ['reply', 2],
+      ])
+      const byRequest = await store.aiUsage.aggregate({ groupBy: ['mergeRequest', 'phase'] })
+      expect(byRequest.map((b) => [b.key.mergeRequest, b.key.phase, b.costUsd])).toEqual([
+        ['', '', 8],
+        ['12', 'initial', 4],
+        ['7', 'initial', 1],
+        ['7', 'reply', 2],
+      ])
+    })
+
     test('ai usage: unknownCost counts runs without a cost, not denied ones', async () => {
       await store.aiUsage.append(usage())
       await store.aiUsage.append(usage({ costUsd: 0, costSource: 'unknown', model: 'mystery' }))

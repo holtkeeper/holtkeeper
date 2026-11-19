@@ -314,6 +314,8 @@ export interface AiUsageRow {
   actor: string
   interactive: boolean
   subject: string | null
+  merge_request: number | null
+  phase: string | null
   provider: string
   model: string
   input_tokens: number | string
@@ -341,6 +343,8 @@ export const toAiUsage = (r: AiUsageRow): AiUsageRecord => ({
   actor: r.actor,
   interactive: r.interactive,
   ...(r.subject !== null && { subject: r.subject }),
+  ...(r.merge_request !== null && { mergeRequest: r.merge_request }),
+  ...(r.phase !== null && { phase: r.phase }),
   provider: r.provider,
   model: r.model,
   inputTokens: num(r.input_tokens),

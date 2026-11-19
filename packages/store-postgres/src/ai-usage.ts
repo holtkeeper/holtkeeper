@@ -27,6 +27,8 @@ export function dimensionFlags(
     taskKind: on('taskKind'),
     analyzer: on('analyzer'),
     origin: on('origin'),
+    phase: on('phase'),
+    mergeRequest: on('mergeRequest'),
   }
 }
 
@@ -54,6 +56,8 @@ export interface AggregateRow {
   k_task_kind: string
   k_analyzer: string
   k_origin: string
+  k_phase: string
+  k_merge_request: string
   input_tokens: number | string | null
   output_tokens: number | string | null
   cache_read_tokens: number | string | null
@@ -77,6 +81,8 @@ const keyColumn: Record<AiUsageDimension, keyof AggregateRow> = {
   taskKind: 'k_task_kind',
   analyzer: 'k_analyzer',
   origin: 'k_origin',
+  phase: 'k_phase',
+  mergeRequest: 'k_merge_request',
 }
 
 /** One aggregate row as a bucket keyed by the requested dimensions only. */
@@ -159,14 +165,15 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
         INSERT INTO ${t.aiUsage} (id, at, repo_forge, repo_path, teams, task_kind, analyzer, job_id,
           analysis_id, actor, interactive, subject, provider, model, input_tokens, output_tokens,
           cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome,
-          error, transcript_ref)
+          error, transcript_ref, merge_request, phase)
         VALUES (${crypto.randomUUID()}, ${record.at}, ${record.repo.forge}, ${record.repo.path},
           ${sql.json(record.teams)}, ${record.taskKind}, ${record.analyzer ?? null},
           ${record.jobId ?? null}, ${record.analysisId ?? null}, ${record.actor},
           ${record.interactive ?? false}, ${record.subject ?? null}, ${record.provider}, ${record.model}, ${record.inputTokens}, ${record.outputTokens},
           ${record.cacheReadTokens}, ${record.cacheWriteTokens}, ${record.costUsd}::float8,
           ${record.costSource}, ${record.durationMs}, ${record.turns}, ${record.outcome},
-          ${record.error ?? null}, ${record.transcriptRef ?? null})
+          ${record.error ?? null}, ${record.transcriptRef ?? null}, ${record.mergeRequest ?? null},
+          ${record.phase ?? null})
         RETURNING *`
       if (!row) throw new Error('insert returned no row')
       return toAiUsage(row)
@@ -198,6 +205,9 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
           CASE WHEN ${on.analyzer}::boolean THEN COALESCE(r.analyzer, '') ELSE '' END AS k_analyzer,
           CASE WHEN ${on.origin}::boolean
             THEN CASE WHEN r.interactive THEN 'interactive' ELSE 'automatic' END ELSE '' END AS k_origin,
+          CASE WHEN ${on.phase}::boolean THEN COALESCE(r.phase, '') ELSE '' END AS k_phase,
+          CASE WHEN ${on.mergeRequest}::boolean
+            THEN COALESCE(r.merge_request::text, '') ELSE '' END AS k_merge_request,
           SUM(r.input_tokens) AS input_tokens,
           SUM(r.output_tokens) AS output_tokens,
           SUM(r.cache_read_tokens) AS cache_read_tokens,
@@ -215,7 +225,7 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
           SELECT '' WHERE NOT ${on.team}::boolean OR jsonb_array_length(r.teams) = 0
         ) g
         WHERE ${await where(sql, t, aggregateFilter(query))}
-        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10`
+        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12`
       return sortAiUsageBuckets(
         rows.map((row) => toBucket(row, groupBy)),
         groupBy,

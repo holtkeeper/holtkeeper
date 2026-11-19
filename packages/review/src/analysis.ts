@@ -164,6 +164,9 @@ const severityCounts = z.object({
  * Stored headline numbers of one `review` record (one review run of a merge request). Parsing
  * stored metrics with it accepts records stored before a field existed: those fields are absent.
  */
+/** How a reply run can answer a thread; see `ReviewMetrics.reply`. */
+export const replyActions = ['explain', 'concede', 'update'] as const
+
 export const reviewMetricsSchema = z.object({
   mergeRequest: z.number(),
   title: z.string().optional(),
@@ -191,6 +194,13 @@ export const reviewMetricsSchema = z.object({
   promptVersion: z.string().optional(),
   /** As `ReviewData.size.minutes`: estimated human review time of the whole merge request. */
   reviewMinutes: z.number().optional(),
+  /** Agent findings the verification pass refuted, as `ReviewData.stats.dropped.refuted`. */
+  refuted: z.number().optional(),
+  /**
+   * How a `reply` run answered the thread: `explain` stood by the comment, `concede` agreed with
+   * the person, `update` proposed other code. Absent on other runs and replies that said nothing.
+   */
+  reply: z.enum(replyActions).optional(),
 })
 
 /** Parsed stored metrics of one review record; fields newer than the record are absent. */
@@ -199,6 +209,8 @@ export type ReviewMetrics = z.infer<typeof reviewMetricsSchema>
 /** `ReviewMetrics` of `data`; every field the data has is set. */
 export function reviewMetrics(data: ReviewData): ReviewMetrics {
   const now = posted(data)
+  const reason = data.mode === 'reply' ? data.threads[0]?.reason : undefined
+  const replyAction = replyActions.find((action) => action === reason)
   const severities: Record<ReviewSeverity, number> = { info: 0, minor: 0, major: 0, critical: 0 }
   for (const comment of now) severities[comment.severity] += 1
   return {
@@ -220,6 +232,8 @@ export function reviewMetrics(data: ReviewData): ReviewMetrics {
     ...(data.ruleSources?.length ? { ruleSources: data.ruleSources } : {}),
     ...(data.promptVersion ? { promptVersion: data.promptVersion } : {}),
     ...(data.size?.minutes ? { reviewMinutes: data.size.minutes } : {}),
+    ...(data.stats.dropped.refuted ? { refuted: data.stats.dropped.refuted } : {}),
+    ...(replyAction ? { reply: replyAction } : {}),
   }
 }
 

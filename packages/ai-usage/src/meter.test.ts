@@ -97,6 +97,19 @@ describe('meteredAgent', () => {
     ])
   })
 
+  test('records the merge request of the context and the phase of the task', async () => {
+    const records: Omit<AiUsageRecord, 'id'>[] = []
+    const agent = meteredAgent(fakeAgent({ text: 'ok', turns: 1 }), {
+      record: (e) => void records.push(e),
+      context: { ...context, mergeRequest: 42 },
+    })
+    await agent.run({ dir: '/x', prompt: 'p', taskKind: 'review', phase: 'reply' })
+    await agent.run({ dir: '/x', prompt: 'p' })
+    expect(records[0]).toMatchObject({ taskKind: 'review', phase: 'reply', mergeRequest: 42 })
+    expect(records[1]?.phase).toBeUndefined()
+    expect(records[1]?.mergeRequest).toBe(42)
+  })
+
   test('records failures with partial usage and rethrows', async () => {
     const records: Omit<AiUsageRecord, 'id'>[] = []
     const failure = Object.assign(new Error('max turns'), {

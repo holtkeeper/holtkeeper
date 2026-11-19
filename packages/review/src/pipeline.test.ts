@@ -192,6 +192,7 @@ describe('reviewMergeRequest', () => {
     ])
 
     expect(tasks[0]?.taskKind).toBe('review')
+    expect(tasks[0]?.phase).toBe('initial')
     expect(tasks[0]?.tier).toBe('main')
     expect(tasks[0]?.context).toContain('Check money.')
     expect(tasks[0]?.prompt).toContain('2 +   return a * b')
@@ -849,7 +850,9 @@ describe('reviewMergeRequest', () => {
     expect(data.previousHead).toBe(previousHead)
     expect(tasks[0]?.prompt).toContain('4 + export const tax = 0.2')
     expect(tasks[0]?.prompt).toContain('2 ~   return a * b')
+    expect(tasks[0]?.phase).toBe('update')
     expect(tasks[1]?.taskKind).toBe('triage')
+    expect(tasks[1]?.phase).toBe('recheck')
     expect(tasks[1]?.tier).toBe('fast')
     expect(data.threads.map((t) => [t.discussionId, t.action])).toEqual([
       ['fixed', 'resolved'],

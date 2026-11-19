@@ -75,7 +75,7 @@ test('the rail holds the eight workspaces in order, with Settings at the bottom'
     ],
     ['releases', ['/releases', '/releases/timeline', '/releases/qa', '/releases/setup']],
     ['knowledge', ['/knowledge/rules', '/knowledge/learnings']],
-    ['ops', ['/ops/runs', '/ops/tasks', '/ops/automation', '/ops/spend']],
+    ['ops', ['/ops/runs', '/ops/tasks', '/ops/automation', '/ops/spend', '/ops/reviews']],
     [
       'settings',
       [
@@ -170,14 +170,15 @@ test('Analyzers and Policies open for settings:read on any scope, each with its 
   expect(activeNav('/settings/policies')?.label).toBe('Policies')
 })
 
-test('AI spend sits under Ops for ai:read or ai:admin', () => {
+test('AI spend and Review analytics sit under Ops for ai:read or ai:admin', () => {
   for (const action of ['ai:read', 'ai:admin'] as const)
     expect(workspaceOf(withGrant({ teams: ['shapes'] }, action), 'ops')?.items.map(navKey)).toEqual(
-      ['/ops/spend'],
+      ['/ops/spend', '/ops/reviews'],
     )
-  expect(visibleNav(withGrant({ all: true }, 'settings:read'), 'off').map(navKey)).not.toContain(
-    '/ops/spend',
-  )
+  const settingsReader = visibleNav(withGrant({ all: true }, 'settings:read'), 'off').map(navKey)
+  expect(settingsReader).not.toContain('/ops/spend')
+  expect(settingsReader).not.toContain('/ops/reviews')
+  expect(activeNav('/ops/reviews')?.label).toBe('Review analytics')
 })
 
 test('repository readers see Repos, Chat, Tasks under Ops and Settings with only the Audit log', () => {

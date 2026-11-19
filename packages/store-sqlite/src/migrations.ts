@@ -855,6 +855,13 @@ export const migrations: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 35,
+    sql: `
+      ALTER TABLE ai_usage ADD COLUMN merge_request INTEGER;
+      ALTER TABLE ai_usage ADD COLUMN phase TEXT;
+    `,
+  },
 ]
 
 /**

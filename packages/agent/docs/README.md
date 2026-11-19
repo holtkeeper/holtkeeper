@@ -9,6 +9,7 @@ The `Agent` contract for LLM work on a repository checkout (code review, refacto
   - `tier` — `fast`, `main` (default) or `deep`, see [Model tiers](#model-tiers); the adapter runs the tier's model at its reasoning effort.
   - `effort` — `low`, `medium` or `high` instead of the tier's reasoning effort (both adapters); the model stays the tier's.
   - `taskKind` — `review`, `refactor`, `triage`, ...; for knowledge, instructions and reporting, never for the model.
+  - `phase` — the step of the work within `taskKind` (a review's `initial`, `update`, `recheck`, `reply`), for reporting only; usage records keep it.
   - `context` — a pre-selected knowledge/conventions block, placed early in the system prompt.
   - `toolsets` — in-process tools (`Toolset { name; tools: AgentTool[]; instructions? }`), e.g. from `@holtkeeper/agent-tools`. Both adapters add every toolset's `instructions` (when to use its tools) to the system prompt as a "When to use the tool groups" list.
   - `mcpServers` — external MCP servers by name (SDK `McpServerConfig`).

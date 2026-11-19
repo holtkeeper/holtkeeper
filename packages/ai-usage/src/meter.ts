@@ -49,6 +49,8 @@ export interface MeteredContext {
   interactive?: boolean
   /** What the runs work on, stored as `AiUsageRecord.subject`. */
   subject?: string
+  /** Merge request (iid) the runs work on, stored as `AiUsageRecord.mergeRequest`. */
+  mergeRequest?: number
 }
 
 /** `task` with `maxCostUsd` lowered to `remainingUsd` when that is smaller. */
@@ -107,6 +109,8 @@ export function usageEntry(
     model: string
     interactive?: boolean
     subject?: string
+    mergeRequest?: number
+    phase?: string
     analyzer?: string
     jobId?: string
     analysisId?: string
@@ -129,6 +133,8 @@ export function usageEntry(
     actor: base.actor,
     interactive: base.interactive ?? false,
     ...(base.subject !== undefined && { subject: base.subject }),
+    ...(base.mergeRequest !== undefined && { mergeRequest: base.mergeRequest }),
+    ...(base.phase !== undefined && { phase: base.phase }),
     provider: base.provider,
     model: base.model,
     inputTokens: usage.inputTokens,
@@ -180,6 +186,8 @@ export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent 
         model: context.model,
         interactive: context.interactive ?? false,
         ...(context.subject !== undefined && { subject: context.subject }),
+        ...(context.mergeRequest !== undefined && { mergeRequest: context.mergeRequest }),
+        ...(task.phase !== undefined && { phase: task.phase }),
         ...(context.analyzer !== undefined && { analyzer: context.analyzer }),
         ...(context.jobId !== undefined && { jobId: context.jobId }),
         ...(context.analysisId !== undefined && { analysisId: context.analysisId }),
@@ -229,6 +237,10 @@ export interface AgentRunInfo {
   interactive?: boolean
   /** What the run worked on, stored as `AiUsageRecord.subject`. */
   subject?: string
+  /** Merge request (iid) the run worked on, stored as `AiUsageRecord.mergeRequest`. */
+  mergeRequest?: number
+  /** `AgentTask.phase` of the run, stored as `AiUsageRecord.phase`. */
+  phase?: string
   analyzer?: string
   jobId?: string
   analysisId?: string
@@ -267,6 +279,8 @@ export function usageRecorder(
       model: info.model,
       interactive: info.interactive ?? false,
       ...(info.subject !== undefined && { subject: info.subject }),
+      ...(info.mergeRequest !== undefined && { mergeRequest: info.mergeRequest }),
+      ...(info.phase !== undefined && { phase: info.phase }),
       ...(info.analyzer !== undefined && { analyzer: info.analyzer }),
       ...(info.jobId !== undefined && { jobId: info.jobId }),
       ...(info.analysisId !== undefined && { analysisId: info.analysisId }),

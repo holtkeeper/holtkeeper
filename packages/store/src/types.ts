@@ -825,6 +825,13 @@ export interface AiUsageRecord {
   interactive: boolean
   /** What the run worked on in a few words, e.g. `MR !42` or `v2.3.0`, when the caller said. */
   subject?: string
+  /** Merge request (iid) the run worked on, when it worked on one. */
+  mergeRequest?: number
+  /**
+   * Step of the work within `taskKind`, when the caller named one; reviews use `ReviewPhase`
+   * values (`initial`, `update`, `recheck`, `reply`).
+   */
+  phase?: string
   /** Credential id or name the run was billed to, or `anthropic`. */
   provider: string
   model: string
@@ -887,7 +894,8 @@ export interface AiUsageQuery extends AiUsageFilter {
  * What aggregates can be split by. `day` is `YYYY-MM-DD`, `week` the Monday starting the ISO week
  * (`YYYY-MM-DD`), `month` `YYYY-MM`, all in UTC; `repo` is `forge:path`. Missing analyzers are `''`.
  * With `team` a record counts once in each of its teams, and records without teams under `''`.
- * `origin` is `interactive` or `automatic` (`AiRunOrigin`).
+ * `origin` is `interactive` or `automatic` (`AiRunOrigin`). `phase` and `mergeRequest` (the iid in
+ * decimal) are `''` on records without them.
  */
 export type AiUsageDimension =
   | 'day'
@@ -900,6 +908,8 @@ export type AiUsageDimension =
   | 'taskKind'
   | 'analyzer'
   | 'origin'
+  | 'phase'
+  | 'mergeRequest'
 
 /** Sums over a set of AI usage records. */
 export interface AiUsageTotals {

@@ -192,6 +192,10 @@ A row opens the item in the `SideSheet`, headed by the item's short id (`shortIt
 
 `/ops/spend` (Ops, `ai:read` or `ai:admin`): the weekly budget with its inline editor, daily cost of people and automatic work, spend by feature, repository and model, and every model run. See [spend.md](spend.md).
 
+## Review analytics
+
+`/ops/reviews` (Ops, `ai:read` or `ai:admin`): what merge request reviews cost by phase and per merge request, how people replied and how the bot answered, and what came of the comments. See [review-analytics.md](review-analytics.md).
+
 ## Audit log
 
 `/settings/audit` (Settings › Audit log, `features/audit-log/AuditLogPage.tsx`; `repos:read` or global `audit:read`) is the one log of who did what. It reads `GET /api/history` and `GET /api/history/summary`, so it lists only what the viewer may see: every audit event with global `audit:read`, otherwise only events about repositories the viewer can read and never instance events. The `ScopeSwitch` narrows it to the repositories of the viewer's home teams (_My teams_), of one picked team, or everything (_All I can see_), using `GET /api/history/scope`. Filters pick an area, one repository, an outcome and a time range (24 h, 7 days by default, 30 days, All). With global `audit:read` a chain banner shows the daily hash chain check (`GET /api/audit/verify/last`), **Verify chain** runs one now, and the ⋯ menu exports CSV or NDJSON. A summary strip counts events, denied and failed ones and the people and agents who acted; the table groups events by day with their `#seq`, a sentence per action (`lib/audit-labels.ts`) and the scope; a row opens the `SideSheet` with **Event** / **Changes** / **Details** tabs and J/K stepping. See [settings-audit-log.md](settings-audit-log.md).

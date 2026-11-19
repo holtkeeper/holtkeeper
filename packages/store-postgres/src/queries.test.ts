@@ -50,6 +50,8 @@ describe('query building', () => {
         k_task_kind: '',
         k_analyzer: '',
         k_origin: '',
+        k_phase: '',
+        k_merge_request: '',
         input_tokens: '300',
         output_tokens: '60',
         cache_read_tokens: null,

@@ -352,6 +352,19 @@ test('review metrics carry the model, wall time and Guide scopes of newer runs',
   expect(reviewMetricsSchema.parse(metrics)).toEqual(metrics)
 })
 
+test('review metrics carry refuted findings and how a reply answered', () => {
+  const refuted = data()
+  refuted.stats.dropped.refuted = 2
+  expect(reviewMetrics(refuted).refuted).toBe(2)
+  expect(reviewMetrics(refuted).reply).toBeUndefined()
+  const reply = data({
+    mode: 'reply',
+    threads: [{ discussionId: 'd1', action: 'resolved', reason: 'concede' }],
+  })
+  expect(reviewMetrics(reply).reply).toBe('concede')
+  expect(reviewMetrics(data({ mode: 'reply', threads: [] })).reply).toBeUndefined()
+})
+
 test('records stored before the model, wall time and Guide scopes existed still parse', () => {
   const old = data()
   expect(reviewDataSchema.safeParse(old).success).toBe(true)

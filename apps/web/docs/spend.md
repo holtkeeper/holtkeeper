@@ -18,15 +18,15 @@ Part of the web app's [Ops](README.md#ai-spend) docs.
 
 `featureOf(taskKind)` from `@holtkeeper/ai-usage/features` (shared with the server, which turns `feature=` into the same task kinds) maps a run's task kind to the feature it is reported under:
 
-| Feature              | Task kinds                                                                    |
-| -------------------- | ----------------------------------------------------------------------------- |
-| Reviews              | `review`, `triage`                                                            |
-| Agent tasks          | `write-task`, `fix`, `port`, `propagate`, `upgrade`, `propagate-fix`, `tests` |
-| Chat                 | `chat`, `chat-summary`                                                        |
-| Guide and learnings  | `guide`, `learning`, `library-digest`                                         |
-| Releases and QA      | `release-notes`, `qa-notes`                                                   |
-| Vulnerability triage | `security-triage`                                                             |
-| Other                | everything else, e.g. `agent`, and runs without a kind                        |
+| Feature              | Task kinds                                                                      |
+| -------------------- | ------------------------------------------------------------------------------- |
+| Reviews              | `review`, `review-plan`, `review-verify`, `review-split`, `triage`, `translate` |
+| Agent tasks          | `write-task`, `fix`, `port`, `propagate`, `upgrade`, `propagate-fix`, `tests`   |
+| Chat                 | `chat`, `chat-summary`                                                          |
+| Guide and learnings  | `guide`, `learning`, `library-digest`                                           |
+| Releases and QA      | `release-notes`, `qa-notes`                                                     |
+| Vulnerability triage | `security-triage`                                                               |
+| Other                | everything else, e.g. `agent`, and runs without a kind                          |
 
 A new task kind lands in _Other_ until it is added to the map. _Other_ is not offered as a filter, since it has no fixed list of kinds.
 

@@ -25,6 +25,8 @@ export const aiUsageDimensions: readonly AiUsageDimension[] = [
   'taskKind',
   'analyzer',
   'origin',
+  'phase',
+  'mergeRequest',
 ]
 
 /** The Monday (UTC) starting the ISO week of a timestamp, as `YYYY-MM-DD`. */
@@ -51,6 +53,10 @@ const dimensionValue = (
       return record.analyzer ?? ''
     case 'origin':
       return record.interactive ? 'interactive' : 'automatic'
+    case 'phase':
+      return record.phase ?? ''
+    case 'mergeRequest':
+      return record.mergeRequest === undefined ? '' : String(record.mergeRequest)
     default:
       return record[dimension]
   }

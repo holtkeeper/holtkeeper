@@ -55,6 +55,7 @@ import type {
   AiRunList,
   AiUsageBuckets,
   AiUsageOverview,
+  ReviewAnalytics,
   AiUsagePeriodKind,
   AiWeekBreakdown,
   AuditVerifyResponse,
@@ -680,6 +681,8 @@ export const api = {
     request<AiUsageBuckets>('GET', '/api/ai/usage', { query: toQuery(filter) }),
   aiRuns: (filter: AiUsageQuery & { before?: string; limit?: number }) =>
     request<AiRunList>('GET', '/api/ai/runs', { query: toQuery(filter) }),
+  aiReviews: (query: { period?: AiUsagePeriodKind; teams?: string } = {}) =>
+    request<ReviewAnalytics>('GET', '/api/ai/reviews', { query: toQuery(query) }),
 
   history: (filter: HistoryQuery & { cursor?: string; limit?: number }) =>
     request<HistoryList>('GET', '/api/history', { query: toQuery(filter) }),

@@ -88,6 +88,10 @@ Every summary except a skipped one ends with a request for feedback (`summary.fe
 
 ## Conversations
 
+### Review phases
+
+Every agent task of a review carries `AgentTask.phase` (`ReviewPhase`, kept on the usage record as `phase`): `initial` for the first review of a merge request (no earlier review that reviewed something), `update` for a review after new commits (incremental, or a full re-review after a force push), `recheck` for the check of earlier threads against the new commits (`recheckThreads`, inside an `update` run) and `reply` for an answer in a thread. Planning, splitting, verification, summary revisions and translations take the phase of the pass they run in; the start note's translation, which runs before the pass is known, has none. `withPhase(agent, phase)` sets the phase on every task that names none; `reviewPhases` lists them in order.
+
 `replyToThread({ forge, repo, mr, discussion, agent, dir?, botUsername?, language?, context? })` answers the latest reply in a thread we started, on the `main` model tier: `explain`, `concede` (and resolve) or `update` with a new suggestion (GitLab ` ```suggestion:-N+0 ` markup). Threads not started by us, and threads whose last note is ours, are skipped. With `options.replyTo` the analyzer runs it with the resolved rules as `context` and stores a `reply` record.
 
 Lasting rules taught in replies are not extracted here: the server looks at each reply separately with a cheap filter and a fast-tier call and stores the rule as a learning (see [@holtkeeper/server](../../../apps/server/docs/README.md)). `commentFinding(body)` reads the category, severity and finding id back from an inline comment `commentBody` wrote, so reactions on it can be counted per category and an open thread's severity is known without the stored run.
@@ -163,7 +167,7 @@ A section headed `## Paths` (or `## Path instructions`) gives rules for files ma
 
 Report sections: **Summary** (with effort, the review time or the advice to split, and the walkthrough), **Findings** (table by severity, comments with tags `new`/`rejected`/`suggestion`, findings no longer reported compared with the previous review of the same MR), **Suggestions** (`changes` block with `applicable: false` — suggestions are applied in the forge), **Threads**, **Not reviewed**. Metrics: verdict, comments, major and critical, suggestions, threads resolved, files reviewed, cost.
 
-`reviewMetrics(data)` is the kind's `metrics`, stored with every record as `ReviewMetrics`: `mergeRequest` (its id), `verdict`, `mode`, posted `comments` and their counts per severity (`severities`, every severity present), `suggestions`, findings the forge `rejected`, discussions `resolved`, `approved`, `costUsd`, and the merge request's `title`, `url` and `author`, `model`, `promptVersion`, `durationMs`, `ruleSources` and `reviewMinutes` (the estimated human review time) so a fleet table needs no record data. `reviewMetricsSchema` parses stored metrics; fields newer than a record are absent. The server's Quality › Reviews (`GET /api/reviews`) lists rows from these metrics only.
+`reviewMetrics(data)` is the kind's `metrics`, stored with every record as `ReviewMetrics`: `mergeRequest` (its id), `verdict`, `mode`, posted `comments` and their counts per severity (`severities`, every severity present), `suggestions`, findings the forge `rejected`, discussions `resolved`, `approved`, `costUsd`, and the merge request's `title`, `url` and `author`, `model`, `promptVersion`, `durationMs`, `ruleSources` and `reviewMinutes` (the estimated human review time), `refuted` (agent findings the verification pass dropped) and, on `reply` records, `reply` (`explain`, `concede` or `update`: how the thread was answered) so a fleet table needs no record data. `reviewMetricsSchema` parses stored metrics; fields newer than a record are absent. The server's Quality › Reviews (`GET /api/reviews`) lists rows from these metrics only.
 
 ## Measuring quality
 

@@ -212,6 +212,8 @@ describe('row mapping', () => {
       outcome: 'ok',
       error: null,
       transcript_ref: null,
+      merge_request: null,
+      phase: null,
     }
     expect(toAiUsage(row)).toMatchObject({
       at: iso(at),

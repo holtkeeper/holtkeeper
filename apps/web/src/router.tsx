@@ -140,6 +140,10 @@ const KnowledgePage = lazyRouteComponent(
   'KnowledgePage',
 )
 const AiSpendPage = lazyRouteComponent(() => import('./features/ai/AiSpendPage.tsx'), 'AiSpendPage')
+const ReviewAnalyticsPage = lazyRouteComponent(
+  () => import('./features/ai/ReviewAnalyticsPage.tsx'),
+  'ReviewAnalyticsPage',
+)
 
 const JobsPage = lazyRouteComponent(() => import('./features/jobs/JobsPage.tsx'), 'JobsPage')
 const JobPage = lazyRouteComponent(() => import('./features/jobs/JobPage.tsx'), 'JobPage')
@@ -400,6 +404,7 @@ const routeTree = rootRoute.addChildren([
     tasksRoute,
     automationRoute,
     page('ops/spend', AiSpendPage),
+    page('ops/reviews', ReviewAnalyticsPage),
     page('settings', SettingsHome),
     settingsSectionRoute,
     accountRoute,

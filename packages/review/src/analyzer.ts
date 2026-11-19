@@ -22,6 +22,7 @@ import { bundledGoGuidelines } from './go-guidelines/snapshot.ts'
 import { readCheckoutRules } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
 import { type ReviewMessages, englishReviewMessages, reviewMessageCatalog } from './messages.ts'
+import { withPhase } from './phase.ts'
 import {
   DEFAULT_REVIEW_COST_LIMIT_USD,
   type ReviewGuide,
@@ -432,7 +433,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             repo,
             mr: mr.id,
             discussion: options.replyTo,
-            agent: context.agent,
+            agent: withPhase(context.agent, 'reply'),
             ...(dir ? { dir } : {}),
             ...(botUsername ? { botUsername } : {}),
             ...(options.language ? { language: options.language } : {}),

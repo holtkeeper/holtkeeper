@@ -27,6 +27,7 @@ import type {
   AiUsageOverview,
   AiUsagePeriod,
   AiWeekBreakdown,
+  ReviewAnalytics,
 } from '@holtkeeper/api'
 import {
   type AiRunOrigin,
@@ -54,6 +55,7 @@ import {
   repoTarget,
   ForbiddenException,
 } from '../context.ts'
+import { reviewAnalytics } from '../review-analytics.ts'
 import { assetsToolset } from '../tools/assets.ts'
 import { catalogToolset } from '../tools/catalog.ts'
 import { opsToolset } from '../tools/ops.ts'
@@ -61,6 +63,7 @@ import { mcpToolsets, taskToolsets } from '../tools/registry.ts'
 import { releasesToolset } from '../tools/releases.ts'
 import { rulesToolset } from '../tools/rules.ts'
 import { stackToolset } from '../tools/stack.ts'
+import { canSee } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
 
 const readActions = ['ai:read', 'ai:admin'] as const
@@ -414,6 +417,31 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
         ...(chatReplyAvgUsd !== undefined && { chatReplyAvgUsd }),
       } satisfies AiSpendCaps,
     })
+  })
+
+  app.get('/ai/reviews', async (c) => {
+    const principal = principalOf(c)
+    const kind = periodParam(c.req.query('period'))
+    const { current } = periodSpans(kind, now())
+    const teams = teamsParam(c.req.query('teams'))
+    return c.json<ReviewAnalytics>(
+      await reviewAnalytics(
+        {
+          aiUsage: store.aiUsage,
+          analyses: store.analyses,
+          ...(store.learnings && { learnings: store.learnings }),
+          targetOf: (repo) => repoTarget(config, repo),
+          canRead: (target) => canSee(principal, 'analyses:read', target),
+        },
+        {
+          kind,
+          from: current.from,
+          to: current.to,
+          access: accessOf(c),
+          ...(teams && { teams }),
+        },
+      ),
+    )
   })
 
   app.get('/ai/budget', async (c) => {

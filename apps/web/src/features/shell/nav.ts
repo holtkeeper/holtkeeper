@@ -7,6 +7,7 @@ import {
   ChartColumn,
   ClipboardCheck,
   CircleDollarSign,
+  CircleGauge,
   CodeXml,
   FileSearch,
   FlaskConical,
@@ -112,6 +113,7 @@ export interface NavItem {
     | '/ops/tasks'
     | '/ops/automation'
     | '/ops/spend'
+    | '/ops/reviews'
     | '/settings/$section'
   /** The Settings section of a `/settings/$section` entry; its visibility follows `visibleSettingsSections`. */
   section?: SettingsSectionId
@@ -326,6 +328,13 @@ const navItems: readonly NavItem[] = [
     to: '/ops/spend',
     label: 'AI spend',
     icon: CircleDollarSign,
+    requires: ['ai:read', 'ai:admin'],
+  },
+  {
+    workspace: 'ops',
+    to: '/ops/reviews',
+    label: 'Review analytics',
+    icon: CircleGauge,
     requires: ['ai:read', 'ai:admin'],
   },
   ...settingsSectionIds.map((section): NavItem => ({

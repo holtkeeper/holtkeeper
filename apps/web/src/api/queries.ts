@@ -1201,6 +1201,15 @@ export const useAiOverview = (enabled = true, query: AiOverviewQuery = {}) =>
     enabled,
   })
 
+/** Ops › Review analytics for one period and scope; off while `enabled` is false. */
+export const useReviewAnalytics = (query: Parameters<typeof api.aiReviews>[0], enabled = true) =>
+  useQuery({
+    queryKey: [...keys.ai, 'reviews', query],
+    queryFn: () => api.aiReviews(query),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+
 /** AI usage sums grouped by `groupBy` (comma list of dimensions); off while `enabled` is false. */
 export const useAiUsage = (filter: AiUsageQuery & { groupBy?: string }, enabled = true) =>
   useQuery({

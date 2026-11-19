@@ -111,12 +111,16 @@ interface AgentRunOrigin {
   interactive?: boolean
   /** What the runs work on (a merge request, a version, a task title), kept on usage records. */
   subject?: string
+  /** Merge request (iid) the runs work on, kept on usage records. */
+  mergeRequest?: number
 }
 
 /** One finished (or budget-denied) agent run. Exactly one of `result` and `error` is set. */
 export interface AgentRunInfo extends AgentRunOrigin {
   repo: RepoTarget
   taskKind: string
+  /** `AgentTask.phase` of the run, when it named one. */
+  phase?: string
   /** The name of the provider credential the run used (its route's, when it fell back). */
   provider: string
   /** Provider kind of `llm.provider`, e.g. `anthropic-compatible`. */
@@ -263,6 +267,7 @@ export function withServerDefaults(
             ...options.origin,
             repo,
             taskKind,
+            ...(task.phase !== undefined && { phase: task.phase }),
             provider: ('result' in outcome && outcome.result.provider) || provider,
             providerKind,
             model: ('result' in outcome && outcome.result.model) || modelOf(task),
@@ -726,6 +731,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       ...(job?.jobId !== undefined && { jobId: job.jobId }),
       ...(job?.interactive !== undefined && { interactive: job.interactive }),
       ...(job?.subject !== undefined && { subject: job.subject }),
+      ...(job?.mergeRequest !== undefined && { mergeRequest: job.mergeRequest }),
     }
     const wrapped = withServerDefaults(agent, {
       repo: target,

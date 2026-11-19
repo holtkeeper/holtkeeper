@@ -830,6 +830,13 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX learnings_search ON learnings USING gin (search);
     `,
   },
+  {
+    version: 34,
+    sql: `
+      ALTER TABLE ai_usage ADD COLUMN merge_request integer;
+      ALTER TABLE ai_usage ADD COLUMN phase text;
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

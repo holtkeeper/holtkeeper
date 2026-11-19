@@ -35,6 +35,8 @@ interface AgentJobInfo {
   interactive: boolean
   /** What the job works on: a task title, a merge request or its ref. */
   subject?: string
+  /** The merge request (iid) the job works on, when it works on one. */
+  mergeRequest?: number
   /** Runs commands the way the job does (host, mise or container). */
   runner: CommandRunner
 }
@@ -315,12 +317,14 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
         }
       if (analyzer.needs.agent) {
         const subject = subjectOf(job)
+        const { mergeRequest } = job.options
         const agent = await factory.agentFor?.(job.repo, {
           jobId: job.id,
           analyzer: job.analyzer,
           ...(job.actor ? { actor: job.actor } : {}),
           interactive: isInteractiveJob(job),
           ...(subject !== undefined && { subject }),
+          ...(typeof mergeRequest === 'number' && { mergeRequest }),
           // The job's runner is prepared with the checkout below; resolve it when the agent runs a command.
           runner: { run: (command, runOptions) => context.runner.run(command, runOptions) },
         })

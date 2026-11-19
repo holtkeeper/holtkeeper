@@ -2848,6 +2848,94 @@ export interface ReviewQuality {
   total: ReviewQualityRow
 }
 
+/**
+ * Which pass over a merge request a review's model run belonged to (`ReviewPhase` of
+ * `@holtkeeper/review`), or `other` for review runs recorded without one (older records, the
+ * start note's translation).
+ */
+export type ReviewAnalyticsPhase = 'initial' | 'update' | 'recheck' | 'reply' | 'other'
+
+/** Review spend of one phase over the period. */
+export interface ReviewPhaseCost {
+  phase: ReviewAnalyticsPhase
+  costUsd: number
+  runs: number
+}
+
+/** Review spend of one UTC day, per phase. */
+export interface ReviewCostDay {
+  /** `YYYY-MM-DD`. */
+  day: string
+  phases: Partial<Record<ReviewAnalyticsPhase, number>>
+}
+
+/** What one merge request's reviews cost over the period. */
+export interface ReviewMergeRequestCost {
+  /** `forge:path`. */
+  repo: string
+  mergeRequest: number
+  /** From the period's review records; absent when none of them was in the period. */
+  title?: string
+  url?: string
+  costUsd: number
+  runs: number
+  phases: Partial<Record<ReviewAnalyticsPhase, number>>
+}
+
+/**
+ * `GET /api/ai/reviews?period=week|month|30d&teams=` — what merge request reviews cost and
+ * what came of them over the period. Needs `ai:read`; spend is limited to what the caller's
+ * `ai:read` covers, review records and comments to repositories it may read analyses of, and
+ * `teams` (comma list of team keys) narrows both further.
+ */
+export interface ReviewAnalytics {
+  period: { kind: 'week' | 'month' | '30d'; from: Timestamp; to: Timestamp }
+  /** Review spend per phase, every phase present, in `ReviewAnalyticsPhase` order. */
+  phases: ReviewPhaseCost[]
+  /** Each UTC day of the period, oldest first. */
+  days: ReviewCostDay[]
+  /** Spend of the merge requests whose runs recorded which one they reviewed. */
+  mergeRequests: {
+    count: number
+    costUsd: number
+    /** Absent when `count` is 0. */
+    meanUsd?: number
+    medianUsd?: number
+    p90Usd?: number
+    /** The most expensive, at most 10. */
+    top: ReviewMergeRequestCost[]
+    /** Review spend of runs recorded without a merge request (before it was recorded). */
+    untrackedUsd: number
+  }
+  /** Review records of the period by what they did. */
+  runs: {
+    /** Reviews of the whole merge request (first reviews, and re-reviews after a force push). */
+    full: number
+    /** Reviews of the commits pushed since the last review. */
+    incremental: number
+    /** Threads answered after a person's reply, by how. */
+    replies: { explain: number; concede: number; update: number; unknown: number }
+    /** Runs that reviewed nothing (diff too large, nothing in scope). */
+    skipped: number
+  }
+  /** Comments the period's review records posted and the agent findings verification refuted. */
+  findings: {
+    posted: number
+    severities: ReviewFindingCounts
+    suggestions: number
+    refuted: number
+  }
+  /**
+   * What came of the comments of merge requests merged in the period (signals read since its
+   * start), as `ReviewQuality.total`, plus how many threads a person replied in.
+   */
+  outcomes: ReviewQualityRow & { discussed: number }
+  /** Review spend over the comments that ended in changed code; absent when none did. */
+  costPerFixedUsd?: number
+  /** The review record scan stopped at its cap, so `runs` and `findings` are a lower bound. */
+  partial?: true
+}
+
 /** A Reviews window in figures, for the strip above the table. */
 export interface ReviewWindowTotals {
   reviews: number

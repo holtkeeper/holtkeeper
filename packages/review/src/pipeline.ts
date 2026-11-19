@@ -47,6 +47,7 @@ import {
 import { impactSection } from './impact.ts'
 import { type MediaReviewer, noopMediaReviewer, reviewMedia } from './media.ts'
 import { type ReviewMessages, englishReviewMessages } from './messages.ts'
+import { withPhase } from './phase.ts'
 import type { ReviewStage } from './progress.ts'
 import {
   type ReviewData,
@@ -783,7 +784,7 @@ const recheck: ReviewSteps['recheck'] = async (run, loaded, planned, usage) => {
     threads.map(async (thread) => ({ thread, code: await excerpt(dir, thread.path, thread.line) })),
   )
   const answers = await recheckThreads({
-    agent: run.agent,
+    agent: withPhase(run.agent, 'recheck'),
     dir,
     threads: items,
     ...(changed ? { changed } : {}),
@@ -996,12 +997,15 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
   return { ...data, durationMs: Math.round(performance.now() - started) }
 }
 
-async function reviewOnce(run: ReviewRun, started: number): Promise<ReviewData> {
+async function reviewOnce(input: ReviewRun, started: number): Promise<ReviewData> {
   const elapsed = () => Math.round(performance.now() - started)
-  const steps = { ...defaultSteps, ...run.steps }
-  const messages = run.messages ?? englishReviewMessages
+  const steps = { ...defaultSteps, ...input.steps }
+  const messages = input.messages ?? englishReviewMessages
   const usage: ReviewUsage = { turns: 0 }
-  const loaded = await steps.load(run)
+  const loaded = await steps.load(input)
+  const run: ReviewRun = input.agent
+    ? { ...input, agent: withPhase(input.agent, loaded.previous ? 'update' : 'initial') }
+    : input
   const planned = await steps.plan(run, loaded)
   const { scope } = planned
   const stats: ReviewData['stats'] = {

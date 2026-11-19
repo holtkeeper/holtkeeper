@@ -74,6 +74,11 @@ export interface AgentTask<Output = unknown> {
    */
   taskKind?: string
   /**
+   * Step of the work within `taskKind` (a review's `initial`, `reply`, ...), for reporting only;
+   * it changes nothing about the run.
+   */
+  phase?: string
+  /**
    * A pre-selected knowledge and conventions block. Adapters place it early in the system prompt,
    * before anything run-specific, so repeated runs share a cacheable prefix.
    */
