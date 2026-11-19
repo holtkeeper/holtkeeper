@@ -21,6 +21,7 @@ import {
   apiTotals,
   diffPackage,
   importPath,
+  withoutFolderTwins,
 } from '@holtkeeper/api-surface'
 import { libraryOfModule } from '@holtkeeper/libraries'
 import type { AnalysisStore } from '@holtkeeper/store'
@@ -296,9 +297,17 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     const record = await options.analyses.get(id)
     const parsed = record ? apiSurfaceDataSchema.safeParse(record.data) : undefined
     if (!parsed?.success) return undefined
-    cache.set(id, parsed.data)
+    // Records stored before folder twins were dropped at extraction still carry them.
+    const value = {
+      ...parsed.data,
+      packages: parsed.data.packages.map((pkg) => ({
+        ...pkg,
+        entries: withoutFolderTwins(pkg.entries),
+      })),
+    }
+    cache.set(id, value)
     while (cache.size > cacheSize) cache.delete(cache.keys().next().value ?? '')
-    return parsed.data
+    return value
   }
 
   const visible = async (filter: RepoFilter) => {

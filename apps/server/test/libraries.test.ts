@@ -532,6 +532,34 @@ const toolsetFor = (path: string) =>
     }),
   )
 
+const widgets = (version: string, names: string[]) => ({
+  ...zodApi(version, names),
+  name: '@acme/widgets',
+})
+const useWidgets = (path: string, version: string) =>
+  store.analyses.add({
+    repo: { forge: 'work', path },
+    kind: 'usages',
+    createdAt: at,
+    data: usage('@acme/widgets', version, 'RoundWidget'),
+  })
+
+const releaseWidgets = async () => {
+  await store.analyses.add({
+    repo: { forge: 'work', path: 'libs/ui' },
+    kind: 'api-surface',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    ref: 'v1.0.0',
+    data: { packages: [widgets('1.0.0', ['RoundWidget', 'SquareWidget'])] },
+  })
+  await store.analyses.add({
+    repo: { forge: 'work', path: 'libs/ui' },
+    kind: 'api-surface',
+    createdAt: '2026-10-02T00:00:00.000Z',
+    ref: 'v2.0.0',
+    data: { packages: [widgets('2.0.0', ['RoundWidget'])] },
+  })
+}
 describe('library MCP tools', () => {
   test('lists the package tools, docs and source included', async () => {
     const response = await app.request('/mcp', {
@@ -963,6 +991,163 @@ describe('library MCP tools', () => {
     })
     expect(unknown.isError).toBe(true)
     expect(unknown.text).toContain('No package no-such-lib is indexed')
+  })
+
+  test('package_api reads an organization package at the version repo uses', async () => {
+    await releaseWidgets()
+    await useWidgets('games/a', '1.0.0')
+    await useWidgets('games/b', '1.5.0')
+    const api = await callTool('package_api', { package: '@acme/widgets', repo: 'work:games/a' })
+    expect(api.text).toStartWith(
+      '`work:games/a` uses @acme/widgets 1.0.0; the newest release is 2.0.0.',
+    )
+    expect(api.text).toContain('# @acme/widgets@1.0.0')
+    expect(api.text).toContain('SquareWidget')
+    const symbol = await callTool('package_api', {
+      package: '@acme/widgets',
+      symbol: 'RoundWidget',
+      repo: 'work:games/a',
+    })
+    expect(symbol.text).toStartWith('`work:games/a` uses @acme/widgets 1.0.0')
+    const plain = await callTool('package_api', { package: '@acme/widgets' })
+    expect(plain.text).toStartWith('# @acme/widgets@2.0.0')
+
+    const missing = await callTool('package_api', {
+      package: '@acme/widgets',
+      repo: 'work:games/b',
+    })
+    expect(missing.text).toStartWith(
+      '`work:games/b` uses @acme/widgets 1.5.0, which has no recorded API; this is 2.0.0.',
+    )
+  })
+
+  test('package_changes of an organization package starts from the version repo uses', async () => {
+    await releaseWidgets()
+    await useWidgets('games/a', '1.0.0')
+    const versions = await callTool('package_changes', {
+      package: '@acme/widgets',
+      repo: 'work:games/a',
+    })
+    expect(versions.text).toContain(
+      "`work:games/a` uses 1.0.0; pass `from: '1.0.0'` (or just `to`) for what changed since.",
+    )
+    expect(versions.text).toMatch(/^- 1\.0\.0 \(used\)/m)
+    const toOnly = await callTool('package_changes', {
+      package: '@acme/widgets',
+      to: '2.0.0',
+      repo: 'work:games/a',
+      include: ['api'],
+    })
+    expect(toOnly.text).toStartWith('@acme/widgets 1.0.0 → 2.0.0 (organization package')
+    expect(toOnly.text).toContain('SquareWidget')
+  })
+
+  test('package_changes refuses a range whose from is newer than its to', async () => {
+    await releaseWidgets()
+    const own = await callTool('package_changes', {
+      package: '@acme/widgets',
+      from: '2.0.0',
+      to: '1.0.0',
+    })
+    expect(own.isError).toBe(true)
+    expect(own.text).toContain('from 2.0.0 is newer than to 1.0.0')
+    const third = await callTool('package_changes', { package: 'zod', from: '4.0.0', to: '3.22.0' })
+    expect(third.isError).toBe(true)
+    expect(third.text).toContain('from 4.0.0 is newer than to 3.22.0')
+  })
+
+  test('a library without an extracted API gets its changelog from the version repo uses', async () => {
+    const changes = await callTool('package_changes', {
+      package: 'left-pad',
+      to: '1.3.0',
+      repo: 'work:libs/ui',
+    })
+    expect(changes.isError).toBeUndefined()
+    expect(changes.text).toBe('`work:libs/ui` already uses left-pad 1.3.0: nothing changed.')
+    await libraries.putVersion({
+      ...left,
+      version: '1.0.0',
+      roles: ['used'],
+      usedBy: ['work:games/a'],
+      sources: {},
+      updatedAt: at,
+    })
+    const fromUsed = await callTool('package_changes', {
+      package: 'left-pad',
+      to: '1.3.0',
+      repo: 'work:games/a',
+    })
+    expect(fromUsed.text).toStartWith('left-pad 1.0.0 → 1.3.0 (npm, third-party)')
+    expect(fromUsed.text).toContain('# Changes of left-pad in (1.0.0, 1.3.0]')
+    const api = await callTool('package_api', { package: 'left-pad' })
+    expect(api.isError).toBe(true)
+    expect(api.text).toContain('is indexed for its versions and docs, but no API was extracted')
+  })
+
+  test('package_source reads an organization package at the version repo uses', async () => {
+    await releaseWidgets()
+    await useWidgets('games/a', '1.0.0')
+    const context = agentCatalogContext({
+      catalog: createApiCatalog({ analyses: store.analyses }),
+      usages: createUsageIndex({ analyses: store.analyses }),
+      store,
+      config,
+      repo: { forge: 'work', path: 'games/a', teams: [] },
+      targetOf: (other) => ({ ...other, teams: [] }),
+      policy: 'metadata',
+      artifacts,
+      now: () => now,
+    })
+    const asked: unknown[] = []
+    const source = async (input: unknown) => {
+      asked.push(input)
+      return 'code'
+    }
+    const docs = new Proxy<Record<string, unknown>>(
+      { source },
+      {
+        get: (target, key) => target[String(key)] ?? (async () => ''),
+      },
+    )
+    const tool = packagesToolset({
+      ...context,
+      library: { ...context.library!, docs: docs as never },
+    }).tools.find((item) => item.name === 'package_source')!
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    await tool.run({ package: '@acme/widgets', path: 'index.d.ts', repo: 'work:games/a' }, ctx)
+    await tool.run({ package: '@acme/widgets', version: '2.0.0', repo: 'work:games/a' }, ctx)
+    await tool.run({ package: 'zod', repo: 'work:games/a' }, ctx)
+    expect(asked).toEqual([
+      { package: '@acme/widgets', path: 'index.d.ts', version: '1.0.0' },
+      { package: '@acme/widgets', version: '2.0.0' },
+      { package: 'zod' },
+    ])
+  })
+
+  test('find_packages caps the repository listing and the full list at limit', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        ...usage('zod', '3.22.0', 'object'),
+        packages: ['zod', 'left-pad', 'some-lib'].map(
+          (name) => usage(name, '1.0.0', 'fooUtil').packages[0]!,
+        ),
+      },
+    })
+    const listing = await callTool('find_packages', { repo: 'work:games/a', limit: 1 })
+    expect(listing.text).toContain('3 packages')
+    expect(listing.text).toContain('…and 2 more packages')
+    await releaseWidgets()
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'libs/kit' },
+      kind: 'api-surface',
+      createdAt: at,
+      data: { packages: [{ ...zodApi('1.0.0', ['Kit']), name: '@acme/kit' }] },
+    })
+    const all = await callTool('find_packages', { limit: 1 })
+    expect(all.text).toContain('…and 1 more packages; pass `query`')
   })
 
   test('Go library API tools take module and package paths and pair packages across majors', async () => {

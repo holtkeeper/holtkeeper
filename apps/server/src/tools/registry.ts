@@ -132,10 +132,11 @@ export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>,
    */
   resolveRepo?: (value: string) => string
   /**
-   * Whether a `repo` argument (after `resolveRepo`) names a repository Holtkeeper knows; a call
-   * naming one it does not is refused before the tool runs. Without it every name is passed on.
+   * The repository a `repo` argument (after `resolveRepo`) names, as Holtkeeper knows it (e.g.
+   * with the forge's spelling of the path), or `undefined` when it knows none: such a call is
+   * refused before the tool runs. Without it every name is passed on as written.
    */
-  repoExists?: (repo: string) => Promise<boolean>
+  repoExists?: (repo: string) => Promise<string | undefined>
   /** Merge request review state; without it the `reviews` toolset is not offered. */
   reviews?: ReviewToolsAccess
   /**
@@ -206,14 +207,15 @@ const REPO_HINT = 'its path such as acme/app (forge:path and a git remote URL wo
 
 /**
  * `tool` taking its `repo` argument in any form `resolve` understands: the argument is resolved
- * before the tool and its usage subject see it, a repository `exists` does not know is refused,
+ * before the tool and its usage subject see it, a repository `exists` does not know is refused
+ * (one it knows under another spelling is passed on in that spelling),
  * and its description says what may be passed.
  * Tools without a `repo` argument are returned as they are.
  */
 function withRepoResolved(
   tool: RegistryTool,
   resolve: (value: string) => string,
-  exists?: (repo: string) => Promise<boolean>,
+  exists?: (repo: string) => Promise<string | undefined>,
 ): RegistryTool {
   const field = tool.input.shape['repo']
   if (!field) return tool
@@ -222,11 +224,13 @@ function withRepoResolved(
   const run: RegistryTool['run'] = async (input, ctx) => {
     const args = resolved(input)
     const repo = args['repo']
-    if (typeof repo === 'string' && exists && !(await exists(repo)))
+    if (typeof repo !== 'string' || !exists) return tool.run(args, ctx)
+    const known = await exists(repo)
+    if (!known)
       throw new ToolError(
         `Holtkeeper knows no repository ${repo}: check the path (as group/app, a git remote URL or forge:path).`,
       )
-    return tool.run(args, ctx)
+    return tool.run({ ...args, repo: known }, ctx)
   }
   return {
     ...tool,

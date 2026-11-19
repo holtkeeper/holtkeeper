@@ -764,6 +764,10 @@ describe('MCP endpoint', () => {
     )
     expect(rules.content[0]?.text).toContain('# How `work:games/a` releases')
     expect(rules.content[0]?.text).not.toContain('# Release rules of')
+    expect(rules.content[0]?.text).toContain(
+      "Team rules for release notes: repo_rules with `agent: 'release'`.",
+    )
+    expect(rules.content[0]?.text).not.toContain('## Team rules for release notes')
   })
 
   test('tokens serve the toolsets their owner picks, QA tasks off unless turned on', async () => {

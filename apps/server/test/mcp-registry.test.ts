@@ -13,6 +13,7 @@ import { z } from 'zod'
 
 import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { registryServer } from '../src/api-surface/mcp.ts'
+import { repoArgResolver } from '../src/api-surface/repo-arg.ts'
 import type { McpCall } from '../src/api-surface/usage.ts'
 import { createUsageIndex } from '../src/api-surface/usages.ts'
 import { createRulesResolver, readForgeRuleFiles } from '../src/rules.ts'
@@ -295,7 +296,7 @@ describe('mcpToolsets', () => {
         },
       },
       resolveRepo: (value) => (value.includes(':') ? value : `work:${value}`),
-      repoExists: async (repo) => repo !== 'work:toys/typo',
+      repoExists: async (repo) => (repo === 'work:toys/typo' ? undefined : repo),
     })
     const toolOf = (name: string) => {
       const found = toolsets.flatMap((toolset) => toolset.tools).find((tool) => tool.name === name)
@@ -333,6 +334,35 @@ describe('mcpToolsets', () => {
       ),
     ).toContain('nothing was stored: noted')
     expect(reported).toEqual([expect.objectContaining({ repo: 'work:toys/typo' })])
+  })
+
+  test('repo arguments: forge prefix in any case, web suffixes, unknown forges and the forge spelling', async () => {
+    const seen: string[] = []
+    const toolsets = mcpToolsets({
+      ...base,
+      commits: {
+        conventions: async (repo) => {
+          seen.push(repo)
+          return undefined
+        },
+      },
+      resolveRepo: repoArgResolver(() => forgeConfig),
+      repoExists: async (repo) =>
+        repo.startsWith('work:') ? `work:${repo.slice('work:'.length).toLowerCase()}` : undefined,
+    })
+    const check = toolsets
+      .flatMap((toolset) => toolset.tools)
+      .find((tool) => tool.name === 'check_commit_message')!
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const run = (repo: string) => failure(() => check.run({ repo, message: 'feat: add kite' }, ctx))
+    await run('WORK:toys/kite')
+    await run(`${forgeConfig.forges.work!.url}/toys/kite/-/merge_requests/1`)
+    await run('work:Toys/Kite')
+    expect(seen).toEqual(['work:toys/kite', 'work:toys/kite', 'work:toys/kite'])
+    expect(await run('gitlab:toys/kite')).toContain(
+      'Holtkeeper knows no repository gitlab:toys/kite',
+    )
+    expect(seen).toHaveLength(3)
   })
 
   test('without a rules reader search_knowledge takes no id', () => {
@@ -791,6 +821,32 @@ describe('rules toolset', () => {
     )
     expect(found).toContain('[rule:r-fetch] Data fetching')
     expect(found).not.toContain('r-sheds')
+  })
+
+  test('search_knowledge keeps only hits that mention a word of the question, stems included', async () => {
+    const { store } = await setup()
+    await store.rules.put({
+      id: 'r-store',
+      title: 'Widget store',
+      body: 'Keep one store per widget.',
+      scope: { teams: ['toys'] },
+      author: 'sam',
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    })
+    const all = await store.rules.list()
+    const loose = {
+      ...store,
+      rules: { ...store.rules, search: async () => all.map((rule) => ({ rule, score: 1 })) },
+    }
+    const toolset = knowledgeToolset({ ...knowledgeOf(loose), repoOf: target })
+    const search = toolset.tools.find((tool) => tool.name === 'search_knowledge')!
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const kafka = await search.run({ query: 'Kafka consumer', repo: 'work:toys/kite' }, ctx)
+    expect(kafka).toContain('No rule or learned rule matches')
+    const stores = await search.run({ query: 'stores', repo: 'work:toys/kite' }, ctx)
+    expect(stores).toContain('[rule:r-store]')
+    expect(stores).not.toContain('[rule:r-fetch]')
   })
 
   test('test_ids lists the learned convention, overrides and selectors under a path', async () => {

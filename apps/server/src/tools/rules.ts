@@ -288,7 +288,7 @@ function topicsOf(access: RulesAccess): RulesTopic[] {
           {
             name: 'releases',
             covers: 'how the repository releases: branches, tags, version bumps, gates',
-            render: (repo: string) => releaseRules(releases, repo),
+            render: (repo: string) => releaseRules(releases, repo, { teamRules: false }),
           },
         ]
       : []),
@@ -590,9 +590,10 @@ function commitTools(access: CommitConventionsAccess): RegistryTool[] {
           checkConventions(conventions, {
             ...(message && { message }),
             ...(branch && { branch }),
-          }).map(({ target, problems }) => ({
+          }).map(({ target, problems, unchecked }) => ({
             what: target === 'message' ? 'Message' : 'Branch',
             problems,
+            unchecked,
           })),
         )
       },

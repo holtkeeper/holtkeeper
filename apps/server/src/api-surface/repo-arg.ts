@@ -5,7 +5,11 @@ import type { AnalysisStore } from '@holtkeeper/store'
 const SSH =
   /^(?:(?:ssh|git|git\+ssh|ssh\+git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|[^@/\s]+@([^:/\s]+):)(.+)$/i
 
-const cleanPath = (path: string) => path.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '')
+const cleanPath = (path: string) =>
+  path
+    .replace(/\/-\/.*$/, '')
+    .replace(/^\/+|\/+$/g, '')
+    .replace(/\.git$/, '')
 
 const urlOf = (value: string) => {
   try {
@@ -31,9 +35,13 @@ export function repoArgResolver(config: () => HoltkeeperConfig): (value: string)
   return (value) => {
     const { forges, fleet, teams } = config()
     const names = Object.keys(forges)
-    const text = value.trim()
-    const separator = text.indexOf(':')
-    if (separator > 0 && names.includes(text.slice(0, separator))) return text
+    const trimmed = value.trim()
+    const separator = trimmed.indexOf(':')
+    const forgePart = separator > 0 ? trimmed.slice(0, separator).toLowerCase() : ''
+    const named = names.find((name) => name.toLowerCase() === forgePart)
+    if (named) return `${named}:${cleanPath(trimmed.slice(separator + 1))}`
+    // A web address written without its scheme, e.g. gitlab.com/group/app.
+    const text = /^[a-z0-9-]+(\.[a-z0-9-]+)+\//i.test(trimmed) ? `https://${trimmed}` : trimmed
 
     const covers = (name: string, path: string) => {
       const patterns = fleetPatterns({ fleet, teams }, name)
@@ -103,9 +111,11 @@ const UNKNOWN_TTL_MS = 60_000
 const CHECKED_MAX = 2000
 
 /**
- * Whether `forge:path` names a repository Holtkeeper knows: one with a stored analysis, else one
- * its forge does not answer 404 for (`getRepository`). Answers are kept for a while; values that are not
- * `forge:path` of a configured forge count as known, so tools answer them in their own words.
+ * The `forge:path` Holtkeeper knows `value` by, spelled as the forge spells it, or `undefined`
+ * when it knows no such repository: one with a stored analysis is known as written; otherwise
+ * the forge is asked (`getRepository`), which also corrects the case of the path. A forge that
+ * is not configured is unknown; a forge outage or a client that cannot be built is no proof, so
+ * the value is then passed on as written. Answers are kept for a while.
  */
 export function knownRepoChecker(deps: {
   analyses: Pick<AnalysisStore, 'latestHeads'>
@@ -114,37 +124,34 @@ export function knownRepoChecker(deps: {
   /** The forge client of a configured forge id; asked only for repositories without analyses. */
   forgeOf: (forge: string) => GitForge | undefined
   now: () => Date
-}): (repo: string) => Promise<boolean> {
-  const checked = new Map<string, { at: number; known: boolean }>()
+}): (repo: string) => Promise<string | undefined> {
+  const checked = new Map<string, { at: number; known: string | undefined }>()
   return async (value) => {
     const separator = value.indexOf(':')
-    if (separator < 1 || separator === value.length - 1) return true
+    if (separator < 1 || separator === value.length - 1) return value
     const repo = { forge: value.slice(0, separator), path: value.slice(separator + 1) }
-    if (!deps.configured(repo.forge)) return true
+    if (!deps.configured(repo.forge)) return undefined
     const now = deps.now().getTime()
     const hit = checked.get(value)
     if (hit && now - hit.at < (hit.known ? KNOWN_TTL_MS : UNKNOWN_TTL_MS)) return hit.known
-    if ((await deps.analyses.latestHeads({ repo })).length > 0) {
-      checked.set(value, { at: now, known: true })
-      return true
+    const remember = (known: string | undefined) => {
+      checked.set(value, { at: now, known })
+      if (checked.size > CHECKED_MAX) checked.delete(checked.keys().next().value ?? value)
+      return known
     }
+    if ((await deps.analyses.latestHeads({ repo })).length > 0) return remember(value)
     let forge: GitForge | undefined
     try {
       forge = deps.forgeOf(repo.forge)
     } catch {
       // A forge whose client cannot be built is down, not proof that the repository is missing.
-      return true
+      return value
     }
-    const known =
-      !forge ||
-      typeof forge.getRepository !== 'function' ||
-      (await forge.getRepository(repo.path).then(
-        () => true,
-        // Only a forge that says the repository is not there makes it unknown; an outage does not.
-        (error: unknown) => statusOf(error) !== 404,
-      ))
-    checked.set(value, { at: now, known })
-    if (checked.size > CHECKED_MAX) checked.delete(checked.keys().next().value ?? value)
-    return known
+    if (!forge || typeof forge.getRepository !== 'function') return value
+    return forge.getRepository(repo.path).then(
+      (found) => remember(found.path ? `${repo.forge}:${found.path}` : value),
+      // Only a forge that says the repository is not there makes it unknown; an outage does not.
+      (error: unknown) => (statusOf(error) === 404 ? remember(undefined) : value),
+    )
   }
 }

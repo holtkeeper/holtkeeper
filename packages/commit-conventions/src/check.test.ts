@@ -49,8 +49,17 @@ describe('checkCommitMessage', () => {
       'warning: Write the title only, without a body',
     ])
     expect(messages('Add things')).toContain(
-      'error: The title must look like `type(scope): [KEY-1] subject`',
+      'error: The title must look like `type: [KEY-1] subject`',
     )
+  })
+
+  test('lets merge titles git or the forge wrote through, except explicit patterns', () => {
+    expect(messages("Merge branch 'main' into development")).toEqual([
+      'error: The message must match `(?i)^(feat|fix)`',
+    ])
+    expect(messages('Merge main into development')).toEqual([
+      'error: The message must match `(?i)^(feat|fix)`',
+    ])
   })
 
   test('ignores git trailers when looking for a body', () => {
@@ -108,7 +117,7 @@ describe('checkConventions', () => {
       },
     ])
     expect(checkConventions({ commit: commits, branch }, { branch: 'feature/x' })).toEqual([
-      { target: 'branch', problems: [] },
+      { target: 'branch', problems: [], unchecked: false },
     ])
   })
 })
@@ -121,5 +130,20 @@ describe('conventionalShape', () => {
     )
     expect(conventionalShape({ required: true, placement: 'scope' })).toBe('type(KEY-1): subject')
     expect(conventionalShape({ required: false, placement: 'lead' })).toBe('type(scope): subject')
+    expect(conventionalShape({ required: true, placement: 'lead' }, false)).toBe(
+      '[KEY-1] type: subject',
+    )
+  })
+})
+
+describe('checkConventions without any rule', () => {
+  test('marks the text as not checked instead of passing it', () => {
+    const empty = { rules: {}, sources: {}, patterns: [], examples: [] }
+    expect(
+      checkConventions({ commit: empty, branch: empty }, { message: 'whatever', branch: 'x' }),
+    ).toEqual([
+      { target: 'message', problems: [], unchecked: true },
+      { target: 'branch', problems: [], unchecked: true },
+    ])
   })
 })

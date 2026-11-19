@@ -13,10 +13,13 @@ import {
   renderDiff,
   renderPackage,
   renderSymbol,
+  withoutFolderTwins,
 } from '@holtkeeper/api-surface'
 import {
   type LatestVersions,
   type LibraryApi,
+  compareSemver,
+  parseSemver,
   type LibraryDocs,
   resolveLibrary,
   sameVersion,
@@ -93,6 +96,14 @@ export interface PackageToolsContext {
   defaultRepo?: string
   /** The asker's findings and licenses; with it `security_findings` and `license_overview` are offered. */
   supply?: SupplyToolsAccess
+}
+
+/** Refuses a `package_changes` range whose `from` is newer than its `to`. */
+function reversed(older: string, newer: string) {
+  if (parseSemver(older) && parseSemver(newer) && compareSemver(older, newer) > 0)
+    throw new ToolError(
+      `from ${older} is newer than to ${newer}: pass the version you are on as \`from\` and the one you upgrade to as \`to\`.`,
+    )
 }
 
 /**
@@ -351,7 +362,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     const packages = await library?.api.get(ref, version)
     if (!packages?.length)
       throw new ToolError(`The API of ${ref.name}@${version} could not be read.`)
-    return packages
+    return packages.map((pkg) => ({ ...pkg, entries: withoutFolderTwins(pkg.entries) }))
   }
 
   const externalDiff = async (
@@ -411,6 +422,40 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
   }
   type Own = NonNullable<Awaited<ReturnType<typeof resolveOwn>>>
 
+  /** The version of `name` the usage record of `repo` (`forge:path`) resolves, if any. */
+  const usedVersion = async (name: string, repo: string | undefined) => {
+    if (!repo) return undefined
+    const entry = (await usages.entries(canRead)).find((item) => item.origin === repo)
+    const used = entry && repoPackages(entry.data).find((item) => item.name === name)
+    return used?.local ? undefined : used?.versions[0]
+  }
+
+  /**
+   * `found` at the version `consumer` (the caller's repository) uses, when no version was asked
+   * for and that version is recorded; else `found` itself. `used` names the consumer's version
+   * also when it is not recorded, so the answer can say so.
+   */
+  const atConsumerVersion = async (
+    name: string,
+    found: Own,
+    consumer: string | undefined,
+    asked: string | undefined,
+  ): Promise<{ found: Own; used?: string }> => {
+    if (asked || !consumer || consumer === repoKey(found.record.repo)) return { found }
+    const used = await usedVersion(name, consumer)
+    if (!used || sameVersion(used, found.version.version)) return { found }
+    const at = await catalog.resolve(canRead, name, {
+      version: used,
+      repo: repoKey(found.record.repo),
+    })
+    return { found: at ?? found, used }
+  }
+
+  const consumerNote = (name: string, consumer: string, used: string, shown: Own, latest: Own) =>
+    sameVersion(shown.version.version, used)
+      ? `\`${consumer}\` uses ${name} ${used}; the newest release is ${latest.version.version}.`
+      : `\`${consumer}\` uses ${name} ${used}, which has no recorded API; this is ${shown.version.version}.`
+
   /** The packages of a third-party library version that `name` names. */
   const externalPackages = async (
     name: string,
@@ -419,7 +464,13 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
   ) => {
     const ref = await externalRef(name, ecosystem)
     const external = await externalVersion(ref, query.version, query.repo)
-    if (!external) throw await notFound(name, query.version)
+    if (!external) {
+      if (await library?.store.getLibrary(ref))
+        throw new ToolError(
+          `${ref.name} (${ref.ecosystem}) is indexed for its versions and docs, but no API was extracted from its published packages. Use package_docs for its documentation, package_changes for its versions and changelog${docs ? ' and package_source for its code' : ''}.`,
+        )
+      throw await notFound(name, query.version)
+    }
     const all = await externalApi(ref, external.version)
     const packages = packagesNamed(ref, name, all)
     if (!packages.length)
@@ -472,10 +523,19 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     ].join('\n\n')
   }
 
-  const ownVersions = async (name: string, found: Own) => {
+  const ownVersions = async (
+    name: string,
+    found: Own,
+    consumer?: { repo: string; version: string },
+  ) => {
     const lines = [
       `# ${name} in \`${repoKey(found.record.repo)}\` (organization package)`,
       ...(found.removed ? [removalNote(name, found.record.repo, found.removed)] : []),
+      ...(consumer
+        ? [
+            `\`${consumer.repo}\` uses ${consumer.version}; pass \`from: '${consumer.version}'\` (or just \`to\`) for what changed since.`,
+          ]
+        : []),
     ]
     const versions = found.versions
     for (const [index, version] of versions.entries()) {
@@ -503,8 +563,10 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           ? 'head (default branch)'
           : `head (default branch, package.json ${version.version})`
         : version.version
+      const mark =
+        consumer && !version.head && sameVersion(version.version, consumer.version) ? ' (used)' : ''
       lines.push(
-        `- ${label}${version.package ? ` as ${version.package}` : ''}${version.ref ? ` tag \`${version.ref}\`` : ''}, ${version.analyzedAt.slice(0, 10)}, ${version.exports} exports${change}`,
+        `- ${label}${mark}${version.package ? ` as ${version.package}` : ''}${version.ref ? ` tag \`${version.ref}\`` : ''}, ${version.analyzedAt.slice(0, 10)}, ${version.exports} exports${change}`,
       )
     }
     if (found.alsoIn.length)
@@ -569,7 +631,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     .string()
     .optional()
     .describe(
-      'Version such as 1.4.0 or a tag. Default: for a third-party library the version `repo` uses, else the newest release; for an organization package the newest release, and `head` is its default branch',
+      'Version such as 1.4.0 or a tag. Default: the version `repo` uses, else the newest release; `head` is the default branch of an organization package',
     )
   const repoArg = z
     .string()
@@ -656,7 +718,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           name: 'package_source',
           narrow: 'pass `path` of one file with `start` and `end`',
           description:
-            'The source code of a package version: a third-party library from its published snapshot, an organization package from its own repository (path relative to the package folder). A file listing (optionally under `path`) or one file with line numbers. A third-party snapshot is made on first request, which can take a while.',
+            'The source code of a package version: a third-party library from its published snapshot, an organization package from its own repository (path relative to the package folder). The version defaults to the one `repo` uses. A file listing (optionally under `path`) or one file with line numbers. A third-party snapshot is made on first request, which can take a while.',
           input: z.object({
             package: packageArg,
             path: z.string().min(1).optional().describe('Folder to list or file to read'),
@@ -666,7 +728,15 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             ecosystem: ecosystemArg,
             repo: repoArg,
           }),
-          run: ({ repo, ...input }) => docs.source(optional(input), caller(repo)),
+          run: async ({ repo, ...input }) => {
+            // An organization package is read at the version the caller's repository uses.
+            const own =
+              input.version === undefined && (await catalog.resolve(canRead, input.package, {}))
+            const used = own
+              ? await usedVersion(input.package, readableRepo(canRead, repoOr(repo)))
+              : undefined
+            return docs.source(optional({ ...input, ...(used && { version: used }) }), caller(repo))
+          },
           subject: ({ package: name }) => name,
         }),
       ]
@@ -720,32 +790,38 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             const entry = (await usages.entries(canRead)).find((item) => item.origin === repo)
             if (!entry) throw new ToolError(`No usage record of ${repo} you can read.`)
             const packages = repoPackages(entry.data)
+            const listed = packages.slice(0, limit ?? 20)
             return [
               `# \`${repo}\`: ${packages.length} packages, ${entry.data.files} files read, type checker ${entry.data.types.status}`,
-              ...packages.map(
+              ...listed.map(
                 (pkg) =>
                   `- **${pkg.name}**${pkg.ecosystem === 'Go' ? ' (Go)' : ''} ${pkg.versions.join(', ') || pkg.ranges.join(', ') || 'version unknown'}${pkg.local ? ' (defined here)' : ''} — ${pkg.count} uses in ${pkg.files} files, ${pkg.exports} exports`,
               ),
+              ...(packages.length > listed.length
+                ? [
+                    `…and ${packages.length - listed.length} more packages, fewer uses first; raise \`limit\` (up to 50) or pass \`query\`.`,
+                  ]
+                : []),
             ].join('\n')
           }
           const packages = await catalog.packages(canRead, query)
           const line = (pkg: (typeof packages)[number]) =>
             `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.ecosystem === 'Go' ? ` (Go${pkg.module && pkg.module !== pkg.name ? `, module ${pkg.module}` : ''}${pkg.private ? ', internal' : ''})` : pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded${pkg.removed ? `\n  ${removalNote(pkg.name, pkg.repo, pkg.removed)}` : ''}`
-          const removed = packages.filter((pkg) => pkg.removed)
-          const own = [
-            ...packages.filter((pkg) => !pkg.removed).map(line),
-            ...(removed.length
-              ? [
-                  '',
-                  'Removed from their repositories, do not use in new code:',
-                  ...removed.map(line),
-                ]
-              : []),
-          ]
-          if (!query)
-            return own.length
-              ? ['## Organization packages', ...own].join('\n')
-              : 'No package is indexed yet.'
+          if (!query) {
+            if (!packages.length) return 'No package is indexed yet.'
+            const first = packages
+              .toSorted((a, b) => Number(Boolean(a.removed)) - Number(Boolean(b.removed)))
+              .slice(0, limit ?? 20)
+            return [
+              '## Organization packages',
+              ...first.map(line),
+              ...(packages.length > first.length
+                ? [
+                    `…and ${packages.length - first.length} more packages; pass \`query\` (part of a name, a repository or a description) to find one.`,
+                  ]
+                : []),
+            ].join('\n')
+          }
           const shown = limit ?? 20
           const [libraries, exported] = await Promise.all([
             library ? library.store.listLibraries({ query }) : [],
@@ -840,8 +916,17 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           limit,
         }) => {
           const where = { ...(version ? { version } : {}), ...(repo ? { repo } : {}) }
-          const found = await resolveOwn(name, where, ecosystem)
-          if (found && symbol) return ownSymbol(found, name, symbol, subpath)
+          const latest = await resolveOwn(name, where, ecosystem)
+          const consumer = readableRepo(canRead, repoOr(repo))
+          const { found, used } = latest
+            ? await atConsumerVersion(name, latest, consumer, version)
+            : { found: undefined, used: undefined }
+          const note =
+            found && latest && used && consumer
+              ? [consumerNote(name, consumer, used, found, latest)]
+              : []
+          if (found && symbol)
+            return [...note, ownSymbol(found, name, symbol, subpath)].join('\n\n')
           if (found && query) {
             const hits = await symbolHits(query, {
               package: name,
@@ -864,6 +949,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
               .slice(0, 8)
               .map((v) => (v.head ? 'head' : v.version))
             return [
+              ...note,
               ...(found.removed ? [removalNote(name, found.record.repo, found.removed)] : []),
               renderPackage(found.package, {
                 repo: repoKey(found.record.repo),
@@ -972,8 +1058,19 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
         run: async ({ package: name, from, to, include, ecosystem, repo }) => {
           const where = repo ? { repo } : {}
           const own = await resolveOwn(name, where, ecosystem)
+          const consumer = readableRepo(canRead, repoOr(repo))
+          const used =
+            own && consumer !== repoKey(own.record.repo)
+              ? await usedVersion(name, consumer)
+              : undefined
           if (!from && !to)
-            return own ? ownVersions(name, own) : externalVersions(name, ecosystem, repo)
+            return own
+              ? ownVersions(
+                  name,
+                  own,
+                  consumer && used ? { repo: consumer, version: used } : undefined,
+                )
+              : externalVersions(name, ecosystem, repo)
           const wants = (part: (typeof changeParts)[number]) => !include || include.includes(part)
           const budget = (include?.length ?? changeParts.length) === 1 ? undefined : SECTION_CHARS
           const section = (part: 'api' | 'impact', body: string) =>
@@ -994,13 +1091,15 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
                 : []),
             ].join('\n\n')
           }
+          const startsAt = from ?? (used && (!to || compareSemver(used, to) < 0) ? used : undefined)
           const query = {
-            ...(from ? { from } : {}),
+            ...(startsAt ? { from: startsAt } : {}),
             ...(to ? { to } : {}),
             ...(own ? { repo: repoKey(own.record.repo) } : where),
           }
           if (own) {
             const result = await catalog.diff(canRead, name, query)
+            if (result) reversed(result.from.version, result.to.version)
             if (!result)
               throw new ToolError(
                 `Could not find both versions of ${name}; recorded: ${own.versions.map((v) => (v.head ? 'head' : v.version)).join(', ')}.`,
@@ -1037,13 +1136,28 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           }
           const ref = await externalRef(name, ecosystem)
           const unavailable = async (reason: string) => {
-            if (!docs || !from || !to || !wants('notes') || !(await library?.store.getLibrary(ref)))
+            if (!docs || !wants('notes') || !(await library?.store.getLibrary(ref)))
               return undefined
+            const records = await library?.store.listVersions(ref)
+            const target = to ?? records?.find((record) => record.roles.includes('latest'))?.version
+            const start =
+              from ??
+              (consumer
+                ? records?.find((record) => record.usedBy.includes(consumer))?.version
+                : undefined)
+            if (!start || !target) return undefined
+            if (sameVersion(start, target))
+              return `${consumer && !from ? `\`${consumer}\` already uses` : 'from and to are both'} ${name} ${target}${to ? '' : ', the newest release'}: nothing changed.`
+            reversed(start, target)
             return [
-              `${name} ${from} → ${to} (${ref.ecosystem}, third-party)`,
+              `${name} ${start} → ${target} (${ref.ecosystem}, third-party)`,
               `No API diff or upgrade impact: ${reason}`,
               '## Changelog and migration notes',
-              await docs.changes({ ...libraryQuery({ package: name, ecosystem }), from, to }),
+              await docs.changes({
+                ...libraryQuery({ package: name, ecosystem }),
+                from: start,
+                to: target,
+              }),
             ].join('\n\n')
           }
           const external = await externalDiff(ref, query).catch(async (error: unknown) => {
@@ -1052,6 +1166,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             return notes
           })
           if (typeof external === 'string') return external
+          if (external) reversed(external.from, external.to)
           if (!external) {
             const notes = await unavailable(`${name} has no version with an indexed API.`)
             if (notes !== undefined) return notes

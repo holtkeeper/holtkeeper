@@ -41,6 +41,33 @@ type KnowledgeMatch =
   | { kind: 'rule'; rule: Rule; score: number }
   | { kind: 'learn'; learning: Learning; score: number }
 
+const STOP_WORDS = new Set(
+  'the and for with from that this what when where which how does into onto our your are was were not use using about should can will'.split(
+    ' ',
+  ),
+)
+
+/** The words of a query that carry meaning: three letters or more, not a stop word. */
+const queryTerms = (query: string) =>
+  [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_]{3,}/gu) ?? [])].filter(
+    (term) => !STOP_WORDS.has(term),
+  )
+
+/**
+ * Whether a match mentions at least one of `terms` (a long word by its stem, so `stores` finds
+ * `store`): search ranks by similarity and always fills the limit, so without this a question
+ * no rule is about would still get the nearest unrelated rules.
+ */
+const mentions = (match: KnowledgeMatch, terms: readonly string[]) => {
+  if (!terms.length) return true
+  const text = (
+    match.kind === 'rule'
+      ? `${match.rule.title} ${match.rule.description ?? ''} ${match.rule.body}`
+      : `${match.learning.text} ${match.learning.reason ?? ''}`
+  ).toLowerCase()
+  return terms.some((term) => text.includes(term.length > 5 ? term.slice(0, -2) : term))
+}
+
 /** Candidates ranked before the scope filters, so filtering does not starve `limit`. */
 const POOL = 200
 
@@ -60,7 +87,7 @@ const citationOf = (match: KnowledgeMatch) =>
 
 /**
  * Rules and active learnings matching `query` (full text over `RuleStore.search` and
- * `LearningStore.search`), best first: only those the caller may read, and with `repo` only those
+ * `LearningStore.search`) that mention at least one of its words, best first: only those the caller may read, and with `repo` only those
  * whose scope covers it, with `agent` only those it reads. Learnings are settled to now first, so
  * one past its approval delay counts as active before the leader stores it.
  */
@@ -89,7 +116,9 @@ async function knowledgeMatches(
         : []
     }),
   ]
+  const terms = queryTerms(query)
   return matches
+    .filter((match) => mentions(match, terms))
     .filter((match) => context.canReadScope(scopeOf(match)))
     .filter((match) => !input.repo || scopeCoversRepo(scopeOf(match), input.repo))
     .filter(

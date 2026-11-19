@@ -562,10 +562,11 @@ export function createApiSurface(deps: ServerDeps) {
    */
   const repoExistsFor =
     (principal: Principal) =>
-    async (value: string): Promise<boolean> => {
+    async (value: string): Promise<string | undefined> => {
       const repo = parseRepo(value)
-      if (!repo || !config.forges[repo.forge]) return true
-      return canSee(principal, 'repos:read', repoTarget(config, repo)) ? knownRepo(value) : true
+      if (!repo) return value
+      if (!config.forges[repo.forge]) return undefined
+      return canSee(principal, 'repos:read', repoTarget(config, repo)) ? knownRepo(value) : value
     }
 
   const fromToken = new WeakMap<Principal, string>()

@@ -1,4 +1,11 @@
-import { compilePattern, conventionalShape, hasBody, parseTitle, ticketKeys } from './title.ts'
+import {
+  compilePattern,
+  conventionalShape,
+  hasBody,
+  isMergeTitle,
+  parseTitle,
+  ticketKeys,
+} from './title.ts'
 import type {
   BranchRules,
   CommitConventions,
@@ -40,10 +47,13 @@ export function checkCommitMessage(ruleset: Ruleset<CommitRules>, message: strin
     problems.push({ message: text, rule: field, source, severity: severity(source) })
   }
   const headline = message.split('\n')[0]?.trim() ?? ''
+  // Merge commits keep the title git or the forge wrote; only explicit patterns apply to them.
+  if (isMergeTitle(headline)) return problems
   const title = parseTitle(headline)
+  const scoped = Boolean(rules.scopes?.length || rules.scopeRequired)
 
   if (rules.conventional && !title.type)
-    add('conventional', `The title must look like \`${conventionalShape(rules.ticket)}\``)
+    add('conventional', `The title must look like \`${conventionalShape(rules.ticket, scoped)}\``)
   if (title.type && rules.types && !rules.types.includes(title.type))
     add('types', `Type \`${title.type}\` is not one of ${rules.types.join(', ')}`)
   if (title.scope && rules.scopes && !rules.scopes.includes(title.scope))
@@ -99,7 +109,12 @@ export function checkBranchName(ruleset: Ruleset<BranchRules>, name: string): Pr
 export interface ConventionsCheck {
   target: 'message' | 'branch'
   problems: Problem[]
+  /** No rule at all is known for this kind of text, so nothing was checked. */
+  unchecked: boolean
 }
+
+const ruleless = (ruleset: Ruleset<object>) =>
+  Object.keys(ruleset.rules).length === 0 && ruleset.patterns.length === 0
 
 /**
  * Checks a commit message (or merge request title) and a branch name against `conventions`: one
@@ -115,11 +130,18 @@ export function checkConventions(
           {
             target: 'message' as const,
             problems: checkCommitMessage(conventions.commit, input.message),
+            unchecked: ruleless(conventions.commit),
           },
         ]
       : []),
     ...(input.branch
-      ? [{ target: 'branch' as const, problems: checkBranchName(conventions.branch, input.branch) }]
+      ? [
+          {
+            target: 'branch' as const,
+            problems: checkBranchName(conventions.branch, input.branch),
+            unchecked: ruleless(conventions.branch),
+          },
+        ]
       : []),
   ]
 }

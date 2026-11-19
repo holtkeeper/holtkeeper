@@ -48,6 +48,24 @@ function targetsOf(value: Json | undefined): string[] {
   return ordered.flatMap((key) => targetsOf(value[key]))
 }
 
+/**
+ * `entries` without the folder mappings (`./services/`) that repeat an entry point of the same
+ * name (`./services`): both resolve to the same module, so the API would list it twice.
+ */
+export function withoutFolderTwins<Entry extends { subpath: string }>(
+  entries: readonly Entry[],
+): Entry[] {
+  const names = new Set(entries.map((entry) => entry.subpath))
+  return entries.filter(
+    (entry) =>
+      !(
+        entry.subpath.length > 2 &&
+        entry.subpath.endsWith('/') &&
+        names.has(entry.subpath.slice(0, -1))
+      ),
+  )
+}
+
 function entriesOf(manifest: Record<string, Json>): Pick<PackageManifest, 'entries' | 'wildcards'> {
   const exports = manifest.exports
   if (exports !== undefined && exports !== null) {
@@ -57,7 +75,7 @@ function entriesOf(manifest: Record<string, Json>): Pick<PackageManifest, 'entri
         .map(([subpath, value]) => ({ subpath, targets: targetsOf(value) }))
         .filter((entry) => entry.targets.length > 0)
       return {
-        entries: all.filter((entry) => !entry.subpath.includes('*')),
+        entries: withoutFolderTwins(all.filter((entry) => !entry.subpath.includes('*'))),
         wildcards: all
           .filter((entry) => stars(entry.subpath) === 1)
           .map((entry) => ({ ...entry, targets: entry.targets.filter((t) => stars(t) === 1) }))

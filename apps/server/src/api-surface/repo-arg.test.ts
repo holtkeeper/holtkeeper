@@ -59,6 +59,19 @@ describe('repoArgResolver', () => {
   })
 })
 
+describe('repoArgResolver forms', () => {
+  test('a forge prefix in another case, web suffixes and an address without its scheme', () => {
+    const resolve = repoArgResolver(() => one)
+    expect(resolve('WORK:shapes/widget')).toBe('work:shapes/widget')
+    expect(resolve('https://forge.test/shapes/widget/-/merge_requests/1')).toBe(
+      'work:shapes/widget',
+    )
+    expect(resolve('https://forge.test/shapes/widget/-/tree/main')).toBe('work:shapes/widget')
+    expect(resolve('forge.test/shapes/widget')).toBe('work:shapes/widget')
+    expect(resolve('shapes/widget/-/blob/main/a.ts')).toBe('work:shapes/widget')
+  })
+})
+
 describe('knownRepoChecker', () => {
   test('knows analyzed repositories and those the forge finds, and remembers for a while', async () => {
     let asked = 0
@@ -76,25 +89,25 @@ describe('knownRepoChecker', () => {
                 asked++
                 if (path === 'shapes/down')
                   throw Object.assign(new Error('bad gateway'), { status: 502 })
-                if (path !== 'shapes/new')
+                if (path.toLowerCase() !== 'shapes/new')
                   throw Object.assign(new Error('Not Found'), { status: 404 })
-                return {}
+                return { path: 'shapes/new' }
               },
             } as never)
           : undefined,
       now: () => new Date(clock),
     })
-    expect(await exists('work:shapes/widget')).toBe(true)
-    expect(await exists('work:shapes/new')).toBe(true)
-    expect(await exists('work:shapes/typo')).toBe(false)
-    expect(await exists('work:shapes/typo')).toBe(false)
+    expect(await exists('work:shapes/widget')).toBe('work:shapes/widget')
+    expect(await exists('work:Shapes/New')).toBe('work:shapes/new')
+    expect(await exists('work:shapes/typo')).toBeUndefined()
+    expect(await exists('work:shapes/typo')).toBeUndefined()
     expect(asked).toBe(2)
     clock = 61_000
-    expect(await exists('work:shapes/typo')).toBe(false)
+    expect(await exists('work:shapes/typo')).toBeUndefined()
     expect(asked).toBe(3)
-    expect(await exists('work:shapes/down')).toBe(true)
-    expect(await exists('other:shapes/widget')).toBe(true)
-    expect(await exists('shapes/widget')).toBe(true)
+    expect(await exists('work:shapes/down')).toBe('work:shapes/down')
+    expect(await exists('other:shapes/widget')).toBeUndefined()
+    expect(await exists('shapes/widget')).toBe('shapes/widget')
   })
 
   test('an analyzed repository never reaches the forge, and a forge that cannot be built is no proof', async () => {
@@ -109,7 +122,7 @@ describe('knownRepoChecker', () => {
       },
       now: () => new Date(0),
     })
-    expect(await exists('work:shapes/widget')).toBe(true)
-    expect(await exists('work:shapes/other')).toBe(true)
+    expect(await exists('work:shapes/widget')).toBe('work:shapes/widget')
+    expect(await exists('work:shapes/other')).toBe('work:shapes/other')
   })
 })

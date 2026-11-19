@@ -53,7 +53,7 @@ function commitLines(conventions: CommitConventions): string[] {
   if (rules.conventional)
     lines.push(
       line(
-        `Conventional Commits: \`${conventionalShape(rules.ticket)}\`${stats ? ` (${percent(stats.conventionalShare)} of the last ${stats.analyzed})` : ''}`,
+        `Conventional Commits: \`${conventionalShape(rules.ticket, Boolean(rules.scopes?.length || rules.scopeRequired))}\`${stats ? ` (${percent(stats.conventionalShare)} of the last ${stats.analyzed})` : ''}`,
         sources.conventional,
       ),
     )
@@ -151,18 +151,22 @@ export function renderCommitConventions(conventions: CommitConventions): string 
 }
 
 /** Markdown verdict of `check_commit_message`. */
-export function renderProblems(results: { what: string; problems: Problem[] }[]): string {
+export function renderProblems(
+  results: { what: string; problems: Problem[]; unchecked?: boolean }[],
+): string {
   return results
-    .map(({ what, problems }) =>
-      problems.length
-        ? [
-            `${what}: ${problems.some((p) => p.severity === 'error') ? 'breaks rules' : 'unusual for this repository'}`,
-            ...problems.map(
-              (problem) =>
-                `- ${problem.severity}: ${problem.message} _(${sourceLabels[problem.source]})_`,
-            ),
-          ].join('\n')
-        : `${what}: follows every known rule.`,
+    .map(({ what, problems, unchecked }) =>
+      unchecked
+        ? `${what}: not checked. No rule is known for this repository (no team setting, push rule, commitlint config or clear history); follow its team rules from repo_rules and the examples of its recent history.`
+        : problems.length
+          ? [
+              `${what}: ${problems.some((p) => p.severity === 'error') ? 'breaks rules' : 'unusual for this repository'}`,
+              ...problems.map(
+                (problem) =>
+                  `- ${problem.severity}: ${problem.message} _(${sourceLabels[problem.source]})_`,
+              ),
+            ].join('\n')
+          : `${what}: follows every known rule.`,
     )
     .join('\n\n')
 }

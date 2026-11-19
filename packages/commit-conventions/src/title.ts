@@ -84,22 +84,32 @@ export function compilePattern(pattern: string): RegExp | undefined {
 /**
  * The Conventional Commits shape of a title with the ticket key where `ticket` puts it, e.g.
  * `[KEY-1] type(scope): subject` for a key in brackets before the type, so a rule about the
- * type never contradicts the rule about the key.
+ * type never contradicts the rule about the key. `scoped: false` (no scopes known) leaves out the
+ * `(scope)`.
  */
-export function conventionalShape(ticket?: { required: boolean; placement?: string }): string {
-  if (!ticket?.required) return 'type(scope): subject'
+export function conventionalShape(
+  ticket?: { required: boolean; placement?: string },
+  scoped = true,
+): string {
+  const head = scoped ? 'type(scope)' : 'type'
+  if (!ticket?.required) return `${head}: subject`
   switch (ticket.placement) {
     case 'lead':
-      return '[KEY-1] type(scope): subject'
+      return `[KEY-1] ${head}: subject`
     case 'bracket':
-      return 'type(scope): [KEY-1] subject'
+      return `${head}: [KEY-1] subject`
     case 'prefix':
-      return 'type(scope): KEY-1 subject'
+      return `${head}: KEY-1 subject`
     case 'scope':
       return 'type(KEY-1): subject'
     case 'suffix':
-      return 'type(scope): subject (KEY-1)'
+      return `${head}: subject (KEY-1)`
     default:
-      return 'type(scope): subject'
+      return `${head}: subject`
   }
 }
+
+/** Whether a title is one git or the forge writes for a merge, which follows no convention. */
+export const isMergeTitle = (title: string) =>
+  /^Merge (branch|remote-tracking branch|pull request|tag) /.test(title) ||
+  /^Merge .+ into .+/.test(title)

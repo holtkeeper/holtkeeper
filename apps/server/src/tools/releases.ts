@@ -279,11 +279,22 @@ export type ReleaseRulesAccess = Pick<ReleaseToolsAccess, 'repoOf' | 'settings' 
 
 /**
  * How a repository the caller may read releases, from its release settings and the rules it
- * resolves for release notes, as Markdown. Throws a `ToolError` for a repository they may not read.
+ * resolves for release notes, as Markdown. With `teamRules: false` the rules are left out and the
+ * answer says where to read them (a caller that lists them already). Throws a `ToolError` for a
+ * repository they may not read.
  */
-export async function releaseRules(access: ReleaseRulesAccess, repo: string): Promise<string> {
+export async function releaseRules(
+  access: ReleaseRulesAccess,
+  repo: string,
+  options: { teamRules?: boolean } = {},
+): Promise<string> {
   const target = access.repoOf(repo)
   if (!target) throw noRepo(repo)
+  if (options.teamRules === false)
+    return renderReleaseRules(repo, await access.settings(target), '').replace(
+      'No team rules for release notes yet.',
+      "Team rules for release notes: repo_rules with `agent: 'release'`.",
+    )
   const [settings, rules] = await Promise.all([access.settings(target), access.rules(target)])
   return renderReleaseRules(repo, settings, rules)
 }
