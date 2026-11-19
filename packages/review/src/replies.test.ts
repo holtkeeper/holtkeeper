@@ -133,6 +133,7 @@ describe('answerReplies', () => {
       ['triage', 'fast'],
       ['review', 'main'],
     ])
+    expect(tasks[0]?.system).toContain('declines it: that is `discuss`, never `ack`')
     expect(tasks[1]?.prompt).toContain('## Thread d1 on src/area.ts:2')
     expect(tasks[1]?.prompt).toContain('## Thread d2 on src/area.ts:2')
     expect(tasks[1]?.prompt).not.toContain('Unused import')

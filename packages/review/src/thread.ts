@@ -103,7 +103,8 @@ export const ANSWER_RULES = [
   '- `concede` when the author is right; say so plainly and set resolve to true.',
   '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
   '- When you already answered earlier in the thread and the author declines again without new code or a new argument, the decision is theirs: say in one or two sentences that you leave it to them, naming the remaining risk once, with `explain` and resolve true. Never argue the same point twice.',
-  '- A short dismissal ("not needed", "it is fine") gets a short answer: at most three sentences with the concrete risk and what would settle it. Do not restate the whole comment.',
+  '- When the author declines a `minor` or `info` comment ("not needed", "it is fine", "we keep it"), the decision is theirs at once: one sentence that you leave it to them, with `explain` and resolve true.',
+  '- A first decline of a `major` or `critical` comment gets a short answer: at most three sentences with the concrete risk and what would settle it, resolve false. Do not restate the whole comment.',
   '- In a general thread, take the state of your review threads from the list in the prompt: resolved threads are settled, never present them as open or blocking.',
   'Be short and concrete. Never be defensive.',
 ]

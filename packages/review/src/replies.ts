@@ -123,9 +123,10 @@ export async function triageReplies(options: {
         capabilities: [],
         system: [
           'People replied in code review threads. Sort each reply by what it asks of the reviewer.',
-          '- `ack`: nothing to answer: thanks, agreement, "noted", a promise to do it later.',
+          '- `ack`: nothing to answer: the person accepts the comment: thanks, "noted", a promise to fix it later.',
           '- `fixed`: the reply only says the problem is already fixed or no longer in the code, and asks nothing.',
           '- `discuss`: everything else: a question, a disagreement, an explanation why the comment is wrong or does not apply, a request, or a reply that says it is fixed and also asks or argues something.',
+          '- A reply that waves the comment off, however short ("it is fine", "not needed", "we keep it", "works as is"), declines it: that is `discuss`, never `ack`.',
           'When in doubt answer `discuss`.',
         ].join('\n'),
         prompt: options.pending
