@@ -9,13 +9,18 @@ import { z } from 'zod'
 import { KEEP_ENGLISH, runTracked } from './agent.ts'
 import { plainCitations } from './cite.ts'
 import { isOurNote } from './dedupe.ts'
-import { replyBody } from './format.ts'
+import { replyBody, threadNote } from './format.ts'
+import type { ReviewMessages } from './messages.ts'
 import type { ReviewUsage } from './schema.ts'
 
 /** What the reviewer answers in one thread. */
 export const answerSchema = z.object({
-  /** `explain` defends or clarifies, `concede` agrees the comment was wrong, `update` proposes new code. */
-  action: z.enum(['explain', 'concede', 'update']),
+  /**
+   * `explain` defends or clarifies, `concede` agrees the comment was wrong, `update` proposes new
+   * code, `fixed` confirms from the code that the problem is gone, `open` says what the code still
+   * has after a fix claim, `none` needs no answer (thanks, a promise to fix it later).
+   */
+  action: z.enum(['explain', 'concede', 'update', 'fixed', 'open', 'none']),
   body: z.string(),
   suggestion: z
     .object({
@@ -56,6 +61,10 @@ export interface ReplyToThreadOptions {
   cite?: (text: string) => Promise<string>
   /** `reviewThreadsState` of the merge request, shown with a general thread. */
   reviewState?: string
+  /** The merge request head that `fixed` and `open` notes name; without it they are plain answers. */
+  head?: string
+  /** Texts of the `fixed` and `open` notes, read only when one is posted; English without it. */
+  messages?: () => Promise<ReviewMessages | undefined>
   signal?: AbortSignal
 }
 
@@ -99,6 +108,9 @@ export function suggestionMarkdown(replacement: string, above = 0): string {
 
 /** How the reviewer answers a reply, as system prompt lines shared by one thread and a batch. */
 export const ANSWER_RULES = [
+  '- `none` when the reply needs no answer: thanks, agreement, or a promise to change the code later. Nothing is posted. A reply that says the code is fine as it is, not needed or kept declines the comment and always gets an answer. A reply that says it is done, added or removed is never `none`: check the code and answer `fixed` or `open`.',
+  '- `fixed` when the reply says it is fixed or already there and the code confirms it: `body` is one sentence on what changed; the thread is resolved.',
+  '- `open` when the reply says it is fixed but the code still has the problem: `body` says what is still there.',
   '- `explain` when your comment stands: clarify it briefly with evidence from the code.',
   '- `concede` when the author is right; say so plainly and set resolve to true.',
   '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
@@ -161,8 +173,9 @@ export async function codeAround(
 
 /**
  * Answers the latest reply in one of our review threads: explains the comment, concedes it (and
- * resolves the thread) or proposes an updated suggestion. Threads not started by us, and threads
- * whose last note is ours, are left alone.
+ * resolves the thread), proposes an updated suggestion, confirms a fix from the code or says what
+ * is still there, or posts nothing when the reply needs no answer (`none`). Threads not started by
+ * us, and threads whose last note is ours, are left alone.
  */
 export async function replyToThread(options: ReplyToThreadOptions): Promise<ThreadReplyResult> {
   const { forge, repo, mr } = options
@@ -231,6 +244,8 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
     if (scratch) await rm(scratch, { recursive: true, force: true })
   }
   const answer = result.output ?? { action: 'explain' as const, body: result.text, resolve: false }
+  if (answer.action === 'none')
+    return { discussionId, action: 'none', replied: false, resolved: false }
   if (options.stillPending && !(await options.stillPending()))
     return skipped('the thread changed while answering')
   const { resolved } = await postThreadAnswer(options, discussion, answer)
@@ -238,18 +253,34 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
 }
 
 /**
- * Posts `answer` as a reply in `discussion`, an `update` with its suggestion in the forge's
- * markup, and resolves the thread when the answer says so and the forge can.
+ * Posts `answer` as a reply in `discussion`: an `update` with its suggestion in the forge's markup,
+ * `fixed` and `open` as status notes naming `head` when given. Resolves the thread for `fixed`, and
+ * for other answers when they say so, when the forge can. `none` posts nothing.
  */
 export async function postThreadAnswer(
-  options: Pick<ReplyToThreadOptions, 'forge' | 'repo' | 'mr' | 'cite'>,
+  options: Pick<ReplyToThreadOptions, 'forge' | 'repo' | 'mr' | 'cite' | 'head' | 'messages'>,
   discussion: Discussion,
   answer: ThreadAnswer,
 ): Promise<{ resolved: boolean }> {
   const { forge, repo, mr } = options
+  if (answer.action === 'none') return { resolved: false }
   if (!forge.replyToDiscussion) throw new Error(`forge ${forge.kind} cannot reply to discussions`)
   const position = discussion.position
   let body = options.cite ? await options.cite(answer.body.trim()) : answer.body.trim()
+  const status = answer.action === 'fixed' || answer.action === 'open'
+  if (status && options.head) {
+    await forge.replyToDiscussion(
+      repo.path,
+      mr,
+      discussion.id,
+      threadNote(
+        answer.action === 'fixed' ? 'resolved' : 'replied',
+        body,
+        options.head,
+        await options.messages?.(),
+      ),
+    )
+  }
   const suggestion = answer.suggestion
   if (answer.action === 'update' && suggestion && position && suggestion.line === position.line) {
     const above = suggestion.startLine ? Math.max(0, suggestion.line - suggestion.startLine) : 0
@@ -257,8 +288,10 @@ export async function postThreadAnswer(
   } else if (answer.action === 'update' && suggestion) {
     body += `\n\nSuggested change for lines ${suggestion.startLine ?? suggestion.line}-${suggestion.line}:\n\n\`\`\`\n${suggestion.replacement}\n\`\`\``
   }
-  await forge.replyToDiscussion(repo.path, mr, discussion.id, replyBody(body))
-  const resolved = answer.resolve && discussion.resolvable && forge.resolveDiscussion !== undefined
+  if (!status || !options.head)
+    await forge.replyToDiscussion(repo.path, mr, discussion.id, replyBody(body))
+  const resolve = answer.action === 'fixed' || (answer.action !== 'open' && answer.resolve)
+  const resolved = resolve && discussion.resolvable && forge.resolveDiscussion !== undefined
   if (resolved) await forge.resolveDiscussion?.(repo.path, mr, discussion.id, true)
   return { resolved }
 }

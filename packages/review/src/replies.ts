@@ -6,9 +6,8 @@ import type { Agent, Toolset } from '@holtkeeper/agent'
 import type { Discussion, DiscussionNote, GitForge, RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
-import { KEEP_ENGLISH, recheckThreads, runTracked } from './agent.ts'
-import { type OpenThread, isOurNote } from './dedupe.ts'
-import { threadNote } from './format.ts'
+import { KEEP_ENGLISH, runTracked } from './agent.ts'
+import { isOurNote } from './dedupe.ts'
 import type { ReviewMessages } from './messages.ts'
 import type { ReviewUsage } from './schema.ts'
 import {
@@ -80,96 +79,6 @@ export async function pendingReplies(options: {
     ),
   )
   return replied.filter((_, index) => !done[index])
-}
-
-/**
- * What a reply asks of the reviewer: `ack` nothing (thanks, noted, will do), `fixed` to confirm
- * that the code no longer has the problem, `discuss` an answer in words.
- */
-export type ReplyKind = 'ack' | 'fixed' | 'discuss'
-
-const stances = ['will-change', 'changed', 'stays', 'asks'] as const
-
-const triageSchema = z.object({
-  threads: z.array(z.object({ id: z.string(), code: z.enum(stances) })),
-})
-
-const kindOfStance: Record<(typeof stances)[number], ReplyKind> = {
-  'will-change': 'ack',
-  changed: 'fixed',
-  stays: 'discuss',
-  asks: 'discuss',
-}
-
-/** The system prompt of `triageReplies`. */
-export const TRIAGE_SYSTEM = [
-  'People replied to your code review comments. For each thread, say what the replies since your comment mean for the code:',
-  '- `will-change`: they promise to change the code as the comment asks, later or in another merge request ("will fix", "good catch, will do"), and ask nothing.',
-  '- `changed`: they say they already changed it, it is already there, or it is no longer in the code ("done", "fixed", "added", "removed", "it is there"), and ask nothing.',
-  '- `stays`: the code stays as it is: they say it is fine, ok, normal, intended, not needed, the same as elsewhere or moved over from another service, or that they keep it, in any language and however short, or they explain why the comment is wrong or does not apply.',
-  '- `asks`: a question, a request, or anything else.',
-  'Only an explicit promise to change the code is `will-change`. "Ok", "fine" or "all good" about the code itself means it stays.',
-].join('\n')
-
-const MAX_TRIAGE_TEXT = 1500
-
-const clip = (text: string) =>
-  text.length > MAX_TRIAGE_TEXT ? `${text.slice(0, MAX_TRIAGE_TEXT)}\n[...]` : text
-
-/**
- * Sorts replies by what they ask for with one call of the `fast` tier without tools: the call says
- * what each thread's replies mean for the code, and only an explicit promise to change it is
- * `ack`; a reply that keeps the code is `discuss`, so it always gets an answer. Anything the call
- * leaves out, and everything when it fails, is `discuss`.
- */
-export async function triageReplies(options: {
-  agent: Agent
-  pending: readonly PendingReply[]
-  botUsername?: string
-  usage: ReviewUsage
-  log?: (line: string) => void
-  signal?: AbortSignal
-}): Promise<Map<string, ReplyKind>> {
-  const kinds = new Map<string, ReplyKind>(
-    options.pending.map((pending) => [pending.discussion.id, 'discuss']),
-  )
-  if (options.pending.length === 0) return kinds
-  const scratch = await mkdtemp(join(tmpdir(), 'holtkeeper-replies-'))
-  try {
-    const result = await runTracked(
-      options.agent,
-      {
-        dir: scratch,
-        capabilities: [],
-        system: TRIAGE_SYSTEM,
-        prompt: options.pending
-          .map((pending) => {
-            const comment = pending.discussion.notes.find((note) => !note.system)
-            return [
-              `## Thread ${pending.discussion.id}`,
-              `Review comment:\n${clip(threadConversation(comment ? [comment] : [], options.botUsername))}`,
-              `Replies since:\n${clip(threadConversation(pending.unanswered, options.botUsername))}`,
-            ].join('\n\n')
-          })
-          .join('\n\n'),
-        output: triageSchema,
-        taskKind: 'triage',
-        tier: 'fast',
-        maxTurns: 1,
-        ...(options.signal ? { signal: options.signal } : {}),
-      },
-      options.usage,
-    )
-    for (const { id, code } of result.output?.threads ?? [])
-      if (kinds.has(id)) kinds.set(id, kindOfStance[code])
-  } catch (error) {
-    options.log?.(
-      `sorting replies failed, answering all in full: ${error instanceof Error ? error.message : String(error)}`,
-    )
-  } finally {
-    await rm(scratch, { recursive: true, force: true })
-  }
-  return kinds
 }
 
 /** What the agent gets to answer replies with, set up once the first reply needs the code. */
@@ -285,7 +194,7 @@ export interface AnswerRepliesOptions {
   /** The replies to answer, from `pendingReplies`. */
   pending: readonly PendingReply[]
   agent: Agent
-  /** Called at most once, when a reply needs the code or a full answer. */
+  /** Called at most once, when a reply is answered (the limit leaves nothing to answer otherwise). */
   workspace?: () => Promise<ReplyWorkspace>
   /** Texts of the status notes; called at most once, when one is posted. English without it. */
   messages?: () => Promise<ReviewMessages>
@@ -299,21 +208,20 @@ export interface AnswerRepliesOptions {
 }
 
 /**
- * Answers every pending reply of a merge request in one run. Replies are sorted first
- * (`triageReplies`): an `ack` gets the `done` mark and no note; a `fixed` claim on a diff line is
- * checked against the code like a re-check after new commits and answered with a status note,
- * resolving the thread when the problem is gone; everything else, and a claim the check could not
- * settle, gets an answer in words, several threads per agent call (`answerThreads`) with a call of
- * its own (`replyToThread`) for a thread the batch left out. A thread that got a newer note while
- * the agent worked is skipped: that note queues its own run. A thread Holtkeeper already answered
- * `MAX_THREAD_ANSWERS` times gets only the `done` mark. General threads are answered with the
- * current state of our diff threads (`reviewThreadsState`). Answered notes lose the `seen` mark.
+ * Answers every pending reply of a merge request in one run on the `main` tier with the code at
+ * hand: several threads per agent call (`answerThreads`), with a call of its own (`replyToThread`)
+ * for a single thread and for one a batch left out. Each answer is a reply in words, a `fixed`
+ * note that resolves the thread once the code confirms the fix, an `open` note on what is still
+ * there, or `none`: no note, only the `done` mark (outcome `ack`). A thread that got a newer note
+ * while the agent worked is skipped: that note queues its own run. A thread Holtkeeper already
+ * answered `MAX_THREAD_ANSWERS` times gets only the `done` mark. General threads are answered with
+ * the current state of our diff threads (`reviewThreadsState`). Answered notes lose the `seen`
+ * mark.
  */
 export async function answerReplies(options: AnswerRepliesOptions): Promise<ReplyOutcome[]> {
   const { forge, repo, mr, pending } = options
   if (pending.length === 0) return []
   if (!forge.replyToDiscussion) throw new Error(`forge ${forge.kind} cannot reply to discussions`)
-  const reply = forge.replyToDiscussion.bind(forge)
   const outcomes = new Map<string, ReplyOutcome>()
   const record = (
     item: PendingReply,
@@ -352,18 +260,11 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
       reason: 'the thread changed while answering',
     })
 
-  // Sorting and checking run on the `fast` tier; `usage.model` names the model of the answers.
-  const side: ReviewUsage = { turns: 0 }
-  const done = () => {
-    const { usage } = options
-    usage.turns += side.turns
-    if (side.costUsd !== undefined) usage.costUsd = (usage.costUsd ?? 0) + side.costUsd
-    if (side.inputTokens !== undefined)
-      usage.inputTokens = (usage.inputTokens ?? 0) + side.inputTokens
-    if (side.outputTokens !== undefined)
-      usage.outputTokens = (usage.outputTokens ?? 0) + side.outputTokens
-    if (!usage.model && side.model) usage.model = side.model
-    return pending.flatMap((item) => outcomes.get(item.discussion.id) ?? [])
+  const done = () => pending.flatMap((item) => outcomes.get(item.discussion.id) ?? [])
+  const acknowledged = async (item: PendingReply) => {
+    await forge.addNoteMark?.(repo.path, mr.id, item.reply.id, 'done').catch(() => undefined)
+    await unmark(item)
+    record(item, { action: 'ack', replied: false, resolved: false })
   }
 
   // Past the answer limit the decision is the author's: no more notes, only the done mark.
@@ -385,109 +286,11 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
   const open = pending.filter((item) => !capped.includes(item))
   if (open.length === 0) return done()
 
-  const kinds = await triageReplies({
-    agent: options.agent,
-    pending: open,
-    ...(options.botUsername ? { botUsername: options.botUsername } : {}),
-    usage: side,
-    ...(options.log ? { log: options.log } : {}),
-    ...(options.signal ? { signal: options.signal } : {}),
-  })
-  const of = (kind: ReplyKind) => open.filter((item) => kinds.get(item.discussion.id) === kind)
-
-  for (const item of of('ack')) {
-    // oxlint-disable-next-line no-await-in-loop -- sequential: forges rate-limit reactions
-    await forge.addNoteMark?.(repo.path, mr.id, item.reply.id, 'done').catch(() => undefined)
-    // oxlint-disable-next-line no-await-in-loop
-    await unmark(item)
-    record(item, { action: 'ack', replied: false, resolved: false })
-  }
-
-  const claims = of('fixed')
-  const inWords = new Set(of('discuss'))
-  if (claims.length + inWords.size === 0) return done()
   const workspace = (await options.workspace?.()) ?? {}
+  let texts: Promise<ReviewMessages | undefined> | undefined
+  const messages = () => (texts ??= options.messages?.() ?? Promise.resolve(undefined))
 
-  const checkable = workspace.dir ? claims.filter((item) => item.discussion.position) : []
-  for (const item of claims) if (!checkable.includes(item)) inWords.add(item)
-  if (checkable.length && workspace.dir) {
-    const dir = workspace.dir
-    const threads = await Promise.all(
-      checkable.map(async (item) => {
-        const position = item.discussion.position ?? { path: '', line: 0, headSha: '' }
-        const first = item.discussion.notes.find((note) => !note.system)
-        const thread: OpenThread = {
-          discussionId: item.discussion.id,
-          path: position.path,
-          line: position.line,
-          text: threadConversation(first ? [first] : [], options.botUsername),
-          ours: true,
-          reply: {
-            noteId: item.reply.id,
-            author: item.reply.author,
-            text: threadConversation(item.unanswered, options.botUsername),
-          },
-        }
-        return {
-          thread,
-          code: await codeAround({ forge, repo, dir }, position.path, position.line, mr.headSha),
-        }
-      }),
-    )
-    const verdicts = await recheckThreads({
-      agent: options.agent,
-      dir,
-      threads,
-      usage: side,
-      ...(options.language ? { language: options.language } : {}),
-      ...(workspace.toolsets ? { toolsets: workspace.toolsets } : {}),
-      ...(options.signal ? { signal: options.signal } : {}),
-    }).catch((error: unknown) => {
-      options.log?.(
-        `checking fixed claims failed, answering them in full: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      return new Map<string, never>()
-    })
-    const settled = checkable.filter((item) => {
-      const verdict = verdicts.get(item.discussion.id)
-      const clear = verdict && verdict.status !== 'unclear' && !verdict.needsAnswer
-      if (!clear) inWords.add(item)
-      return clear
-    })
-    if (settled.length) {
-      const [latest, messages] = await Promise.all([latestNotes(), options.messages?.()])
-      for (const item of settled) {
-        const verdict = verdicts.get(item.discussion.id)
-        if (!verdict) continue
-        if (latest.get(item.discussion.id) !== item.reply.id) {
-          changed(item)
-          continue
-        }
-        const fixed = verdict.status === 'fixed'
-        // oxlint-disable-next-line no-await-in-loop -- sequential: forges rate-limit note creation
-        await reply(
-          repo.path,
-          mr.id,
-          item.discussion.id,
-          threadNote(fixed ? 'resolved' : 'replied', verdict.note, mr.headSha, messages),
-        )
-        const resolved =
-          fixed && item.discussion.resolvable && forge.resolveDiscussion !== undefined
-        // oxlint-disable-next-line no-await-in-loop
-        if (resolved) await forge.resolveDiscussion?.(repo.path, mr.id, item.discussion.id, true)
-        // oxlint-disable-next-line no-await-in-loop
-        await unmark(item)
-        record(item, {
-          action: fixed ? 'fixed' : 'open',
-          replied: true,
-          resolved,
-          reason: verdict.note,
-        })
-      }
-    }
-  }
-
-  const general = [...inWords].some((item) => !item.discussion.position)
+  const general = open.some((item) => !item.discussion.position)
   const reviewState = general
     ? reviewThreadsState(
         (await forge.listDiscussions?.(repo.path, mr.id).catch(() => undefined)) ?? [],
@@ -510,9 +313,12 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
       usage: options.usage,
       ...(options.cite ? { cite: options.cite } : {}),
       ...(reviewState && { reviewState }),
+      head: mr.headSha,
+      messages,
       stillPending: async () => (await latestNotes()).get(item.discussion.id) === item.reply.id,
       ...(options.signal ? { signal: options.signal } : {}),
     })
+    if (result.action === 'none') return acknowledged(item)
     if (result.replied) await unmark(item)
     record(item, {
       action: result.action,
@@ -522,7 +328,7 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
     })
   }
 
-  const queue = open.filter((item) => inWords.has(item))
+  const queue = open
   for (let start = 0; start < queue.length; start += REPLY_BATCH) {
     const batch = queue.slice(start, start + REPLY_BATCH)
     const [only] = batch
@@ -563,9 +369,21 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
         changed(item)
         continue
       }
+      if (answer.action === 'none') {
+        // oxlint-disable-next-line no-await-in-loop -- sequential: forges rate-limit reactions
+        await acknowledged(item)
+        continue
+      }
       // oxlint-disable-next-line no-await-in-loop
       const { resolved } = await postThreadAnswer(
-        { forge, repo, mr: mr.id, ...(options.cite ? { cite: options.cite } : {}) },
+        {
+          forge,
+          repo,
+          mr: mr.id,
+          ...(options.cite ? { cite: options.cite } : {}),
+          head: mr.headSha,
+          messages,
+        },
         item.discussion,
         answer,
       )

@@ -6,7 +6,7 @@ import type { Discussion } from '@holtkeeper/forge'
 import { HEAD, fakeAgent, fakeForge } from '../test/fakes.ts'
 import { findingMarker } from './dedupe.ts'
 import { replyBody } from './format.ts'
-import { TRIAGE_SYSTEM, answerReplies, pendingReplies, repliedThreads } from './replies.ts'
+import { answerReplies, pendingReplies, repliedThreads } from './replies.ts'
 import type { ReviewUsage } from './schema.ts'
 
 const repo = { forge: 'work', path: 'shapes/circle' }
@@ -84,7 +84,7 @@ describe('repliedThreads', () => {
 })
 
 describe('answerReplies', () => {
-  test('answers several threads with one triage call and one answer call', async () => {
+  test('answers several threads in one call of the main tier and posts nothing for none', async () => {
     const first = thread('d1', [
       ['bot', finding('Radius is never checked')],
       ['ann', 'Negative radius cannot reach this function.'],
@@ -105,15 +105,6 @@ describe('answerReplies', () => {
     for (const item of [first, second, thanks])
       await forge.addNoteMark?.(repo.path, mr.id, replyOf(item), 'seen')
     const { agent, tasks } = fakeAgent({
-      triage: [
-        {
-          threads: [
-            { id: 'd1', code: 'stays' },
-            { id: 'd2', code: 'asks' },
-            { id: 'd3', code: 'will-change' },
-          ],
-        },
-      ],
       review: [
         {
           answers: [
@@ -124,19 +115,16 @@ describe('answerReplies', () => {
               body: 'The second rounding loses cents.',
               resolve: false,
             },
+            { id: 'd3', action: 'none', body: '', resolve: false },
           ],
         },
       ],
     })
     const { outcomes, usage } = await run(forge, agent)
-    expect(tasks.map((task) => [task.taskKind, task.tier])).toEqual([
-      ['triage', 'fast'],
-      ['review', 'main'],
-    ])
-    expect(tasks[0]?.system).toBe(TRIAGE_SYSTEM)
-    expect(tasks[1]?.prompt).toContain('## Thread d1 on src/area.ts:2')
-    expect(tasks[1]?.prompt).toContain('## Thread d2 on src/area.ts:2')
-    expect(tasks[1]?.prompt).not.toContain('Unused import')
+    expect(tasks.map((task) => [task.taskKind, task.tier])).toEqual([['review', 'main']])
+    expect(tasks[0]?.system).toContain('`none` when the reply needs no answer')
+    expect(tasks[0]?.prompt).toContain('## Thread d1 on src/area.ts:2')
+    expect(tasks[0]?.prompt).toContain('## Thread d3 on src/area.ts:2')
     expect(outcomes).toEqual([
       {
         discussionId: 'd1',
@@ -168,7 +156,20 @@ describe('answerReplies', () => {
     expect(marksOn(replyOf(first))).toEqual([])
     expect(marksOn(replyOf(second))).toEqual([])
     expect(marksOn(replyOf(thanks))).toEqual(['done'])
-    expect(usage.turns).toBe(4)
+    expect(usage.turns).toBe(2)
+  })
+
+  test('a single reply that needs no answer gets only the done mark', async () => {
+    const thanks = thread('d1', [
+      ['bot', finding('Unused import')],
+      ['ann', 'Thanks, will remove it.'],
+    ])
+    const { forge, replies, marksOn } = fakeForge({ files: [], discussions: [thanks] })
+    const { agent } = fakeAgent({ review: [{ action: 'none', body: '', resolve: false }] })
+    const { outcomes } = await run(forge, agent)
+    expect(outcomes.map((o) => [o.action, o.replied])).toEqual([['ack', false]])
+    expect(replies).toEqual([])
+    expect(marksOn(replyOf(thanks))).toEqual(['done'])
   })
 
   test('a reply marked done is not looked at again', async () => {
@@ -220,15 +221,14 @@ describe('answerReplies', () => {
     ])
     const { forge } = fakeForge({ files: [], discussions: [summary, settled, open] })
     const { agent, tasks } = fakeAgent({
-      triage: [{ threads: [{ id: 's', code: 'stays' }] }],
       review: [{ action: 'explain', body: 'One open thread remains.', resolve: false }],
     })
     await run(forge, agent)
-    expect(tasks[1]?.prompt).toContain('- resolved: src/area.ts:2 Radius is never checked')
-    expect(tasks[1]?.prompt).toContain('- open: src/area.ts:2 No test for the zero area')
+    expect(tasks[0]?.prompt).toContain('- resolved: src/area.ts:2 Radius is never checked')
+    expect(tasks[0]?.prompt).toContain('- open: src/area.ts:2 No test for the zero area')
   })
 
-  test('checks a fixed claim against the code and resolves the thread', async () => {
+  test('confirms a fixed claim from the code with status notes and resolves the thread', async () => {
     const fixed = thread('d1', [
       ['bot', finding('Radius is never checked')],
       ['ann', 'Already fixed.'],
@@ -242,25 +242,22 @@ describe('answerReplies', () => {
       discussions: [fixed, not],
       contents: { 'src/area.ts': 'a\nb\nc' },
     })
-    const { agent, tasks } = fakeAgent({
-      triage: [
+    const { agent } = fakeAgent({
+      review: [
         {
-          threads: [
-            { id: 'd1', code: 'changed' },
-            { id: 'd2', code: 'changed' },
-          ],
-        },
-        {
-          threads: [
-            { id: 'd1', status: 'fixed', note: 'The radius is validated now.' },
-            { id: 'd2', status: 'still-relevant', note: 'Both rounding calls are still there.' },
+          answers: [
+            { id: 'd1', action: 'fixed', body: 'The radius is validated now.', resolve: false },
+            {
+              id: 'd2',
+              action: 'open',
+              body: 'Both rounding calls are still there.',
+              resolve: true,
+            },
           ],
         },
       ],
     })
     const { outcomes } = await run(forge, agent, { dir: import.meta.dir })
-    expect(tasks).toHaveLength(2)
-    expect(tasks[1]?.prompt).toContain('Reply of ann:')
     expect(outcomes.map((outcome) => [outcome.action, outcome.resolved])).toEqual([
       ['fixed', true],
       ['open', false],
@@ -270,30 +267,7 @@ describe('answerReplies', () => {
     expect(resolved).toEqual(['d1'])
   })
 
-  test('a claim the check cannot settle gets a full answer', async () => {
-    const claim = thread('d1', [
-      ['bot', finding('Radius is never checked')],
-      ['ann', 'Fixed.'],
-    ])
-    const { forge, replies } = fakeForge({
-      files: [],
-      discussions: [claim],
-      contents: { 'src/area.ts': 'a\nb\nc' },
-    })
-    const { agent, tasks } = fakeAgent({
-      triage: [
-        { threads: [{ id: 'd1', code: 'changed' }] },
-        { threads: [{ id: 'd1', status: 'unclear', note: 'Cannot tell.' }] },
-      ],
-      review: [{ action: 'explain', body: 'The check is in another branch.', resolve: false }],
-    })
-    const { outcomes } = await run(forge, agent, { dir: import.meta.dir })
-    expect(tasks).toHaveLength(3)
-    expect(outcomes[0]?.action).toBe('explain')
-    expect(replies[0]?.body).toContain('The check is in another branch.')
-  })
-
-  test('answers in full when sorting fails, and one by one what the batch left out', async () => {
+  test('answers one by one what the batch left out', async () => {
     const first = thread('d1', [
       ['bot', finding('Radius is never checked')],
       ['ann', 'Why?'],
@@ -304,14 +278,13 @@ describe('answerReplies', () => {
     ])
     const { forge, replies } = fakeForge({ files: [], discussions: [first, second] })
     const { agent, tasks } = fakeAgent({
-      triage: [undefined],
       review: [
         { answers: [{ id: 'd2', action: 'explain', body: 'Second.', resolve: false }] },
         { action: 'explain', body: 'First.', resolve: false },
       ],
     })
     const { outcomes } = await run(forge, agent)
-    expect(tasks).toHaveLength(3)
+    expect(tasks).toHaveLength(2)
     expect(outcomes.map((outcome) => outcome.action)).toEqual(['explain', 'explain'])
     expect(replies.map((reply) => reply.discussionId).toSorted()).toEqual(['d1', 'd2'])
   })
@@ -327,7 +300,6 @@ describe('answerReplies', () => {
     ])
     const { forge, state, replies } = fakeForge({ files: [], discussions: [first, second] })
     const scripted = fakeAgent({
-      triage: [undefined],
       review: [
         {
           answers: [
