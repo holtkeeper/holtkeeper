@@ -457,8 +457,17 @@ describe('note events', () => {
     expect((await replyHook('disc-1', 11)).status).toBe(202)
     expect((await replyHook('disc-2', 12)).status).toBe(202)
     expect(await store.jobs.list()).toHaveLength(1)
+    const list = store.jobs.list.bind(store.jobs)
+    store.jobs.list = async (query) =>
+      (await list(query)).map((job) => ({
+        ...job,
+        options: Object.fromEntries(Object.entries(job.options).toReversed()),
+      }))
+    expect((await replyHook('disc-2', 14)).status).toBe(202)
+    store.jobs.list = list
+    expect(await store.jobs.list()).toHaveLength(1)
     await Bun.sleep(0)
-    expect(marks.map((mark) => mark.noteId)).toEqual([11, 12])
+    expect(marks.map((mark) => mark.noteId)).toEqual([11, 12, 14])
 
     const claimed = await store.jobs.claim('worker-1', '2026-10-30T12:05:00.000Z')
     expect(claimed?.options).toEqual({ mergeRequest: 7, replies: true })

@@ -30,7 +30,13 @@ import {
   policiesSettingKey,
 } from '@holtkeeper/mr-policies'
 import { releaseTarget } from '@holtkeeper/release'
-import type { AuditOutcome, JobStatus, JobTrigger, KvStore } from '@holtkeeper/store'
+import {
+  type AuditOutcome,
+  type JobStatus,
+  type JobTrigger,
+  type KvStore,
+  canonicalJson,
+} from '@holtkeeper/store'
 import { WRITE_TASK_KIND } from '@holtkeeper/write-task'
 import { z } from 'zod'
 
@@ -215,11 +221,12 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         analyzer: request.analyzer,
         limit: 500,
       })
-      const options = JSON.stringify(request.options ?? {})
+      // Stores may hand options back with their keys in another order (Postgres jsonb).
+      const options = canonicalJson(request.options ?? {})
       const duplicate = active.some(
         (job) =>
           (job.ref ?? '') === (request.ref ?? '') &&
-          (request.options === undefined || JSON.stringify(job.options) === options),
+          (request.options === undefined || canonicalJson(job.options) === options),
       )
       if (duplicate) continue
       const job = await store.jobs.enqueue({
