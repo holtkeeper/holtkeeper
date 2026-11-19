@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { citedRules } from './citations.ts'
-import { type CitedRuleInfo, citationRenderer, renderCitations } from './cite.ts'
+import { type CitedRuleInfo, citationRenderer, plainCitations, renderCitations } from './cite.ts'
 
 const known = new Map<string, CitedRuleInfo>([
   [
@@ -17,20 +17,23 @@ const known = new Map<string, CitedRuleInfo>([
 
 const text = 'Render reads a file [rule:r1]. Round later [learn:l1], see also [rule:gone].'
 
-test('link shows a titled link with the rule as tooltip and keeps the citation hidden', () => {
+test('link keeps the citation as a link titled with the rule name', () => {
   const shown = renderCitations(text, 'link', known)
   expect(shown).toBe(
-    'Render reads a file [📘 Widgets core](https://panel.example.com/knowledge/rules?rule=r1 "Keep widgets \'pure\'. No I/O in render.")<!-- [rule:r1] -->. Round later 📘 _Round at the boundary_<!-- [learn:l1] -->, see also<!-- [rule:gone] -->.',
+    'Render reads a file [\\[rule:r1\\]](https://panel.example.com/knowledge/rules?rule=r1 "Widgets [core]"). Round later [learn:l1], see also<!-- [rule:gone] -->.',
   )
   expect(citedRules(shown)).toEqual(citedRules(text))
   expect(renderCitations(shown, 'link', known)).toBe(shown)
+  expect(plainCitations(shown)).toBe(
+    'Render reads a file [rule:r1]. Round later [learn:l1], see also<!-- [rule:gone] -->.',
+  )
 })
 
 test('details appends each cited rule once', () => {
   const shown = renderCitations(`${text} Again [rule:r1].`, 'details', known)
   expect(shown.match(/<details>/g)).toHaveLength(2)
   expect(shown).toContain(
-    '<details><summary>📘 Widgets core</summary>\n\nKeep widgets "pure".\nNo I/O in render.\n\n</details>',
+    '<details><summary>rule:r1: Widgets [core]</summary>\n\nKeep widgets "pure".\nNo I/O in render.\n\n</details>',
   )
 })
 
@@ -47,7 +50,7 @@ test('the renderer looks up only what a note cites and survives a failing lookup
     return known
   })
   expect(await render('Nothing cited.')).toBe('Nothing cited.')
-  expect(await render('See [rule:r1].')).toContain('📘 Widgets core')
+  expect(await render('See [rule:r1].')).toContain('[\\[rule:r1\\]](https://panel.example.com')
   expect(asked).toEqual([['r1']])
   const failing = citationRenderer('link', async () => {
     throw new Error('store is down')

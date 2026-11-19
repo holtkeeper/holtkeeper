@@ -387,7 +387,7 @@ export async function startServer(
             learning && [
               citationKey(item),
               {
-                title: learning.text.length > 60 ? `${learning.text.slice(0, 59)}…` : learning.text,
+                title: learning.text,
                 text: learning.reason ? `${learning.text}\n\n${learning.reason}` : learning.text,
                 ...(panel && {
                   url: `${panel}/knowledge/learnings?learning=${encodeURIComponent(learning.id)}`,

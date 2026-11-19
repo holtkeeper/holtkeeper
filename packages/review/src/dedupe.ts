@@ -1,5 +1,6 @@
 import type { Discussion } from '@holtkeeper/forge'
 
+import { plainCitations } from './cite.ts'
 import { type ReviewCategory, type ReviewSeverity, categories, severities } from './schema.ts'
 import type { Candidate } from './validate.ts'
 
@@ -37,7 +38,8 @@ export interface OpenThread {
 export const isOurNote = (note: { author: string; body: string }, botUsername?: string) =>
   markerOf(note.body) !== undefined || (botUsername !== undefined && note.author === botUsername)
 
-const withoutComments = (body: string) => body.replace(/<!--[\s\S]*?-->/g, '').trim()
+const withoutComments = (body: string) =>
+  plainCitations(body.replace(/<!--[\s\S]*?-->/g, '')).trim()
 
 const categoryOf = (body: string) => {
   const name = /^\*\*\w+\*\* · (\w+)/.exec(body.trimStart())?.[1]
@@ -66,7 +68,7 @@ function diffThreads(
         discussionId: discussion.id,
         path: discussion.position.path,
         line: discussion.position.line,
-        text: first.body.replace(new RegExp(markerPattern.source, 'g'), '').trim(),
+        text: plainCitations(first.body.replace(new RegExp(markerPattern.source, 'g'), '')).trim(),
         ours,
         ...(marker ? { findingId: marker } : {}),
         ...(category && { category }),

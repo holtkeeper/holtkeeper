@@ -57,7 +57,8 @@ export interface CitationSummary {
   lastCitedAt?: string
 }
 
-const CITATION = /\[\s*(rule|learn)\s*:\s*([A-Za-z0-9][\w-]*)\s*\]/g
+// The brackets may be escaped: a posted note shows a citation as the text of a link.
+const CITATION = /\\?\[\s*(rule|learn)\s*:\s*([A-Za-z0-9][\w-]*)\s*\\?\]/g
 
 /** A rule or learning a text cites. */
 export interface CitedRule {

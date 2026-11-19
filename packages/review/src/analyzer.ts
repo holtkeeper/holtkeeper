@@ -113,7 +113,7 @@ export const reviewOptionsSchema = z.object({
     .enum(citationStyles)
     .default('link')
     .describe(
-      'How comments show the rules they cite: link (a link to the rule with its text as tooltip), details (also the rule text in a collapsed block) or off (not shown).',
+      'How comments show the rules they cite: link (the citation links to the rule, its title as tooltip), details (also the rule text in a collapsed block) or off (not shown).',
     ),
   replies: flag.default(false),
   media: flag.default(true),

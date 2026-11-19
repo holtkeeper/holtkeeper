@@ -7,6 +7,7 @@ import type { Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
 import { KEEP_ENGLISH, runTracked } from './agent.ts'
+import { plainCitations } from './cite.ts'
 import { isOurNote } from './dedupe.ts'
 import { replyBody } from './format.ts'
 import type { ReviewUsage } from './schema.ts'
@@ -130,7 +131,7 @@ export function threadConversation(
   return notes
     .map(
       (note) =>
-        `**${isOurNote(note, botUsername) ? 'reviewer (you)' : note.author}**:\n${note.body.replace(/<!--[\s\S]*?-->/g, '').trim()}`,
+        `**${isOurNote(note, botUsername) ? 'reviewer (you)' : note.author}**:\n${plainCitations(note.body.replace(/<!--[\s\S]*?-->/g, '')).trim()}`,
     )
     .join('\n\n')
 }

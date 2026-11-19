@@ -1,9 +1,9 @@
 import { type CitedRule, citedRules } from './citations.ts'
 
 /**
- * How a posted note shows the rules and learnings it cites: `link` turns each citation into a
- * link to the rule with its text as the tooltip, `details` also appends each cited rule in a
- * collapsed block, `off` shows nothing.
+ * How a posted note shows the rules and learnings it cites: `link` makes each citation a link to
+ * the rule with its title as the tooltip, `details` also appends each cited rule in a collapsed
+ * block, `off` shows nothing.
  */
 export type CitationStyle = 'link' | 'details' | 'off'
 
@@ -22,21 +22,16 @@ export interface CitedRuleInfo {
 export const citationKey = (cited: CitedRule) => `${cited.kind}:${cited.id}`
 
 const CITATION = /[ \t]*\[\s*(rule|learn)\s*:\s*([A-Za-z0-9][\w-]*)\s*\](?!\s*-->)/g
-const MAX_TOOLTIP = 240
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
 
-const tooltip = (text: string) => {
-  const flat = oneLine(text).replace(/["\\]/g, "'")
-  return flat.length > MAX_TOOLTIP ? `${flat.slice(0, MAX_TOOLTIP - 1)}…` : flat
-}
-
-const label = (title: string) => oneLine(title).replace(/[[\]]/g, '')
+const tooltip = (title: string) => oneLine(title).replace(/["\\]/g, "'")
 
 /**
- * `text` with every `[rule:<id>]` and `[learn:<id>]` shown in `style`. Each citation stays in the
- * note as a hidden comment, so `citedRules` still finds it in the posted note whatever the style.
- * A citation `known` lacks is shown as nothing.
+ * `text` with every `[rule:<id>]` and `[learn:<id>]` shown in `style`: the citation itself as the
+ * text of a link to the rule, titled with the rule's name (as it is when the rule has no `url`).
+ * A citation that is not shown stays in the note as a hidden comment, so `citedRules` still finds
+ * it in the posted note whatever the style. A citation `known` lacks is not shown.
  */
 export function renderCitations(
   text: string,
@@ -50,15 +45,25 @@ export function renderCitations(
     const hidden = `<!-- [${key}] -->`
     const info = known.get(key)
     if (style === 'off' || !info) return hidden
-    const title = label(info.title)
     if (style === 'details' && !seen.has(key)) {
       seen.add(key)
-      appended.push(`<details><summary>📘 ${title}</summary>\n\n${info.text.trim()}\n\n</details>`)
+      appended.push(
+        `<details><summary>${key}: ${oneLine(info.title)}</summary>\n\n${info.text.trim()}\n\n</details>`,
+      )
     }
-    const shown = info.url ? `[📘 ${title}](${info.url} "${tooltip(info.text)}")` : `📘 _${title}_`
-    return ` ${shown}${hidden}`
+    return info.url ? ` [\\[${key}\\]](${info.url} "${tooltip(info.title)}")` : ` [${key}]`
   })
   return [body.replace(/[ \t]*\(\s*(<!-- \[[^\]]+\] -->)\s*\)/g, '$1'), ...appended].join('\n\n')
+}
+
+const LINKED = /\[\\\[((?:rule|learn):[\w-]+)\\\]\]\(\S+ "[^"]*"\)/g
+
+/**
+ * `text` of a posted note with the citation links `renderCitations` made turned back into plain
+ * `[rule:<id>]` and `[learn:<id>]`, as the agent wrote them: what an agent reading the note gets.
+ */
+export function plainCitations(text: string): string {
+  return text.replace(LINKED, '[$1]')
 }
 
 /**
