@@ -1,4 +1,10 @@
-import type { ReviewAnalytics, ReviewAnalyticsPhase, ReviewCostDay } from '@holtkeeper/api'
+import type {
+  ReviewAnalytics,
+  ReviewAnalyticsPhase,
+  ReviewCostDay,
+  ReviewSizeClass,
+  ReviewTrendDay,
+} from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
 
@@ -58,3 +64,22 @@ export const replyCount = (replies: ReviewAnalytics['runs']['replies']) =>
 
 /** `part` over `whole`; `undefined` when `whole` is 0. */
 export const share = (part: number, whole: number) => (whole > 0 ? part / whole : undefined)
+
+/** How each size class is named, with the estimated human review time it covers. */
+export const sizeInfo: Record<ReviewSizeClass, { label: string; hint: string }> = {
+  small: { label: 'Small', hint: 'Under 15 minutes of human review' },
+  medium: { label: 'Medium', hint: '15 minutes to an hour' },
+  large: { label: 'Large', hint: 'One to three hours' },
+  huge: { label: 'Huge', hint: 'Over three hours' },
+}
+
+/** Fixed over the comments judged that day; `undefined` when none was judged. */
+export const dayAcceptance = (day: ReviewTrendDay) =>
+  share(day.fixed, day.fixed + day.resolved + day.ignored)
+
+/**
+ * Answers where the bot agreed with the person who replied, over every recorded answer: how
+ * often a comment people pushed back on turned out wrong.
+ */
+export const concedeShare = (replies: ReviewAnalytics['runs']['replies']) =>
+  share(replies.concede, replyCount(replies) - replies.unknown)

@@ -1,22 +1,36 @@
-import type { AiUsagePeriodKind, ReviewAnalytics, ReviewCostDay } from '@holtkeeper/api'
+import type {
+  AiUsagePeriodKind,
+  ReviewAnalytics,
+  ReviewCostDay,
+  ReviewLatency,
+  ReviewQualityRow,
+} from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import { useReviewAnalytics } from '../../api/queries.ts'
 import { canReadSpend } from '../../lib/access.ts'
 import { formatUsd, niceScale } from '../../lib/ai-usage.ts'
-import { formatDateTime, formatDayLabel, plural } from '../../lib/format.ts'
+import { formatDateTime, formatDayLabel, formatDuration, plural } from '../../lib/format.ts'
 import { viewTeams } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoSplat } from '../../lib/repo.ts'
 import {
   analyticsPhases,
+  concedeShare,
+  dayAcceptance,
   dayTotal,
   phaseInfo,
   replyCount,
   reviewSpend,
   share,
+  sizeInfo,
 } from '../../lib/review-analytics.ts'
-import { acceptanceTone, outcomeSegments, shareText } from '../../lib/reviews.ts'
+import {
+  acceptanceTone,
+  outcomeSegments,
+  reviewSeverityLabel,
+  shareText,
+} from '../../lib/reviews.ts'
 import { statusColor } from '../../ui/colors.ts'
 import {
   ErrorState,
@@ -29,7 +43,10 @@ import {
   SegmentedTabs,
   Strip,
   type StripCell,
+  Table,
   Tag,
+  Td,
+  Th,
 } from '../../ui/index.ts'
 import { copyLinkItem } from '../shell/copy-link.ts'
 import { Forbidden } from '../shell/Forbidden.tsx'
@@ -107,23 +124,35 @@ function dayTitle(day: ReviewCostDay): string {
   return `${formatDayLabel(day.day)}: ${parts.length ? parts.join(', ') : 'nothing'}`
 }
 
-function PhaseBars({ days }: { days: ReviewCostDay[] }) {
-  const scale = niceScale(Math.max(...days.map(dayTotal)))
+interface DayStack {
+  day: string
+  title: string
+  parts: { key: string; value: number; color: string }[]
+}
+
+function DayBars({
+  days,
+  label,
+  money = false,
+  height = 150,
+}: {
+  days: DayStack[]
+  label: string
+  money?: boolean
+  height?: number
+}) {
+  const totalOf = (day: DayStack) => day.parts.reduce((sum, part) => sum + part.value, 0)
+  const scale = niceScale(Math.max(...days.map(totalOf)))
   const lines = Array.from(
     { length: Math.round(scale.max / scale.step) + 1 },
     (_, i) => i * scale.step,
   )
   const pct = (value: number) => `${(value / scale.max) * 100}%`
-  const total = days.reduce((sum, day) => sum + dayTotal(day), 0)
   const first = days[0]?.day ?? ''
   const last = days.at(-1)?.day ?? ''
   return (
     <div className="flex flex-col gap-1.5">
-      <div
-        className="relative ml-9 h-[150px]"
-        role="img"
-        aria-label={`Daily review cost from ${formatDayLabel(first)} to ${formatDayLabel(last)}, ${formatUsd(total)} in total.`}
-      >
+      <div className="relative ml-9" style={{ height }} role="img" aria-label={label}>
         {lines.map((value) => (
           <span
             key={value}
@@ -131,7 +160,7 @@ function PhaseBars({ days }: { days: ReviewCostDay[] }) {
             style={{ bottom: pct(value) }}
           >
             <span className="absolute -left-9 -top-[7px] font-mono text-[10px] text-dim">
-              ${value}
+              {money ? `$${value}` : value}
             </span>
           </span>
         ))}
@@ -139,20 +168,19 @@ function PhaseBars({ days }: { days: ReviewCostDay[] }) {
           {days.map((day) => (
             <div
               key={day.day}
-              title={dayTitle(day)}
+              title={day.title}
               className="flex h-full min-w-0 flex-1 flex-col-reverse"
             >
-              {dayTotal(day) > 0 ? (
-                analyticsPhases.map((phase) => {
-                  const cost = day.phases[phase] ?? 0
-                  return cost > 0 ? (
+              {totalOf(day) > 0 ? (
+                day.parts.map((part) =>
+                  part.value > 0 ? (
                     <i
-                      key={phase}
+                      key={part.key}
                       className="block w-full first:rounded-none last:rounded-t-[2px]"
-                      style={{ height: pct(cost), background: phaseColor(phase) }}
+                      style={{ height: pct(part.value), background: part.color }}
                     />
-                  ) : null
-                })
+                  ) : null,
+                )
               ) : (
                 <i className="block h-px w-full bg-line" />
               )}
@@ -165,6 +193,25 @@ function PhaseBars({ days }: { days: ReviewCostDay[] }) {
         <span>{formatDayLabel(last)}</span>
       </div>
     </div>
+  )
+}
+
+function PhaseBars({ days }: { days: ReviewCostDay[] }) {
+  const total = days.reduce((sum, day) => sum + dayTotal(day), 0)
+  return (
+    <DayBars
+      money
+      label={`Daily review cost from ${formatDayLabel(days[0]?.day ?? '')} to ${formatDayLabel(days.at(-1)?.day ?? '')}, ${formatUsd(total)} in total.`}
+      days={days.map((day) => ({
+        day: day.day,
+        title: dayTitle(day),
+        parts: analyticsPhases.map((phase) => ({
+          key: phase,
+          value: day.phases[phase] ?? 0,
+          color: phaseColor(phase),
+        })),
+      }))}
+    />
   )
 }
 
@@ -426,6 +473,311 @@ function Comments({ data }: { data: ReviewAnalytics }) {
   )
 }
 
+const outcomeColor: Record<'fixed' | 'resolved' | 'ignored', string> = {
+  fixed: statusColor.success,
+  resolved: statusColor.info,
+  ignored: statusColor.warning,
+}
+
+const outcomeLegend = (['fixed', 'resolved', 'ignored'] as const).map((key) => ({
+  color: outcomeColor[key],
+  label: key[0]?.toUpperCase() + key.slice(1),
+}))
+
+function Usefulness({ data }: { data: ReviewAnalytics }) {
+  const { trend, outcomes } = data
+  const posted = trend.reduce((sum, day) => sum + day.posted, 0)
+  return (
+    <Panel
+      variant="flush"
+      title="Usefulness over time"
+      description="Outcomes of comments as merge requests merged, per UTC day"
+      actions={<Legend label="Outcomes" items={outcomeLegend} />}
+      contentClassName="flex flex-col gap-3"
+    >
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+        <Figure label="Accepted" value={shareText(outcomes.acceptance)} hint="Fixed over judged" />
+        <Figure
+          label="Addressed"
+          value={shareText(outcomes.addressed)}
+          hint="Fixed or resolved over judged"
+        />
+        <Figure
+          label="Per fixed comment"
+          value={data.costPerFixedUsd === undefined ? '—' : formatUsd(data.costPerFixedUsd)}
+          hint="Review spend of the period over the comments that changed code"
+        />
+        <Figure label="Comments posted" value={posted.toLocaleString('en')} />
+      </div>
+      <DayBars
+        height={120}
+        label={`Judged comments per day: ${outcomes.fixed} fixed, ${outcomes.resolved} resolved, ${outcomes.ignored} ignored.`}
+        days={trend.map((day) => ({
+          day: day.day,
+          title: `${formatDayLabel(day.day)}: ${day.fixed} fixed, ${day.resolved} resolved, ${day.ignored} ignored, ${shareText(dayAcceptance(day))} accepted · ${day.posted} posted · ${formatUsd(day.costUsd)}`,
+          parts: (['fixed', 'resolved', 'ignored'] as const).map((key) => ({
+            key,
+            value: day[key],
+            color: outcomeColor[key],
+          })),
+        }))}
+      />
+      <span className="text-xs text-muted">
+        A day counts the comments whose merge request was merged that day.{' '}
+        <Link to="/quality/reviews" className="underline hover:text-foreground">
+          Quality › Reviews
+        </Link>{' '}
+        splits outcomes by model and prompt version.
+      </span>
+    </Panel>
+  )
+}
+
+function RepoName({ repo }: { repo: string }) {
+  const parsed = parseRepoKey(repo)
+  return parsed ? (
+    <Link
+      to="/repos/$"
+      params={{ _splat: repoSplat(parsed) }}
+      className="mono text-[12px] hover:underline"
+    >
+      {parsed.path}
+    </Link>
+  ) : (
+    <span className="mono text-[12px]">{repo}</span>
+  )
+}
+
+function Repositories({ data }: { data: ReviewAnalytics }) {
+  return (
+    <Panel
+      variant="flush"
+      title="Where reviews pay off"
+      description="Repositories by review spend in the period"
+    >
+      {data.repos.length ? (
+        <Table label="Review spend and outcomes per repository">
+          <thead>
+            <tr>
+              <Th sorted="descending">Repository</Th>
+              <Th align="right">Merge requests</Th>
+              <Th align="right">Spend</Th>
+              <Th align="right">Comments</Th>
+              <Th>Outcomes</Th>
+              <Th align="right">Accepted</Th>
+              <Th align="right">👎</Th>
+              <Th align="right">Per fix</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.repos.map((row) => (
+              <tr key={row.repo}>
+                <Td>
+                  <RepoName repo={row.repo} />
+                </Td>
+                <Td align="right" className="mono">
+                  {row.mergeRequests}
+                </Td>
+                <Td align="right" className="mono">
+                  {formatUsd(row.costUsd)}
+                </Td>
+                <Td align="right" className="mono">
+                  {row.posted}
+                </Td>
+                <Td className="min-w-24">
+                  {row.outcomes.comments ? (
+                    <SegmentBar segments={outcomeSegments(row.outcomes)} />
+                  ) : (
+                    <span className="text-xs text-dim">not judged yet</span>
+                  )}
+                </Td>
+                <Td align="right">
+                  {row.outcomes.acceptance === undefined ? (
+                    <span className="text-dim">—</span>
+                  ) : (
+                    <Tag tone={acceptanceTone(row.outcomes.acceptance)}>
+                      {shareText(row.outcomes.acceptance)}
+                    </Tag>
+                  )}
+                </Td>
+                <Td align="right" className="mono">
+                  {row.outcomes.down}
+                </Td>
+                <Td align="right" className="mono">
+                  {row.costPerFixedUsd === undefined ? '—' : formatUsd(row.costPerFixedUsd)}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      ) : (
+        <p className="text-xs text-muted">No reviews in this period.</p>
+      )}
+    </Panel>
+  )
+}
+
+const severityName = (key: string) =>
+  Object.entries(reviewSeverityLabel).find(([severity]) => severity === key)?.[1] ?? 'Not recorded'
+
+function OutcomeRows({
+  title,
+  rows,
+  name,
+}: {
+  title: string
+  rows: ReviewQualityRow[]
+  name: (key: string) => string
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-dim">{title}</span>
+      {rows.length ? (
+        rows.map((row) => (
+          <div
+            key={row.key}
+            className="grid grid-cols-[minmax(6rem,1fr)_minmax(6rem,2fr)_3.5rem_3.5rem] items-center gap-x-3 text-xs"
+          >
+            <span className="truncate">{name(row.key)}</span>
+            <SegmentBar segments={outcomeSegments(row)} />
+            <span className="mono text-right text-muted">{row.comments}</span>
+            <span className="mono text-right">{shareText(row.acceptance)}</span>
+          </div>
+        ))
+      ) : (
+        <p className="text-xs text-muted">No judged comments in this period.</p>
+      )}
+    </div>
+  )
+}
+
+function Noise({ data }: { data: ReviewAnalytics }) {
+  const { noise, outcomes, runs } = data
+  const perMr = noise.perMergeRequest
+  return (
+    <Panel
+      variant="flush"
+      title="Noise"
+      description="Which comments people act on and which they pass over"
+      contentClassName="flex flex-col gap-3"
+    >
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+        <Figure
+          label="Bot agreed with the person"
+          value={shareText(concedeShare(runs.replies))}
+          hint="Answers to replies where the bot admitted the comment was wrong, over every recorded answer"
+        />
+        <Figure
+          label="👎 share"
+          value={shareText(share(outcomes.down, outcomes.comments))}
+          hint="Thumbs down over judged comments"
+        />
+        <Figure
+          label="Clean merge requests"
+          value={shareText(share(perMr.clean, perMr.reviewed))}
+          hint={`${perMr.clean} of ${perMr.reviewed} reviewed merge requests got no comment`}
+        />
+        <Figure
+          label="Comments per merge request"
+          value={perMr.meanComments === undefined ? '—' : perMr.meanComments.toFixed(1)}
+          hint={`Mean over merge requests with comments${perMr.p90Comments === undefined ? '' : `; 90th percentile ${perMr.p90Comments}`}`}
+        />
+      </div>
+      <div className="grid gap-4 border-t border-line pt-2.5 md:grid-cols-2">
+        <OutcomeRows title="By severity" rows={noise.bySeverity} name={severityName} />
+        <OutcomeRows title="By category" rows={noise.byCategory} name={(key) => key} />
+      </div>
+      <span className="text-xs text-muted">
+        Bars: fixed, resolved, ignored and unknown; then judged comments and the accepted share.
+      </span>
+    </Panel>
+  )
+}
+
+const ms = (value: number) => formatDuration(value)
+
+function LatencyFigures({ label, latency }: { label: string; latency?: ReviewLatency }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-dim">
+        {label}
+        {latency ? ` · ${plural(latency.count, 'job')}` : ''}
+      </span>
+      {latency ? (
+        <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+          <Figure
+            label="Event to result"
+            value={ms(latency.total.medianMs)}
+            hint={`Median; 90th percentile ${ms(latency.total.p90Ms)}. Includes the planned delay before start.`}
+          />
+          <Figure label="90th percentile" value={ms(latency.total.p90Ms)} />
+          <Figure
+            label="Queue wait"
+            value={ms(latency.wait.medianMs)}
+            hint={`Median from when the job could start to a worker taking it; 90th percentile ${ms(latency.wait.p90Ms)}`}
+          />
+          <Figure
+            label="Work"
+            value={ms(latency.run.medianMs)}
+            hint={`Median time a worker spent; 90th percentile ${ms(latency.run.p90Ms)}`}
+          />
+        </div>
+      ) : (
+        <p className="text-xs text-muted">No finished jobs in this period.</p>
+      )}
+    </div>
+  )
+}
+
+function Speed({ data }: { data: ReviewAnalytics }) {
+  const { speed } = data
+  return (
+    <Panel
+      variant="flush"
+      title="Speed"
+      description="How long reviews and replies took, and what size costs"
+      contentClassName="flex flex-col gap-3"
+    >
+      <LatencyFigures label="Reviews" latency={speed.reviews} />
+      <LatencyFigures label="Replies" latency={speed.replies} />
+      <div className="flex flex-col gap-1.5 border-t border-line pt-2.5">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-dim">
+          Full reviews by size
+        </span>
+        <div className="grid grid-cols-[minmax(6rem,1fr)_4rem_4.5rem_5rem_4.5rem] gap-x-3 text-[11px] text-dim">
+          <span>Size</span>
+          <span className="text-right">Reviews</span>
+          <span className="text-right">Cost</span>
+          <span className="text-right">Time</span>
+          <span className="text-right">Comments</span>
+        </div>
+        {speed.bySize.map((row) => (
+          <div
+            key={row.size}
+            title={sizeInfo[row.size].hint}
+            className="grid grid-cols-[minmax(6rem,1fr)_4rem_4.5rem_5rem_4.5rem] items-center gap-x-3 text-xs"
+          >
+            <span>{sizeInfo[row.size].label}</span>
+            <span className="mono text-right text-muted">{row.reviews}</span>
+            <span className="mono text-right">
+              {row.meanCostUsd === undefined ? '—' : formatUsd(row.meanCostUsd)}
+            </span>
+            <span className="mono text-right">
+              {row.meanDurationMs === undefined ? '—' : ms(row.meanDurationMs)}
+            </span>
+            <span className="mono text-right">
+              {row.reviews ? row.meanComments.toFixed(1) : '—'}
+            </span>
+          </div>
+        ))}
+        <span className="text-xs text-muted">
+          Means per full review; size is the estimated human review time of the merge request.
+        </span>
+      </div>
+    </Panel>
+  )
+}
+
 function Body({ data }: { data: ReviewAnalytics }) {
   return (
     <>
@@ -438,6 +790,12 @@ function Body({ data }: { data: ReviewAnalytics }) {
         <Activity data={data} />
         <Comments data={data} />
       </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Usefulness data={data} />
+        <Noise data={data} />
+      </div>
+      <Repositories data={data} />
+      <Speed data={data} />
       {data.partial ? (
         <span className="text-xs text-muted">
           Too many review records in this period: review and comment counts cover the newest ones
@@ -492,7 +850,8 @@ function Analytics() {
 /**
  * Ops › Review analytics (`/ops/reviews`) for `ai:read` or `ai:admin`: what merge request reviews
  * cost by phase (first review, new commits, rechecks, replies) and per merge request, how often
- * people replied and how the bot answered, and what came of the comments.
+ * people replied and how the bot answered, what came of the comments over time, per repository,
+ * severity and category, and how fast reviews came.
  */
 export function ReviewAnalyticsPage() {
   const { can } = useSession()

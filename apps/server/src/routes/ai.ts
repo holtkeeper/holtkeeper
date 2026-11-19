@@ -429,6 +429,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
         {
           aiUsage: store.aiUsage,
           analyses: store.analyses,
+          jobs: store.jobs,
           ...(store.learnings && { learnings: store.learnings }),
           targetOf: (repo) => repoTarget(config, repo),
           canRead: (target) => canSee(principal, 'analyses:read', target),

@@ -59,7 +59,7 @@ const OWN_MARKER = 'holtkeeper:review'
  * How long a replies run waits after the first reply, so the replies a person writes in several
  * threads in a row are answered together.
  */
-const REPLY_DELAY_MS = 2 * 60_000
+const REPLY_DELAY_MS = 60_000
 
 /** Bot usernames GitLab gives project and group access tokens, plus GitHub-style `[bot]` names. */
 const DEFAULT_BOT_GLOBS = ['project_*_bot*', 'group_*_bot*', '*[bot]']

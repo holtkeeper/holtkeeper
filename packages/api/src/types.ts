@@ -2882,6 +2882,60 @@ export interface ReviewMergeRequestCost {
   phases: Partial<Record<ReviewAnalyticsPhase, number>>
 }
 
+/** Review spend and comment outcomes of one UTC day. */
+export interface ReviewTrendDay {
+  /** `YYYY-MM-DD`. */
+  day: string
+  costUsd: number
+  /** Comments the day's review records posted. */
+  posted: number
+  /** Comments of merged merge requests whose outcome was read that day, judged or not. */
+  judged: number
+  fixed: number
+  resolved: number
+  ignored: number
+}
+
+/** Reviews of one repository over the period. */
+export interface ReviewRepoRow {
+  /** `forge:path`. */
+  repo: string
+  /** Merge requests with review spend or a review record in the period. */
+  mergeRequests: number
+  costUsd: number
+  /** Comments its review records posted. */
+  posted: number
+  /** Outcomes of its comments on merge requests merged in the period. */
+  outcomes: ReviewQualityRow
+  /** `costUsd` over `outcomes.fixed`; absent when nothing was fixed. */
+  costPerFixedUsd?: number
+}
+
+/** How long review jobs took: median and nearest-rank 90th percentile, in milliseconds. */
+export interface ReviewLatency {
+  /** Finished jobs counted. */
+  count: number
+  /** From the event that queued the job to the review being posted. */
+  total: { medianMs: number; p90Ms: number }
+  /** From when the job could start (`runAfter`) to when a worker took it. */
+  wait: { medianMs: number; p90Ms: number }
+  /** From a worker taking the job to its end. */
+  run: { medianMs: number; p90Ms: number }
+}
+
+/** Size class of a merge request by its estimated human review time. */
+export type ReviewSizeClass = 'small' | 'medium' | 'large' | 'huge'
+
+/** Full reviews of merge requests of one size class. */
+export interface ReviewSizeRow {
+  size: ReviewSizeClass
+  reviews: number
+  /** Means over the reviews that recorded the value; absent when none did. */
+  meanCostUsd?: number
+  meanDurationMs?: number
+  meanComments: number
+}
+
 /**
  * `GET /api/ai/reviews?period=week|month|30d&teams=` — what merge request reviews cost and
  * what came of them over the period. Needs `ai:read`; spend is limited to what the caller's
@@ -2943,6 +2997,34 @@ export interface ReviewAnalytics {
   outcomes: ReviewQualityRow & { discussed: number }
   /** Review spend over the comments that ended in changed code; absent when none did. */
   costPerFixedUsd?: number
+  /** Each UTC day of the period, oldest first: spend, comments posted and outcomes read. */
+  trend: ReviewTrendDay[]
+  /** Repositories with review spend, records or judged comments in the period, by spend. */
+  repos: ReviewRepoRow[]
+  /** Where comments went unheeded. */
+  noise: {
+    /** Outcomes per severity (`critical`, `major`, `minor`, `info`, `unknown`), as `outcomes`. */
+    bySeverity: ReviewQualityRow[]
+    /** Outcomes per category, most commented first, at most 8. */
+    byCategory: ReviewQualityRow[]
+    /** Comments posted per merge request reviewed (full or incremental) in the period. */
+    perMergeRequest: {
+      reviewed: number
+      /** Merge requests whose reviews of the period posted no comment. */
+      clean: number
+      /** Over the merge requests with comments; absent when none had any. */
+      meanComments?: number
+      p90Comments?: number
+    }
+  }
+  /** How fast reviews and replies came; absent parts had no finished job in the period. */
+  speed: {
+    reviews?: ReviewLatency
+    replies?: ReviewLatency
+    /** Full reviews by size class, every class present: small under 15 minutes of estimated
+     * human review, medium under an hour, large under three hours, huge above. */
+    bySize: ReviewSizeRow[]
+  }
   /** The review record scan stopped at its cap, so `runs` and `findings` are a lower bound. */
   partial?: true
 }

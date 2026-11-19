@@ -447,7 +447,7 @@ describe('note events', () => {
       },
     ])
     const [job] = await store.jobs.list()
-    expect(job?.runAfter).toBe('2026-10-30T12:02:00.000Z')
+    expect(job?.runAfter).toBe('2026-10-30T12:01:00.000Z')
     await Bun.sleep(0)
     expect(marks).toEqual([{ noteId: 1244, mark: 'seen' }])
   })

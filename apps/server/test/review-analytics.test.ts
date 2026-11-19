@@ -12,7 +12,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
 import { createApp } from '../src/app.ts'
-import { daysBetween, spread } from '../src/review-analytics.ts'
+import { daysBetween, latencyOf, sizeClass, spread } from '../src/review-analytics.ts'
 
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
@@ -148,7 +148,15 @@ beforeEach(async () => {
       data,
       metrics: reviewMetrics(data),
     })
-  await add('shapes/circle', daysAgo(1), review(4))
+  await add(
+    'shapes/circle',
+    daysAgo(1),
+    review(4, {
+      durationMs: 60_000,
+      usage: { costUsd: 3, turns: 4 },
+      size: { minutes: 40, level: 'ok', files: 3, lines: 120, groups: 2 },
+    }),
+  )
   await add('shapes/square', daysAgo(3), review(9))
   await add('shapes/square', daysAgo(2), review(9, { mode: 'incremental', comments: [] }))
   await add(
@@ -173,9 +181,62 @@ beforeEach(async () => {
     }),
   )
   await add('colors/red', daysAgo(1), review(2))
+  await add('shapes/square', daysAgo(2), review(12, { comments: [], verdict: 'looks-good' }))
 
-  await store.learnings.putReactions(signal({ noteId: '1', up: 1, humanReplies: 2 }))
-  await store.learnings.putReactions(signal({ noteId: '2', outcome: 'ignored', down: 1 }))
+  const finished = async (
+    path: string,
+    options: Record<string, unknown>,
+    times: { created: string; runAfter: string; started: string; finished: string },
+  ) => {
+    const job = await store.jobs.enqueue({
+      analyzer: 'review',
+      repo: { forge: 'work', path },
+      options,
+      trigger: 'webhook',
+      createdAt: times.created,
+      runAfter: times.runAfter,
+    })
+    await store.jobs.claim('w1', times.started)
+    await store.jobs.complete(job.id, { at: times.finished })
+  }
+  const at = (minutes: number) => new Date(Date.parse(daysAgo(1)) + minutes * 60_000).toISOString()
+  await finished(
+    'shapes/circle',
+    { mergeRequest: 4 },
+    {
+      created: at(0),
+      runAfter: at(2),
+      started: at(3),
+      finished: at(8),
+    },
+  )
+  await finished(
+    'shapes/circle',
+    { mergeRequest: 4, replies: true },
+    {
+      created: at(20),
+      runAfter: at(20),
+      started: at(20),
+      finished: at(21),
+    },
+  )
+  await finished(
+    'colors/red',
+    { mergeRequest: 2 },
+    {
+      created: at(30),
+      runAfter: at(30),
+      started: at(30),
+      finished: at(90),
+    },
+  )
+
+  await store.learnings.putReactions(
+    signal({ noteId: '1', up: 1, humanReplies: 2, severity: 'major' }),
+  )
+  await store.learnings.putReactions(
+    signal({ noteId: '2', outcome: 'ignored', down: 1, severity: 'minor', category: 'style' }),
+  )
   await store.learnings.putReactions(signal({ noteId: '3', outcome: 'resolved' }))
   await store.learnings.putReactions(signal({ noteId: '4', mergeRequestState: 'closed' }))
   await store.learnings.putReactions(signal({ noteId: '5', updatedAt: daysAgo(45) }))
@@ -222,7 +283,7 @@ describe('GET /api/ai/reviews', () => {
       phases: { initial: 4, recheck: 0.5, reply: 0.5 },
     })
     expect(body.runs).toEqual({
-      full: 2,
+      full: 3,
       incremental: 1,
       replies: { explain: 1, concede: 1, update: 0, fixed: 1, open: 0, unknown: 0 },
       skipped: 0,
@@ -231,7 +292,7 @@ describe('GET /api/ai/reviews', () => {
       posted: 2,
       severities: { critical: 0, major: 2, minor: 0, info: 0 },
       suggestions: 2,
-      refuted: 6,
+      refuted: 8,
     })
     expect(body.outcomes).toMatchObject({
       comments: 3,
@@ -246,10 +307,68 @@ describe('GET /api/ai/reviews', () => {
     expect(body.partial).toBeUndefined()
   })
 
+  test('trend, repositories, noise and speed of the period', async () => {
+    const { body } = await analytics('?period=30d&teams=shapes')
+    expect(body.trend).toHaveLength(31)
+    expect(body.trend.find((day) => day.day === '2026-11-10')).toEqual({
+      day: '2026-11-10',
+      costUsd: 5,
+      posted: 1,
+      judged: 0,
+      fixed: 0,
+      resolved: 0,
+      ignored: 0,
+    })
+    expect(body.trend.find((day) => day.day === '2026-11-09')).toMatchObject({
+      posted: 0,
+      judged: 3,
+      fixed: 1,
+      resolved: 1,
+      ignored: 1,
+    })
+    expect(body.repos.map((row) => [row.repo, row.mergeRequests, row.costUsd, row.posted])).toEqual(
+      [
+        ['work:shapes/circle', 1, 5, 1],
+        ['work:shapes/square', 2, 3.25, 1],
+      ],
+    )
+    expect(body.repos[0]?.outcomes).toMatchObject({ comments: 3, fixed: 1, acceptance: 1 / 3 })
+    expect(body.repos[0]?.costPerFixedUsd).toBe(5)
+    expect(body.repos[1]?.costPerFixedUsd).toBeUndefined()
+    expect(body.noise.bySeverity.map((row) => [row.key, row.comments])).toEqual([
+      ['major', 1],
+      ['minor', 1],
+      ['unknown', 1],
+    ])
+    expect(body.noise.byCategory.map((row) => [row.key, row.comments])).toEqual([
+      ['bug', 2],
+      ['style', 1],
+    ])
+    expect(body.noise.perMergeRequest).toEqual({
+      reviewed: 3,
+      clean: 1,
+      meanComments: 1,
+      p90Comments: 1,
+    })
+    expect(body.speed.reviews).toEqual({
+      count: 1,
+      total: { medianMs: 480_000, p90Ms: 480_000 },
+      wait: { medianMs: 60_000, p90Ms: 60_000 },
+      run: { medianMs: 300_000, p90Ms: 300_000 },
+    })
+    expect(body.speed.replies?.count).toBe(1)
+    expect(body.speed.bySize).toEqual([
+      { size: 'small', reviews: 0, meanComments: 0 },
+      { size: 'medium', reviews: 1, meanCostUsd: 3, meanDurationMs: 60_000, meanComments: 1 },
+      { size: 'large', reviews: 0, meanComments: 0 },
+      { size: 'huge', reviews: 0, meanComments: 0 },
+    ])
+  })
+
   test('limits spend to ai:read and records to analyses:read, and needs ai:read', async () => {
     const { body } = await analytics('?period=30d', 'shapes-ai')
     expect(body.mergeRequests.top.map((entry) => entry.repo)).not.toContain('work:colors/red')
-    expect(body.runs.full).toBe(2)
+    expect(body.runs.full).toBe(3)
     expect(body.outcomes.comments).toBe(3)
     expect((await analytics('?period=30d', 'shapes-reader')).status).toBe(403)
     expect((await analytics('?period=year')).status).toBe(400)
@@ -277,6 +396,9 @@ describe('GET /api/ai/reviews', () => {
   })
 })
 
+const job = (createdAt: string, runAfter: string, startedAt?: string, finishedAt?: string) =>
+  ({ createdAt, runAfter, startedAt, finishedAt }) as Parameters<typeof latencyOf>[0][number]
+
 describe('helpers', () => {
   test('daysBetween counts both ends in UTC', () => {
     expect(daysBetween('2026-10-30T22:00:00.000Z', '2026-11-01T01:00:00.000Z')).toEqual([
@@ -284,6 +406,37 @@ describe('helpers', () => {
       '2026-10-31',
       '2026-11-01',
     ])
+  })
+
+  test('sizeClass splits at 15 minutes, an hour and three hours', () => {
+    expect([0, 14, 15, 59, 60, 179, 180].map(sizeClass)).toEqual([
+      'small',
+      'small',
+      'medium',
+      'medium',
+      'large',
+      'large',
+      'huge',
+    ])
+  })
+
+  test('latencyOf skips unfinished jobs and never counts the planned delay as waiting', () => {
+    expect(latencyOf([job('2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')])).toBeUndefined()
+    expect(
+      latencyOf([
+        job(
+          '2026-11-01T00:00:00.000Z',
+          '2026-11-01T00:05:00.000Z',
+          '2026-11-01T00:04:00.000Z',
+          '2026-11-01T00:06:00.000Z',
+        ),
+      ]),
+    ).toEqual({
+      count: 1,
+      total: { medianMs: 360_000, p90Ms: 360_000 },
+      wait: { medianMs: 0, p90Ms: 0 },
+      run: { medianMs: 120_000, p90Ms: 120_000 },
+    })
   })
 
   test('spread gives the median and the nearest-rank 90th percentile', () => {
