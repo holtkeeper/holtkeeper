@@ -1172,6 +1172,8 @@ const recheckSchema = z.object({
       id: z.string(),
       status: z.enum(['fixed', 'still-relevant', 'unclear']),
       note: z.string(),
+      /** The author's reply asks or argues something one status sentence would not answer. */
+      needsAnswer: z.boolean().optional(),
     }),
   ),
 })
@@ -1181,7 +1183,9 @@ export type RecheckVerdict = z.infer<typeof recheckSchema>['threads'][number]
 /**
  * Asks the cheaper triage model whether each of our earlier comments still applies to the code at
  * the current head. `changed` names the files changed since the last review, where a fix outside
- * the thread's own file may be. Threads the answer leaves out count as `unclear`.
+ * the thread's own file may be. A thread's `reply` (the author's latest answer to the comment) is
+ * shown with it, and `needsAnswer` says the reply wants more than the status note. Threads the
+ * answer leaves out count as `unclear`.
  */
 export async function recheckThreads(options: {
   agent: Agent
@@ -1194,10 +1198,15 @@ export async function recheckThreads(options: {
   signal?: AbortSignal
 }): Promise<Map<string, RecheckVerdict>> {
   if (options.threads.length === 0) return new Map()
-  const items = options.threads.map(
-    ({ thread, code }) =>
-      `## Thread ${thread.discussionId} at ${thread.path}:${thread.line}\n\nComment:\n${thread.text}\n\nCode now:\n\`\`\`\n${code}\n\`\`\``,
+  const items = options.threads.map(({ thread, code }) =>
+    [
+      `## Thread ${thread.discussionId} at ${thread.path}:${thread.line}`,
+      `Comment:\n${thread.text}`,
+      ...(thread.reply ? [`Reply of ${thread.reply.author}:\n${thread.reply.text}`] : []),
+      `Code now:\n\`\`\`\n${code}\n\`\`\``,
+    ].join('\n\n'),
   )
+  const replied = options.threads.some(({ thread }) => thread.reply)
   const result = await runTracked(
     options.agent,
     {
@@ -1205,6 +1214,11 @@ export async function recheckThreads(options: {
       system: [
         'You check whether earlier code review comments were addressed. For each thread answer `fixed` when the problem is gone from the current code, `still-relevant` when it remains, `unclear` when you cannot tell. Read the files when the excerpt is not enough: a comment about a missing test is fixed by a test file, one about a caller by that caller.',
         'note: one short sentence for the author explaining your answer.',
+        ...(replied
+          ? [
+              'Some threads show the reply of the author. Judge the code, not the claim: a reply saying it is fixed does not make it fixed, and say in the note what you still see. Set `needsAnswer` to true when the reply asks a question or argues that the comment is wrong, so one status sentence would not answer it.',
+            ]
+          : []),
         `${options.language ? `Write notes in ${options.language}.` : 'Write notes in the language of the comment.'} ${KEEP_ENGLISH}`,
       ].join('\n'),
       prompt: [

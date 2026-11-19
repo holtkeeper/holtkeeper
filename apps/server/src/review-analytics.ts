@@ -7,7 +7,7 @@ import type {
   ReviewMergeRequestCost,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import { qualityRows, reviewMetricsSchema, reviewPhases } from '@holtkeeper/review'
+import { qualityRows, replyActions, reviewMetricsSchema, reviewPhases } from '@holtkeeper/review'
 import type { AiUsageFilter, AiUsageStore, AnalysisStore, LearningStore } from '@holtkeeper/store'
 
 import { REVIEWS_SCAN } from './reviews.ts'
@@ -201,7 +201,7 @@ async function reviewRecords(
   const runs: ReviewAnalytics['runs'] = {
     full: 0,
     incremental: 0,
-    replies: { explain: 0, concede: 0, update: 0, unknown: 0 },
+    replies: { explain: 0, concede: 0, update: 0, fixed: 0, open: 0, unknown: 0 },
     skipped: 0,
   }
   const findings: ReviewAnalytics['findings'] = {
@@ -236,7 +236,8 @@ async function reviewRecords(
           ...(metrics.url && { url: metrics.url }),
         })
       if (metrics.mode === 'reply') {
-        runs.replies[metrics.reply ?? 'unknown'] += 1
+        if (!metrics.replies) runs.replies.unknown += 1
+        for (const action of replyActions) runs.replies[action] += metrics.replies?.[action] ?? 0
         continue
       }
       if (metrics.mode === 'skipped') {

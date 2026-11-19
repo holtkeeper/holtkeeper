@@ -27,7 +27,15 @@ export interface OpenThread {
   ours: boolean
   /** Finding id from our marker. */
   findingId?: string
+  /** The latest note when a person left it after ours in a thread we started: a reply waiting for an answer. */
+  reply?: { noteId: number | string; author: string; text: string }
 }
+
+/** Whether Holtkeeper's review wrote the note: it carries the review marker or the bot wrote it. */
+export const isOurNote = (note: { author: string; body: string }, botUsername?: string) =>
+  markerOf(note.body) !== undefined || (botUsername !== undefined && note.author === botUsername)
+
+const withoutComments = (body: string) => body.replace(/<!--[\s\S]*?-->/g, '').trim()
 
 /** Unresolved threads on diff lines; `ours` is decided by the marker or the bot's username. */
 export function openThreads(
@@ -38,14 +46,20 @@ export function openThreads(
     const first = discussion.notes.find((note) => !note.system)
     if (!discussion.position || discussion.resolved || !first) return []
     const marker = markerOf(first.body)
+    const ours = marker !== undefined || (botUsername !== undefined && first.author === botUsername)
+    const last = discussion.notes.findLast((note) => !note.system)
+    const reply = ours && last && last !== first && !isOurNote(last, botUsername) ? last : undefined
     return [
       {
         discussionId: discussion.id,
         path: discussion.position.path,
         line: discussion.position.line,
         text: first.body.replace(new RegExp(markerPattern.source, 'g'), '').trim(),
-        ours: marker !== undefined || (botUsername !== undefined && first.author === botUsername),
+        ours,
         ...(marker ? { findingId: marker } : {}),
+        ...(reply && {
+          reply: { noteId: reply.id, author: reply.author, text: withoutComments(reply.body) },
+        }),
       },
     ]
   })

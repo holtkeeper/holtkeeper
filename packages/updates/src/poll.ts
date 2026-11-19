@@ -175,6 +175,7 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
               author: note.author,
               ...(note.authorId !== undefined && { authorId: note.authorId }),
               body: note.body,
+              noteId: note.id,
               discussionId: discussion.id,
               inThread:
                 discussion.notes.length > 1 ||

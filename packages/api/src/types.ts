@@ -2913,8 +2913,19 @@ export interface ReviewAnalytics {
     full: number
     /** Reviews of the commits pushed since the last review. */
     incremental: number
-    /** Threads answered after a person's reply, by how. */
-    replies: { explain: number; concede: number; update: number; unknown: number }
+    /**
+     * Threads answered after a person's reply, by how: stood by the comment, agreed with the
+     * person, proposed other code, confirmed a reported fix (`fixed`), said the problem is still
+     * there (`open`); `unknown` counts runs that recorded no answer.
+     */
+    replies: {
+      explain: number
+      concede: number
+      update: number
+      fixed: number
+      open: number
+      unknown: number
+    }
     /** Runs that reviewed nothing (diff too large, nothing in scope). */
     skipped: number
   }

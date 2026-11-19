@@ -25,7 +25,7 @@ test('sums days, spend and replies', () => {
       ],
     }),
   ).toBe(2.5)
-  expect(replyCount({ explain: 1, concede: 2, update: 3, unknown: 4 })).toBe(10)
+  expect(replyCount({ explain: 1, concede: 2, update: 3, fixed: 5, open: 6, unknown: 4 })).toBe(21)
 })
 
 test('share is undefined over nothing', () => {

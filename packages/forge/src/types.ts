@@ -410,6 +410,12 @@ export interface NoteReaction {
   user: string
 }
 
+/**
+ * A mark Holtkeeper leaves on someone's note as an emoji reaction of its own account: `seen` says
+ * the note is queued for an answer, `done` that it was handled and needs none.
+ */
+export type NoteMark = 'seen' | 'done'
+
 export interface ReviewSubmission {
   refs: DiffRefs
   comments: ReviewComment[]
@@ -556,6 +562,12 @@ export interface GitForge {
   listDiscussions?(repo: string, id: number): Promise<Discussion[]>
   /** Emoji reactions on one note of a merge request; forges without reactions leave it out. */
   listNoteReactions?(repo: string, id: number, noteId: number | string): Promise<NoteReaction[]>
+  /** The marks the token's own account left on a note; forges without reactions leave it out. */
+  noteMarks?(repo: string, id: number, noteId: number | string): Promise<NoteMark[]>
+  /** Leaves `mark` on a note; a mark that is already there is not an error. */
+  addNoteMark?(repo: string, id: number, noteId: number | string, mark: NoteMark): Promise<void>
+  /** Takes the token account's own `mark` off a note; a mark that is not there is not an error. */
+  removeNoteMark?(repo: string, id: number, noteId: number | string, mark: NoteMark): Promise<void>
   /** Posts all comments as one review where the forge supports batching (GitLab draft notes). */
   submitReview?(repo: string, id: number, review: ReviewSubmission): Promise<ReviewOutcome>
   replyToDiscussion?(repo: string, id: number, discussionId: string, body: string): Promise<void>
@@ -723,6 +735,8 @@ export interface NoteAddedEvent {
   /** The author's stable user id (numeric on GitLab), when the source reports it. */
   authorId?: string
   body: string
+  /** The note's id on the forge, when the source reports it. */
+  noteId?: number | string
   discussionId?: string
   /** The note is part of a thread (a diff or discussion note), not a standalone comment. */
   inThread: boolean

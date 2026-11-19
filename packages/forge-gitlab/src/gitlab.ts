@@ -15,6 +15,7 @@ import {
   type MergeRequest,
   type MergeRequestRecord,
   type MergeRequestState,
+  type NoteMark,
   type Pipeline,
   type PipelineJob,
   type PipelineRun,
@@ -282,10 +283,14 @@ const fullPathSchema = z.object({ full_path: z.string() })
 const projectNamespaceSchema = z.object({ namespace: fullPathSchema })
 const anySchema = z.unknown()
 const awardSchema = z.object({
+  id: z.number(),
   name: z.string(),
   user: z.object({ username: z.string() }).nullish(),
 })
 const noteIdSchema = z.object({ id: z.number() })
+
+const NOTE_MARKS: readonly NoteMark[] = ['seen', 'done']
+const MARK_EMOJI: Record<NoteMark, string> = { seen: 'eyes', done: 'white_check_mark' }
 
 const toRelease = (release: z.infer<typeof releaseSchema>, fallbackUrl: string): ForgeRelease => ({
   tag: release.tag_name,
@@ -551,6 +556,9 @@ const project = (repo: string) => `projects/${encode(repo)}`
 
 const mrPath = (repo: string, id: number) => `${project(repo)}/merge_requests/${id}`
 
+const awardsPath = (repo: string, id: number, noteId: number | string) =>
+  `${mrPath(repo, id)}/notes/${encode(String(noteId))}/award_emoji`
+
 const withoutUndefined = (body: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined))
 
@@ -568,6 +576,18 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
 
   const pageSize = (limit: number | undefined) =>
     limit === undefined ? perPage : Math.max(1, Math.min(perPage, limit))
+
+  let ownUsername: Promise<string> | undefined
+  /** Awards of the token's own account on a note. */
+  const ownAwards = async (repo: string, id: number, noteId: number | string) => {
+    ownUsername ??= client.json('GET', 'user', currentUserSchema).then((user) => user.username)
+    const username = await ownUsername.catch((error: unknown) => {
+      ownUsername = undefined
+      throw error
+    })
+    const awards = await take(client.paginate(awardsPath(repo, id, noteId), awardSchema), undefined)
+    return awards.filter((award) => award.user?.username === username)
+  }
 
   const fetchMergeRequest = async (repo: string, id: number) =>
     client.json('GET', `${project(repo)}/merge_requests/${id}`, mergeRequestDetailSchema)
@@ -1271,14 +1291,31 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     },
 
     async listNoteReactions(repo, id, noteId) {
-      const list = client.paginate(
-        `${mrPath(repo, id)}/notes/${encode(String(noteId))}/award_emoji`,
-        awardSchema,
-      )
+      const list = client.paginate(awardsPath(repo, id, noteId), awardSchema)
       return (await take(list, undefined)).map((award) => ({
         name: award.name,
         user: award.user?.username ?? '',
       }))
+    },
+
+    async noteMarks(repo, id, noteId) {
+      const own = await ownAwards(repo, id, noteId)
+      return NOTE_MARKS.filter((mark) => own.some((award) => award.name === MARK_EMOJI[mark]))
+    },
+
+    async addNoteMark(repo, id, noteId, mark) {
+      if ((await ownAwards(repo, id, noteId)).some((award) => award.name === MARK_EMOJI[mark]))
+        return
+      await client.json('POST', awardsPath(repo, id, noteId), anySchema, {
+        body: { name: MARK_EMOJI[mark] },
+      })
+    },
+
+    async removeNoteMark(repo, id, noteId, mark) {
+      const own = await ownAwards(repo, id, noteId)
+      for (const award of own.filter((item) => item.name === MARK_EMOJI[mark]))
+        // oxlint-disable-next-line no-await-in-loop -- at most one award of a name per account
+        await client.text('DELETE', `${awardsPath(repo, id, noteId)}/${award.id}`)
     },
 
     async submitReview(repo, id, review): Promise<ReviewOutcome> {

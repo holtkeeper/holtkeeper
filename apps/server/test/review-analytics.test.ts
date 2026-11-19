@@ -166,7 +166,10 @@ beforeEach(async () => {
     review(4, {
       mode: 'reply',
       comments: [],
-      threads: [{ discussionId: 'd2', action: 'replied', reason: 'explain' }],
+      threads: [
+        { discussionId: 'd2', action: 'replied', reason: 'explain' },
+        { discussionId: 'd3', action: 'resolved', reason: 'fixed' },
+      ],
     }),
   )
   await add('colors/red', daysAgo(1), review(2))
@@ -221,7 +224,7 @@ describe('GET /api/ai/reviews', () => {
     expect(body.runs).toEqual({
       full: 2,
       incremental: 1,
-      replies: { explain: 1, concede: 1, update: 0, unknown: 0 },
+      replies: { explain: 1, concede: 1, update: 0, fixed: 1, open: 0, unknown: 0 },
       skipped: 0,
     })
     expect(body.findings).toEqual({

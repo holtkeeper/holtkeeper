@@ -7,11 +7,12 @@ import type { Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
 import { KEEP_ENGLISH, runTracked } from './agent.ts'
-import { markerOf } from './dedupe.ts'
+import { isOurNote } from './dedupe.ts'
 import { replyBody } from './format.ts'
 import type { ReviewUsage } from './schema.ts'
 
-const answerSchema = z.object({
+/** What the reviewer answers in one thread. */
+export const answerSchema = z.object({
   /** `explain` defends or clarifies, `concede` agrees the comment was wrong, `update` proposes new code. */
   action: z.enum(['explain', 'concede', 'update']),
   body: z.string(),
@@ -45,6 +46,11 @@ export interface ReplyToThreadOptions {
   toolsets?: readonly Toolset[]
   /** The repository's resolved rules, passed as the task's stable `context`. */
   context?: string
+  /**
+   * Asked right before posting: `false` when the thread got a newer note while the agent worked,
+   * so the answer is dropped instead of posted next to it.
+   */
+  stillPending?: () => Promise<boolean>
   signal?: AbortSignal
 }
 
@@ -57,9 +63,6 @@ export interface ThreadReplyResult {
   reason?: string
 }
 
-const isOurs = (note: { author: string; body: string }, botUsername?: string) =>
-  markerOf(note.body) !== undefined || (botUsername !== undefined && note.author === botUsername)
-
 /**
  * GitLab suggestion markup replacing `startLine..line` relative to the commented `line`; inside a
  * reply it is the only way to propose a change.
@@ -68,8 +71,30 @@ export function suggestionMarkdown(replacement: string, above = 0): string {
   return `\`\`\`suggestion:-${above}+0\n${replacement.replace(/\n$/, '')}\n\`\`\``
 }
 
-async function codeAround(
-  options: ReplyToThreadOptions,
+/** How the reviewer answers a reply, as system prompt lines shared by one thread and a batch. */
+export const ANSWER_RULES = [
+  '- `explain` when your comment stands: clarify it briefly with evidence from the code.',
+  '- `concede` when the author is right; say so plainly and set resolve to true.',
+  '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
+  'Be short and concrete. Never be defensive.',
+]
+
+/** The thread's notes as the agent reads them: who said what, our notes named `reviewer (you)`. */
+export function threadConversation(
+  notes: readonly { author: string; body: string }[],
+  botUsername?: string,
+): string {
+  return notes
+    .map(
+      (note) =>
+        `**${isOurNote(note, botUsername) ? 'reviewer (you)' : note.author}**:\n${note.body.replace(/<!--[\s\S]*?-->/g, '').trim()}`,
+    )
+    .join('\n\n')
+}
+
+/** The 10 lines around `line` of `path` at the head, numbered: from the checkout, else the forge. */
+export async function codeAround(
+  options: Pick<ReplyToThreadOptions, 'forge' | 'repo' | 'dir'>,
   path: string,
   line: number,
   headSha: string,
@@ -114,21 +139,16 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
   const notes = discussion.notes.filter((note) => !note.system)
   const first = notes[0]
   const last = notes.at(-1)
-  if (!first || !isOurs(first, options.botUsername))
+  if (!first || !isOurNote(first, options.botUsername))
     return skipped('thread was not started by Holtkeeper')
-  if (!last || isOurs(last, options.botUsername)) return skipped('last note is already ours')
+  if (!last || isOurNote(last, options.botUsername)) return skipped('last note is already ours')
   if (!forge.replyToDiscussion) throw new Error(`forge ${forge.kind} cannot reply to discussions`)
 
   const position = discussion.position
   const code = position
     ? await codeAround(options, position.path, position.line, position.headSha)
     : undefined
-  const conversation = notes
-    .map(
-      (note) =>
-        `**${isOurs(note, options.botUsername) ? 'reviewer (you)' : note.author}**:\n${note.body.replace(/<!--[\s\S]*?-->/g, '').trim()}`,
-    )
-    .join('\n\n')
+  const conversation = threadConversation(notes, options.botUsername)
   // Without a checkout the agent gets an empty directory, so it cannot read anything else.
   const scratch = options.dir ? undefined : await mkdtemp(join(tmpdir(), 'holtkeeper-reply-'))
   const task = runTracked(
@@ -138,10 +158,7 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
       capabilities: options.dir ? ['read', 'search'] : [],
       system: [
         'You are the code reviewer who started this merge request thread. Answer the latest reply.',
-        '- `explain` when your comment stands: clarify it briefly with evidence from the code.',
-        '- `concede` when the author is right; say so plainly and set resolve to true.',
-        '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
-        'Be short and concrete. Never be defensive.',
+        ...ANSWER_RULES,
         `${options.language ? `Write in ${options.language}.` : 'Write in the language of the latest reply.'} ${KEEP_ENGLISH}`,
       ].join('\n'),
       prompt: [
@@ -168,7 +185,24 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
     if (scratch) await rm(scratch, { recursive: true, force: true })
   }
   const answer = result.output ?? { action: 'explain' as const, body: result.text, resolve: false }
+  if (options.stillPending && !(await options.stillPending()))
+    return skipped('the thread changed while answering')
+  const { resolved } = await postThreadAnswer(options, discussion, answer)
+  return { discussionId, action: answer.action, replied: true, resolved }
+}
 
+/**
+ * Posts `answer` as a reply in `discussion`, an `update` with its suggestion in the forge's
+ * markup, and resolves the thread when the answer says so and the forge can.
+ */
+export async function postThreadAnswer(
+  options: Pick<ReplyToThreadOptions, 'forge' | 'repo' | 'mr'>,
+  discussion: Discussion,
+  answer: ThreadAnswer,
+): Promise<{ resolved: boolean }> {
+  const { forge, repo, mr } = options
+  if (!forge.replyToDiscussion) throw new Error(`forge ${forge.kind} cannot reply to discussions`)
+  const position = discussion.position
   let body = answer.body.trim()
   const suggestion = answer.suggestion
   if (answer.action === 'update' && suggestion && position && suggestion.line === position.line) {
@@ -177,8 +211,8 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
   } else if (answer.action === 'update' && suggestion) {
     body += `\n\nSuggested change for lines ${suggestion.startLine ?? suggestion.line}-${suggestion.line}:\n\n\`\`\`\n${suggestion.replacement}\n\`\`\``
   }
-  await forge.replyToDiscussion(repo.path, mr, discussionId, replyBody(body))
-  const resolve = answer.resolve && discussion.resolvable && forge.resolveDiscussion !== undefined
-  if (resolve) await forge.resolveDiscussion?.(repo.path, mr, discussionId, true)
-  return { discussionId, action: answer.action, replied: true, resolved: resolve }
+  await forge.replyToDiscussion(repo.path, mr, discussion.id, replyBody(body))
+  const resolved = answer.resolve && discussion.resolvable && forge.resolveDiscussion !== undefined
+  if (resolved) await forge.resolveDiscussion?.(repo.path, mr, discussion.id, true)
+  return { resolved }
 }

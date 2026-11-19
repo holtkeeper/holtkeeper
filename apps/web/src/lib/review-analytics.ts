@@ -49,7 +49,12 @@ export const reviewSpend = (analytics: Pick<ReviewAnalytics, 'phases'>) =>
 
 /** Replies a person drew out of the bot, however it answered. */
 export const replyCount = (replies: ReviewAnalytics['runs']['replies']) =>
-  replies.explain + replies.concede + replies.update + replies.unknown
+  replies.explain +
+  replies.concede +
+  replies.update +
+  replies.fixed +
+  replies.open +
+  replies.unknown
 
 /** `part` over `whole`; `undefined` when `whole` is 0. */
 export const share = (part: number, whole: number) => (whole > 0 ? part / whole : undefined)

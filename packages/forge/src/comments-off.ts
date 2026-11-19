@@ -36,6 +36,8 @@ const posts: Record<string, (args: readonly unknown[]) => boolean> = {
   updateMergeRequestNote: () => true,
   deleteMergeRequestNote: () => true,
   resolveDiscussion: () => true,
+  addNoteMark: () => true,
+  removeNoteMark: () => true,
 }
 
 /**

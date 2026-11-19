@@ -24,13 +24,13 @@ export interface MergeRequestStatusSink {
 
 /**
  * The merge request a job reviews: review analyzer jobs with a numeric `mergeRequest` option,
- * except thread replies (`replyTo`), which do not review the merge request again.
+ * except replies runs (`replies`), which do not review the merge request again.
  */
 export function reviewTargetOf(
   config: HoltkeeperConfig,
   job: Pick<Job, 'analyzer' | 'repo' | 'options'>,
 ): MergeRequestTarget | undefined {
-  if (!isReviewAnalyzer(config, job.analyzer) || job.options.replyTo !== undefined) return undefined
+  if (!isReviewAnalyzer(config, job.analyzer) || job.options.replies === true) return undefined
   const mergeRequest = Number(job.options.mergeRequest)
   if (!Number.isInteger(mergeRequest) || mergeRequest <= 0) return undefined
   return { repo: job.repo, mergeRequest }

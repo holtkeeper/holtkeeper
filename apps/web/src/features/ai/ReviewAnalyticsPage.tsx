@@ -334,6 +334,8 @@ function Activity({ data }: { data: ReviewAnalytics }) {
                 { value: runs.replies.explain, tone: 'info', label: 'stood by the comment' },
                 { value: runs.replies.concede, tone: 'warning', label: 'agreed with the person' },
                 { value: runs.replies.update, tone: 'success', label: 'proposed other code' },
+                { value: runs.replies.fixed, tone: 'success', label: 'confirmed a fix' },
+                { value: runs.replies.open, tone: 'info', label: 'still applies' },
                 { value: runs.replies.unknown, tone: 'default', label: 'not recorded' },
               ]}
             />
@@ -343,6 +345,8 @@ function Activity({ data }: { data: ReviewAnalytics }) {
                 { tone: 'info', label: `stood by the comment ${runs.replies.explain}` },
                 { tone: 'warning', label: `agreed with the person ${runs.replies.concede}` },
                 { tone: 'success', label: `proposed other code ${runs.replies.update}` },
+                { tone: 'success', label: `confirmed a fix ${runs.replies.fixed}` },
+                { tone: 'info', label: `still applies ${runs.replies.open}` },
                 ...(runs.replies.unknown
                   ? [{ tone: 'default' as const, label: `not recorded ${runs.replies.unknown}` }]
                   : []),

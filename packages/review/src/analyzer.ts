@@ -34,7 +34,8 @@ import {
   reviewRef,
 } from './pipeline.ts'
 import { type ReviewStage, startProgress } from './progress.ts'
-import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
+import { type ReplyOutcome, answerReplies, pendingReplies } from './replies.ts'
+import { type ReviewData, type ReviewUsage, type ThreadAction, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
 import {
   DEFAULT_REVIEW_TIME_MODEL,
@@ -43,7 +44,6 @@ import {
   reviewTimeModels,
 } from './size.ts'
 import { DEFAULT_RELEASE_BRANCHES, skipReason, skippedReview } from './skip.ts'
-import { replyToThread } from './thread.ts'
 
 const flag = z.preprocess(
   (value) => (value === 'true' ? true : value === 'false' ? false : value),
@@ -107,7 +107,7 @@ export const reviewOptionsSchema = z.object({
   maxDiffLines: z.coerce.number().int().positive().default(3000),
   language: z.string().min(1).optional(),
   instructions: z.string().optional(),
-  replyTo: z.string().min(1).optional(),
+  replies: flag.default(false),
   media: flag.default(true),
   releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
   reviewOwn: flag.default(false),
@@ -270,18 +270,13 @@ async function headCheckout(context: AnalyzerContext<ReviewOptions>, headSha: st
   return (await context.checkout(context.repo, { ref: headSha })).dir
 }
 
-/**
- * The review's fixed texts in the review language and, unless `progressNote` rules it out, the
- * posted "review is running" note. Translating runs on the job's agent; `usage` collects its cost.
- */
-async function startTexts(
-  context: AnalyzerContext<ReviewOptions & { progressNote?: 'first' | 'always' | 'never' }>,
+/** The review's fixed texts in the review language; translating runs on the job's agent and `usage` collects its cost. */
+async function reviewTexts(
+  context: AnalyzerContext<ReviewOptions>,
   deps: ReviewAnalyzerDeps,
-  forge: GitForge,
-  mr: { id: number; description: string },
-  botUsername: string | undefined,
+  mr: { description: string },
 ) {
-  const { options, repo } = context
+  const { options } = context
   const usage: ReviewUsage = { turns: 0 }
   const messages: ReviewMessages = deps.messages
     ? await resolveMessages({
@@ -306,6 +301,22 @@ async function startTexts(
         ...(context.log && { log: context.log }),
       })
     : englishReviewMessages
+  return { messages, usage }
+}
+
+/**
+ * The review's fixed texts in the review language and, unless `progressNote` rules it out, the
+ * posted "review is running" note. Translating runs on the job's agent; `usage` collects its cost.
+ */
+async function startTexts(
+  context: AnalyzerContext<ReviewOptions & { progressNote?: 'first' | 'always' | 'never' }>,
+  deps: ReviewAnalyzerDeps,
+  forge: GitForge,
+  mr: { id: number; description: string },
+  botUsername: string | undefined,
+) {
+  const { options, repo } = context
+  const { messages, usage } = await reviewTexts(context, deps, mr)
   const policy = options.progressNote ?? 'first'
   const first =
     policy !== 'first' ||
@@ -327,10 +338,27 @@ async function startTexts(
   return { messages, usage, progress }
 }
 
+/** One line on what a replies run did, for the stored record. */
+function repliesSummary(outcomes: readonly ReplyOutcome[]): string {
+  if (outcomes.length === 0) return 'No replies waiting for an answer.'
+  const count = (test: (outcome: ReplyOutcome) => boolean) => outcomes.filter(test).length
+  const parts = [
+    [count((o) => o.replied), 'answered'],
+    [count((o) => o.resolved), 'resolved'],
+    [count((o) => o.action === 'ack'), 'needed no answer'],
+    [count((o) => o.action === 'skipped'), 'skipped'],
+  ] as const
+  return `Replies in ${outcomes.length} ${outcomes.length === 1 ? 'thread' : 'threads'}: ${parts
+    .filter(([n]) => n > 0)
+    .map(([n, label]) => `${n} ${label}`)
+    .join(', ')}.`
+}
+
 /**
  * The `review` analyzer: an AI review of one merge request, stored under `ref` `!<iid>`. With
- * `replyTo` it answers a reply in one of its threads instead. Jobs should set `ref` to the head sha
- * so the checkout already sits at the reviewed commit.
+ * `replies` it answers the replies people left in its threads instead (`answerReplies`), checking
+ * out the head only when a reply needs the code. Review jobs should set `ref` to the head sha so
+ * the checkout already sits at the reviewed commit.
  */
 export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
   return defineAnalyzer<ReviewData, ReviewOptions>({
@@ -373,7 +401,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       const botUsername =
         typeof deps.botUsername === 'function' ? deps.botUsername(repo) : deps.botUsername
       const skip =
-        options.replyTo || options.force
+        options.replies || options.force
           ? undefined
           : skipReason(
               mr,
@@ -388,11 +416,11 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         return { data: skippedReview(mr, skip), ref: reviewRef(mr.id) }
       }
       // Posted before the checkout, which can take a while on large repositories.
-      const texts = options.replyTo
+      const texts = options.replies
         ? undefined
         : await startTexts(context, deps, forge, mr, botUsername)
       // A failed run must not leave the progress note saying the review is running.
-      const reviewOrReply = async () => {
+      const workspaceAt = async () => {
         const dir = await headCheckout(context, mr.headSha)
         const knowledge = deps.knowledge
         const knowledgeRepo = { ...repo, teams: knowledge?.teamsOf?.(repo) ?? [] }
@@ -409,37 +437,60 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
                   }),
                 ]
               : undefined
-
-        if (options.replyTo) {
-          if (!context.agent) throw new Error('answering a thread needs an agent')
+        return { dir, toolsets }
+      }
+      const reviewOrReply = async () => {
+        if (options.replies) {
+          if (!context.agent) throw new Error('answering threads needs an agent')
           const started = performance.now()
           const usage: ReviewUsage = { turns: 0 }
-          const guide = deps.guideFor
-            ? await deps
-                .guideFor(repo, {
-                  repoFiles: dir
-                    ? await readCheckoutRules(context.runner, dir, context.signal)
-                    : [],
-                })
-                .catch((error: unknown) => {
-                  context.log?.(
-                    `rules lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-                  )
-                  return undefined
-                })
-            : undefined
-          const reply = await replyToThread({
+          const pending = await pendingReplies({
             forge,
             repo,
             mr: mr.id,
-            discussion: options.replyTo,
+            ...(botUsername ? { botUsername } : {}),
+          })
+          let ruleSources: string[] = []
+          const outcomes = await answerReplies({
+            forge,
+            repo,
+            mr: { id: mr.id, headSha: mr.headSha },
+            pending,
             agent: withPhase(context.agent, 'reply'),
-            ...(dir ? { dir } : {}),
+            workspace: async () => {
+              const { dir, toolsets } = await workspaceAt()
+              const guide = deps.guideFor
+                ? await deps
+                    .guideFor(repo, {
+                      repoFiles: dir
+                        ? await readCheckoutRules(context.runner, dir, context.signal)
+                        : [],
+                    })
+                    .catch((error: unknown) => {
+                      context.log?.(
+                        `rules lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+                      )
+                      return undefined
+                    })
+                : undefined
+              if (guide?.text) ruleSources = guide.sources
+              return {
+                ...(dir ? { dir } : {}),
+                ...(toolsets ? { toolsets } : {}),
+                ...(guide?.text ? { context: guide.text } : {}),
+              }
+            },
+            messages: async () => {
+              const fixed = await reviewTexts(context, deps, mr)
+              usage.turns += fixed.usage.turns
+              if (fixed.usage.costUsd !== undefined)
+                usage.costUsd = (usage.costUsd ?? 0) + fixed.usage.costUsd
+              return fixed.messages
+            },
             ...(botUsername ? { botUsername } : {}),
             ...(options.language ? { language: options.language } : {}),
-            ...(toolsets ? { toolsets } : {}),
-            ...(guide?.text ? { context: guide.text } : {}),
             usage,
+            ...(context.log ? { log: context.log } : {}),
             ...(context.signal ? { signal: context.signal } : {}),
           })
           const data: ReviewData = {
@@ -454,19 +505,21 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             head: mr.headSha,
             mode: 'reply',
             verdict: 'skipped',
-            summary: reply.replied
-              ? `Answered thread ${reply.discussionId} (${reply.action}).`
-              : `Did not answer: ${reply.reason ?? 'nothing to do'}.`,
+            summary: repliesSummary(outcomes),
             comments: [],
-            threads: reply.replied
-              ? [
-                  {
-                    discussionId: reply.discussionId,
-                    action: reply.resolved ? 'resolved' : 'replied',
-                    reason: reply.action,
-                  },
-                ]
-              : [],
+            threads: outcomes.flatMap((outcome): ThreadAction[] =>
+              outcome.action === 'skipped'
+                ? []
+                : [
+                    {
+                      discussionId: outcome.discussionId,
+                      ...(outcome.path !== undefined && { path: outcome.path }),
+                      ...(outcome.line !== undefined && { line: outcome.line }),
+                      action: outcome.resolved ? 'resolved' : outcome.replied ? 'replied' : 'kept',
+                      reason: outcome.action,
+                    },
+                  ],
+            ),
             skipped: [],
             stats: {
               files: 0,
@@ -476,12 +529,13 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             approved: false,
             checks: [],
             ...(usage.turns ? { usage } : {}),
-            ...(guide?.text && guide.sources.length ? { ruleSources: guide.sources } : {}),
+            ...(ruleSources.length ? { ruleSources } : {}),
             durationMs: Math.round(performance.now() - started),
           }
           return { data, ref: reviewRef(mr.id) }
         }
 
+        const { dir, toolsets } = await workspaceAt()
         const guideFor = deps.guideFor
         const checks = deps.checksFor
           ? await deps.checksFor(repo).catch((error: unknown) => {

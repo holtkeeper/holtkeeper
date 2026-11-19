@@ -186,6 +186,25 @@ describe('discussions', () => {
     ])
   })
 
+  test('leaves and takes back its own marks on a note', async () => {
+    const { server, forge, mr } = setup()
+    const discussion = server.addDiscussion(mr, [{ body: 'x' }])
+    const note = discussion.notes[0]?.id ?? 0
+    server.addAward(note, 'eyes', 'dev')
+    expect(await forge.noteMarks('g/a', 1, note)).toEqual([])
+    await forge.addNoteMark('g/a', 1, note, 'seen')
+    await forge.addNoteMark('g/a', 1, note, 'seen')
+    await forge.addNoteMark('g/a', 1, note, 'done')
+    expect(await forge.noteMarks('g/a', 1, note)).toEqual(['seen', 'done'])
+    await forge.removeNoteMark('g/a', 1, note, 'seen')
+    await forge.removeNoteMark('g/a', 1, note, 'seen')
+    expect(await forge.noteMarks('g/a', 1, note)).toEqual(['done'])
+    expect((await forge.listNoteReactions('g/a', 1, note)).map((r) => r.name)).toEqual([
+      'eyes',
+      'white_check_mark',
+    ])
+  })
+
   test('replies to and resolves a discussion', async () => {
     const { server, forge, mr } = setup()
     const discussion = server.addDiscussion(mr, [{ body: 'q', resolvable: true }])

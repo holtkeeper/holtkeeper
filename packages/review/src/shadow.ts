@@ -22,6 +22,7 @@ const READS = new Set<string | symbol>([
   'getMergeRequestDiff',
   'listDiscussions',
   'listNoteReactions',
+  'noteMarks',
   'listFiles',
   'compareCommits',
   'readFile',
@@ -51,6 +52,8 @@ export function dryRunForge<Forge extends GitForge>(
     resolveDiscussion: async (_repo: string, _id: number, discussionId: string) => {
       wouldDo.resolved.push(discussionId)
     },
+    addNoteMark: async () => undefined,
+    removeNoteMark: async () => undefined,
   }
   const view = new Proxy(forge, {
     get(target, property) {

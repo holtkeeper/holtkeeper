@@ -30,7 +30,7 @@ import {
   policiesSettingKey,
 } from '@holtkeeper/mr-policies'
 import { releaseTarget } from '@holtkeeper/release'
-import type { AuditOutcome, JobTrigger, KvStore } from '@holtkeeper/store'
+import type { AuditOutcome, JobStatus, JobTrigger, KvStore } from '@holtkeeper/store'
 import { WRITE_TASK_KIND } from '@holtkeeper/write-task'
 import { z } from 'zod'
 
@@ -48,6 +48,12 @@ import { analyzerOffFor } from './repo-analyzers.ts'
 
 /** Every note Holtkeeper posts carries this marker. */
 const OWN_MARKER = 'holtkeeper:review'
+
+/**
+ * How long a replies run waits after the first reply, so the replies a person writes in several
+ * threads in a row are answered together.
+ */
+const REPLY_DELAY_MS = 2 * 60_000
 
 /** Bot usernames GitLab gives project and group access tokens, plus GitHub-style `[bot]` names. */
 const DEFAULT_BOT_GLOBS = ['project_*_bot*', 'group_*_bot*', '*[bot]']
@@ -149,8 +155,11 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  *   matches, runs policies as a `command` event, then goes to the chat router
  *   (see `chatFor`): `jobs.commands[command]` queues its analyzer, built-in commands (`release`,
  *   `verify`, `help`) answer in the merge request; a reply in a review thread Holtkeeper started
- *   queues `review` with `{ mergeRequest, replyTo: discussionId }` and, in the background, is
- *   looked at for a lasting rule (`captureReplyLearning`).
+ *   queues `review` with `{ mergeRequest, replies: true }` to run `REPLY_DELAY_MS` later, so the
+ *   replies a person writes one after another are answered by one run: a reply arriving while
+ *   such a job waits queues nothing, one arriving while it runs queues the next. The note gets
+ *   the `seen` mark, and in the background is looked at for a lasting rule
+ *   (`captureReplyLearning`).
  * - Every merge request change and note, whatever else it does, tells `deps.mergeRequestStatus`
  *   (`noteMergeRequestChange`), since resolved or answered threads change the status it shows.
  * - A merge request seen closed or merged that Holtkeeper reviewed has what became of its review
@@ -181,8 +190,15 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
   const analyzers = new Map((deps.analyzers ?? []).map((analyzer) => [analyzer.kind, analyzer]))
   const memory: PolicyMemory = store.kv ? kvPolicyMemory(store.kv) : createMemory()
 
-  const enqueue = async (requests: JobRequest[], trigger: JobTrigger) => {
+  const enqueue = async (
+    requests: JobRequest[],
+    trigger: JobTrigger,
+    how: { delayMs?: number; against?: JobStatus[] } = {},
+  ) => {
     const now = deps.now().toISOString()
+    const runAfter = how.delayMs
+      ? new Date(deps.now().getTime() + how.delayMs).toISOString()
+      : undefined
     const enqueued: string[] = []
     for (const request of requests) {
       if (deps.analyzers && !analyzers.has(request.analyzer)) continue
@@ -194,7 +210,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       )
         continue
       const active = await store.jobs.list({
-        status: ['queued', 'running'],
+        status: how.against ?? ['queued', 'running'],
         repo: request.repo,
         analyzer: request.analyzer,
         limit: 500,
@@ -206,7 +222,12 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
           (request.options === undefined || JSON.stringify(job.options) === options),
       )
       if (duplicate) continue
-      const job = await store.jobs.enqueue({ ...request, trigger, createdAt: now })
+      const job = await store.jobs.enqueue({
+        ...request,
+        trigger,
+        createdAt: now,
+        ...(runAfter && { runAfter }),
+      })
       noteReviewJob(deps, job)
       enqueued.push(job.id)
     }
@@ -656,7 +677,20 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       const analyzer = config.jobs?.commands?.review?.analyzer ?? 'review'
       if (await analyzerOffFor(store, config, repo, analyzer))
         return ignore(`${analyzer} is turned off for this repository`)
-      return { enqueued: await enqueue([request(analyzer, { replyTo: discussionId })], 'command') }
+      // No `ref`: the run answers at whatever the head is by then, and replies before and after
+      // a push still share one job. A running job has already read the threads, so only a
+      // waiting one covers this reply.
+      const enqueued = await enqueue(
+        [{ analyzer, repo, options: { mergeRequest: iid, replies: true } }],
+        'command',
+        { delayMs: REPLY_DELAY_MS, against: ['queued'] },
+      )
+      if (event.noteId !== undefined && forge?.addNoteMark)
+        inBackground(
+          'replies: marking the note failed',
+          forge.addNoteMark(repo.path, iid, event.noteId, 'seen'),
+        )
+      return { enqueued }
     }
 
     const handlePipeline = async (event: PipelineDoneEvent): Promise<EventOutcome> => {

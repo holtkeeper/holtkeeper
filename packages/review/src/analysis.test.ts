@@ -234,7 +234,7 @@ describe('review analyzer', () => {
     )
   })
 
-  test('replyTo answers the thread instead of reviewing', async () => {
+  test('replies answers the threads instead of reviewing', async () => {
     const { forge, replies, submissions } = fakeForge({
       files: [],
       discussions: [
@@ -263,7 +263,7 @@ describe('review analyzer', () => {
       forge,
       agent,
       runner: createFakeRunner().runner,
-      options: reviewOptionsSchema.parse({ mergeRequest: 7, replyTo: 'd1' }),
+      options: reviewOptionsSchema.parse({ mergeRequest: 7, replies: true }),
     })
     expect(result.data.mode).toBe('reply')
     expect(result.data.threads).toEqual([
@@ -273,7 +273,7 @@ describe('review analyzer', () => {
     expect(submissions).toEqual([])
   })
 
-  test('replyTo answers with the Guide as context', async () => {
+  test('replies are answered with the Guide as context', async () => {
     const { forge } = fakeForge({
       files: [],
       discussions: [
@@ -308,10 +308,10 @@ describe('review analyzer', () => {
       forge,
       agent,
       runner: createFakeRunner().runner,
-      options: reviewOptionsSchema.parse({ mergeRequest: 7, replyTo: 'd1' }),
+      options: reviewOptionsSchema.parse({ mergeRequest: 7, replies: true }),
     })
-    expect(tasks[0]?.context).toBe('Prices are integer cents.')
-    expect(result.data.summary).toBe('Answered thread d1 (concede).')
+    expect(tasks.at(-1)?.context).toBe('Prices are integer cents.')
+    expect(result.data.summary).toBe('Replies in 1 thread: 1 answered.')
     expect(result.data.ruleSources).toEqual(['All repositories', 'Team web'])
     expect(result.data.usage?.model).toBe('fake-main')
     expect(result.data.durationMs).toBeGreaterThanOrEqual(0)
@@ -356,13 +356,18 @@ test('review metrics carry refuted findings and how a reply answered', () => {
   const refuted = data()
   refuted.stats.dropped.refuted = 2
   expect(reviewMetrics(refuted).refuted).toBe(2)
-  expect(reviewMetrics(refuted).reply).toBeUndefined()
+  expect(reviewMetrics(refuted).replies).toBeUndefined()
   const reply = data({
     mode: 'reply',
-    threads: [{ discussionId: 'd1', action: 'resolved', reason: 'concede' }],
+    threads: [
+      { discussionId: 'd1', action: 'resolved', reason: 'concede' },
+      { discussionId: 'd2', action: 'replied', reason: 'concede' },
+      { discussionId: 'd3', action: 'resolved', reason: 'fixed' },
+      { discussionId: 'd4', action: 'kept', reason: 'ack' },
+    ],
   })
-  expect(reviewMetrics(reply).reply).toBe('concede')
-  expect(reviewMetrics(data({ mode: 'reply', threads: [] })).reply).toBeUndefined()
+  expect(reviewMetrics(reply).replies).toEqual({ concede: 2, fixed: 1 })
+  expect(reviewMetrics(data({ mode: 'reply', threads: [] })).replies).toBeUndefined()
 })
 
 test('records stored before the model, wall time and Guide scopes existed still parse', () => {

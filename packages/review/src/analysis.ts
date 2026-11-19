@@ -164,8 +164,12 @@ const severityCounts = z.object({
  * Stored headline numbers of one `review` record (one review run of a merge request). Parsing
  * stored metrics with it accepts records stored before a field existed: those fields are absent.
  */
-/** How a reply run can answer a thread; see `ReviewMetrics.reply`. */
-export const replyActions = ['explain', 'concede', 'update'] as const
+/**
+ * How a replies run can answer a thread; see `ReviewMetrics.replies`. `explain` stood by the
+ * comment, `concede` agreed with the person, `update` proposed other code, `fixed` confirmed a fix
+ * the person reported, `open` said the code still has the problem.
+ */
+export const replyActions = ['explain', 'concede', 'update', 'fixed', 'open'] as const
 
 export const reviewMetricsSchema = z.object({
   mergeRequest: z.number(),
@@ -197,10 +201,10 @@ export const reviewMetricsSchema = z.object({
   /** Agent findings the verification pass refuted, as `ReviewData.stats.dropped.refuted`. */
   refuted: z.number().optional(),
   /**
-   * How a `reply` run answered the thread: `explain` stood by the comment, `concede` agreed with
-   * the person, `update` proposed other code. Absent on other runs and replies that said nothing.
+   * Threads a `reply` run answered, by how (`replyActions`); absent on other runs and on runs that
+   * answered nothing.
    */
-  reply: z.enum(replyActions).optional(),
+  replies: z.partialRecord(z.enum(replyActions), z.number()).optional(),
 })
 
 /** Parsed stored metrics of one review record; fields newer than the record are absent. */
@@ -209,8 +213,12 @@ export type ReviewMetrics = z.infer<typeof reviewMetricsSchema>
 /** `ReviewMetrics` of `data`; every field the data has is set. */
 export function reviewMetrics(data: ReviewData): ReviewMetrics {
   const now = posted(data)
-  const reason = data.mode === 'reply' ? data.threads[0]?.reason : undefined
-  const replyAction = replyActions.find((action) => action === reason)
+  const replies: Partial<Record<(typeof replyActions)[number], number>> = {}
+  if (data.mode === 'reply')
+    for (const thread of data.threads) {
+      const action = replyActions.find((name) => name === thread.reason)
+      if (action) replies[action] = (replies[action] ?? 0) + 1
+    }
   const severities: Record<ReviewSeverity, number> = { info: 0, minor: 0, major: 0, critical: 0 }
   for (const comment of now) severities[comment.severity] += 1
   return {
@@ -233,7 +241,7 @@ export function reviewMetrics(data: ReviewData): ReviewMetrics {
     ...(data.promptVersion ? { promptVersion: data.promptVersion } : {}),
     ...(data.size?.minutes ? { reviewMinutes: data.size.minutes } : {}),
     ...(data.stats.dropped.refuted ? { refuted: data.stats.dropped.refuted } : {}),
-    ...(replyAction ? { reply: replyAction } : {}),
+    ...(Object.keys(replies).length ? { replies } : {}),
   }
 }
 

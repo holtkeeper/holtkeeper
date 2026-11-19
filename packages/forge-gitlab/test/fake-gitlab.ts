@@ -211,6 +211,9 @@ const DRAFT = /^\s*(?:\[draft\]|\(draft\)|draft:|draft\s+-)/i
 const EPOCH = '2026-01-01T00:00:00.000Z'
 
 /** An in-memory GitLab REST v4 that implements the endpoints the adapter calls. */
+/** The account the fake's token belongs to. */
+const FAKE_USERNAME = 'fake-bot'
+
 export class FakeGitLab {
   readonly base: string
   readonly token: string
@@ -392,10 +395,17 @@ export class FakeGitLab {
     return discussion
   }
 
-  private readonly awards = new Map<number, { name: string; user: { username: string } }[]>()
+  private readonly awards = new Map<
+    number,
+    { id: number; name: string; user: { username: string } }[]
+  >()
+  private nextAwardId = 1
 
   addAward(noteId: number, name: string, username: string) {
-    this.awards.set(noteId, [...(this.awards.get(noteId) ?? []), { name, user: { username } }])
+    this.awards.set(noteId, [
+      ...(this.awards.get(noteId) ?? []),
+      { id: this.nextAwardId++, name, user: { username } },
+    ])
   }
 
   private reviewState() {
@@ -588,6 +598,9 @@ export class FakeGitLab {
 
   private route(method: string, s: string[], url: URL, body: Record<string, unknown>): Response {
     const q = url.searchParams
+
+    if (method === 'GET' && s.length === 1 && s[0] === 'user')
+      return json(200, { username: FAKE_USERNAME, name: 'Fake Bot' })
 
     if (method === 'GET' && (s[0] === 'projects' || s[0] === 'groups') && s[2] === 'avatar') {
       const avatar = this.avatars.get(`${s[0]}:${s[1] ?? ''}`)
@@ -966,7 +979,7 @@ export class FakeGitLab {
       if (!body['auto_merge']) mr.state = 'merged'
       return json(200, this.mrJson(project, mr))
     }
-    if (rest[2] === 'notes' && method === 'POST') {
+    if (rest[2] === 'notes' && rest.length === 3 && method === 'POST') {
       const id = this.nextId++
       this.standaloneNotes.set(id, { mr, index: mr.notes.length })
       mr.notes.push(String(body['body']))
@@ -1073,6 +1086,18 @@ export class FakeGitLab {
       const known = mr.discussions.flatMap((d) => d.notes).some((n) => String(n.id) === rest[1])
       if (!known) return json(404, { message: '404 Note Not Found' })
       return this.page(url, this.awards.get(Number(rest[1])) ?? [])
+    }
+    if (rest[0] === 'notes' && method === 'POST' && rest[2] === 'award_emoji') {
+      this.addAward(Number(rest[1]), String(body.name), FAKE_USERNAME)
+      return json(201, this.awards.get(Number(rest[1]))?.at(-1))
+    }
+    if (rest[0] === 'notes' && method === 'DELETE' && rest[2] === 'award_emoji') {
+      const noteId = Number(rest[1])
+      this.awards.set(
+        noteId,
+        (this.awards.get(noteId) ?? []).filter((award) => String(award.id) !== rest[3]),
+      )
+      return new Response(null, { status: 204 })
     }
     if (rest[0] === 'notes' && method === 'DELETE' && rest[1]) {
       const id = Number(rest[1])

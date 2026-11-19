@@ -4,6 +4,7 @@ import type {
   Discussion,
   GitForge,
   MergeRequest,
+  NoteMark,
   ReviewSubmission,
 } from '@holtkeeper/forge'
 
@@ -44,6 +45,13 @@ export function fakeForge(state: FakeForgeState) {
   const resolved: string[] = []
   const notes: string[] = []
   const compared: [string, string][] = []
+  const marks = new Map<string, Set<NoteMark>>()
+  const marksOf = (noteId: number | string) => {
+    const key = String(noteId)
+    const set = marks.get(key) ?? new Set<NoteMark>()
+    marks.set(key, set)
+    return set
+  }
   const forge = {
     kind: 'gitlab',
     getMergeRequest: async () => ({ ...mergeRequest, ...state.mergeRequest }),
@@ -98,8 +106,17 @@ export function fakeForge(state: FakeForgeState) {
     commentOnMergeRequest: async (_repo: string, _id: number, body: string) => {
       notes.push(body)
     },
+    noteMarks: async (_repo: string, _id: number, noteId: number | string) => [...marksOf(noteId)],
+    addNoteMark: async (_repo: string, _id: number, noteId: number | string, mark: NoteMark) => {
+      marksOf(noteId).add(mark)
+    },
+    removeNoteMark: async (_repo: string, _id: number, noteId: number | string, mark: NoteMark) => {
+      marksOf(noteId).delete(mark)
+    },
   } as unknown as GitForge
-  return { forge, submissions, replies, resolved, notes, compared }
+  /** The marks left on a note, sorted. */
+  const marksOn = (noteId: number | string) => [...marksOf(noteId)].toSorted()
+  return { forge, state, submissions, replies, resolved, notes, compared, marksOn }
 }
 
 /** An agent that answers each task with the next scripted output, by task kind. */

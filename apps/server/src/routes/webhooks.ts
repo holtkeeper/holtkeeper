@@ -263,6 +263,7 @@ async function parseGitlab(
         author: hook.user?.username ?? '',
         ...(hook.user?.id !== undefined && { authorId: String(hook.user.id) }),
         body: note.note,
+        noteId: note.id,
         ...(note.discussion_id && { discussionId: note.discussion_id }),
         inThread: note.type === 'DiffNote' || note.type === 'DiscussionNote',
       },

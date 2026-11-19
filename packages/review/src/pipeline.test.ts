@@ -795,7 +795,21 @@ describe('reviewMergeRequest', () => {
       ),
       thread('gone', 'src/removed.ts', 1, 'Old problem'),
     ]
-    const { forge, submissions, replies, resolved, compared } = fakeForge({
+    const replied = (id: string, body: string, reply: string): Discussion => {
+      const base = thread(id, 'src/price.ts', 1, body)
+      return {
+        ...base,
+        notes: [
+          ...base.notes,
+          { id: `${id}-reply`, author: 'jane', body: reply, createdAt: '', system: false },
+        ],
+      }
+    }
+    discussions.push(
+      replied('claimed', 'Export is never imported anywhere.', 'Already used.'),
+      replied('asked', 'Name shadows a global.', 'Which global do you mean?'),
+    )
+    const { forge, submissions, replies, resolved, compared, marksOn } = fakeForge({
       files,
       discussions,
       compare: [
@@ -836,10 +850,19 @@ describe('reviewMergeRequest', () => {
           threads: [
             { id: 'fixed', status: 'fixed', note: 'Rounding was added.' },
             { id: 'repeat', status: 'still-relevant', note: 'The rate is still a literal.' },
+            { id: 'claimed', status: 'still-relevant', note: 'No import of it yet.' },
+            {
+              id: 'asked',
+              status: 'still-relevant',
+              note: 'Still shadowed.',
+              needsAnswer: true,
+            },
           ],
         },
       ],
     })
+    await forge.addNoteMark?.(repo.path, 7, 'claimed-reply', 'seen')
+    await forge.addNoteMark?.(repo.path, 7, 'asked-reply', 'seen')
     const runner = createFakeRunner(() => ({ exitCode: 0 })).runner
     const data = await reviewMergeRequest(
       runOf({ forge: requireReviewForge(forge), agent, runner, analyses: store.analyses }),
@@ -858,13 +881,23 @@ describe('reviewMergeRequest', () => {
       ['fixed', 'resolved'],
       ['repeat', 'replied'],
       ['gone', 'resolved'],
+      ['claimed', 'replied'],
+      ['asked', 'kept'],
     ])
     expect(resolved).toEqual(['fixed', 'gone'])
+    // A reply that only claims a fix gets the status note; one that asks waits for the replies run.
+    expect(tasks[1]?.prompt).toContain('Reply of jane:\nWhich global do you mean?')
+    expect(replies.find((r) => r.discussionId === 'claimed')?.body).toContain(
+      'No import of it yet.',
+    )
+    expect(replies.some((r) => r.discussionId === 'asked')).toBe(false)
+    expect(marksOn('claimed-reply')).toEqual([])
+    expect(marksOn('asked-reply')).toEqual(['seen'])
     expect(replies.find((r) => r.discussionId === 'repeat')?.body).toContain('Still applies')
     // The repeat is answered in its thread; line 2 was reviewed before.
     expect(data.comments).toEqual([])
     expect(data.stats.dropped).toMatchObject({ duplicates: 1, invalid: 1 })
-    expect(submissions[0]?.summary).toContain('2 resolved, 1 still open')
+    expect(submissions[0]?.summary).toContain('2 resolved, 3 still open')
   })
 
   test('falls back to a full review after a force push', async () => {
@@ -1478,6 +1511,18 @@ describe('threadsToRecheck', () => {
     expect(result.recheck.map((t) => t.discussionId)).toEqual(['touched', 'untouched'])
     expect(result.gone.map((t) => t.discussionId)).toEqual(['left'])
     expect(result.changed).toEqual(['src/widget.test.ts'])
+  })
+
+  test('threads a person replied in come first', () => {
+    const replied = {
+      ...open('replied', 'src/widget.ts'),
+      reply: { noteId: 5, author: 'jane', text: 'Fixed' },
+    }
+    const result = threadsToRecheck(
+      { diff, threads: [...threads, replied] },
+      { since: [file('src/widget.test.ts')] },
+    )
+    expect(result.recheck.map((t) => t.discussionId)).toEqual(['replied', 'touched', 'untouched'])
   })
 
   test('rechecks nothing when no file changed since the last review', () => {

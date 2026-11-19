@@ -21,6 +21,7 @@ const HEAD = 'c'.repeat(40)
 let store: Store
 let discussions: Discussion[]
 let notes: { discussionId?: string; body: string }[]
+let marks: { noteId: number | string; mark: string }[]
 
 const fakeForge = {
   kind: 'gitlab',
@@ -30,6 +31,9 @@ const fakeForge = {
   },
   commentOnMergeRequest: async (_r: string, _id: number, body: string) => {
     notes.push({ body })
+  },
+  addNoteMark: async (_r: string, _id: number, noteId: number | string, mark: string) => {
+    marks.push({ noteId, mark })
   },
 } as unknown as GitForge
 
@@ -59,7 +63,7 @@ const analyzers: JobAnalyzerInfo[] = [
     options: z.object({
       mergeRequest: z.coerce.number(),
       mode: z.enum(['auto', 'full', 'incremental']).optional(),
-      replyTo: z.string().optional(),
+      replies: z.boolean().optional(),
     }),
   },
   {
@@ -150,6 +154,25 @@ const noteEvent = (note: string, attributes: Record<string, unknown> = {}, user 
   merge_request: { id: 99, iid: 7, state: 'opened', last_commit: { id: HEAD } },
 })
 
+const ourThread = (id: string): Discussion => ({
+  id,
+  resolvable: true,
+  resolved: false,
+  notes: [
+    {
+      id: 1,
+      author: 'holtkeeper',
+      body: 'Bug <!-- holtkeeper:review id=x -->',
+      createdAt: '',
+      system: false,
+    },
+    { id: 2, author: 'jane', body: 'Why?', createdAt: '', system: false },
+  ],
+})
+
+const replyHook = (discussion: string, id: number) =>
+  hook('Note Hook', noteEvent('Why?', { type: 'DiffNote', discussion_id: discussion, id }))
+
 const jobs = async () =>
   (await store.jobs.list()).map((j) => ({
     analyzer: j.analyzer,
@@ -167,6 +190,7 @@ beforeEach(() => {
   store = memoryStore()
   discussions = []
   notes = []
+  marks = []
 })
 
 describe('parsing commands', () => {
@@ -349,7 +373,7 @@ describe('note events', () => {
       noteEvent('@holtkeeper explain this', { type: 'DiffNote' }),
     )
     expect(response.status).toBe(202)
-    expect((await jobs())[0]?.options).toEqual({ mergeRequest: 7, replyTo: 'disc-1' })
+    expect((await jobs())[0]?.options).toEqual({ mergeRequest: 7, replies: true })
     expect(notes).toEqual([])
   })
 
@@ -417,10 +441,31 @@ describe('note events', () => {
     expect(await jobs()).toEqual([
       {
         analyzer: 'review',
-        ref: HEAD,
-        options: { mergeRequest: 7, replyTo: 'disc-1' },
+        ref: undefined,
+        options: { mergeRequest: 7, replies: true },
         trigger: 'command',
       },
+    ])
+    const [job] = await store.jobs.list()
+    expect(job?.runAfter).toBe('2026-10-30T12:02:00.000Z')
+    await Bun.sleep(0)
+    expect(marks).toEqual([{ noteId: 1244, mark: 'seen' }])
+  })
+
+  test('replies in several threads share one waiting job, a running one does not cover them', async () => {
+    discussions = [ourThread('disc-1'), ourThread('disc-2')]
+    expect((await replyHook('disc-1', 11)).status).toBe(202)
+    expect((await replyHook('disc-2', 12)).status).toBe(202)
+    expect(await store.jobs.list()).toHaveLength(1)
+    await Bun.sleep(0)
+    expect(marks.map((mark) => mark.noteId)).toEqual([11, 12])
+
+    const claimed = await store.jobs.claim('worker-1', '2026-10-30T12:05:00.000Z')
+    expect(claimed?.options).toEqual({ mergeRequest: 7, replies: true })
+    expect((await replyHook('disc-1', 13)).status).toBe(202)
+    expect((await store.jobs.list()).map((job) => job.status).toSorted()).toEqual([
+      'queued',
+      'running',
     ])
   })
 

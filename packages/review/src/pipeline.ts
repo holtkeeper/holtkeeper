@@ -119,7 +119,8 @@ export interface ReviewOptions {
   maxDiffLines: number
   language?: string
   instructions?: string
-  replyTo?: string
+  /** Answer the replies people left in our threads instead of reviewing. */
+  replies?: boolean
   /** Reviews added or changed images with the injected `MediaReviewer`. */
   media: boolean
   /** `source:target` branch globs of release merge requests the analyzer does not review. */
@@ -738,8 +739,8 @@ export const MAX_RECHECKS = 10
 
 /**
  * Our open threads worth re-checking, at most `MAX_RECHECKS`: after new commits every open thread
- * whose file is still in the diff, those whose file changed first, since a fix may land in another
- * file (a test, a caller); with no previous review none; and those whose file left the diff, which
+ * whose file is still in the diff, those a person replied in first, then those whose file changed,
+ * since a fix may land in another file (a test, a caller); with no previous review none; and those whose file left the diff, which
  * count as `gone`. `changed` lists the files changed since the last review, when known.
  */
 export function threadsToRecheck(
@@ -754,9 +755,13 @@ export function threadsToRecheck(
   const open = ours.filter((t) => inDiff.has(t.path))
   const due = changed ? (changed.length ? open : []) : loaded.previous ? open : []
   const touched = (t: OpenThread) => changed?.includes(t.path) ?? true
+  const ordered = [...due.filter(touched), ...due.filter((t) => !touched(t))]
   return {
     gone: ours.filter((t) => !inDiff.has(t.path)),
-    recheck: [...due.filter(touched), ...due.filter((t) => !touched(t))].slice(0, MAX_RECHECKS),
+    recheck: [...ordered.filter((t) => t.reply), ...ordered.filter((t) => !t.reply)].slice(
+      0,
+      MAX_RECHECKS,
+    ),
     ...(changed ? { changed } : {}),
   }
 }
@@ -1112,9 +1117,15 @@ async function reviewOnce(input: ReviewRun, started: number): Promise<ReviewData
         action: 'resolved',
         reason: 'The file is no longer changed by this merge request.',
       })
+    // A reply that asks or argues gets a full answer from the replies run, not a status note.
+    else if (thread.reply && verdict.needsAnswer)
+      threads.push({ ...base, action: 'kept', reason: verdict.note })
     else if (verdict.status === 'fixed')
       threads.push({ ...base, action: 'resolved', reason: verdict.note })
-    else if (verdict.status === 'still-relevant' && repeated.has(thread.discussionId))
+    else if (
+      verdict.status === 'still-relevant' &&
+      (repeated.has(thread.discussionId) || thread.reply)
+    )
       threads.push({ ...base, action: 'replied', reason: verdict.note })
     else threads.push({ ...base, action: 'kept', reason: verdict.note })
   }
@@ -1227,5 +1238,11 @@ async function applyThreadActions(run: ReviewRun, loaded: LoadedReview, threads:
     if (thread.action === 'resolved')
       // oxlint-disable-next-line no-await-in-loop
       await run.forge.resolveDiscussion?.(run.repo.path, loaded.mr.id, thread.discussionId, true)
+    const reply = loaded.threads.find((t) => t.discussionId === thread.discussionId)?.reply
+    if (reply)
+      // oxlint-disable-next-line no-await-in-loop
+      await run.forge
+        .removeNoteMark?.(run.repo.path, loaded.mr.id, reply.noteId, 'seen')
+        .catch(() => undefined)
   }
 }

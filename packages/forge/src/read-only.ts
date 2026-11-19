@@ -44,6 +44,8 @@ const writes: Record<string, (args: readonly unknown[]) => string | undefined> =
   updateMergeRequestNote: firstArgument,
   deleteMergeRequestNote: firstArgument,
   resolveDiscussion: firstArgument,
+  addNoteMark: firstArgument,
+  removeNoteMark: firstArgument,
   registerSshKey: (args) =>
     typeof args[0] === 'object' && args[0] !== null
       ? deployRepo(Reflect.get(args[0], 'scope'))
