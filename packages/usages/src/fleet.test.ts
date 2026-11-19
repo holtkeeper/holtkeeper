@@ -4,6 +4,7 @@ import {
   addedInterfaceMethods,
   declaredMembers,
   findSites,
+  narrowImpact,
   packageUsage,
   upgradeImpact,
   usedByCounts,
@@ -402,5 +403,50 @@ describe('Go usage records', () => {
     expect([
       ...declaredMembers('type Drawer interface {\n\tfmt.Stringer\n\tDraw(c Canvas) error\n}'),
     ]).toEqual(['Stringer', 'Draw'])
+  })
+})
+
+describe('narrowImpact', () => {
+  const callSite = { file: 'src/a.ts', line: 1, kind: 'call' as const, snippet: 'fooUtil()' }
+  const impact = {
+    package: 'some-lib',
+    items: [
+      {
+        change: {
+          change: 'removed' as const,
+          name: 'fooUtil',
+          subpath: '.',
+          kind: 'function' as const,
+        },
+        level: 'breaking' as const,
+        repos: [
+          { origin: 'a', versions: ['1.0.0'], count: 2, sites: [callSite] },
+          { origin: 'b', versions: ['1.0.0'], count: 3, sites: [callSite] },
+        ],
+        count: 5,
+      },
+      {
+        change: {
+          change: 'removed' as const,
+          name: 'barUtil',
+          subpath: '.',
+          kind: 'function' as const,
+        },
+        level: 'breaking' as const,
+        repos: [{ origin: 'b', versions: ['1.0.0'], count: 1, sites: [callSite] }],
+        count: 1,
+      },
+    ],
+    affected: ['a', 'b'],
+    unaffected: ['c'],
+  }
+
+  test('keeps only the uses of the kept repositories and counts the others', () => {
+    const narrowed = narrowImpact(impact as never, (origin) => origin === 'a')
+    expect(narrowed.others).toBe(1)
+    expect(narrowed.impact.affected).toEqual(['a'])
+    expect(narrowed.impact.unaffected).toEqual([])
+    expect(narrowed.impact.items).toHaveLength(1)
+    expect(narrowed.impact.items[0]).toMatchObject({ count: 2, repos: [{ origin: 'a' }] })
   })
 })

@@ -12,6 +12,11 @@ export interface RegistryTool<Input extends z.ZodObject = z.ZodObject> extends A
   subject?(input: z.infer<Input>): string | undefined
   /** Hits returned when `limit` is not passed; result caps clamp it like an explicit `limit`. */
   defaultLimit?: number
+  /**
+   * How to ask this tool for less, said when a result is cut for length, e.g. "pass `include`
+   * with fewer parts". Default: a generic "narrow the request".
+   */
+  narrow?: string
 }
 
 /** A toolset of the registry; MCP clients get its `instructions` as server instructions. */
@@ -31,6 +36,7 @@ export function defineTool<Input extends z.ZodObject>(tool: {
   readOnly?: boolean
   subject?(input: z.infer<Input>): string | undefined
   defaultLimit?: number
+  narrow?: string
 }): RegistryTool {
   return tool
 }

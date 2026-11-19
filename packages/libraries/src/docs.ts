@@ -105,6 +105,22 @@ const versionList = (versions: readonly string[], max = 4) =>
 
 const date = (at: string | undefined) => (at ? at.slice(0, 10) : '')
 
+/**
+ * `url` of a document, pointing at the git ref `asked` instead of the one it was indexed at: the
+ * first of `refs` (the tags or commits of the versions sharing the text) that stands as the
+ * `/blob/<ref>/` or `/tree/<ref>/` segment of `url` is replaced. Without such a segment, or
+ * without `asked`, `url` is returned as it is; no ref is guessed.
+ */
+export function urlAt(url: string, refs: readonly string[], asked: string | undefined): string {
+  if (!asked) return url
+  for (const ref of refs)
+    for (const kind of ['blob', 'tree']) {
+      const segment = `/${kind}/${ref}/`
+      if (url.includes(segment)) return url.replace(segment, `/${kind}/${asked}/`)
+    }
+  return url
+}
+
 const label = (library: LibraryRef, version?: string) =>
   `${library.name}${version ? `@${version}` : ''}`
 
@@ -243,12 +259,14 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
       const filter: Parameters<LibraryStore['searchChunks']>[1] = {}
       let scope = 'every indexed library'
       let defaulted = false
+      let records: LibraryVersionRecord[] = []
       if (input.package) {
         const found = await findLibrary({
           package: input.package,
           ...(input.ecosystem ? { ecosystem: input.ecosystem } : {}),
         })
         if (typeof found === 'string') return found
+        records = found.versions
         filter.ecosystem = found.library.ecosystem
         filter.name = found.library.name
         scope = found.library.name
@@ -282,12 +300,29 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
         `# "${query}" in ${scope}: ${shown.length}${hits.length > limit ? '+' : ''} results`,
       )
       for (const [index, { chunk }] of shown.entries()) {
-        const versions = versionList(chunk.versions)
+        const asked =
+          filter.version && chunk.versions.includes(filter.version) ? filter.version : undefined
+        const others = chunk.versions.filter((version) => version !== asked)
+        const versions = asked
+          ? `${asked}${others.length ? `, same text in ${versionList(others)}` : ''}`
+          : versionList(chunk.versions)
+        const refOf = (version: string) => {
+          const record = records.find((item) => item.version === version)
+          return record?.tag ?? record?.commit
+        }
+        const url =
+          chunk.url && asked
+            ? urlAt(
+                chunk.url,
+                others.flatMap((version) => refOf(version) ?? []),
+                refOf(asked),
+              )
+            : chunk.url
         const block = [
           '',
           `## ${index + 1}. ${chunk.name} — ${header(chunk)}`,
-          `Versions: ${versions} · source: ${chunk.source}${chunk.url ? ` · ${chunk.url}` : ''}`,
-          thirdParty(label(chunk, chunk.versions[0]), clip(chunk.text, 1800)),
+          `Versions: ${versions} · source: ${chunk.source}${url ? ` · ${url}` : ''}`,
+          thirdParty(label(chunk, asked ?? chunk.versions[0]), clip(chunk.text, 1800)),
         ].join('\n')
         if (!answer.add(block)) break
       }

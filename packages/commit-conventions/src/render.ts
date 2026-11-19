@@ -1,3 +1,4 @@
+import { conventionalShape } from './title.ts'
 import type {
   BranchRules,
   CommitConventions,
@@ -52,7 +53,7 @@ function commitLines(conventions: CommitConventions): string[] {
   if (rules.conventional)
     lines.push(
       line(
-        `Conventional Commits: \`type(scope): subject\`${stats ? ` (${percent(stats.conventionalShare)} of the last ${stats.analyzed})` : ''}`,
+        `Conventional Commits: \`${conventionalShape(rules.ticket)}\`${stats ? ` (${percent(stats.conventionalShare)} of the last ${stats.analyzed})` : ''}`,
         sources.conventional,
       ),
     )
@@ -103,7 +104,10 @@ function branchLines(rules: BranchRules, sources: CommitConventions['branch']['s
     )
   if (rules.case)
     lines.push(
-      line(`Lowercase words joined by \`${rules.case === 'kebab' ? '-' : '_'}\``, sources.case),
+      line(
+        `Lowercase words joined by \`${rules.case === 'kebab' ? '-' : '_'}\`${rules.ticket ? ' (ticket keys keep their case)' : ''}`,
+        sources.case,
+      ),
     )
   return lines
 }

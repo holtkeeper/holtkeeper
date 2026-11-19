@@ -49,6 +49,17 @@ describe('result caps', () => {
     expect(result).toContain('output cut at about 4000 tokens')
   })
 
+  test('capTool says how to narrow a cut result in the words of the tool', async () => {
+    const long = defineTool({
+      name: 'gadget_dump',
+      description: 'A long answer',
+      input: z.object({ part: z.string().optional() }),
+      narrow: 'pass `part`',
+      run: () => 'x\n'.repeat(RESULT_CAPS.maxChars),
+    })
+    expect(await capTool(long).run({}, ctx)).toEndWith('; narrow the request: pass `part`.')
+  })
+
   test('capToolsets caps every tool and keeps names and schemas', () => {
     const [capped] = capToolsets([{ name: 'widgets', tools: [echo] }])
     expect(capped?.name).toBe('widgets')

@@ -144,6 +144,13 @@ export interface ApiCatalogOptions {
 /** Which repositories the caller may read; lists filter on it. */
 export type RepoFilter = (repo: RepoRef) => boolean
 
+/**
+ * Files code generators write (protobuf, gRPC, OpenAPI clients, Go generate): their exports rank
+ * below hand-written ones of the same match.
+ */
+const GENERATED =
+  /(^|\/)(generated|__generated__|gen)\/|\.pb(\.gw)?\.go$|_grpc\.pb\.go$|zz_generated|_gen\.go$|\.gen(\.d)?\.[cm]?[jt]s$|_pb(\.d)?\.[cm]?[jt]s$|ServiceClientPb\.ts$/
+
 const matchRank: Record<PublicApiMatch, number> = { exact: 4, prefix: 3, part: 2, doc: 1 }
 
 function matchOf(name: string, needle: string, doc?: string): PublicApiMatch | undefined {
@@ -616,7 +623,8 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     /**
      * Exported names matching `query` in the newest record of each readable repository and
      * package (packages their repository dropped included, marked `removed`): exact names first,
-     * then prefixes, substrings of names, and matches in doc comments.
+     * then prefixes, substrings of names, and matches in doc comments; within each, hand-written
+     * code before generated code (`GENERATED`) and top-level names before members (`Type.method`).
      */
     async search(
       filter: RepoFilter,
@@ -675,6 +683,8 @@ export function createApiCatalog(options: ApiCatalogOptions) {
           (a, b) =>
             matchRank[b.match] - matchRank[a.match] ||
             Number(a.removed) - Number(b.removed) ||
+            Number(GENERATED.test(a.symbol.file)) - Number(GENERATED.test(b.symbol.file)) ||
+            Number(a.symbol.name.includes('.')) - Number(b.symbol.name.includes('.')) ||
             a.symbol.name.length - b.symbol.name.length ||
             a.importPath.localeCompare(b.importPath),
         )

@@ -40,7 +40,8 @@ const goModuleKey = (keys: Iterable<string>, name: string) => {
 
 /**
  * Markdown of who uses a library or an internal package: teams → repositories → versions, with
- * how far each is behind the latest release, in at most `MAX_ROWS` rows; `undefined` when no
+ * how far each is behind the latest release, in at most `MAX_ROWS` rows, and the repositories
+ * (`forge:path`) it counted; `undefined` when no
  * repository the caller can see uses it. Without `ecosystem`, the name is looked up as an npm
  * package, then a Go module (a name with a `/` and no `@scope` is tried as Go first; a Go package
  * import path counts as its module). Reads stored records only.
@@ -49,7 +50,7 @@ export async function packageUsers(
   context: PackageUsersContext,
   name: string,
   ecosystem?: LibraryEcosystem,
-): Promise<string | undefined> {
+): Promise<{ text: string; repos: string[] } | undefined> {
   const fleet = await fleetLibraryUses(context.analyses, {
     accept: context.canRead,
     usages: context.usages,
@@ -73,11 +74,14 @@ export async function packageUsers(
     // oxlint-disable-next-line no-await-in-loop -- at most one lookup, the loop returns
     const latest = internal ? fleet.defined.get(key) : (await context.latest?.all())?.get(key)
     const latestVersion = typeof latest === 'string' ? latest : latest?.latest
-    return renderLibraryUsers(users.ref.name, candidate, users.repos, {
-      internal,
-      ...(latestVersion ? { latest: latestVersion } : {}),
-      ownerOf: context.ownerOf,
-    })
+    return {
+      text: renderLibraryUsers(users.ref.name, candidate, users.repos, {
+        internal,
+        ...(latestVersion ? { latest: latestVersion } : {}),
+        ownerOf: context.ownerOf,
+      }),
+      repos: [...users.repos.keys()],
+    }
   }
   return undefined
 }

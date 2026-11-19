@@ -184,4 +184,17 @@ describe('serveToolsets', () => {
     expect(started).toBe(false)
     expect(recorded).toEqual([])
   })
+
+  test('a call of a retired or unknown tool says what to call and to reload the tool list', async () => {
+    const { call } = setup({ ask: async () => 'unused' })
+    const retired = await (await call('get_package_api', { package: 'some-lib' }, both)).json()
+    expect(retired).toMatchObject({ id: 7, result: { isError: true } })
+    const text = (retired as { result: { content: { text: string }[] } }).result.content[0]?.text
+    expect(text).toContain(
+      'get_package_api is not a tool of this server any more. Call package_api',
+    )
+    expect(text).toContain('reconnect the Holtkeeper MCP server')
+    const unknown = await (await call('fooUtil', {}, both)).json()
+    expect(JSON.stringify(unknown)).toContain('Its tools are: ask, echo.')
+  })
 })

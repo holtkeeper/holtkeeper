@@ -407,10 +407,13 @@ function repoRulesTools(
             throw error
           })
           if (text !== undefined) served = true
-          sections.push(
-            `# ${title} of \`${repo}\``,
-            text ?? `You may not read the ${title.toLowerCase()} of \`${repo}\`.`,
-          )
+          // Topics that render their own title keep it; the others get one.
+          if (text?.startsWith('# ')) sections.push(text)
+          else
+            sections.push(
+              `# ${title} of \`${repo}\``,
+              text ?? `You may not read the ${title.toLowerCase()} of \`${repo}\`.`,
+            )
         }
         if (!served && wanted.length) throw noRepo(repo)
         return sections.join('\n\n')

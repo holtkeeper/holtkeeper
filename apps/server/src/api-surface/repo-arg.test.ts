@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { parseConfig } from '@holtkeeper/core'
 
-import { repoArgResolver } from './repo-arg.ts'
+import { knownRepoChecker, repoArgResolver } from './repo-arg.ts'
 
 const forge = (url: string) => ({ kind: 'gitlab', url, create: () => ({}) as never })
 
@@ -56,5 +56,60 @@ describe('repoArgResolver', () => {
       'https://code.example:8443/other/kits/some-lib',
     )
     expect(resolve('git@forge.test:shapes/widget.git')).toBe('git@forge.test:shapes/widget.git')
+  })
+})
+
+describe('knownRepoChecker', () => {
+  test('knows analyzed repositories and those the forge finds, and remembers for a while', async () => {
+    let asked = 0
+    let clock = 0
+    const exists = knownRepoChecker({
+      analyses: {
+        latestHeads: async (query) =>
+          query?.repo?.path === 'shapes/widget' ? ([{ id: 'a' }] as never) : [],
+      },
+      configured: (id) => id === 'work',
+      forgeOf: (id) =>
+        id === 'work'
+          ? ({
+              getRepository: async (path: string) => {
+                asked++
+                if (path === 'shapes/down')
+                  throw Object.assign(new Error('bad gateway'), { status: 502 })
+                if (path !== 'shapes/new')
+                  throw Object.assign(new Error('Not Found'), { status: 404 })
+                return {}
+              },
+            } as never)
+          : undefined,
+      now: () => new Date(clock),
+    })
+    expect(await exists('work:shapes/widget')).toBe(true)
+    expect(await exists('work:shapes/new')).toBe(true)
+    expect(await exists('work:shapes/typo')).toBe(false)
+    expect(await exists('work:shapes/typo')).toBe(false)
+    expect(asked).toBe(2)
+    clock = 61_000
+    expect(await exists('work:shapes/typo')).toBe(false)
+    expect(asked).toBe(3)
+    expect(await exists('work:shapes/down')).toBe(true)
+    expect(await exists('other:shapes/widget')).toBe(true)
+    expect(await exists('shapes/widget')).toBe(true)
+  })
+
+  test('an analyzed repository never reaches the forge, and a forge that cannot be built is no proof', async () => {
+    const exists = knownRepoChecker({
+      analyses: {
+        latestHeads: async (query) =>
+          query?.repo?.path === 'shapes/widget' ? ([{ id: 'a' }] as never) : [],
+      },
+      configured: () => true,
+      forgeOf: () => {
+        throw new Error('forge work is unavailable')
+      },
+      now: () => new Date(0),
+    })
+    expect(await exists('work:shapes/widget')).toBe(true)
+    expect(await exists('work:shapes/other')).toBe(true)
   })
 })

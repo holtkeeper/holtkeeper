@@ -355,6 +355,36 @@ export interface UpgradeImpact<Origin = string> {
   untyped?: UntypedUser<Origin>[]
 }
 
+/**
+ * `impact` reduced to the repositories `keep` accepts: items keep only their uses there (items
+ * left without uses are dropped), and `affected`, `unaffected`, `widened` and `untyped` are
+ * filtered the same way. `others` counts the affected repositories that were left out.
+ */
+export function narrowImpact<Origin>(
+  impact: UpgradeImpact<Origin>,
+  keep: (origin: Origin) => boolean,
+): { impact: UpgradeImpact<Origin>; others: number } {
+  const items = impact.items.flatMap((item) => {
+    const repos = item.repos.filter((repo) => keep(repo.origin))
+    return repos.length
+      ? [{ ...item, repos, count: repos.reduce((sum, repo) => sum + repo.count, 0) }]
+      : []
+  })
+  return {
+    impact: {
+      ...impact,
+      items,
+      affected: impact.affected.filter(keep),
+      unaffected: impact.unaffected.filter(keep),
+      ...(impact.widened && {
+        widened: impact.widened.map((item) => ({ ...item, repos: item.repos.filter(keep) })),
+      }),
+      ...(impact.untyped && { untyped: impact.untyped.filter((user) => keep(user.origin)) }),
+    },
+    others: impact.affected.filter((origin) => !keep(origin)).length,
+  }
+}
+
 /** A Go interface an upgrade only adds methods to. */
 export interface WidenedInterface<Origin = string> {
   name: string

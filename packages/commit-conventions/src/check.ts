@@ -1,4 +1,4 @@
-import { compilePattern, hasBody, parseTitle, ticketKeys } from './title.ts'
+import { compilePattern, conventionalShape, hasBody, parseTitle, ticketKeys } from './title.ts'
 import type {
   BranchRules,
   CommitConventions,
@@ -43,7 +43,7 @@ export function checkCommitMessage(ruleset: Ruleset<CommitRules>, message: strin
   const title = parseTitle(headline)
 
   if (rules.conventional && !title.type)
-    add('conventional', 'The title must look like `type(scope): subject`')
+    add('conventional', `The title must look like \`${conventionalShape(rules.ticket)}\``)
   if (title.type && rules.types && !rules.types.includes(title.type))
     add('types', `Type \`${title.type}\` is not one of ${rules.types.join(', ')}`)
   if (title.scope && rules.scopes && !rules.scopes.includes(title.scope))
@@ -87,10 +87,11 @@ export function checkBranchName(ruleset: Ruleset<BranchRules>, name: string): Pr
     (text, key) => text.replace(key, ''),
     prefix && rules.prefixes ? name.slice(slash + 1) : name,
   )
+  const keyNote = rules.ticket ? ' (ticket keys keep their case)' : ''
   if (rules.case === 'kebab' && !/^[a-z0-9/-]*$/u.test(rest))
-    add('case', 'Use lowercase words joined by `-`')
+    add('case', `Use lowercase words joined by \`-\`${keyNote}`)
   if (rules.case === 'snake' && !/^[a-z0-9/_]*$/u.test(rest))
-    add('case', 'Use lowercase words joined by `_`')
+    add('case', `Use lowercase words joined by \`_\`${keyNote}`)
   return problems
 }
 

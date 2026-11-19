@@ -1,4 +1,6 @@
 import { type HoltkeeperConfig, fleetPatterns } from '@holtkeeper/core'
+import type { GitForge } from '@holtkeeper/forge'
+import type { AnalysisStore } from '@holtkeeper/store'
 
 const SSH =
   /^(?:(?:ssh|git|git\+ssh|ssh\+git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/|[^@/\s]+@([^:/\s]+):)(.+)$/i
@@ -85,5 +87,64 @@ export function repoArgResolver(config: () => HoltkeeperConfig): (value: string)
     if (only && !others.length) return `${only}:${path}`
     const covering = names.filter((name) => covers(name, path))
     return covering.length === 1 ? `${covering[0]}:${path}` : value
+  }
+}
+
+/** The HTTP status a forge client's error carries, when it has one. */
+const statusOf = (error: unknown) => {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error ? error.status : undefined
+  return typeof status === 'number' ? status : undefined
+}
+
+/** How long `knownRepoChecker` trusts an answer: a known repository long, an unknown one briefly. */
+const KNOWN_TTL_MS = 30 * 60_000
+const UNKNOWN_TTL_MS = 60_000
+const CHECKED_MAX = 2000
+
+/**
+ * Whether `forge:path` names a repository Holtkeeper knows: one with a stored analysis, else one
+ * its forge does not answer 404 for (`getRepository`). Answers are kept for a while; values that are not
+ * `forge:path` of a configured forge count as known, so tools answer them in their own words.
+ */
+export function knownRepoChecker(deps: {
+  analyses: Pick<AnalysisStore, 'latestHeads'>
+  /** Whether `forge` is a configured forge id. */
+  configured: (forge: string) => boolean
+  /** The forge client of a configured forge id; asked only for repositories without analyses. */
+  forgeOf: (forge: string) => GitForge | undefined
+  now: () => Date
+}): (repo: string) => Promise<boolean> {
+  const checked = new Map<string, { at: number; known: boolean }>()
+  return async (value) => {
+    const separator = value.indexOf(':')
+    if (separator < 1 || separator === value.length - 1) return true
+    const repo = { forge: value.slice(0, separator), path: value.slice(separator + 1) }
+    if (!deps.configured(repo.forge)) return true
+    const now = deps.now().getTime()
+    const hit = checked.get(value)
+    if (hit && now - hit.at < (hit.known ? KNOWN_TTL_MS : UNKNOWN_TTL_MS)) return hit.known
+    if ((await deps.analyses.latestHeads({ repo })).length > 0) {
+      checked.set(value, { at: now, known: true })
+      return true
+    }
+    let forge: GitForge | undefined
+    try {
+      forge = deps.forgeOf(repo.forge)
+    } catch {
+      // A forge whose client cannot be built is down, not proof that the repository is missing.
+      return true
+    }
+    const known =
+      !forge ||
+      typeof forge.getRepository !== 'function' ||
+      (await forge.getRepository(repo.path).then(
+        () => true,
+        // Only a forge that says the repository is not there makes it unknown; an outage does not.
+        (error: unknown) => statusOf(error) !== 404,
+      ))
+    checked.set(value, { at: now, known })
+    if (checked.size > CHECKED_MAX) checked.delete(checked.keys().next().value ?? value)
+    return known
   }
 }

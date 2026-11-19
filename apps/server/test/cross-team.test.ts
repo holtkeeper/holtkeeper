@@ -269,6 +269,93 @@ describe('MCP cross-team tools', () => {
     expect(go.text).not.toContain('# widget-kit (npm)')
   })
 
+  test('package_usage lists the repositories once and names those whose code was not read', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'shapes/circle' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        packages: [
+          {
+            name: 'widget-kit',
+            versions: ['1.2.0'],
+            ranges: ['^1.2.0'],
+            workspaces: ['root'],
+            count: 2,
+            files: 1,
+            exports: [
+              {
+                name: 'Widget',
+                subpath: '.',
+                count: 2,
+                files: 1,
+                kinds: { jsx: 2 },
+                members: [],
+                props: [],
+                spread: 0,
+                sites: [],
+              },
+            ],
+          },
+        ],
+        files: 3,
+        types: { status: 'used', projects: ['tsconfig.json'], sites: 0 },
+      },
+    })
+    const { text } = await callTool('package_usage', { package: 'widget-kit' }, asAdmin)
+    expect(text).toContain('# widget-kit (npm): 2 repositories of 2 teams')
+    expect(text).toContain(
+      '## Exports used\n- **Widget** from `widget-kit` — 2 uses in 1 repos (jsx 2)',
+    )
+    expect(text).not.toContain('## Repositories')
+    expect(text.match(/repositor(y|ies)/g)).toHaveLength(1)
+    expect(text).toEndWith(
+      'No code use of it was read in `work:colors/red`: they depend on it without importing it, or their usage record is missing.',
+    )
+  })
+
+  test('package_usage lists code imports without a resolved version once, apart from the teams', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'shapes/square' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        packages: [
+          {
+            name: 'widget-kit',
+            versions: [],
+            ranges: ['^1.2.0'],
+            workspaces: ['root'],
+            count: 3,
+            files: 2,
+            exports: [
+              {
+                name: 'Widget',
+                subpath: '.',
+                count: 3,
+                files: 2,
+                kinds: { jsx: 3 },
+                members: [],
+                props: [],
+                spread: 0,
+                sites: [],
+              },
+            ],
+          },
+        ],
+        files: 4,
+        types: { status: 'used', projects: ['tsconfig.json'], sites: 0 },
+      },
+    })
+    const { text } = await callTool('package_usage', { package: 'widget-kit' }, asAdmin)
+    expect(text).toContain('# widget-kit (npm): 2 repositories of 2 teams')
+    expect(text).not.toContain('## team shapes\n- `work:shapes/square`')
+    expect(text).toContain(
+      'Also imported, without a resolved registry version (an own workspace, a replaced module or no lockfile entry):\n- `work:shapes/square` (team shapes) — ^1.2.0, 3 uses in 2 files',
+    )
+    expect(text.match(/work:shapes\/square/g)).toHaveLength(1)
+  })
+
   test('package_usage stays within the caller when the policy is off', async () => {
     await crossTeam('off')
     const result = await callTool('package_usage', { package: 'widget-kit' }, asShapes)
@@ -291,7 +378,7 @@ describe('MCP cross-team tools', () => {
     expect(result).not.toContain('colors/red')
     expect(await usage.run({ tool: 'deno' }, ctx)).toContain('Known tools: node')
     const viaMcp = await callTool('stack_usage', { tool: 'node' }, asShapes)
-    expect(viaMcp.text).toContain('Tool stack_usage not found')
+    expect(viaMcp.text).toContain('stack_usage is not a tool of this server')
   })
 
   test('repo_stack shows runtimes, conventions and key dependencies; MCP leaves it out', async () => {
@@ -317,7 +404,7 @@ describe('MCP cross-team tools', () => {
     ).tools.find((tool) => tool.name === 'repo_stack')!
     expect(hidden.run({ repo: 'work:colors/red' }, ctx)).rejects.toThrow('No stack record')
     const viaMcp = await callTool('repo_stack', { repo: 'work:colors/red' }, asShapes)
-    expect(viaMcp.text).toContain('Tool repo_stack not found')
+    expect(viaMcp.text).toContain('repo_stack is not a tool of this server')
   })
 
   test('callers without any read grant reach nothing', async () => {

@@ -45,7 +45,11 @@ export function capTool(tool: RegistryTool, caps: ResultCaps = RESULT_CAPS): Reg
             ),
           }
         : input
-      return capText(await tool.run(args, ctx), caps.maxChars)
+      return capText(
+        await tool.run(args, ctx),
+        caps.maxChars,
+        tool.narrow ? `narrow the request: ${tool.narrow}` : undefined,
+      )
     },
   }
 }

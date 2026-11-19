@@ -32,7 +32,7 @@ import { z } from 'zod'
 
 import { type RepoFilter, cachedCatalog, createApiCatalog } from '../api-surface/catalog.ts'
 import { handleMcpRequest } from '../api-surface/mcp.ts'
-import { repoArgResolver } from '../api-surface/repo-arg.ts'
+import { knownRepoChecker, repoArgResolver } from '../api-surface/repo-arg.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { type McpPersonCalls, mcpUsage } from '../api-surface/usage.ts'
 import { createUsageIndex } from '../api-surface/usages.ts'
@@ -549,6 +549,24 @@ export function createApiSurface(deps: ServerDeps) {
   })
 
   const resolveRepo = repoArgResolver(() => deps.config)
+  const knownRepo = knownRepoChecker({
+    analyses: store.analyses,
+    configured: (forge) => config.forges[forge] !== undefined,
+    forgeOf: (forge) => forgeFor(config, forge),
+    now: deps.now,
+  })
+  /**
+   * The existence check for one caller, limited to repositories their own grants cover: anything
+   * else falls through to the tools' own "may not read" answers, so the check never tells which
+   * repositories exist out of the caller's reach.
+   */
+  const repoExistsFor =
+    (principal: Principal) =>
+    async (value: string): Promise<boolean> => {
+      const repo = parseRepo(value)
+      if (!repo || !config.forges[repo.forge]) return true
+      return canSee(principal, 'repos:read', repoTarget(config, repo)) ? knownRepo(value) : true
+    }
 
   const fromToken = new WeakMap<Principal, string>()
   const reportingOf = new WeakMap<Principal, SecretReportingMode>()
@@ -590,6 +608,7 @@ export function createApiSurface(deps: ServerDeps) {
       ...(toolsets && { toolsets }),
       ...(ask && { ask }),
       resolveRepo,
+      repoExists: repoExistsFor(principal),
       ...(!toolsets || toolsets.includes('qa') ? { qa: qaToolsAccess(deps, principal) } : {}),
       ...(reports && { secretReports: reports }),
       ...(reports?.mode === 'anonymous' && { unrecorded: anonymousReports }),

@@ -30,13 +30,14 @@ One set of tool definitions serves the internal agents and the server's MCP endp
 - `readOnly` (default `true`): `false` for tools that write; MCP clients see it as `readOnlyHint`.
 - `subject(input)`: what a call is about (a package, a repository), for usage statistics.
 - `defaultLimit`: hits returned when `limit` is not passed.
+- `narrow`: how to ask the tool for less, e.g. "pass `include` with fewer parts"; a result cut for length ends with it instead of a generic "narrow the request".
 
 A toolset's `instructions` (on `Toolset` of `@holtkeeper/agent`) is a sentence or two on when to use its tools: internal agents get it in their system prompt, and the MCP adapter joins those of `RegistryToolset`s into the server instructions.
 
 - `mountToolsets(available, names)` → the toolsets named in `names`, in that order; unknown names are skipped. Each task mounts only what it needs, because tool schemas cost prompt tokens.
 - `RESULT_CAPS = { maxChars: 16000, maxSnippets: 20 }`: about 4k tokens and 20 hits per internal agent call.
 - `capText(text, maxChars, hint?)`: the text, or its head cut at a line break followed by `… output cut at about N tokens; <hint>.`
-- `capTool(tool, caps = RESULT_CAPS)` / `capToolsets(toolsets, caps)`: a `limit` argument (passed, else `defaultLimit`, else `maxSnippets`) is clamped to `maxSnippets` and the result to `maxChars`. The server caps every toolset an internal task mounts; MCP results are cut at 80 000 characters with the same `capText`.
+- `capTool(tool, caps = RESULT_CAPS)` / `capToolsets(toolsets, caps)`: a `limit` argument (passed, else `defaultLimit`, else `maxSnippets`) is clamped to `maxSnippets` and the result to `maxChars`, ending with the tool's `narrow` hint when it is cut. The server caps every toolset an internal task mounts; MCP results are cut at 80 000 characters with the same `capText` and hint.
 
 ## Budgets
 

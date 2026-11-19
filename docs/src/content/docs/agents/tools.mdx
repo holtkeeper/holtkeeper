@@ -7,7 +7,7 @@ sidebar:
 
 Holtkeeper's MCP endpoint offers about fifteen tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis; only `ask`, where an administrator turned it on, and a review requested through `code_review` run an AI agent and spend the AI budget. Every tool reads, except three: `propose_learning`, which leaves a pending learning people may reject, `code_review`, which queues at most one review per merge request head, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
 
-A repository is named by its path (`acme/checkout-web`): Holtkeeper works out the forge. A git remote URL (`git@gitlab.example.com:acme/checkout-web.git`) and the full `forge:path` (`gitlab:acme/checkout-web`) work too, and `forge:path` is needed only when several forges have a repository at that path. Answers name repositories as `forge:path`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
+A repository is named by its path (`acme/checkout-web`): Holtkeeper works out the forge. A git remote URL (`git@gitlab.example.com:acme/checkout-web.git`) and the full `forge:path` (`gitlab:acme/checkout-web`) work too, and `forge:path` is needed only when several forges have a repository at that path. Answers name repositories as `forge:path`; a path Holtkeeper does not know is refused with a message to check it. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request. After an upgrade of Holtkeeper, reconnect the MCP server in your client: clients keep the tool list they read when they connected, and a renamed tool answers only with what to call instead.
 
 ## Packages: yours and third-party
 
@@ -75,7 +75,7 @@ A second index records how every repository uses its dependencies: which exports
     …
 ```
 
-Between two versions `package_changes` returns the API diff, for third-party libraries the changelog and migration notes, and the uses the upgrade affects; `include` narrows it to one part. The impact covers npm packages and Go modules; for Go it sees syntactic uses, plus the methods and fields reached through values (a method called on a returned value) when the usages job has the `go` toolchain.
+Between two versions `package_changes` returns the API diff, for third-party libraries the changelog and migration notes, and the uses the upgrade affects; `include` narrows it to one part. With `repo`, the affected uses are those of your repository, with a count of the others. The impact covers npm packages and Go modules; for Go it sees syntactic uses, plus the methods and fields reached through values (a method called on a returned value) when the usages job has the `go` toolchain.
 
 ## Adding or upgrading a dependency
 

@@ -1,4 +1,4 @@
-import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
+import { type RegistryToolset, ToolError, capText, defineTool } from '@holtkeeper/agent-tools'
 import type { PublicApiPackageRemoval, RepoRef } from '@holtkeeper/api'
 import {
   type ApiEcosystem,
@@ -24,7 +24,9 @@ import {
 } from '@holtkeeper/libraries'
 import type { LibraryEcosystem, LibraryRef, LibraryStore, Store } from '@holtkeeper/store'
 import {
+  type UpgradeImpact,
   findSites,
+  narrowImpact,
   packageUsage,
   renderImpact,
   renderPackageUsage,
@@ -91,6 +93,45 @@ export interface PackageToolsContext {
   defaultRepo?: string
   /** The asker's findings and licenses; with it `security_findings` and `license_overview` are offered. */
   supply?: SupplyToolsAccess
+}
+
+/**
+ * Characters the API diff and the affected uses of a `package_changes` answer get when several
+ * parts are asked for; the changelog keeps its own 20 000 limit of whole blocks. Together about
+ * 76 000, under the MCP cap, so a large upgrade keeps every part instead of losing the last.
+ */
+const SECTION_CHARS = { api: 24_000, impact: 32_000 } as const
+
+/**
+ * `text` cut to about `max` characters at a line break like `capText`, closing a code fence the cut
+ * left open so the note after it is not read as part of the fenced block.
+ */
+function capFenced(text: string, max: number, hint: string): string {
+  if (text.length <= max) return text
+  const cut = capText(text, max, hint)
+  const marker = cut.lastIndexOf('\n\n… output cut')
+  const kept = cut.slice(0, marker)
+  let open: string | undefined
+  for (const line of kept.split('\n')) {
+    const fence = /^(`{3,})/.exec(line)?.[1]
+    if (!fence) continue
+    if (open === undefined) open = fence
+    else if (fence === open && line.trim() === fence) open = undefined
+  }
+  return open === undefined ? cut : `${kept}\n${open}${cut.slice(marker)}`
+}
+
+/** Third-party `body` in its data fence, cut to `max` inside it with the note after the fence. */
+function cappedThirdParty(
+  origin: string,
+  body: string,
+  max: number | undefined,
+  hint: string,
+): string {
+  if (max === undefined || body.length <= max) return thirdParty(origin, body)
+  const cut = capFenced(body, max, hint)
+  const marker = cut.lastIndexOf('\n\n… output cut')
+  return `${thirdParty(origin, cut.slice(0, marker))}${cut.slice(marker)}`
 }
 
 const ecosystemArg = z
@@ -546,6 +587,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     ? [
         defineTool({
           name: 'package_docs',
+          narrow: 'pass `path` with `heading`, or a narrower `query`',
           description:
             'Docs of third-party libraries at the version in use: README, docs folders, llms.txt, Go package docs, repository docs and release notes. With `query`, full-text search (over every library without `package`); with `issues: true`, known issues and answered discussions matching an error message or symptom, with state, fix version and link; with `package` and no `query`, the list of its documents, or one document by `path` (one section by `heading`). Organization packages have no indexed docs: read package_api and package_source.',
           input: z.object({
@@ -612,6 +654,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
         }),
         defineTool({
           name: 'package_source',
+          narrow: 'pass `path` of one file with `start` and `end`',
           description:
             'The source code of a package version: a third-party library from its published snapshot, an organization package from its own repository (path relative to the package folder). A file listing (optionally under `path`) or one file with line numbers. A third-party snapshot is made on first request, which can take a while.',
           input: z.object({
@@ -648,8 +691,9 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     tools: [
       defineTool({
         name: 'find_packages',
+        narrow: 'a narrower `query`, `kind` or a lower `limit`',
         description:
-          'Finds packages and exports. With `query`: organization packages and indexed third-party libraries whose name, description or repository matches, then exported functions, classes, types and constants of organization packages matching by name or doc comment. With `repo` and no `query`: the packages that repository imports, with resolved versions and number of uses (`repo` does not narrow a search). Without arguments: every organization package.',
+          'Finds packages and exports. With `query`: organization packages (closest names first) and indexed third-party libraries whose name, description or repository matches, then exported functions, classes, types and constants of organization packages matching by name or doc comment; with `kind`, the exports come first. With `repo` and no `query`: the packages that repository imports, with resolved versions and number of uses (`repo` does not narrow a search). Without arguments: every organization package.',
         input: z.object({
           query: z
             .string()
@@ -662,7 +706,13 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             .optional()
             .describe('Without `query`: list what this repository imports, as forge:path'),
           kind: z.enum(apiSymbolKinds).optional().describe('Only exports of this kind'),
-          limit: z.number().int().min(1).max(50).optional().describe('Exports to show; default 20'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .describe('Packages and exports to show of a search; default 20'),
         }),
         defaultLimit: 20,
         run: async ({ query, repo, kind, limit }) => {
@@ -696,12 +746,42 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             return own.length
               ? ['## Organization packages', ...own].join('\n')
               : 'No package is indexed yet.'
+          const shown = limit ?? 20
           const [libraries, exported] = await Promise.all([
             library ? library.store.listLibraries({ query }) : [],
-            symbolHits(query, { ...(kind ? { kind } : {}), limit: limit ?? 20 }),
+            symbolHits(query, { ...(kind ? { kind } : {}), limit: shown }),
           ])
+          const needle = query.trim().toLowerCase()
+          const rank = (pkg: (typeof packages)[number]) => {
+            const lower = pkg.name.toLowerCase()
+            const last = lower.split('/').pop() ?? lower
+            if (lower === needle || last === needle) return 0
+            if (last.includes(needle)) return 1
+            return lower.includes(needle) ? 2 : 3
+          }
+          const matching = packages.toSorted(
+            (a, b) => Number(Boolean(a.removed)) - Number(Boolean(b.removed)) || rank(a) - rank(b),
+          )
+          const packageLines = [
+            '## Organization packages',
+            ...matching.slice(0, shown).map(line),
+            ...(matching.length > shown
+              ? [`…and ${matching.length - shown} more packages; narrow the query.`]
+              : []),
+          ].join('\n')
+          const exportLines = exported.lines.length
+            ? [
+                ['## Exports of organization packages', ...exported.lines].join('\n\n'),
+                ...(exported.more
+                  ? [
+                      `…and ${exported.more} more exports; narrow with \`kind\` or package_api \`query\`.`,
+                    ]
+                  : []),
+              ]
+            : []
           const sections = [
-            ...(own.length ? [['## Organization packages', ...own].join('\n')] : []),
+            ...(kind ? exportLines : []),
+            ...(matching.length ? [packageLines] : []),
             ...(libraries.length
               ? [
                   [
@@ -713,16 +793,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
                   ].join('\n'),
                 ]
               : []),
-            ...(exported.lines.length
-              ? [
-                  ['## Exports of organization packages', ...exported.lines].join('\n\n'),
-                  ...(exported.more
-                    ? [
-                        `…and ${exported.more} more exports; narrow with \`kind\` or package_api \`query\`.`,
-                      ]
-                    : []),
-                ]
-              : []),
+            ...(kind ? [] : exportLines),
           ]
           return sections.length
             ? sections.join('\n\n')
@@ -733,6 +804,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
 
       defineTool({
         name: 'package_api',
+        narrow: 'pass `subpath`, `symbol`, `query` or `docs: false`',
         description:
           'The public API of one package version as Markdown: each entry point (import path) with every exported name, its doc comment and declaration. With `symbol`, that one export in full with the import statement to use; with `query`, only the exports matching it by name or doc comment. For large packages pass `subpath`, `query` or `docs: false`.',
         input: z.object({
@@ -882,8 +954,9 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
 
       defineTool({
         name: 'package_changes',
+        narrow: 'pass `include` with fewer parts, or `repo` for the uses of one repository',
         description:
-          'Versions of a package and what changed between them. Without `from` and `to`: the recorded versions, newest first, with dates and how the API changed from the one before; for third-party libraries also which repositories use which version. With `from` or `to`: the API diff (removed, changed, deprecated and added exports, and whether the bump matches semver), for third-party libraries the changelog and migration notes, and the uses in the organization’s repositories the upgrade breaks (`breaking`, `check`, `deprecated`) with their code. `to` defaults to the newest release, `from` to the version `repo` uses when that is older (third-party), else the release before `to`. Narrow with `include`.',
+          'Versions of a package and what changed between them. Without `from` and `to`: the recorded versions, newest first, with dates and how the API changed from the one before; for third-party libraries also which repositories use which version. With `from` or `to`: the API diff (removed, changed, deprecated and added exports, and whether the bump matches semver), for third-party libraries the changelog and migration notes, and the uses in the organization’s repositories the upgrade breaks (`breaking`, `check`, `deprecated`) with their code. `to` defaults to the newest release, `from` to the version `repo` uses when that is older (third-party), else the release before `to`. With `repo` (other than the package’s own repository) the uses are those of that repository, with a count of the others; without it, those of every repository. Narrow with `include`; each part is shortened on its own when several are asked for.',
         input: z.object({
           package: packageArg,
           from: z.string().min(1).optional().describe('The version you are on'),
@@ -902,6 +975,25 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           if (!from && !to)
             return own ? ownVersions(name, own) : externalVersions(name, ecosystem, repo)
           const wants = (part: (typeof changeParts)[number]) => !include || include.includes(part)
+          const budget = (include?.length ?? changeParts.length) === 1 ? undefined : SECTION_CHARS
+          const section = (part: 'api' | 'impact', body: string) =>
+            budget
+              ? capFenced(body, budget[part], `pass \`include: ['${part}']\` for all of it`)
+              : body
+          // Only a repository the caller names narrows the uses; an agent's own repository does not.
+          const working = repo ? readableRepo(canRead, repo) : undefined
+          const affects = (impact: UpgradeImpact, range: string, publisher?: string) => {
+            if (!working || working === publisher) return renderImpact(impact)
+            const narrowed = narrowImpact(impact, (origin) => origin === working)
+            return [
+              renderImpact(narrowed.impact),
+              ...(narrowed.others
+                ? [
+                    `${narrowed.others} other repositor${narrowed.others === 1 ? 'y is' : 'ies are'} affected too; call with ${range} and without \`repo\` for all of them.`,
+                  ]
+                : []),
+            ].join('\n\n')
+          }
           const query = {
             ...(from ? { from } : {}),
             ...(to ? { to } : {}),
@@ -920,12 +1012,27 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
               `${name} ${result.from.version} → ${result.to.version} (organization package, \`${repoKey(result.repo)}\`)`,
               ...(wants('api')
                 ? [
-                    result.diff.changes.length
-                      ? renderDiff(result.diff)
-                      : `No export changed between ${result.from.version} and ${result.to.version}.`,
+                    section(
+                      'api',
+                      result.diff.changes.length
+                        ? renderDiff(result.diff)
+                        : `No export changed between ${result.from.version} and ${result.to.version}.`,
+                    ),
                   ]
                 : []),
-              ...(impact ? ['## Uses the upgrade affects', renderImpact(impact.impact)] : []),
+              ...(impact
+                ? [
+                    '## Uses the upgrade affects',
+                    section(
+                      'impact',
+                      affects(
+                        impact.impact,
+                        `\`from: '${result.from.version}'\`, \`to: '${result.to.version}'\``,
+                        repoKey(result.repo),
+                      ),
+                    ),
+                  ]
+                : []),
             ].join('\n\n')
           }
           const ref = await externalRef(name, ecosystem)
@@ -959,9 +1066,11 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             )
             sections.push(
               changed.length
-                ? thirdParty(
+                ? cappedThirdParty(
                     `${name} ${external.from} → ${external.to} (API from the published packages)`,
                     changed.map((diff) => renderDiff(diff)).join('\n\n'),
+                    budget?.api,
+                    "pass `include: ['api']` for all of it",
                   )
                 : `No export changed between ${external.from} and ${external.to}.`,
             )
@@ -991,7 +1100,13 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
                     changes: external.diffs.flatMap((diff) => diff.changes),
                     target: external.to,
                   })
-            sections.push('## Uses the upgrade affects', renderImpact(impact))
+            sections.push(
+              '## Uses the upgrade affects',
+              section(
+                'impact',
+                affects(impact, `\`from: '${external.from}'\`, \`to: '${external.to}'\``),
+              ),
+            )
           }
           return sections.join('\n\n')
         },
@@ -1000,6 +1115,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
 
       defineTool({
         name: 'package_usage',
+        narrow: 'pass `export`, `repo` or a lower `limit`',
         description:
           'Who uses a package across the organization’s repositories. Without narrowing: teams and repositories with the versions in use and how far behind the latest release each is, then every export used with how often and how (call, jsx, type, member, …), the JSX props passed and members read. With `export`, `member` (e.g. `reset` or `().reset` for the result of a call), `prop`, `kind`, `repo` or `code: true`: the code of those uses, file, line and snippet per use, grouped by repository. For Go, pass a module path (every package of it) or a package import path. Start here before changing or upgrading a package.',
         input: z.object({
@@ -1061,9 +1177,38 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             ),
             usages.entries(canRead).then((entries) => packageUsage(entries, name)),
           ])
+          if (!users) return renderPackageUsage(usage, { originLabel: String, teamOf })
+          const read = new Set(usage.repos.map((item) => item.origin))
+          const unread = users.repos.filter((origin) => !read.has(origin))
+          const counted = new Set(users.repos)
+          const extra = usage.repos.filter((item) => !counted.has(item.origin))
           return [
-            ...(users ? [users] : []),
-            renderPackageUsage(usage, { originLabel: String, teamOf }),
+            users.text,
+            ...(usage.repos.length
+              ? [
+                  renderPackageUsage(usage, {
+                    originLabel: String,
+                    teamOf,
+                    repositories: false,
+                  }),
+                ]
+              : []),
+            ...(extra.length
+              ? [
+                  [
+                    'Also imported, without a resolved registry version (an own workspace, a replaced module or no lockfile entry):',
+                    ...extra.map(
+                      (item) =>
+                        `- \`${item.origin}\`${teamOf(item.origin) ? ` (team ${teamOf(item.origin)})` : ''} — ${item.versions.join(', ') || item.ranges.join(', ') || 'version unknown'}, ${item.count} uses in ${item.files} files`,
+                    ),
+                  ].join('\n'),
+                ]
+              : []),
+            ...(unread.length
+              ? [
+                  `No code use of it was read in ${unread.map((origin) => `\`${origin}\``).join(', ')}: they depend on it without importing it, or their usage record is missing.`,
+                ]
+              : []),
           ].join('\n\n')
         },
         subject: ({ package: name }) => name,

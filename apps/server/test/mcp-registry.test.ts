@@ -157,6 +157,43 @@ describe('registryServer', () => {
   })
 })
 
+describe('registryServer caps', () => {
+  test('a result over the cap says how to narrow it in the words of the tool', async () => {
+    const dumps = {
+      name: 'dumps',
+      tools: [
+        defineTool({
+          name: 'dump_widgets',
+          description: 'Dumps widgets',
+          input: z.object({}),
+          narrow: 'pass `shape`',
+          run: () => 'w\n'.repeat(50_000),
+        }),
+        defineTool({
+          name: 'dump_gadgets',
+          description: 'Dumps gadgets',
+          input: z.object({}),
+          run: () => 'g\n'.repeat(50_000),
+        }),
+      ],
+    }
+    const client = await connect([], [dumps])
+    const dumped = textOf(await client.callTool({ name: 'dump_widgets', arguments: {} }))
+    expect(dumped).toEndWith('output cut at about 20000 tokens; narrow the request: pass `shape`.')
+    const gadgets = textOf(await client.callTool({ name: 'dump_gadgets', arguments: {} }))
+    expect(gadgets).toEndWith('output cut at about 20000 tokens; narrow the request.')
+  })
+})
+
+const failure = async (run: () => Promise<string> | string) => {
+  try {
+    await run()
+    return ''
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
 describe('mcpToolsets', () => {
   const store = memoryStore()
   const base = {
@@ -237,6 +274,65 @@ describe('mcpToolsets', () => {
     const served = rulesOf(['packages', 'rules', 'knowledge'])
     expect(served?.tools.map((tool) => tool.name)).toEqual(['repo_rules'])
     expect(served?.tools[0]?.description).toContain('search_knowledge (pass `id`)')
+  })
+
+  test('a repository repoExists does not know is refused before the tool runs; secret reports never are', async () => {
+    const asked: string[] = []
+    const reported: unknown[] = []
+    const toolsets = mcpToolsets({
+      ...base,
+      commits: {
+        conventions: async (repo) => {
+          asked.push(repo)
+          return undefined
+        },
+      },
+      secretReports: {
+        mode: 'named',
+        submit: async (input) => {
+          reported.push(input)
+          return { status: 'rejected', reason: 'noted' }
+        },
+      },
+      resolveRepo: (value) => (value.includes(':') ? value : `work:${value}`),
+      repoExists: async (repo) => repo !== 'work:toys/typo',
+    })
+    const toolOf = (name: string) => {
+      const found = toolsets.flatMap((toolset) => toolset.tools).find((tool) => tool.name === name)
+      if (!found) throw new Error(`no tool ${name}`)
+      return found
+    }
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    expect(
+      await failure(() =>
+        toolOf('check_commit_message').run({ repo: 'toys/typo', message: 'feat: add kite' }, ctx),
+      ),
+    ).toBe(
+      'Holtkeeper knows no repository work:toys/typo: check the path (as group/app, a git remote URL or forge:path).',
+    )
+    expect(asked).toEqual([])
+    expect(
+      await failure(() =>
+        toolOf('check_commit_message').run({ repo: 'toys/kite', message: 'feat: add kite' }, ctx),
+      ),
+    ).toContain('No readable repository work:toys/kite')
+    expect(asked).toEqual(['work:toys/kite'])
+    expect(await toolOf('find_packages').run({}, ctx)).toBe('No package is indexed yet.')
+    expect(
+      await failure(() =>
+        toolOf('report_secret_exposure').run(
+          {
+            kind: 'api-key',
+            identifier: 'WIDGET_API_KEY',
+            masked: 'wk_l…(40)',
+            channel: 'chat',
+            repo: 'toys/typo',
+          },
+          ctx,
+        ),
+      ),
+    ).toContain('nothing was stored: noted')
+    expect(reported).toEqual([expect.objectContaining({ repo: 'work:toys/typo' })])
   })
 
   test('without a rules reader search_knowledge takes no id', () => {
@@ -927,7 +1023,8 @@ describe('rules toolset', () => {
     const text = await refused?.run({ repo: 'work:toys/kite', topics: ['test-ids', 'assets'] }, ctx)
     expect(text).toStartWith('# Rules for `work:toys/kite`')
     expect(text).toContain('# Test ids of `work:toys/kite`\n\nYou may not read the test ids of')
-    expect(text).toContain('# Asset policy of `work:toys/kite`\n\n# Asset policy of')
+    expect(text).toContain('\n\n# Asset policy of `work:toys/kite`, from')
+    expect(text?.match(/# Asset policy of/g)).toHaveLength(1)
 
     const nothing = rulesToolset({
       ...access,

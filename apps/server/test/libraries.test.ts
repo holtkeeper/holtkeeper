@@ -845,6 +845,69 @@ describe('library MCP tools', () => {
     expect(previous.text).toStartWith('zod 3.23.0 → 4.0.0 (npm, third-party)')
   })
 
+  test('package_changes narrows the uses only to a repo the caller names, not to an agent own repository', async () => {
+    for (const path of ['games/a', 'libs/ui'])
+      // oxlint-disable-next-line no-await-in-loop -- fixtures in order
+      await store.analyses.add({
+        repo: { forge: 'work', path },
+        kind: 'usages',
+        createdAt: at,
+        data: usage('zod', '3.22.0', 'nativeEnum'),
+      })
+    const changes = packagesToolset(
+      agentCatalogContext({
+        catalog: createApiCatalog({ analyses: store.analyses }),
+        usages: createUsageIndex({ analyses: store.analyses }),
+        store,
+        config,
+        repo: { forge: 'work', path: 'games/a', teams: [] },
+        targetOf: (other) => ({ ...other, teams: [] }),
+        policy: 'snippets',
+        artifacts,
+        now: () => now,
+      }),
+    ).tools.find((tool) => tool.name === 'package_changes')!
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const args = { package: 'zod', from: '3.22.0', to: '4.0.0', include: ['impact'] }
+    const fleet = await changes.run(args, ctx)
+    expect(fleet).toContain('`work:games/a`')
+    expect(fleet).toContain('`work:libs/ui`')
+    expect(fleet).not.toContain('affected too')
+    const narrowed = await changes.run({ ...args, repo: 'work:games/a' }, ctx)
+    expect(narrowed).toContain('`work:games/a`')
+    expect(narrowed).not.toContain('`work:libs/ui`')
+    expect(narrowed).toEndWith(
+      "1 other repository is affected too; call with `from: '3.22.0'`, `to: '4.0.0'` and without `repo` for all of them.",
+    )
+  })
+
+  test('an oversized third-party API part is cut inside its data fence with the note after it', async () => {
+    const names = Array.from({ length: 400 }, (_, i) => `widgetSchema${String(i).padStart(4, '0')}`)
+    await libraries.putVersion({
+      ...zod,
+      version: '5.0.0',
+      roles: [],
+      usedBy: [],
+      api: await putApi('5.0.0', names),
+      sources: { archive: { status: 'ok', at }, api: { status: 'ok', at } },
+      updatedAt: at,
+    })
+    const { text } = await callTool('package_changes', {
+      package: 'zod',
+      from: '4.0.0',
+      to: '5.0.0',
+    })
+    const note = text.indexOf("pass `include: ['api']` for all of it")
+    expect(note).toBeGreaterThan(0)
+    const opened = text.indexOf('Third-party content from zod 4.0.0 → 5.0.0')
+    expect(opened).toBeGreaterThanOrEqual(0)
+    const fenced = text.slice(opened, note)
+    const fences = fenced.split('\n').filter((line) => /^`{3,}/.test(line))
+    expect(fences.length % 2).toBe(0)
+    expect(fences.at(-1)?.trim()).toMatch(/^`{3,}$/)
+    expect(text).not.toContain('widgetSchema0399')
+  })
+
   test('find_packages searches the same with and without repo', async () => {
     await store.analyses.add({
       repo: { forge: 'work', path: 'libs/ui' },

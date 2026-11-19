@@ -36,6 +36,8 @@ export function renderPackageUsage<Origin>(
     exports?: number
     /** The owning team of a repository, appended to its line. */
     teamOf?: (origin: Origin) => string | undefined
+    /** `false` leaves out the title and the repository list, for callers that list them. */
+    repositories?: boolean
   } = {
     originLabel: String,
   },
@@ -48,15 +50,19 @@ export function renderPackageUsage<Origin>(
     return owner ? ` (team ${owner})` : ''
   }
   const lines = [
-    `# ${title}${usage.ecosystem === 'Go' ? ' (Go)' : ''}: ${usage.repos.length} repositor${usage.repos.length === 1 ? 'y' : 'ies'}`,
-    `Versions in use: ${usage.versions.join(', ') || 'unknown'}.`,
-    '',
-    '## Repositories',
-    ...usage.repos.map(
+    ...(options.repositories === false
+      ? []
+      : [
+          `# ${title}${usage.ecosystem === 'Go' ? ' (Go)' : ''}: ${usage.repos.length} repositor${usage.repos.length === 1 ? 'y' : 'ies'}`,
+          `Versions in use: ${usage.versions.join(', ') || 'unknown'}.`,
+          '',
+          '## Repositories',
+        ]),
+    ...(options.repositories === false ? [] : usage.repos).map(
       (repo) =>
         `- \`${label(repo.origin)}\`${team(repo.origin)} — ${repo.versions.join(', ') || repo.ranges.join(', ') || 'version unknown'}, ${repo.count} uses in ${repo.files} files, ${repo.exports.length} exports${repo.workspaces.length > 1 || repo.workspaces[0] !== 'root' ? ` (workspaces ${repo.workspaces.join(', ')})` : ''}`,
     ),
-    '',
+    ...(options.repositories === false ? [] : ['']),
     '## Exports used',
   ]
   const limit = options.exports ?? 60

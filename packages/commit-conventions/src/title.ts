@@ -80,3 +80,26 @@ export function compilePattern(pattern: string): RegExp | undefined {
     return undefined
   }
 }
+
+/**
+ * The Conventional Commits shape of a title with the ticket key where `ticket` puts it, e.g.
+ * `[KEY-1] type(scope): subject` for a key in brackets before the type, so a rule about the
+ * type never contradicts the rule about the key.
+ */
+export function conventionalShape(ticket?: { required: boolean; placement?: string }): string {
+  if (!ticket?.required) return 'type(scope): subject'
+  switch (ticket.placement) {
+    case 'lead':
+      return '[KEY-1] type(scope): subject'
+    case 'bracket':
+      return 'type(scope): [KEY-1] subject'
+    case 'prefix':
+      return 'type(scope): KEY-1 subject'
+    case 'scope':
+      return 'type(KEY-1): subject'
+    case 'suffix':
+      return 'type(scope): subject (KEY-1)'
+    default:
+      return 'type(scope): subject'
+  }
+}

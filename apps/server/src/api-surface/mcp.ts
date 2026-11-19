@@ -13,11 +13,13 @@ import type { McpUsage } from './usage.ts'
 /** Longest text a tool returns over MCP; agents get a hint to narrow the request instead. */
 const maxText = 80_000
 
-const narrowHint =
-  'narrow the request, e.g. package_api with `subpath`, `symbol`, `query` or `docs: false`'
-
-const text = (value: string) => ({
-  content: [{ type: 'text' as const, text: capText(value, maxText, narrowHint) }],
+const text = (value: string, narrow?: string) => ({
+  content: [
+    {
+      type: 'text' as const,
+      text: capText(value, maxText, narrow ? `narrow the request: ${narrow}` : undefined),
+    },
+  ],
 })
 
 /** Who calls the MCP endpoint, for usage statistics. */
@@ -126,6 +128,7 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
               signal: extra.signal,
               ...(progress && { progress }),
             }),
+            tool.narrow,
           )
         } catch (error) {
           ok = false
@@ -157,32 +160,93 @@ const STREAMED_TOOLS: ReadonlySet<string> = new Set([ASK_TOOL])
 /** How often a streamed response sends a keep-alive comment while its tool runs. */
 const STREAM_KEEP_ALIVE_MS = 4000
 
-/** Whether `request` is a single call of a streamed tool by a client that accepts event streams. */
-async function wantsStream(request: Request): Promise<boolean> {
-  if (!request.headers.get('accept')?.includes('text/event-stream')) return false
-  const body: unknown = await request
-    .clone()
-    .json()
-    .catch(() => undefined)
-  const parsed = z
-    .object({ method: z.literal('tools/call'), params: z.object({ name: z.string() }) })
-    .safeParse(body)
-  return parsed.success && STREAMED_TOOLS.has(parsed.data.params.name)
+/** Tools this server no longer offers, with what to call instead. */
+const RETIRED_TOOLS: Readonly<Record<string, string>> = {
+  list_packages: 'find_packages',
+  search_symbols: 'find_packages',
+  repo_packages: 'find_packages with `repo`',
+  get_package_api: 'package_api',
+  get_symbol: 'package_api with `symbol`',
+  list_versions: 'package_changes',
+  library_versions: 'package_changes',
+  diff_versions: 'package_changes with `from` and `to`',
+  library_changes: 'package_changes with `from` and `to`',
+  upgrade_impact: 'package_changes with `from` and `to`',
+  find_usages: 'package_usage with `export` or `code: true`',
+  who_uses: 'package_usage',
+  search_library_docs: 'package_docs with `query`',
+  read_library_doc: 'package_docs with `path`',
+  search_library_issues: 'package_docs with `issues: true`',
+  library_source: 'package_source',
+  commit_conventions: 'repo_rules with `topics: ["commits"]`',
+  release_rules: 'repo_rules with `topics: ["releases"]`',
+  asset_policy: 'repo_rules with `topics: ["assets"]`',
+  suggest_test_ids: 'test_ids with `file` and `content`',
+  get_rule: 'search_knowledge with `id`',
+  review_status: 'code_review',
+}
+
+const toolCall = z.object({
+  id: z.union([z.string(), z.number()]),
+  method: z.literal('tools/call'),
+  params: z.object({ name: z.string() }),
+})
+
+/** The id and tool name of `body` when it is a single tool call. */
+const toolCallOf = (body: unknown) => {
+  const parsed = toolCall.safeParse(body)
+  return parsed.success ? { id: parsed.data.id, name: parsed.data.params.name } : undefined
+}
+
+/**
+ * The answer to a call of a tool `toolsets` does not offer: an error result naming what to call
+ * instead and telling the client to reload its tool list, rather than a bare "not found". Clients
+ * keep the tool list they read when they connected, so after a release they may call tools that
+ * were renamed or merged.
+ */
+function unknownToolResponse(
+  call: { id: string | number; name: string },
+  toolsets: readonly RegistryToolset[],
+): Response {
+  const instead = RETIRED_TOOLS[call.name]
+  const names = toolsets.flatMap((toolset) => toolset.tools.map((tool) => tool.name))
+  const message = [
+    `${call.name} is not a tool of this server${instead ? ' any more' : ''}.`,
+    instead ? `Call ${instead} instead.` : `Its tools are: ${names.join(', ')}.`,
+    'Your client still has an old tool list: reconnect the Holtkeeper MCP server (in Claude Code, /mcp) to load the current one.',
+  ].join(' ')
+  return Response.json({
+    jsonrpc: '2.0',
+    id: call.id,
+    result: { content: [{ type: 'text', text: message }], isError: true },
+  })
 }
 
 /**
  * Answers one request (Streamable HTTP, stateless) with a fresh server over `toolsets`.
  * Responses are JSON, except calls of `STREAMED_TOOLS`, which are answered as an event stream so
  * progress reaches the client while the tool runs, with a keep-alive comment every few seconds.
- * A request the client aborts closes the server, which aborts the signal of its running tools.
+ * A request the client aborts closes the server, which aborts the signal of its running tools. A
+ * call of a tool `toolsets` does not offer is answered with what to call instead and a hint to
+ * reload the tool list (`RETIRED_TOOLS`).
  */
 export async function serveToolsets(
   request: Request,
   toolsets: readonly RegistryToolset[],
   caller: McpCaller,
 ): Promise<Response> {
+  const body: unknown = await request
+    .clone()
+    .json()
+    .catch(() => undefined)
+  const call = toolCallOf(body)
+  if (call && !toolsets.some((toolset) => toolset.tools.some((tool) => tool.name === call.name)))
+    return unknownToolResponse(call, toolsets)
+  const stream =
+    call !== undefined &&
+    STREAMED_TOOLS.has(call.name) &&
+    (request.headers.get('accept')?.includes('text/event-stream') ?? false)
   const server = registryServer(toolsets, caller)
-  const stream = await wantsStream(request)
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: !stream,

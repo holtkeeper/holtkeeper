@@ -31,7 +31,10 @@ import { createApp } from '../src/app.ts'
 import { createFleetCache } from '../src/fleet-cache.ts'
 
 const workForge = {
-  getRepository: async (path: string) => ({ path, defaultBranch: 'main' }),
+  getRepository: async (path: string) => {
+    if (path.endsWith('/typo')) throw Object.assign(new Error('404 Not Found'), { status: 404 })
+    return { path, defaultBranch: 'main' }
+  },
   readFile: async () => undefined,
   listCommits: async () =>
     Array.from({ length: 12 }, (_, i) => ({
@@ -464,6 +467,88 @@ const callTool = async (
   return body.result
 }
 
+const kitPackage = (name: string, dir: string, exported: string[]) => ({
+  ...ui('1.0.0', exported),
+  name,
+  dir,
+})
+const foundText = async (args: Record<string, unknown>) =>
+  (await callTool('find_packages', args, asAdmin)).content[0]?.text ?? ''
+const calcSymbol = (name: string, file: string) => ({
+  name,
+  kind: 'function' as const,
+  signature: `function ${name}(): void`,
+  file,
+  line: 1,
+})
+describe('package search', () => {
+  test('find_packages caps a search, puts the closest names first and the exports first for a kind', async () => {
+    await add(
+      'libs/kit',
+      {
+        packages: [
+          kitPackage('@acme/widget-extra', 'packages/extra', ['gadget']),
+          kitPackage('@acme/widget', 'packages/widget', ['widget']),
+          kitPackage('@acme/widgetry', 'packages/widgetry', ['gizmo']),
+        ],
+      },
+      '2026-10-06T00:00:00.000Z',
+    )
+    const capped = await foundText({ query: 'widget', limit: 1 })
+    const packages = capped.slice(capped.indexOf('## Organization packages'))
+    expect(packages).toStartWith('## Organization packages\n- **@acme/widget**@1.0.0')
+    expect(packages).toContain('…and 2 more packages; narrow the query.')
+    expect(packages).not.toContain('@acme/widgetry')
+    const plain = await foundText({ query: 'widget' })
+    expect(plain.indexOf('## Organization packages')).toBeLessThan(
+      plain.indexOf('## Exports of organization packages'),
+    )
+    expect(plain).not.toContain('more packages')
+    const kinds = await foundText({ query: 'widget', kind: 'function' })
+    expect(kinds.indexOf('## Exports of organization packages')).toBeGreaterThanOrEqual(0)
+    expect(kinds.indexOf('## Exports of organization packages')).toBeLessThan(
+      kinds.indexOf('## Organization packages'),
+    )
+  })
+
+  test('export search puts hand-written top-level names before members and generated code', async () => {
+    await add(
+      'libs/calc',
+      {
+        packages: [
+          {
+            ...ui('1.0.0', []),
+            name: '@acme/calc',
+            dir: '.',
+            entries: [
+              {
+                subpath: '.',
+                file: 'src/index.ts',
+                symbols: [
+                  calcSymbol('RecalcX', 'gen/recalc.pb.go'),
+                  calcSymbol('RecalcGen', 'generated/recalc.ts'),
+                  calcSymbol('RecalcPb', 'src/proto/recalc_pb.d.ts'),
+                  calcSymbol('Recalc.Reset', 'src/recalc.ts'),
+                  calcSymbol('RecalcLong', 'src/recalc.ts'),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      '2026-10-07T00:00:00.000Z',
+    )
+    const { hits } = await createApiCatalog({ analyses: store.analyses }).search(() => true, 'reca')
+    expect(hits.map((hit) => hit.symbol.name)).toEqual([
+      'RecalcLong',
+      'Recalc.Reset',
+      'RecalcX',
+      'RecalcPb',
+      'RecalcGen',
+    ])
+  })
+})
+
 describe('removed packages', () => {
   const kit = { ...ui('2.0.0', ['button']), name: '@acme/kit' }
   const other = { ...ui('1.0.0', ['tab']), name: '@acme/other', dir: 'packages/other' }
@@ -550,6 +635,28 @@ const toolNamesOf = async (headers: Record<string, string>) =>
   ).result.tools.map((tool) => tool.name)
 
 describe('MCP endpoint', () => {
+  test('a path that does not exist is refused within the caller own grants and nowhere else', async () => {
+    const own = await callTool(
+      'check_commit_message',
+      { repo: 'games/typo', message: 'x' },
+      asAdmin,
+    )
+    expect(own.isError).toBe(true)
+    expect(own.content[0]?.text).toBe(
+      'Holtkeeper knows no repository work:games/typo: check the path (as group/app, a git remote URL or forge:path).',
+    )
+    const known = await callTool('check_commit_message', { repo: 'games/a', message: 'x' }, asAdmin)
+    expect(known.content[0]?.text).not.toContain('knows no repository')
+    const outside = await callTool(
+      'check_commit_message',
+      { repo: 'games/typo', message: 'x' },
+      asGames,
+    )
+    expect(outside.isError).toBe(true)
+    expect(outside.content[0]?.text).not.toContain('knows no repository')
+    expect(outside.content[0]?.text).toContain('No readable repository work:games/typo')
+  })
+
   test('rejects anonymous requests and answers tools for token holders', async () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {})).status).toBe(401)
 
@@ -655,7 +762,8 @@ describe('MCP endpoint', () => {
       { repo: 'work:games/a', topics: ['releases'] },
       bearer,
     )
-    expect(rules.content[0]?.text).toContain('# Release rules of `work:games/a`')
+    expect(rules.content[0]?.text).toContain('# How `work:games/a` releases')
+    expect(rules.content[0]?.text).not.toContain('# Release rules of')
   })
 
   test('tokens serve the toolsets their owner picks, QA tasks off unless turned on', async () => {
@@ -884,6 +992,31 @@ const gameUsage = (version: string): UsagesData => ({
   types: { status: 'used', projects: ['tsconfig.json'], sites: 0 },
 })
 
+const affectedOf = async (extra: Record<string, unknown>) => {
+  const result = await callTool(
+    'package_changes',
+    { package: '@acme/ui', from: '1.0.0', to: '1.1.0', ...extra },
+    asAdmin,
+  )
+  const text = result.content[0]?.text ?? ''
+  return text.slice(text.indexOf('## Uses the upgrade affects'))
+}
+const bigNames = Array.from({ length: 600 }, (_, i) => `widgetPart${String(i).padStart(4, '0')}`)
+
+const bigPackage = (version: string, exported: string[]) => ({
+  ...ui(version, exported),
+  name: '@acme/big',
+  dir: '.',
+})
+
+const bigChanges = async (extra: Record<string, unknown>) =>
+  (
+    await callTool(
+      'package_changes',
+      { package: '@acme/big', from: '1.0.0', to: '2.0.0', ...extra },
+      asAdmin,
+    )
+  ).content[0]?.text ?? ''
 describe('usage routes and tools', () => {
   beforeEach(async () => {
     await store.analyses.add({
@@ -928,6 +1061,53 @@ describe('usage routes and tools', () => {
       headers: { 'x-forwarded-user': 'eve', 'x-forwarded-groups': 'nobody' },
     })
     expect(hidden.status).toBe(404)
+  })
+
+  test('package_changes shows the uses of the repository asked for, unless it publishes the package', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/b' },
+      kind: 'usages',
+      createdAt: '2026-10-21T00:00:00.000Z',
+      data: gameUsage('1.0.0'),
+    })
+    const consumer = await affectedOf({ repo: 'work:games/a' })
+    expect(consumer).toContain('### `work:games/a` (1.0.0) — 1 uses')
+    expect(consumer).not.toContain('work:games/b')
+    expect(consumer).toEndWith(
+      "1 other repository is affected too; call with `from: '1.0.0'`, `to: '1.1.0'` and without `repo` for all of them.",
+    )
+    const publisher = await affectedOf({ repo: 'work:libs/ui' })
+    expect(publisher).toContain('### `work:games/a` (1.0.0) — 1 uses')
+    expect(publisher).toContain('### `work:games/b` (1.0.0) — 1 uses')
+    expect(publisher).not.toContain('affected too')
+    expect(await affectedOf({})).toBe(publisher)
+  })
+
+  test('package_changes shortens an oversized part on its own when several are asked for', async () => {
+    await add(
+      'libs/big',
+      { packages: [bigPackage('1.0.0', ['widget'])] },
+      '2026-10-02T00:00:00.000Z',
+      'v1.0.0',
+    )
+    await add(
+      'libs/big',
+      { packages: [bigPackage('2.0.0', bigNames)] },
+      '2026-10-03T00:00:00.000Z',
+      'v2.0.0',
+    )
+    const all = await bigChanges({})
+    const cut = all.indexOf("pass `include: ['api']` for all of it")
+    expect(cut).toBeGreaterThan(0)
+    expect(all.indexOf('## Uses the upgrade affects')).toBeGreaterThan(cut)
+    expect(all).not.toContain('widgetPart0599')
+    const head = all.slice(0, cut)
+    expect((head.match(/^```/gm) ?? []).length % 2).toBe(0)
+    const apiOnly = await bigChanges({ include: ['api'] })
+    expect(apiOnly.length).toBeGreaterThan(24_000)
+    expect(apiOnly).toContain('widgetPart0599')
+    expect(apiOnly).not.toContain('pass `include:')
+    expect(apiOnly).not.toContain('output cut')
   })
 
   test('counts the uses of the packages one repository defines', async () => {
@@ -995,9 +1175,9 @@ describe('usage routes and tools', () => {
     expect(fromConsumer.content[0]?.text).toBe(changes)
 
     const used = await callTool('package_usage', { package: '@acme/ui' }, asAdmin)
-    expect(used.content[0]?.text).toContain(
-      '- `work:games/a` (team games) — 1.0.0, 3 uses in 2 files, 2 exports',
-    )
+    expect(used.content[0]?.text).toContain('## team games\n- `work:games/a` 1.0.0')
+    expect(used.content[0]?.text).toContain('## Exports used\n- **button** from `@acme/ui`')
+    expect(used.content[0]?.text?.match(/repositor(y|ies)/g)).toHaveLength(1)
     expect(used.content[0]?.text).not.toContain('`src/hud.tsx:9`')
     const found = await callTool(
       'package_usage',
@@ -1324,7 +1504,8 @@ describe('commit conventions', () => {
       asGames,
     )
     const text = listed.content[0]?.text ?? ''
-    expect(text).toContain('# Commit conventions of `work:games/a`')
+    expect(text).toContain('# Commit conventions of work:games/a')
+    expect(text.match(/# Commit conventions of/g)).toHaveLength(1)
     expect(text).toContain('Template: `<type>(<scope>): [<TICKET>] <subject>`')
     expect(text).toContain('- Title at most 50 characters _(team setting)_')
     expect(text).toContain('`feat(scene): [GAME-0] add level 0`')

@@ -131,6 +131,11 @@ export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>,
    * `forge:path`; without it tools take `forge:path` only.
    */
   resolveRepo?: (value: string) => string
+  /**
+   * Whether a `repo` argument (after `resolveRepo`) names a repository Holtkeeper knows; a call
+   * naming one it does not is refused before the tool runs. Without it every name is passed on.
+   */
+  repoExists?: (repo: string) => Promise<boolean>
   /** Merge request review state; without it the `reviews` toolset is not offered. */
   reviews?: ReviewToolsAccess
   /**
@@ -179,11 +184,20 @@ export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
         )
       : MCP_TOOLSETS,
   )
-  const { resolveRepo } = context
+  const { resolveRepo, repoExists } = context
   return mounted.flatMap((toolset) => {
     const tools = toolset.tools
       .filter((tool) => tool.readOnly !== false || MCP_WRITE_TOOLS.has(tool.name))
-      .map((tool) => (resolveRepo ? withRepoResolved(tool, resolveRepo) : tool))
+      .map((tool) =>
+        resolveRepo || repoExists
+          ? withRepoResolved(
+              tool,
+              resolveRepo ?? ((value) => value),
+              // A secret report must never be lost to a misspelled repository.
+              tool.name === REPORT_TOOL ? undefined : repoExists,
+            )
+          : tool,
+      )
     return tools.length ? [{ ...toolset, tools }] : []
   })
 }
@@ -192,14 +206,28 @@ const REPO_HINT = 'its path such as acme/app (forge:path and a git remote URL wo
 
 /**
  * `tool` taking its `repo` argument in any form `resolve` understands: the argument is resolved
- * before the tool and its usage subject see it, and its description says what may be passed.
+ * before the tool and its usage subject see it, a repository `exists` does not know is refused,
+ * and its description says what may be passed.
  * Tools without a `repo` argument are returned as they are.
  */
-function withRepoResolved(tool: RegistryTool, resolve: (value: string) => string): RegistryTool {
+function withRepoResolved(
+  tool: RegistryTool,
+  resolve: (value: string) => string,
+  exists?: (repo: string) => Promise<boolean>,
+): RegistryTool {
   const field = tool.input.shape['repo']
   if (!field) return tool
   const resolved = (input: Record<string, unknown>) =>
     typeof input['repo'] === 'string' ? { ...input, repo: resolve(input['repo']) } : input
+  const run: RegistryTool['run'] = async (input, ctx) => {
+    const args = resolved(input)
+    const repo = args['repo']
+    if (typeof repo === 'string' && exists && !(await exists(repo)))
+      throw new ToolError(
+        `Holtkeeper knows no repository ${repo}: check the path (as group/app, a git remote URL or forge:path).`,
+      )
+    return tool.run(args, ctx)
+  }
   return {
     ...tool,
     input: tool.input.extend({
@@ -207,7 +235,7 @@ function withRepoResolved(tool: RegistryTool, resolve: (value: string) => string
         (field.description ?? 'The repository').replace('forge:path', REPO_HINT),
       ),
     }),
-    run: (input, ctx) => tool.run(resolved(input), ctx),
+    run,
     ...(tool.subject && { subject: (input) => tool.subject?.(resolved(input)) }),
   }
 }

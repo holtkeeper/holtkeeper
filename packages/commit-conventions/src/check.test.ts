@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { checkBranchName, checkCommitMessage, checkConventions } from './check.ts'
+import { conventionalShape } from './title.ts'
 import type { BranchRules, CommitRules, Ruleset } from './types.ts'
 
 const commits: Ruleset<CommitRules> = {
@@ -48,7 +49,7 @@ describe('checkCommitMessage', () => {
       'warning: Write the title only, without a body',
     ])
     expect(messages('Add things')).toContain(
-      'error: The title must look like `type(scope): subject`',
+      'error: The title must look like `type(scope): [KEY-1] subject`',
     )
   })
 
@@ -79,7 +80,7 @@ describe('checkBranchName', () => {
       'The branch name must match `^(feat|fix)/`',
       'Start with one of `feat/`, `fix/`',
       'The name needs a ticket key matching `ABC-\\d+`',
-      'Use lowercase words joined by `-`',
+      'Use lowercase words joined by `-` (ticket keys keep their case)',
     ])
   })
 })
@@ -109,5 +110,16 @@ describe('checkConventions', () => {
     expect(checkConventions({ commit: commits, branch }, { branch: 'feature/x' })).toEqual([
       { target: 'branch', problems: [] },
     ])
+  })
+})
+
+describe('conventionalShape', () => {
+  test('puts the ticket key where the rule about it says', () => {
+    expect(conventionalShape()).toBe('type(scope): subject')
+    expect(conventionalShape({ required: true, placement: 'lead' })).toBe(
+      '[KEY-1] type(scope): subject',
+    )
+    expect(conventionalShape({ required: true, placement: 'scope' })).toBe('type(KEY-1): subject')
+    expect(conventionalShape({ required: false, placement: 'lead' })).toBe('type(scope): subject')
   })
 })
