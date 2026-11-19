@@ -908,17 +908,15 @@ describe('reviewMergeRequest', () => {
       ['fixed', 'resolved'],
       ['repeat', 'replied'],
       ['gone', 'resolved'],
-      ['claimed', 'replied'],
+      ['claimed', 'kept'],
       ['asked', 'kept'],
     ])
     expect(resolved).toEqual(['fixed', 'gone'])
-    // A reply that only claims a fix gets the status note; one that asks waits for the replies run.
+    // A waiting reply the code does not settle is left to the replies run, whatever it says.
     expect(tasks[1]?.prompt).toContain('Reply of jane:\nWhich global do you mean?')
-    expect(replies.find((r) => r.discussionId === 'claimed')?.body).toContain(
-      'No import of it yet.',
-    )
+    expect(replies.some((r) => r.discussionId === 'claimed')).toBe(false)
     expect(replies.some((r) => r.discussionId === 'asked')).toBe(false)
-    expect(marksOn('claimed-reply')).toEqual([])
+    expect(marksOn('claimed-reply')).toEqual(['seen'])
     expect(marksOn('asked-reply')).toEqual(['seen'])
     expect(replies.find((r) => r.discussionId === 'repeat')?.body).toContain('Still applies')
     // The repeat is answered in its thread; line 2 was reviewed before.

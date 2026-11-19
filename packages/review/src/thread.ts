@@ -108,33 +108,19 @@ export function suggestionMarkdown(replacement: string, above = 0): string {
 
 /** How the reviewer answers a reply, as system prompt lines shared by one thread and a batch. */
 export const ANSWER_RULES = [
-  '- `none` when the reply needs no answer: thanks, agreement, or a promise to change the code later. Nothing is posted. A reply that says the code is fine as it is, not needed or kept declines the comment and always gets an answer. A reply that says it is done, added or removed is never `none`: check the code and answer `fixed` or `open`.',
-  '- `fixed` when the reply says it is fixed or already there and the code confirms it: `body` is one sentence on what changed; the thread is resolved.',
-  '- `open` when the reply says it is fixed but the code still has the problem: `body` says what is still there.',
-  '- `explain` when your comment stands: clarify it briefly with evidence from the code.',
-  '- `concede` when the author is right; say so plainly and set resolve to true.',
-  '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
-  '- When you already answered earlier in the thread and the author declines again without new code or a new argument, the decision is theirs: say in one or two sentences that you leave it to them, naming the remaining risk once, with `explain` and resolve true. Never argue the same point twice.',
-  '- When the author declines a `minor` or `info` comment ("not needed", "it is fine", "we keep it"), the decision is theirs at once: one sentence that you leave it to them, with `explain` and resolve true.',
-  '- A first decline of a `major` or `critical` comment gets a short answer: at most three sentences with the concrete risk and what would settle it, resolve false. Do not restate the whole comment.',
-  '- In a general thread, take the state of your review threads from the list in the prompt: resolved threads are settled, never present them as open or blocking.',
+  'First decide what the latest reply does:',
+  '- it declines when it says the code stays as it is, now or in this merge request: "fine", "ok as is", "it will do for now", "we keep it", "not needed", "works in prod", "close the thread", in any language and however short, or it argues the comment is wrong. A partial change followed by such a reply is a decline too.',
+  '- it claims a fix when it only says it is done, changed, added or removed.',
+  '- otherwise it asks something, accepts the comment, or promises a change later.',
+  'Then answer with the first rule that fits:',
+  '1. A decline after you already answered a person in this thread, a decline of a `minor` or `info` comment, or a reply that asks to close the thread: the decision is theirs. `explain` in one or two sentences that you leave it to them, naming the remaining risk once; resolve true. Never argue the same point twice.',
+  '2. A first decline of a `major` or `critical` comment: `explain` in at most three sentences with the concrete risk and what would settle it; resolve false. Do not restate the whole comment.',
+  '3. A fix claim: check the code. `fixed` when it confirms the fix (`body` is one sentence on what changed; the thread is resolved), `open` when the problem is still there (`body` says what is left).',
+  '4. Thanks, agreement or a promise to change the code later, with no question: `none`; nothing is posted. A decline or a fix claim is never `none`.',
+  '5. Otherwise: `explain` to clarify your comment with evidence from the code, `concede` when the author is right (resolve true), or `update` when a different fix fits better (give `suggestion` with new-side `line`, and `startLine`, and the full replacement of exactly those lines).',
+  'In a general thread, take the state of your review threads from the list in the prompt: resolved threads are settled, never present them as open or blocking.',
   'Be short and concrete. Never be defensive.',
 ]
-
-/** Most answers Holtkeeper gives to people's replies in one thread; later replies get none. */
-export const MAX_THREAD_ANSWERS = 2
-
-/** How many of Holtkeeper's notes in the thread answer a person's note right before them. */
-export function answersIn(
-  notes: readonly { author: string; body: string; system?: boolean }[],
-  botUsername?: string,
-): number {
-  const visible = notes.filter((note) => !note.system)
-  return visible.filter((note, index) => {
-    const before = visible[index - 1]
-    return before !== undefined && isOurNote(note, botUsername) && !isOurNote(before, botUsername)
-  }).length
-}
 
 /** The thread's notes as the agent reads them: who said what, our notes named `reviewer (you)`. */
 export function threadConversation(

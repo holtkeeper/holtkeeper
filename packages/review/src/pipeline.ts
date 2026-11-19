@@ -1184,15 +1184,13 @@ async function reviewOnce(input: ReviewRun, started: number): Promise<ReviewData
         action: 'resolved',
         reason: 'The file is no longer changed by this merge request.',
       })
-    // A reply that asks or argues gets a full answer from the replies run, not a status note.
-    else if (thread.reply && verdict.needsAnswer)
+    // A reply waits for the replies run, which answers it with the code at hand; a status note
+    // here would read past a decline and leave the reply unanswered.
+    else if (thread.reply && verdict.status !== 'fixed')
       threads.push({ ...base, action: 'kept', reason: verdict.note })
     else if (verdict.status === 'fixed')
       threads.push({ ...base, action: 'resolved', reason: verdict.note })
-    else if (
-      verdict.status === 'still-relevant' &&
-      (repeated.has(thread.discussionId) || thread.reply)
-    )
+    else if (verdict.status === 'still-relevant' && repeated.has(thread.discussionId))
       threads.push({ ...base, action: 'replied', reason: verdict.note })
     else threads.push({ ...base, action: 'kept', reason: verdict.note })
   }

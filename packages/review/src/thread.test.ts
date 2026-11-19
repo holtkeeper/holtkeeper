@@ -4,7 +4,7 @@ import type { Discussion } from '@holtkeeper/forge'
 
 import { fakeAgent, fakeForge } from '../test/fakes.ts'
 import { findingMarker } from './dedupe.ts'
-import { answersIn, replyToThread, suggestionMarkdown } from './thread.ts'
+import { replyToThread, suggestionMarkdown } from './thread.ts'
 
 const repo = { forge: 'work', path: 'games/a' }
 
@@ -99,20 +99,6 @@ describe('replyToThread', () => {
     expect(tasks).toEqual([])
     expect(replies).toEqual([])
   })
-})
-
-const note = (author: string, body: string) => ({ author, body, system: false })
-
-test('answersIn counts our notes that answer a person, not status notes after commits', () => {
-  const notes = [
-    note('bot', `Bug ${findingMarker('f1')}`),
-    note('bot', 'Still applies <!-- holtkeeper:review reply -->'),
-    note('ann', 'Not needed.'),
-    note('bot', 'Here is why <!-- holtkeeper:review reply -->'),
-    { author: 'ann', body: 'changed the line', system: true },
-    note('ann', 'Still not needed.'),
-  ]
-  expect(answersIn(notes, 'bot')).toBe(1)
 })
 
 test('suggestionMarkdown', () => {

@@ -122,7 +122,7 @@ describe('answerReplies', () => {
     })
     const { outcomes, usage } = await run(forge, agent)
     expect(tasks.map((task) => [task.taskKind, task.tier])).toEqual([['review', 'main']])
-    expect(tasks[0]?.system).toContain('`none` when the reply needs no answer')
+    expect(tasks[0]?.system).toContain('A decline or a fix claim is never `none`')
     expect(tasks[0]?.prompt).toContain('## Thread d1 on src/area.ts:2')
     expect(tasks[0]?.prompt).toContain('## Thread d3 on src/area.ts:2')
     expect(outcomes).toEqual([
@@ -184,24 +184,24 @@ describe('answerReplies', () => {
     expect(tasks).toEqual([])
   })
 
-  test('stops answering a thread after the answer limit and marks the reply done', async () => {
+  test('answers every reply however long the thread, and resolves when the author asks', async () => {
     const argued = thread('d1', [
       ['bot', finding('Radius is never checked')],
       ['ann', 'Not needed.'],
       ['bot', replyBody('A negative radius gives a negative area.')],
       ['ann', 'Still not needed.'],
-      ['bot', replyBody('Your call then.')],
-      ['ann', 'It is fine.'],
+      ['bot', replyBody('A caller may still pass one.')],
+      ['ann', 'We live with it, close the thread.'],
     ])
-    const { forge, replies, marksOn } = fakeForge({ files: [], discussions: [argued] })
-    const { agent, tasks } = fakeAgent({})
+    const { forge, replies, resolved } = fakeForge({ files: [], discussions: [argued] })
+    const { agent, tasks } = fakeAgent({
+      review: [{ action: 'explain', body: 'Your call, closing it.', resolve: true }],
+    })
     const { outcomes } = await run(forge, agent)
-    expect(tasks).toEqual([])
-    expect(replies).toEqual([])
-    expect(outcomes.map((o) => [o.discussionId, o.action, o.reason])).toEqual([
-      ['d1', 'skipped', 'answer limit reached'],
-    ])
-    expect(marksOn(replyOf(argued))).toEqual(['done'])
+    expect(tasks).toHaveLength(1)
+    expect(replies.map((r) => r.discussionId)).toEqual(['d1'])
+    expect(resolved).toEqual(['d1'])
+    expect(outcomes.map((o) => [o.action, o.resolved])).toEqual([['explain', true]])
   })
 
   test('answers a general thread with the current state of the review threads', async () => {

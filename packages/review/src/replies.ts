@@ -12,10 +12,8 @@ import type { ReviewMessages } from './messages.ts'
 import type { ReviewUsage } from './schema.ts'
 import {
   ANSWER_RULES,
-  MAX_THREAD_ANSWERS,
   type ThreadAnswer,
   answerSchema,
-  answersIn,
   codeAround,
   postThreadAnswer,
   replyToThread,
@@ -213,8 +211,7 @@ export interface AnswerRepliesOptions {
  * for a single thread and for one a batch left out. Each answer is a reply in words, a `fixed`
  * note that resolves the thread once the code confirms the fix, an `open` note on what is still
  * there, or `none`: no note, only the `done` mark (outcome `ack`). A thread that got a newer note
- * while the agent worked is skipped: that note queues its own run. A thread Holtkeeper already
- * answered `MAX_THREAD_ANSWERS` times gets only the `done` mark. General threads are answered with
+ * while the agent worked is skipped: that note queues its own run. General threads are answered with
  * the current state of our diff threads (`reviewThreadsState`). Answered notes lose the `seen`
  * mark.
  */
@@ -267,30 +264,11 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
     record(item, { action: 'ack', replied: false, resolved: false })
   }
 
-  // Past the answer limit the decision is the author's: no more notes, only the done mark.
-  const capped = pending.filter(
-    (item) => answersIn(item.discussion.notes, options.botUsername) >= MAX_THREAD_ANSWERS,
-  )
-  for (const item of capped) {
-    // oxlint-disable-next-line no-await-in-loop -- sequential: forges rate-limit reactions
-    await forge.addNoteMark?.(repo.path, mr.id, item.reply.id, 'done').catch(() => undefined)
-    // oxlint-disable-next-line no-await-in-loop
-    await unmark(item)
-    record(item, {
-      action: 'skipped',
-      replied: false,
-      resolved: false,
-      reason: 'answer limit reached',
-    })
-  }
-  const open = pending.filter((item) => !capped.includes(item))
-  if (open.length === 0) return done()
-
   const workspace = (await options.workspace?.()) ?? {}
   let texts: Promise<ReviewMessages | undefined> | undefined
   const messages = () => (texts ??= options.messages?.() ?? Promise.resolve(undefined))
 
-  const general = open.some((item) => !item.discussion.position)
+  const general = pending.some((item) => !item.discussion.position)
   const reviewState = general
     ? reviewThreadsState(
         (await forge.listDiscussions?.(repo.path, mr.id).catch(() => undefined)) ?? [],
@@ -328,9 +306,8 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
     })
   }
 
-  const queue = open
-  for (let start = 0; start < queue.length; start += REPLY_BATCH) {
-    const batch = queue.slice(start, start + REPLY_BATCH)
+  for (let start = 0; start < pending.length; start += REPLY_BATCH) {
+    const batch = pending.slice(start, start + REPLY_BATCH)
     const [only] = batch
     if (batch.length === 1 && only) {
       // oxlint-disable-next-line no-await-in-loop -- batches run one after another on purpose
