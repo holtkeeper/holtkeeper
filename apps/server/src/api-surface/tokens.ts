@@ -70,10 +70,25 @@ type StoredToken = z.infer<typeof storedTokenSchema>
 
 type ToolsetChoices = Record<string, boolean>
 
-/** The toolsets a token serves: its choices over the catalog defaults, in catalog order. */
+/** Toolsets that were merged into another: a choice stored under the old name counts for it. */
+const MERGED_TOOLSETS: Readonly<Record<string, readonly string[]>> = {
+  packages: ['catalog', 'libraries'],
+}
+
+/**
+ * The toolsets a token serves: its choices over the catalog defaults, in catalog order. A
+ * toolset its owner never chose for is off when they had turned off one of the toolsets it
+ * replaced (`MERGED_TOOLSETS`), so a merge never serves what the owner had removed.
+ */
 const toolsetsOf = (choices: ToolsetChoices = {}): McpToolsetName[] =>
   mcpToolsetCatalog
-    .filter((toolset) => choices[toolset.name] ?? toolset.defaultOn)
+    .filter(
+      (toolset) =>
+        choices[toolset.name] ??
+        ((MERGED_TOOLSETS[toolset.name] ?? []).some((old) => choices[old] === false)
+          ? false
+          : toolset.defaultOn),
+    )
     .map((toolset) => toolset.name)
 
 /** The choices that make a token serve exactly `toolsets`: only differences from the defaults. */

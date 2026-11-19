@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Holtkeeper's MCP endpoint offers about fifteen tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis; only `ask`, where an administrator turned it on, runs an AI agent. Every tool reads, except `propose_learning`, which leaves a pending learning people may reject, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
+Holtkeeper's MCP endpoint offers about fifteen tools for developers at work in a repository, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis; only `ask`, where an administrator turned it on, and a review requested through `code_review` run an AI agent and spend the AI budget. Every tool reads, except three: `propose_learning`, which leaves a pending learning people may reject, `code_review`, which queues at most one review per merge request head, and `report_secret_exposure`, which reports a leaked secret. Fleet-wide views (security findings, licenses, stack usage), release state and jobs stay in the panel and in [Chat](/guide/chat/threads/). This page walks through the tools by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
 
 A repository is named by its path (`acme/checkout-web`): Holtkeeper works out the forge. A git remote URL (`git@gitlab.example.com:acme/checkout-web.git`) and the full `forge:path` (`gitlab:acme/checkout-web`) work too, and `forge:path` is needed only when several forges have a repository at that path. Answers name repositories as `forge:path`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
 
@@ -119,7 +119,7 @@ Every statement names where it comes from: a rule or learning (`[rule:<id>]`, `[
 What to keep in mind:
 
 - It answers from what Holtkeeper indexed. It cannot read your working tree, and it does not search the source of other repositories beyond indexed usages, package source and docs.
-- It takes up to 90 seconds and spends the AI budget, so use the direct tools for a single lookup. Clients that support progress see which tools it reads meanwhile.
+- It takes up to 50 seconds and spends the AI budget, so use the direct tools for a single lookup. Clients that support progress see which tools it reads meanwhile.
 - Limits are set in `mcp.ask`: a spend cap per answer, questions per person per day and a weekly spend for everyone. Repeating a question within ten minutes returns the earlier answer and is not counted.
 
 ## Reviews of your merge request

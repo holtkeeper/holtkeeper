@@ -80,7 +80,12 @@ import { type AssetToolsAccess, assetsToolset, storedAssetTools } from './tools/
 import { knowledgeAccessOf } from './tools/knowledge.ts'
 import { type OpsToolsAccess, opsToolset } from './tools/ops.ts'
 import { type PackageToolsContext, packagesToolset } from './tools/packages.ts'
-import { agentCatalogContext, agentRulesAccess, taskToolsets } from './tools/registry.ts'
+import {
+  agentCatalogContext,
+  agentRulesAccess,
+  dependenciesMissing,
+  taskToolsets,
+} from './tools/registry.ts'
 import { type ReleaseToolsAccess, releasesToolset } from './tools/releases.ts'
 import type { SupplyToolsAccess } from './tools/repos.ts'
 import { type RulesAccess, rulesToolset, testIdsReader } from './tools/rules.ts'
@@ -213,8 +218,9 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
 /**
  * `agent` with what server tasks get: the toolsets `taskToolsets` names for the task kind out of
  * `code`, `docs`, `knowledge`, `packages` (when `packages` is given), `rules` (when `rules` is given), `releases` (when `releases` is given), `ops` (when `ops` is given) and `assets` (when `assets` is given), then the task's own toolsets (one of the same name wins); every tool result
- * stays within `RESULT_CAPS`. Tasks that mount `packages` also get `externalFiles` over it, so
- * reads of dependencies the checkout does not hold are answered from the package index. A task without its own `context` gets the repository's resolved
+ * stays within `RESULT_CAPS`. Review tasks that mount `packages` also get `externalFiles` over it:
+ * their checkouts have no dependencies installed, so reads of them are answered from the package
+ * index. Other tasks install dependencies and read them from disk. A task without its own `context` gets the repository's resolved
  * rules for its task kind (`ruleAgentOf`) as `context`; a task that brings a `context` (the
  * review, which resolves rules with the files of its checkout) keeps it as is. No external MCP server is added. `budgets` may deny a run before it starts and caps the cost of the runs it allows
  * (`maxCostUsd`). With `artifacts`, every run that reached the provider stores its JSONL
@@ -356,7 +362,9 @@ export function withServerDefaults(
         if (context) onEvidence?.({ source: 'context', text: context })
         const external =
           task.externalFiles ??
-          (options.packages && taskToolsets(taskKind).includes('packages')
+          (options.packages &&
+          dependenciesMissing(taskKind) &&
+          taskToolsets(taskKind).includes('packages')
             ? externalFiles(options.packages)
             : undefined)
         prepared = {

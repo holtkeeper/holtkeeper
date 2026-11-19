@@ -986,6 +986,13 @@ describe('usage routes and tools', () => {
       asAdmin,
     )
     expect(apiOnly.content[0]?.text).not.toContain('## Uses the upgrade affects')
+    const fromConsumer = await callTool(
+      'package_changes',
+      { package: '@acme/ui', from: '1.0.0', to: '1.1.0', repo: 'work:games/a' },
+      asAdmin,
+    )
+    expect(fromConsumer.isError).toBeUndefined()
+    expect(fromConsumer.content[0]?.text).toBe(changes)
 
     const used = await callTool('package_usage', { package: '@acme/ui' }, asAdmin)
     expect(used.content[0]?.text).toContain(

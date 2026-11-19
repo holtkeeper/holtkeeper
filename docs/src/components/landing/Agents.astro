@@ -5,9 +5,9 @@ claude mcp add --transport http holtkeeper \\
   --header "Authorization: Bearer $HOLTKEEPER_TOKEN"`
 
 const tools = [
-  ['search_symbols', 'Find an exported name across every package'],
+  ['find_packages', 'Find a package or an exported name'],
   ['evaluate_dependency', 'Who uses it, advisories, licenses, bundle share'],
-  ['upgrade_impact', 'The uses an upgrade breaks'],
+  ['package_changes', 'What an upgrade changes and breaks'],
   ['repo_rules', 'Team rules for one repository'],
   ['release_status', 'What is ready to ship and what blocks it'],
   ['why_job', 'Why a run failed or is stuck'],

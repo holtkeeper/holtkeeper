@@ -199,7 +199,7 @@ const renderRequested = (resolved: ResolvedRules, readWith: string): string[] =>
           `Rules to read with ${readWith} when they fit the work:`,
           ...resolved.requested.map(
             (rule) =>
-              `- \`${rule.id}\`${rule.title === rule.id ? '' : ` ${rule.title}`}${rule.source === rule.id ? '' : ` (${rule.source})`}: ${rule.description}`,
+              `- \`${rule.source === rule.id ? rule.id : `rule:${rule.id}`}\`${rule.title === rule.id ? '' : ` ${rule.title}`}${rule.source === rule.id ? '' : ` (${rule.source})`}: ${rule.description}`,
           ),
         ].join('\n'),
       ]
@@ -236,7 +236,11 @@ export async function readRule(
     ].join('\n\n')
   }
   const ruleId = key.startsWith('rule:') ? key.slice('rule:'.length) : key
-  const rule = repo && !key.startsWith('rule:') ? undefined : await access.rule(ruleId)
+  if (repo && !key.startsWith('rule:')) {
+    const file = await access.repoFile(repo, key)
+    if (file) return `# ${file.path} (${repo})\n\n${file.text.trim()}`
+  }
+  const rule = await access.rule(ruleId)
   if (rule)
     return [
       `# [rule:${rule.id}] ${rule.title}`,
@@ -248,10 +252,6 @@ export async function readRule(
       ].join('\n'),
       rule.body.trim(),
     ].join('\n\n')
-  if (repo) {
-    const file = await access.repoFile(repo, key)
-    if (file) return `# ${file.path} (${repo})\n\n${file.text.trim()}`
-  }
   throw new ToolError(
     repo
       ? `No rule or rules file ${key} in \`${repo}\`.`
@@ -375,6 +375,7 @@ function repoRulesTools(
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `topics` is in the schema only when there are topics
         const wanted = (input as { topics?: string[] }).topics ?? []
         const sections: string[] = []
+        let rulesServed = false
         if (rules) {
           const resolved = await rules
             .resolve(repo, { agent: agent ?? 'task', ...(files && { files }) })
@@ -382,6 +383,7 @@ function repoRulesTools(
               if (wanted.length && error instanceof ToolError) return error
               throw error
             })
+          rulesServed = Boolean(resolved) && !(resolved instanceof ToolError)
           if (!resolved && !wanted.length) throw noRepo(repo)
           if (!resolved) sections.push(`You may not read the rules of \`${repo}\`.`)
           else if (resolved instanceof ToolError) sections.push(resolved.message)
@@ -396,12 +398,21 @@ function repoRulesTools(
               ...(resolved.warnings.length ? [`Notes: ${resolved.warnings.join(' ')}`] : []),
             )
         }
-        for (const topic of topics.filter((item) => wanted.includes(item.name)))
+        let served = rulesServed
+        for (const topic of topics.filter((item) => wanted.includes(item.name))) {
+          const title = topicTitles[topic.name] ?? topic.name
+          // oxlint-disable-next-line no-await-in-loop -- a few topics, kept in order
+          const text = await topic.render(repo, files ?? []).catch((error: unknown) => {
+            if (error instanceof ToolError) return undefined
+            throw error
+          })
+          if (text !== undefined) served = true
           sections.push(
-            `# ${topicTitles[topic.name] ?? topic.name} of \`${repo}\``,
-            // oxlint-disable-next-line no-await-in-loop -- a few topics, kept in order
-            await topic.render(repo, files ?? []),
+            `# ${title} of \`${repo}\``,
+            text ?? `You may not read the ${title.toLowerCase()} of \`${repo}\`.`,
           )
+        }
+        if (!served && wanted.length) throw noRepo(repo)
         return sections.join('\n\n')
       },
       subject: ({ repo }) => repo,

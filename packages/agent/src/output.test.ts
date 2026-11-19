@@ -66,4 +66,17 @@ describe('answerInToolCall', () => {
     expect(answerInToolCall('lookup', 'not json', verdictSchema)).toBeUndefined()
     expect(answerInToolCall('lookup', '{"path":"src/a.ts"}', verdictSchema)).toBeUndefined()
   })
+
+  test('a lookup tool is not an answer, whatever the schema lets through', () => {
+    const loose = z.object({
+      findings: z.array(z.string()).default([]),
+      summary: z.string().optional(),
+    })
+    expect(answerInToolCall('search_code', '{"query":"foo"}', loose)).toBeUndefined()
+    expect(answerInToolCall('read_json', '{"path":"package.json"}', loose)).toBeUndefined()
+    expect(answerInToolCall('list_files', '{"exclude":[]}', z.array(z.string()))).toBeUndefined()
+    expect(answerInToolCall('submit', '{"summary":"fine"}', loose)).toEqual({
+      answer: { summary: 'fine' },
+    })
+  })
 })

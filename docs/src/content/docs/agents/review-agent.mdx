@@ -87,8 +87,8 @@ Every summary ends with this request: when a comment is wrong or misses the poin
 
 A coding agent connected over MCP asks for a review of its own merge request and reads it with one tool, `code_review`, so it can fix findings without you copying them from the forge. After pushing a branch or opening a merge request it offers you a review, then calls the tool with the repository and the branch, or the merge request number. There is nothing else to set: it is the same review a push starts.
 
-- **It needs a merge request.** For a branch without one the tool says to push the branch and open a merge request first. It also says when Holtkeeper's forge user cannot read the repository's merge requests, so a maintainer can give it access.
-- **It makes sure a review is coming.** When no review covers the newest commit and none is queued or running, the tool queues one. Where reviews start by themselves on new commits, the first call only notes the request and leaves the next minute to the automatic review; a later call queues one if none came. Either way a commit is never reviewed twice.
+- **It needs a merge request.** For a branch without one the tool says to push the branch and open a merge request first. It also says when Holtkeeper's forge user cannot read the repository's merge requests, so a maintainer can give it access, and tells that apart from a wrong merge request number and from a forge that did not answer.
+- **It makes sure a review is coming.** When no review covers the newest commit and none is queued or running, the tool queues one. Where reviews start by themselves on new commits, the first call only notes the request and leaves the next minute to the automatic review; a later call queues one if none came. Either way a commit is never reviewed twice, also when two calls arrive together, and a commit whose review found nothing new counts as reviewed. A review the AI budget stopped is not queued again until the weekly budget resets, one that failed is tried once more for that commit, and a canceled one stays canceled.
 - **Call it again for the findings.** A review takes a few minutes; the same call then returns them.
 
 ```text
@@ -124,6 +124,10 @@ The answer has:
 | A review is on its way                     | Reviews start by themselves on new commits; call again in a few minutes.                                              |
 | A review is queued or running              | Call `code_review` again in a few minutes.                                                                            |
 | The repository is frozen                   | Holtkeeper may not change it, so no review was queued; a maintainer can lift the freeze.                              |
+| The AI budget stopped the review           | It was not queued again this week; call again after the weekly budget resets, or have it raised.                      |
+| The review failed or was canceled          | It was not queued again; comment `/holtkeeper review` on the merge request or push a new commit.                      |
+| Could not tell whether it was reviewed     | Nothing was queued; comment `/holtkeeper review` on the merge request to ask for a review.                            |
+| The newest commits brought nothing new     | The review looked at them and found nothing to review.                                                                |
 | Fix the open threads                       | Fix them or answer in the thread, push and call again; the next review re-checks them and resolves fixed ones.        |
 | Nothing left to fix                        | The newest review is clean and nothing is running.                                                                    |
 

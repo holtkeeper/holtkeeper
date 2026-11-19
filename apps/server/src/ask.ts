@@ -10,7 +10,7 @@ import type { HoltkeeperConfig } from '@holtkeeper/core'
 import { type McpAsk, mcpAskSchema, resolveGlobalSetting } from '@holtkeeper/settings'
 import type { AiUsageStore, KvStore, SettingStore } from '@holtkeeper/store'
 
-import type { AgentEvidence, AgentJob } from './agent.ts'
+import { type AgentEvidence, type AgentJob, providerReference } from './agent.ts'
 import { type Citation, checkAnswer } from './ask-citations.ts'
 import { repoTarget } from './context.ts'
 import type { AskAccess, AskInput } from './tools/ask.ts'
@@ -22,8 +22,11 @@ const ASK_LIMITS = {
   trimToolResults: { maxChars: 60_000, keepLast: 3 },
 } as const
 
-/** How long one answer may take before it is given up. */
-const ASK_TIMEOUT_MS = 90_000
+/**
+ * How long one answer may take before it is given up: under the 60 seconds MCP clients wait for
+ * a tool by default.
+ */
+const ASK_TIMEOUT_MS = 50_000
 
 /** How long an answer is reused for the same person asking the same question. */
 const CACHE_TTL_MS = 10 * 60_000
@@ -65,12 +68,16 @@ export interface AskDeps {
   /** Runs of this week, for the weekly cap; without it the cap is not checked. */
   aiUsage?: Pick<AiUsageStore, 'aggregate'>
   /** Keeps the per-person daily count; without it the count is not kept. */
-  kv?: Pick<KvStore, 'get' | 'set'>
+  kv?: Pick<KvStore, 'get' | 'set' | 'compareAndSet'>
   agentFor?: AskAgentFor
   /** The asker's home teams, which own the stand-in target of questions without a repository. */
   homeTeams: (principal: Principal) => Promise<string[]>
+  /** Whether the asker may read the repositories and the rules of team `team`. */
+  canReadTeam: (principal: Principal, team: string) => boolean
   /** Whether the asker may read `repo` (`forge:path`) of a configured forge. */
   canReadRepo: (principal: Principal, repo: string) => boolean
+  /** Whether the asker may read the rules of `repo`; without it the run starts without them. */
+  canReadRules: (principal: Principal, repo: RepoTarget) => boolean
   now: () => Date
   log?: (line: string) => void
 }
@@ -127,6 +134,37 @@ export function renderAnswer(
   }
 }
 
+/** Context of a run for an asker who may not read the repository's rules, in place of them. */
+const NO_RULES_CONTEXT =
+  'The asker may not read the rules of this repository, so none are given here.'
+
+const DAY_KEY_TTL_SECONDS = 2 * 24 * 60 * 60
+
+/**
+ * Counts one more question under `key` unless `limit` is reached; `false` when it is. Atomic
+ * across processes where the store has `compareAndSet`.
+ */
+async function takeSlot(
+  kv: NonNullable<AskDeps['kv']>,
+  key: string,
+  limit: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    // oxlint-disable-next-line no-await-in-loop -- retried only when another write won
+    const before = await kv.get(key)
+    const asked = Number(before ?? 0) || 0
+    if (asked >= limit) return false
+    if (!kv.compareAndSet) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await kv.set(key, asked + 1, DAY_KEY_TTL_SECONDS)
+      return true
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    if (await kv.compareAndSet(key, before, asked + 1, DAY_KEY_TTL_SECONDS)) return true
+  }
+  return false
+}
+
 const parseRepo = (value: string) => {
   const separator = value.indexOf(':')
   return { forge: value.slice(0, separator), path: value.slice(separator + 1) }
@@ -134,9 +172,10 @@ const parseRepo = (value: string) => {
 
 /**
  * Answers questions of MCP callers: `accessFor` is the `AskAccess` of one principal while the
- * `mcp.ask` setting is on and an agent can be had, else `undefined`. An answer runs as task kind
+ * `mcp.ask` setting is on, an AI provider is set (`llm.provider`) and an agent can be had, else
+ * `undefined`. An answer runs as task kind
  * `ask` on the asked repository (or a stand-in owned by the asker's home teams), interactive and
- * read-only with the asker's reach, capped at `perAnswerUsd` and 90 seconds; its sources are
+ * read-only with the asker's reach (home teams and rules only where the asker may read them), capped at `perAnswerUsd` and 50 seconds; its sources are
  * checked against what the run read (`renderAnswer`). Each person gets `perPersonPerDay` answers
  * a day, `ask` as a whole `weeklyUsd` a week; grounded answers are reused for ten minutes per
  * person without counting.
@@ -172,12 +211,6 @@ export function askService(deps: AskDeps) {
     if (input.repo && !deps.canReadRepo(principal, input.repo))
       throw new ToolError(`No repository ${input.repo} you can read; pass forge:path.`)
 
-    const dayKey = `mcp-ask:${principal.id}:${now.toISOString().slice(0, 10)}`
-    const asked = Number((await deps.kv?.get(dayKey)) ?? 0) || 0
-    if (asked >= setting.perPersonPerDay)
-      throw new ToolError(
-        `You asked ${asked} questions today, the daily limit; use the direct tools until tomorrow.`,
-      )
     if (deps.aiUsage) {
       const week = weekRange(now)
       const spent = await usageTotals(deps.aiUsage, { from: week.from, taskKind: 'ask' })
@@ -189,7 +222,14 @@ export function askService(deps: AskDeps) {
 
     const target: RepoTarget = input.repo
       ? repoTarget(deps.config, parseRepo(input.repo))
-      : { forge: 'mcp', path: 'ask', teams: await deps.homeTeams(principal) }
+      : {
+          forge: 'mcp',
+          path: 'ask',
+          teams: (await deps.homeTeams(principal)).filter((team) =>
+            deps.canReadTeam(principal, team),
+          ),
+        }
+    const rulesReadable = !input.repo || deps.canReadRules(principal, target)
     const evidence: AgentEvidence[] = []
     const agent = await agentFor(target, {
       actor: principal.id,
@@ -203,13 +243,18 @@ export function askService(deps: AskDeps) {
     })
     if (!agent) throw new ToolError('No AI provider is configured, so ask cannot answer.')
 
-    await deps.kv?.set(dayKey, asked + 1, 2 * 24 * 60 * 60)
+    const dayKey = `mcp-ask:${principal.id}:${now.toISOString().slice(0, 10)}`
+    if (deps.kv && !(await takeSlot(deps.kv, dayKey, setting.perPersonPerDay)))
+      throw new ToolError(
+        `You asked ${setting.perPersonPerDay} questions today, the daily limit; use the direct tools until tomorrow.`,
+      )
     const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-ask-'))
     try {
       const result = await agent.run({
         dir,
         system: ASK_SYSTEM,
         prompt: buildAskPrompt(input),
+        ...(!rulesReadable && { context: NO_RULES_CONTEXT }),
         taskKind: 'ask',
         capabilities: [],
         ...ASK_LIMITS,
@@ -247,6 +292,7 @@ export function askService(deps: AskDeps) {
       if (!agentFor) return undefined
       const setting = mcpAskOf(await deps.settings.list('mcp.ask'))
       if (!setting.enabled) return undefined
+      if (!providerReference(await deps.settings.list('llm.provider'))) return undefined
       return { ask: (input, ctx) => answer(principal, setting, agentFor, input, ctx) }
     },
   }

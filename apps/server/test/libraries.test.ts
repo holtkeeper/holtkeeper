@@ -795,6 +795,113 @@ describe('library MCP tools', () => {
     expect(toolsetFor('libs/ui').tools.map((tool) => tool.name)).not.toContain('package_docs')
   })
 
+  test('an organization package resolves when repo is the repository that uses it', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'libs/ui' },
+      kind: 'api-surface',
+      createdAt: at,
+      data: { packages: [{ ...zodApi('2.0.0', ['RoundWidget']), name: '@acme/widgets' }] },
+    })
+    const api = await callTool('package_api', { package: '@acme/widgets', repo: 'work:games/a' })
+    expect(api.isError).toBeUndefined()
+    expect(api.text).toContain('# @acme/widgets@2.0.0')
+    expect(api.text).toContain('Repository: `work:libs/ui`')
+    const versions = await callTool('package_changes', {
+      package: '@acme/widgets',
+      repo: 'work:games/a',
+    })
+    expect(versions.text).toContain('# @acme/widgets in `work:libs/ui` (organization package)')
+  })
+
+  test('package_changes targets the newest release and starts from what the repository uses', async () => {
+    await libraries.putVersion({
+      ...zod,
+      version: '3.23.0',
+      roles: [],
+      usedBy: [],
+      api: await putApi('3.23.0', ['object', 'string', 'nativeEnum']),
+      sources: { archive: { status: 'ok', at }, api: { status: 'ok', at } },
+      updatedAt: at,
+    })
+    const header = 'zod 3.22.0 → 4.0.0 (npm, third-party)'
+    const fromOnly = await callTool('package_changes', {
+      package: 'zod',
+      from: '3.22.0',
+      repo: 'work:libs/ui',
+    })
+    expect(fromOnly.text).toStartWith(header)
+    expect(fromOnly.text).not.toContain('must be lower than')
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const changes = toolsetFor('libs/ui').tools.find((tool) => tool.name === 'package_changes')!
+    expect(await changes.run({ package: 'zod', from: '3.22.0' }, ctx)).toStartWith(header)
+
+    const used = await callTool('package_changes', {
+      package: 'zod',
+      to: '4.0.0',
+      repo: 'work:libs/ui',
+    })
+    expect(used.text).toStartWith(header)
+    const previous = await callTool('package_changes', { package: 'zod', to: '4.0.0' })
+    expect(previous.text).toStartWith('zod 3.23.0 → 4.0.0 (npm, third-party)')
+  })
+
+  test('find_packages searches the same with and without repo', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'libs/ui' },
+      kind: 'api-surface',
+      createdAt: at,
+      data: { packages: [{ ...zodApi('2.0.0', ['RoundWidget']), name: '@acme/widgets' }] },
+    })
+    for (const query of ['zod', 'widget']) {
+      const plain = await callTool('find_packages', { query })
+      const narrowed = await callTool('find_packages', { query, repo: 'work:games/a' })
+      expect(narrowed.text).toBe(plain.text)
+    }
+    const zodHits = await callTool('find_packages', { query: 'zod', repo: 'work:games/a' })
+    expect(zodHits.text).toContain('## Third-party libraries\n- **zod** (npm)')
+    const widgetHits = await callTool('find_packages', { query: 'widget', repo: 'work:games/a' })
+    expect(widgetHits.text).toContain('## Organization packages\n- **@acme/widgets**@2.0.0')
+  })
+
+  test('package_changes still gives the changelog when a version has no indexed API', async () => {
+    const noApi = await callTool('package_changes', {
+      package: 'left-pad',
+      from: '1.0.0',
+      to: '1.3.0',
+    })
+    expect(noApi.isError).toBeUndefined()
+    expect(noApi.text).toStartWith('left-pad 1.0.0 → 1.3.0 (npm, third-party)')
+    expect(noApi.text).toContain('No API diff or upgrade impact:')
+    expect(noApi.text).toContain('# Changes of left-pad in (1.0.0, 1.3.0]')
+
+    const oneMissing = await callTool('package_changes', {
+      package: 'zod',
+      from: '3.20.0',
+      to: '4.0.0',
+      include: ['notes'],
+    })
+    expect(oneMissing.isError).toBeUndefined()
+    expect(oneMissing.text).toContain(
+      'No API diff or upgrade impact: zod@3.20.0 has no indexed API',
+    )
+    expect(oneMissing.text).toContain('# Changes of zod in (3.20.0, 4.0.0]')
+
+    const apiOnly = await callTool('package_changes', {
+      package: 'zod',
+      from: '3.20.0',
+      to: '4.0.0',
+      include: ['api'],
+    })
+    expect(apiOnly.isError).toBe(true)
+    const unknown = await callTool('package_changes', {
+      package: 'no-such-lib',
+      from: '1.0.0',
+      to: '2.0.0',
+    })
+    expect(unknown.isError).toBe(true)
+    expect(unknown.text).toContain('No package no-such-lib is indexed')
+  })
+
   test('Go library API tools take module and package paths and pair packages across majors', async () => {
     const kit = { ecosystem: 'Go', name: 'example.com/acme/kit' } as const
     await libraries.putLibrary({ ...kit, latest: 'v2.0.0', sources: {}, updatedAt: at })

@@ -41,7 +41,9 @@ const forge = {
   findMergeRequest: async (_repo: string, query: { sourceBranch: string }) =>
     query.sourceBranch === mr.sourceBranch ? mr : undefined,
   getMergeRequest: async (_repo: string, id: number) => {
-    if (id !== mr.id) throw new Error('not found')
+    if (id === 500) throw Object.assign(new Error('bad gateway'), { status: 502 })
+    if (id === 403) throw Object.assign(new Error('forbidden'), { status: 403 })
+    if (id !== mr.id) throw Object.assign(new Error('not found'), { status: 404 })
     return mr
   },
   listDiscussions: async () => discussions,
@@ -115,6 +117,36 @@ beforeEach(() => {
   clock = new Date('2026-11-10T14:00:00.000Z')
   queued.length = 0
 })
+
+const endJob = async (how: 'fail' | 'block' | 'cancel') => {
+  const job = await store.jobs.enqueue({
+    analyzer: 'review',
+    repo,
+    ref: mr.headSha,
+    options: { mergeRequest: mr.id },
+    trigger: 'webhook',
+    createdAt: '2026-11-10T13:00:00.000Z',
+  })
+  const at = '2026-11-10T13:05:00.000Z'
+  if (how === 'cancel') return store.jobs.cancel(job.id, at)
+  await store.jobs.claim('w1', '2026-11-10T13:01:00.000Z')
+  return how === 'block'
+    ? store.jobs.block(job.id, { at, error: 'weekly AI budget reached' })
+    : store.jobs.fail(job.id, { at, error: 'provider error' })
+}
+const queuedJobs = async () => (await reviewJobs()).filter((job) => job.status === 'queued')
+
+const otherReviews = async (count: number) => {
+  for (let index = 0; index < count; index++)
+    // oxlint-disable-next-line no-await-in-loop -- fixtures in order
+    await store.analyses.add({
+      repo,
+      kind: 'review',
+      ref: `!${100 + index}`,
+      createdAt: `2026-11-11T10:${String(index % 60).padStart(2, '0')}:${String(index % 50).padStart(2, '0')}.${String(index).padStart(3, '0')}Z`,
+      data: review({}),
+    })
+}
 
 describe('code_review', () => {
   test('finds the merge request by branch and lists findings, open threads and what to do', async () => {
@@ -233,10 +265,96 @@ describe('code_review', () => {
     expect(await reviewJobs()).toHaveLength(0)
   })
 
-  test('says so when Holtkeeper cannot read the merge request', async () => {
+  test('tells a missing merge request, missing access and a forge outage apart', async () => {
     expect(statusText({ repo: 'work:shapes/widget', mergeRequest: 8 })).rejects.toThrow(
-      'Holtkeeper could not read merge requests of work:shapes/widget: not found. Ask a maintainer to give it access',
+      'Holtkeeper sees no merge request !8 in work:shapes/widget',
     )
+    expect(statusText({ repo: 'work:shapes/widget', mergeRequest: 403 })).rejects.toThrow(
+      'Holtkeeper could not read merge requests of work:shapes/widget: forbidden. Ask a maintainer to give it access',
+    )
+    expect(statusText({ repo: 'work:shapes/widget', mergeRequest: 500 })).rejects.toThrow(
+      'The forge did not answer for work:shapes/widget: bad gateway. Try again in a moment.',
+    )
+  })
+
+  test('a run that found nothing new covers the head', async () => {
+    await addReview('2026-11-10T10:00:00.000Z', review({}))
+    await addReview(
+      '2026-11-10T12:00:00.000Z',
+      review({ head: mr.headSha, mode: 'skipped', verdict: 'skipped', comments: [] }),
+    )
+    const text = await statusText({ repo: 'work:shapes/widget', mergeRequest: 7 })
+    expect(text).toContain('The newest commits brought nothing new to review.')
+    expect(await reviewJobs()).toHaveLength(0)
+  })
+
+  test('a review the budget stopped or someone canceled is not queued again', async () => {
+    const args = { repo: 'work:shapes/widget', mergeRequest: 7 }
+    await endJob('block')
+    expect(await statusText(args)).toContain('The AI budget stopped the review of this commit')
+    expect(await queuedJobs()).toHaveLength(0)
+
+    store = memoryStore()
+    await endJob('cancel')
+    expect(await statusText(args)).toContain('was canceled and was not queued again')
+    expect(await queuedJobs()).toHaveLength(0)
+  })
+
+  test('a failed review of the head is tried once more, then left', async () => {
+    const args = { repo: 'work:shapes/widget', mergeRequest: 7 }
+    await endJob('fail')
+    expect(await statusText(args, { onMergeRequest: { analyzers: ['review'] } })).toContain(
+      'The last review job failed (provider error). A review of bbbbbbbb was queued just now',
+    )
+    const [retry] = await queuedJobs()
+    await store.jobs.claim('w1', '2026-11-10T14:01:00.000Z')
+    await store.jobs.fail(retry!.id, { at: '2026-11-10T14:02:00.000Z', error: 'provider error' })
+    expect(await statusText(args)).toContain('failed (provider error) and was not queued again')
+    expect(await queuedJobs()).toHaveLength(0)
+  })
+
+  test('in a busy repository a new merge request still gets its first review', async () => {
+    await otherReviews(120)
+    const text = await statusText({ repo: 'work:shapes/widget', mergeRequest: 7 })
+    expect(text).toContain('was queued just now')
+    expect(await queuedJobs()).toHaveLength(1)
+  })
+
+  test('a head reviewed before many newer records of other merge requests stays reviewed', async () => {
+    await addReview('2026-11-10T12:00:00.000Z', review({ head: mr.headSha, comments: [] }))
+    await otherReviews(120)
+    const text = await statusText({ repo: 'work:shapes/widget', mergeRequest: 7 })
+    expect(text).not.toContain('queued')
+    expect(text).not.toContain('nothing new to review')
+    expect(await queuedJobs()).toHaveLength(0)
+  })
+
+  test('a review the budget stopped in an earlier week is queued again', async () => {
+    await endJob('block')
+    clock = new Date('2026-11-17T09:00:00.000Z')
+    expect(await statusText({ repo: 'work:shapes/widget', mergeRequest: 7 })).toContain(
+      'was queued just now',
+    )
+  })
+
+  test('a request that fails to queue leaves no phantom review behind', async () => {
+    const args = { repo: 'work:shapes/widget', mergeRequest: 7 }
+    const enqueue = store.jobs.enqueue.bind(store.jobs)
+    store.jobs.enqueue = async () => {
+      throw new Error('db down')
+    }
+    expect(statusText(args)).rejects.toThrow('db down')
+    await Bun.sleep(0)
+    store.jobs.enqueue = enqueue
+    expect(await statusText(args)).toContain('was queued just now')
+    expect(await queuedJobs()).toHaveLength(1)
+  })
+
+  test('requests made at the same time queue one review', async () => {
+    const args = { repo: 'work:shapes/widget', mergeRequest: 7 }
+    const texts = await Promise.all([statusText(args), statusText(args), statusText(args)])
+    expect(texts.filter((text) => text.includes('was queued just now'))).toHaveLength(1)
+    expect(await queuedJobs()).toHaveLength(1)
   })
 
   test('refuses unreadable repositories, unknown branches and missing arguments', async () => {

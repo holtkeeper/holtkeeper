@@ -16,9 +16,11 @@ export interface DependencyPath {
 const GLOB = /[*?[\]{}]/
 
 /**
- * The dependency `path` points into: a package under `node_modules`, a module in the Go module
- * cache (`…/pkg/mod/<module>@<version>/…`) or a vendored Go package (`vendor/<host.tld>/…`);
- * `undefined` for any other path.
+ * The dependency `path` points into: a package under `node_modules` (dot folders such as `.bin`
+ * and globs name none), a module in the Go module cache (`…/pkg/mod/<module>@v<version>/…`, with
+ * its `!x` escapes undone) or a vendored Go package (`vendor/<host.tld>/<name>…` at the root,
+ * `<owner>/<name>` on hosts that have owners); `undefined` for any other path, the repository's own `pkg/mod` and `vendor` folders
+ * included.
  */
 export function dependencyPath(path: string): DependencyPath | undefined {
   const parts = path.replaceAll('\\', '/').split('/').filter(Boolean)
@@ -28,15 +30,14 @@ export function dependencyPath(path: string): DependencyPath | undefined {
     const scoped = first.startsWith('@')
     const name = scoped ? `${first}/${second}` : first
     const rest = (scoped ? after : [second, ...after]).filter(Boolean).join('/')
-    return name && !GLOB.test(name) && (!scoped || second)
+    return name && !name.startsWith('.') && !GLOB.test(name) && (!scoped || second)
       ? { package: name, ecosystem: 'npm', rest }
       : { ecosystem: 'npm', rest: '' }
   }
   const cache = parts.findIndex((part, index) => part === 'mod' && parts[index - 1] === 'pkg')
-  if (cache !== -1) {
-    const after = parts.slice(cache + 1)
-    const at = after.findIndex((part) => part.includes('@'))
-    if (at === -1) return { ecosystem: 'Go', rest: '' }
+  const after = cache === -1 ? [] : parts.slice(cache + 1).map(unescapeGo)
+  const at = after.findIndex((part) => /@v\d/.test(part))
+  if (at !== -1) {
     const [last = '', version = ''] = (after[at] ?? '').split('@')
     return {
       package: [...after.slice(0, at), last].join('/'),
@@ -45,17 +46,31 @@ export function dependencyPath(path: string): DependencyPath | undefined {
       rest: after.slice(at + 1).join('/'),
     }
   }
-  const vendor = parts.indexOf('vendor')
-  if (vendor !== -1 && parts[vendor + 1]?.includes('.')) {
-    const after = parts.slice(vendor + 1)
-    const file = after.at(-1)?.includes('.') && after.length > 1 ? after.at(-1) : undefined
-    const folder = file ? after.slice(0, -1) : after
+  const depth = OWNER_HOSTS.has(parts[1] ?? '') ? 3 : 2
+  if (parts[0] === 'vendor' && GO_HOST.test(parts[1] ?? '') && parts.length > depth) {
+    const vendored = parts.slice(1)
+    const file =
+      vendored.length > depth && GO_FILE.test(vendored.at(-1) ?? '') ? vendored.at(-1) : undefined
+    const folder = file ? vendored.slice(0, -1) : vendored
     return folder.some((part) => GLOB.test(part))
       ? { ecosystem: 'Go', rest: '' }
       : { package: folder.join('/'), ecosystem: 'Go', rest: file ?? '' }
   }
   return undefined
 }
+
+/** A segment of the Go module cache as written: `!x` stands for an upper-case `X`. */
+const unescapeGo = (part: string) =>
+  part.replace(/!([a-z])/g, (_, letter: string) => letter.toUpperCase())
+
+/** Hosts whose module paths have an owner before the name (`host/owner/name`). */
+const OWNER_HOSTS: ReadonlySet<string> = new Set(['github.com', 'gitlab.com', 'bitbucket.org'])
+
+/** Files a vendored Go package holds; a last path element such as `yaml.v3` is a package. */
+const GO_FILE = /\.(go|s|h|c|cc|cpp|proto|mod|sum|txt|md|json|ya?ml)$/
+
+/** The first path element of a Go module path: a host name, not a folder named like a file. */
+const GO_HOST = /^(?!.*\.(?:js|mjs|cjs|ts|css|json|map|html|md)$)[a-z0-9-]+(\.[a-z0-9-]+)+$/
 
 /** Paths of a published package that hold declarations or build output, not its source. */
 const BUILT = /(^|\/)(dist|lib|build|out|types|typings|esm|cjs|umd)\/|\.d\.[cm]?ts$|\.min\.js$/
@@ -75,9 +90,11 @@ export function externalFiles(context: PackageToolsContext): ExternalFiles {
     const tool = tools.get(name)
     if (!tool) return undefined
     try {
-      return await tool.run(input, { dir: process.cwd(), signal: new AbortController().signal })
+      return {
+        text: await tool.run(input, { dir: process.cwd(), signal: new AbortController().signal }),
+      }
     } catch (error) {
-      return error instanceof Error ? error.message : String(error)
+      return { error: error instanceof Error ? error.message : String(error) }
     }
   }
   const source = tools.has('package_source')
@@ -97,7 +114,7 @@ export function externalFiles(context: PackageToolsContext): ExternalFiles {
         vendored ||
         !found.rest ||
         found.rest === 'package.json' ||
-        BUILT.test(found.rest)
+        (found.ecosystem === 'npm' && BUILT.test(found.rest))
       const [name, input] = api
         ? (['package_api', base] as const)
         : ([
@@ -109,8 +126,11 @@ export function externalFiles(context: PackageToolsContext): ExternalFiles {
               ...(lines?.offset && lines.limit && { end: lines.offset + lines.limit - 1 }),
             },
           ] as const)
-      const text = await call(name, input)
-      if (text === undefined) return undefined
+      const answer = await call(name, input)
+      if (answer === undefined) return undefined
+      if ('error' in answer)
+        return `${NOT_INSTALLED}, so \`${path}\` does not exist, and Holtkeeper's package index has nothing for it either: ${answer.error}`
+      const { text } = answer
       return [
         `${NOT_INSTALLED}, so \`${path}\` does not exist. This is ${found.package} from Holtkeeper's package index instead (${name} ${JSON.stringify(input)}); call the package tools for more of it.`,
         text,
@@ -124,7 +144,7 @@ export function externalFiles(context: PackageToolsContext): ExternalFiles {
       const name = JSON.stringify(found.package)
       return `${NOT_INSTALLED}, so there is nothing under \`${path}\`. For ${found.package} call package_api { "package": ${name} } for its API${
         source
-          ? `, package_source { "package": ${name}${found.rest && !BUILT.test(found.rest) ? `, "path": ${JSON.stringify(found.rest)}` : ''} } for its code`
+          ? `, package_source { "package": ${name}${found.rest && !(found.ecosystem === 'npm' && BUILT.test(found.rest)) ? `, "path": ${JSON.stringify(found.rest)}` : ''} } for its code`
           : ''
       } and package_usage for how repositories use it.`
     },

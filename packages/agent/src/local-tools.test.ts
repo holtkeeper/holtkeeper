@@ -128,5 +128,14 @@ describe('localTools', () => {
     expect(await call(tools, 'grep', { pattern: 'fooUtil', glob: 'node_modules/**' })).toBe(
       'use the tools for node_modules/**',
     )
+    expect(await call(tools, 'glob', { pattern: '**/*.d.ts', path: 'node_modules/some-lib' })).toBe(
+      'use the tools for node_modules/some-lib',
+    )
+    expect(await call(tools, 'grep', { pattern: 'x', path: 'node_modules/some-lib/a.js' })).toBe(
+      'use the tools for node_modules/some-lib/a.js',
+    )
+    expect(await call(tools, 'grep', { pattern: 'x', path: 'src/none' })).toContain('ENOENT')
+    await mkdir(join(dir, 'node_modules', 'kept'), { recursive: true })
+    expect(await call(tools, 'read_file', { path: 'node_modules/kept' })).toContain('EISDIR')
   })
 })

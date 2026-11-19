@@ -29,7 +29,7 @@ export function searchTool(budget: Budget): AgentTool {
   return defineTool({
     name: 'code.search',
     description:
-      'Structural code search with an ast-grep pattern ($X matches one node, $$$ any number), e.g. "useEffect($$$)" or "import $A from \'lodash\'". Returns file:line and a short snippet per match. Cheaper than grep for code shapes; follow up with code.read for context.',
+      'Structural code search with an ast-grep pattern ($X matches one node, $$$ any number), e.g. "useEffect($$$)" or "import $A from \'lodash\'". Returns file:line and a short snippet per match. Cheaper than grep for code shapes; then read the file around a match for context.',
     input: z.object({
       pattern: z.string().min(1).describe('ast-grep pattern'),
       language: z.enum(LANGUAGES).describe('Parser; only files of this language are searched'),
@@ -81,7 +81,7 @@ export function grepTool(budget: Budget): AgentTool {
   return defineTool({
     name: 'code.grep',
     description:
-      'Text search over repository files (node_modules, build output and hidden directories skipped). Returns matching lines as "line: text" grouped by file, with optional context lines ("line- text"). Use it for strings, comments and config; use code.search or code.references for code. Files over 1 MB are not searched and are listed in the result; for versions in lockfiles use lockfiles.resolve.',
+      'Text search over repository files (node_modules, build output and hidden directories skipped). Returns matching lines as "line: text" grouped by file, with optional context lines ("line- text"). Use it for strings, comments and config; use code.search or code.symbol for code. Files over 1 MB are not searched and are listed in the result; for versions in lockfiles use lockfiles.resolve.',
     input: z.object({
       query: z.string().min(1),
       regex: z.boolean().optional().describe('Treat query as a JavaScript regular expression'),

@@ -317,12 +317,17 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     ref: LibraryRef,
     query: { from?: string; to?: string; repo?: string },
   ) => {
-    const to = await externalVersion(ref, query.to, query.repo)
+    const to = await externalVersion(ref, query.to ?? 'latest', undefined)
     if (!to) return undefined
     const index = to.versions.indexOf(to.version)
+    const used = query.from
+      ? undefined
+      : (await externalVersion(ref, undefined, query.repo))?.version
     const fromVersion = query.from
       ? (await externalVersion(ref, query.from, undefined))?.version
-      : to.versions[index + 1]
+      : used !== undefined && to.versions.indexOf(used) > index
+        ? used
+        : to.versions[index + 1]
     if (!fromVersion)
       throw new ToolError(
         `${ref.name} has no indexed API below ${to.version}; indexed: ${to.versions.join(', ')}.`,
@@ -344,14 +349,22 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
 
   /**
    * The catalog version of `name`, unless `ecosystem` names another ecosystem than the package's;
-   * Go packages of the organization's repositories come from the catalog too.
+   * Go packages of the organization's repositories come from the catalog too. `query.repo` picks
+   * the publishing repository when it publishes the package; a repository that only uses it (the
+   * one the caller works in) is ignored, so the package still resolves.
    */
   const resolveOwn = async (
     name: string,
     query: { version?: string; repo?: string },
     ecosystem: ApiEcosystem | undefined,
   ) => {
-    const found = await catalog.resolve(canRead, name, query)
+    const { repo, ...anywhere } = query
+    const published = await catalog.resolve(canRead, name, query)
+    const found =
+      published ??
+      (repo && !(await catalog.resolve(canRead, name, { repo }))
+        ? await catalog.resolve(canRead, name, anywhere)
+        : undefined)
     if (!found || (ecosystem && (found.package.ecosystem ?? 'npm') !== ecosystem)) return undefined
     return found
   }
@@ -515,13 +528,13 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     .string()
     .optional()
     .describe(
-      'Version such as 1.4.0 or a tag. Default: the version `repo` uses, else the newest release; `head` is the default branch of an organization package',
+      'Version such as 1.4.0 or a tag. Default: for a third-party library the version `repo` uses, else the newest release; for an organization package the newest release, and `head` is its default branch',
     )
   const repoArg = z
     .string()
     .optional()
     .describe(
-      'The repository you work in, as forge:path: versions default to what it uses; also picks the repository when several publish a package of that name',
+      'The repository you work in, as forge:path: third-party versions default to what it uses. When several repositories publish a package of that name, the one of them to read',
     )
   const packageArg = z
     .string()
@@ -636,7 +649,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
       defineTool({
         name: 'find_packages',
         description:
-          'Finds packages and exports. With `query`: organization packages and indexed third-party libraries whose name, description or repository matches, then exported functions, classes, types and constants of organization packages matching by name or doc comment. With `repo` and no `query`: the packages that repository imports, with resolved versions and number of uses. Without arguments: every organization package.',
+          'Finds packages and exports. With `query`: organization packages and indexed third-party libraries whose name, description or repository matches, then exported functions, classes, types and constants of organization packages matching by name or doc comment. With `repo` and no `query`: the packages that repository imports, with resolved versions and number of uses (`repo` does not narrow a search). Without arguments: every organization package.',
         input: z.object({
           query: z
             .string()
@@ -647,7 +660,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             .string()
             .min(1)
             .optional()
-            .describe('List what this repository imports, as forge:path'),
+            .describe('Without `query`: list what this repository imports, as forge:path'),
           kind: z.enum(apiSymbolKinds).optional().describe('Only exports of this kind'),
           limit: z.number().int().min(1).max(50).optional().describe('Exports to show; default 20'),
         }),
@@ -665,9 +678,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
               ),
             ].join('\n')
           }
-          const packages = (await catalog.packages(canRead, query)).filter(
-            (pkg) => !repo || repoKey(pkg.repo) === repo,
-          )
+          const packages = await catalog.packages(canRead, query)
           const line = (pkg: (typeof packages)[number]) =>
             `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.ecosystem === 'Go' ? ` (Go${pkg.module && pkg.module !== pkg.name ? `, module ${pkg.module}` : ''}${pkg.private ? ', internal' : ''})` : pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded${pkg.removed ? `\n  ${removalNote(pkg.name, pkg.repo, pkg.removed)}` : ''}`
           const removed = packages.filter((pkg) => pkg.removed)
@@ -686,7 +697,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
               ? ['## Organization packages', ...own].join('\n')
               : 'No package is indexed yet.'
           const [libraries, exported] = await Promise.all([
-            library && !repo ? library.store.listLibraries({ query }) : [],
+            library ? library.store.listLibraries({ query }) : [],
             symbolHits(query, { ...(kind ? { kind } : {}), limit: limit ?? 20 }),
           ])
           const sections = [
@@ -872,7 +883,7 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
       defineTool({
         name: 'package_changes',
         description:
-          'Versions of a package and what changed between them. Without `from` and `to`: the recorded versions, newest first, with dates and how the API changed from the one before; for third-party libraries also which repositories use which version. With `from` or `to`: the API diff (removed, changed, deprecated and added exports, and whether the bump matches semver), for third-party libraries the changelog and migration notes, and the uses in the organization’s repositories the upgrade breaks (`breaking`, `check`, `deprecated`) with their code. `from` defaults to the release before `to`, `to` to the newest release. Narrow with `include`.',
+          'Versions of a package and what changed between them. Without `from` and `to`: the recorded versions, newest first, with dates and how the API changed from the one before; for third-party libraries also which repositories use which version. With `from` or `to`: the API diff (removed, changed, deprecated and added exports, and whether the bump matches semver), for third-party libraries the changelog and migration notes, and the uses in the organization’s repositories the upgrade breaks (`breaking`, `check`, `deprecated`) with their code. `to` defaults to the newest release, `from` to the version `repo` uses when that is older (third-party), else the release before `to`. Narrow with `include`.',
         input: z.object({
           package: packageArg,
           from: z.string().min(1).optional().describe('The version you are on'),
@@ -891,7 +902,11 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
           if (!from && !to)
             return own ? ownVersions(name, own) : externalVersions(name, ecosystem, repo)
           const wants = (part: (typeof changeParts)[number]) => !include || include.includes(part)
-          const query = { ...(from ? { from } : {}), ...(to ? { to } : {}), ...where }
+          const query = {
+            ...(from ? { from } : {}),
+            ...(to ? { to } : {}),
+            ...(own ? { repo: repoKey(own.record.repo) } : where),
+          }
           if (own) {
             const result = await catalog.diff(canRead, name, query)
             if (!result)
@@ -914,8 +929,27 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
             ].join('\n\n')
           }
           const ref = await externalRef(name, ecosystem)
-          const external = await externalDiff(ref, query)
-          if (!external) throw await notFound(name)
+          const unavailable = async (reason: string) => {
+            if (!docs || !from || !to || !wants('notes') || !(await library?.store.getLibrary(ref)))
+              return undefined
+            return [
+              `${name} ${from} → ${to} (${ref.ecosystem}, third-party)`,
+              `No API diff or upgrade impact: ${reason}`,
+              '## Changelog and migration notes',
+              await docs.changes({ ...libraryQuery({ package: name, ecosystem }), from, to }),
+            ].join('\n\n')
+          }
+          const external = await externalDiff(ref, query).catch(async (error: unknown) => {
+            const notes = error instanceof ToolError ? await unavailable(error.message) : undefined
+            if (notes === undefined) throw error
+            return notes
+          })
+          if (typeof external === 'string') return external
+          if (!external) {
+            const notes = await unavailable(`${name} has no version with an indexed API.`)
+            if (notes !== undefined) return notes
+            throw await notFound(name)
+          }
           const sections = [
             `${name} ${external.from} → ${external.to} (${ref.ecosystem}, third-party)`,
           ]

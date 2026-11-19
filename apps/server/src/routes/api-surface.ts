@@ -539,6 +539,12 @@ export function createApiSurface(deps: ServerDeps) {
     ...(deps.askAgentFor && { agentFor: deps.askAgentFor }),
     homeTeams: (principal) => homeTeamsOf(deps, principal),
     canReadRepo: (principal, repo) => canReadRepo(config, principal, repo),
+    canReadTeam: (principal, team) =>
+      (['repos:read', 'knowledge:read'] as const).every((action) =>
+        can(principal, action, { kind: 'scope', scope: { teams: [team] } }),
+      ),
+    canReadRules: (principal, target) =>
+      can(principal, 'knowledge:read', { kind: 'repo', repo: target }),
     now: deps.now,
   })
 

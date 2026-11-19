@@ -709,6 +709,9 @@ export async function startServer(
   const listener = Bun.serve({
     hostname: server.hostname,
     port: server.port,
+    // Above the longest request that sends nothing while it works (an `ask` answered as JSON);
+    // Bun's default of 10 seconds would cut it.
+    idleTimeout: 120,
     fetch: ops.fetch(duties.http === 'api' ? app.fetch : undefined),
   })
   const url = `http://${listener.hostname}:${listener.port}`

@@ -175,7 +175,7 @@ function renderRepoStack(
       lines.push(`- ${dep.name} ${dep.version} (${dep.ecosystem})`)
     if (dependencies.length > MAX_DEPENDENCIES)
       lines.push(
-        `…and ${dependencies.length - MAX_DEPENDENCIES} more; repo_packages lists what the code imports.`,
+        `…and ${dependencies.length - MAX_DEPENDENCIES} more; find_packages with repo lists what the code imports.`,
       )
   }
   return lines.join('\n')

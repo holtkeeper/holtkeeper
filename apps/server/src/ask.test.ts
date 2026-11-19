@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { Principal } from '@holtkeeper/access'
+import type { Principal, RepoTarget } from '@holtkeeper/access'
 import { type Agent, type AgentTask, BudgetExceededError } from '@holtkeeper/agent'
 import { ToolError } from '@holtkeeper/agent-tools'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
@@ -32,13 +32,30 @@ interface Script {
   error?: unknown
 }
 
-function setup(script: Script, options: { setting?: unknown; spentUsd?: number } = {}) {
+function setup(
+  script: Script,
+  options: {
+    setting?: unknown
+    spentUsd?: number
+    provider?: boolean
+    rules?: boolean
+    teams?: string[]
+  } = {},
+) {
   const kv = new Map<string, unknown>()
   const tasks: AgentTask[] = []
   const jobs: AgentJob[] = []
+  const targets: RepoTarget[] = []
   const deps: AskDeps = {
     config,
-    settings: { list: async () => [entry(options.setting ?? { enabled: true })] },
+    settings: {
+      list: async (key?: string) =>
+        key === 'llm.provider'
+          ? options.provider === false
+            ? []
+            : [{ ...entry('main'), key: 'llm.provider' }]
+          : [entry(options.setting ?? { enabled: true })],
+    },
     aiUsage: {
       aggregate: async () =>
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- only `costUsd` is read
@@ -47,8 +64,14 @@ function setup(script: Script, options: { setting?: unknown; spentUsd?: number }
     kv: {
       get: async (key) => kv.get(key),
       set: async (key, value) => void kv.set(key, value),
+      compareAndSet: async (key, expected, value) => {
+        if (kv.get(key) !== expected) return false
+        kv.set(key, value)
+        return true
+      },
     },
-    agentFor: async (_target, job) => {
+    agentFor: async (target, job) => {
+      targets.push(target)
       jobs.push(job)
       const agent: Agent = {
         name: 'fake',
@@ -62,11 +85,13 @@ function setup(script: Script, options: { setting?: unknown; spentUsd?: number }
       }
       return agent
     },
-    homeTeams: async () => ['shop'],
+    homeTeams: async () => ['shop', 'other'],
     canReadRepo: (_principal, repo) => repo === 'gitlab:acme/shop',
+    canReadTeam: (_principal, team) => (options.teams ?? ['shop']).includes(team),
+    canReadRules: () => options.rules ?? true,
     now: () => new Date('2026-01-07T10:00:00Z'),
   }
-  return { service: askService(deps), kv, tasks, jobs }
+  return { service: askService(deps), kv, tasks, jobs, targets }
 }
 
 const rule: AgentEvidence = {
@@ -193,5 +218,39 @@ describe('askService', () => {
     })
     const access = await service.accessFor(principal)
     expect(access?.ask({ question: 'Something very broad?' }, ctx())).rejects.toThrow('$0.30 cap')
+  })
+
+  test('offers nothing without an AI provider', async () => {
+    const { service } = setup({}, { provider: false })
+    expect(await service.accessFor(principal)).toBeUndefined()
+  })
+
+  test('a question without a repository runs for the home teams the asker may read', async () => {
+    const { service, targets } = setup({ evidence: [rule], text: 'Yes [rule:r1].' })
+    const access = await service.accessFor(principal)
+    await access?.ask({ question: 'Where do widget sizes live?' }, ctx())
+    expect(targets[0]).toEqual({ forge: 'mcp', path: 'ask', teams: ['shop'] })
+  })
+
+  test('an asker who may not read the rules of the repository gets a run without them', async () => {
+    const { service, tasks } = setup({ evidence: [rule], text: 'Yes [rule:r1].' }, { rules: false })
+    const access = await service.accessFor(principal)
+    await access?.ask({ question: 'Where do widget sizes live?', repo: 'gitlab:acme/shop' }, ctx())
+    expect(tasks[0]?.context).toContain('may not read the rules')
+  })
+
+  test('parallel questions cannot pass the daily count together', async () => {
+    const { service, tasks } = setup(
+      { evidence: [rule], text: 'Yes [rule:r1].' },
+      { setting: { enabled: true, perPersonPerDay: 2 } },
+    )
+    const access = await service.accessFor(principal)
+    const results = await Promise.allSettled(
+      ['One question here?', 'Two questions here?', 'Three questions here?'].map(async (question) =>
+        access?.ask({ question }, ctx()),
+      ),
+    )
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2)
+    expect(tasks).toHaveLength(2)
   })
 })

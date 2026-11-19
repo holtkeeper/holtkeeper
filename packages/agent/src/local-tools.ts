@@ -45,6 +45,19 @@ export function clipOutput(text: string, max: number): string {
   return `${text.slice(0, max)}\n… [truncated ${text.length - max} characters]`
 }
 
+/**
+ * Whether a file tool failed because the checkout does not hold the path: it does not exist, or
+ * it lies outside the working directory (where uninstalled dependencies are looked for too).
+ */
+function lacks(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : ''
+  return (
+    code === 'ENOENT' ||
+    code === 'ENOTDIR' ||
+    (error instanceof Error && error.message.endsWith('is outside the working directory'))
+  )
+}
+
 function relativeTo(dir: string, path: string): string {
   return relative(dir, path).split(sep).join('/')
 }
@@ -70,8 +83,9 @@ async function files(dir: string, root: string, pattern: string, signal: AbortSi
  * directory: `read` → `read_file`, `glob`; `search` → `grep`; `edit` → `edit_file`,
  * `write_file`; `run` → `run_command`, only with a `runner` (without one `run` grants nothing).
  * Paths outside the directory (symlinks resolved) are refused with an error result. With
- * `external`, a `read_file` that cannot read its file answers with `external.read` when that has
- * something, and a `glob` or `grep` that finds nothing with `external.hint`.
+ * `external`, a `read_file` whose file the checkout lacks (missing, or outside the directory)
+ * answers with `external.read` when that has something, and a `glob` or `grep` that finds nothing
+ * or is pointed at a missing folder with `external.hint`.
  */
 export function localTools(
   capabilities: readonly AgentCapability[],
@@ -105,7 +119,7 @@ export function localTools(
           try {
             text = await readFile(resolveInside(dir, path), 'utf8')
           } catch (error) {
-            const stand = await external?.read(path, { offset, limit })
+            const stand = lacks(error) ? await external?.read(path, { offset, limit }) : undefined
             if (stand === undefined) throw error
             return clip(stand)
           }
@@ -125,7 +139,14 @@ export function localTools(
           path: z.string().optional().describe('Directory to search from; default the root'),
         }),
         async run({ pattern, path = '.' }, { dir, signal }) {
-          const found = await files(dir, resolveInside(dir, path), pattern, signal)
+          const found = await files(dir, resolveInside(dir, path), pattern, signal).catch(
+            (error: unknown) => {
+              const hint = lacks(error) ? external?.hint(path) : undefined
+              if (hint === undefined) throw error
+              return hint
+            },
+          )
+          if (typeof found === 'string') return found
           if (!found.length)
             return external?.hint(path === '.' ? pattern : `${path}/${pattern}`) ?? 'no files found'
           const shown = found.slice(0, limits.maxEntries)
@@ -153,9 +174,16 @@ export function localTools(
           const matches: string[] = []
           const tooLarge: string[] = []
           const root = resolveInside(dir, path)
-          const searched = (await stat(root)).isFile()
-            ? [relativeTo(dir, root)]
-            : await files(dir, root, glob, signal)
+          const searched = await stat(root)
+            .then((found) =>
+              found.isFile() ? [relativeTo(dir, root)] : files(dir, root, glob, signal),
+            )
+            .catch((error: unknown) => {
+              const hint = lacks(error) ? external?.hint(path) : undefined
+              if (hint === undefined) throw error
+              return hint
+            })
+          if (typeof searched === 'string') return searched
           for (const file of searched) {
             if (matches.length >= limits.maxEntries) break
             const absolute = resolveInside(dir, file)

@@ -130,6 +130,20 @@ describe('createClaudeAgent', () => {
         behavior: 'deny',
       })
       expect(await ask('Read', { file_path: 'src/a.ts' })).toMatchObject({ behavior: 'allow' })
+      expect(await ask('Grep', { pattern: 'node_modules', glob: '*.json' })).toMatchObject({
+        behavior: 'allow',
+      })
+      await mkdir(join(dir, 'node_modules', 'some-lib'), { recursive: true })
+      expect(
+        await ask('Grep', { pattern: 'fooUtil', path: 'node_modules/other-lib' }),
+      ).toMatchObject({ behavior: 'allow' })
+      expect(await ask('Glob', { pattern: '**/node_modules/some-lib/**' })).toMatchObject({
+        behavior: 'allow',
+      })
+      await mkdir(join(dir, 'services', 'api', 'vendor'), { recursive: true })
+      expect(
+        await ask('Glob', { path: 'services/api', pattern: 'vendor/example.com/kit/*.go' }),
+      ).toMatchObject({ behavior: 'allow' })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

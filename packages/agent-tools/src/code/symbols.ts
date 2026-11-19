@@ -27,7 +27,7 @@ export function outlineTool(budget: Budget): AgentTool {
   return defineTool({
     name: 'code.outline',
     description:
-      'Outline of a TypeScript/JavaScript file: imports, functions, classes with members, interfaces, types, enums, variables and exports, each as "start-end signature". Read this before code.read so you only read the ranges you need.',
+      'Outline of a TypeScript/JavaScript file: imports, functions, classes with members, interfaces, types, enums, variables and exports, each as "start-end signature". Read this before reading the file so you only read the ranges you need.',
     input: z.object({
       path: z.string().min(1).describe('File path relative to the repository root'),
     }),

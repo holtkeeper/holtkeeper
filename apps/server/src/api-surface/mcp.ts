@@ -154,6 +154,9 @@ export type McpRequestContext = McpToolsetsContext & McpCaller
 /** Tools slow enough that their calls are answered as an event stream carrying progress. */
 const STREAMED_TOOLS: ReadonlySet<string> = new Set([ASK_TOOL])
 
+/** How often a streamed response sends a keep-alive comment while its tool runs. */
+const STREAM_KEEP_ALIVE_MS = 4000
+
 /** Whether `request` is a single call of a streamed tool by a client that accepts event streams. */
 async function wantsStream(request: Request): Promise<boolean> {
   if (!request.headers.get('accept')?.includes('text/event-stream')) return false
@@ -170,7 +173,8 @@ async function wantsStream(request: Request): Promise<boolean> {
 /**
  * Answers one request (Streamable HTTP, stateless) with a fresh server over `toolsets`.
  * Responses are JSON, except calls of `STREAMED_TOOLS`, which are answered as an event stream so
- * progress reaches the client while the tool runs.
+ * progress reaches the client while the tool runs, with a keep-alive comment every few seconds.
+ * A request the client aborts closes the server, which aborts the signal of its running tools.
  */
 export async function serveToolsets(
   request: Request,
@@ -182,8 +186,17 @@ export async function serveToolsets(
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: !stream,
+    // Keeps bytes flowing while a slow tool runs, under the idle timeouts of the HTTP server and
+    // of proxies in front of it.
+    ...(stream && { keepAliveMs: STREAM_KEEP_ALIVE_MS }),
   })
   await server.connect(transport)
+  // A client that goes away (cancel, dropped connection) aborts the tool it was waiting for.
+  if (request.signal.aborted) {
+    void server.close()
+    return new Response(null, { status: 499 })
+  }
+  request.signal.addEventListener('abort', () => void server.close(), { once: true })
   try {
     return await transport.handleRequest(request)
   } finally {

@@ -92,8 +92,34 @@ const ANTHROPIC_API_HOST = 'api.anthropic.com'
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path'] as const
 
-/** Claude Code's file tools, whose calls `AgentTask.externalFiles` may answer with a hint. */
+/**
+ * Claude Code's file tools, whose calls `AgentTask.externalFiles` answers with a hint when the
+ * checkout does not hold what they point at.
+ */
 const FILE_TOOLS: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep'])
+
+/** The inputs of each file tool that name a path or a glob; a Grep `pattern` is a regex. */
+const FILE_TOOL_PATHS: Readonly<Record<string, readonly string[]>> = {
+  Read: ['file_path'],
+  Glob: ['path', 'pattern'],
+  Grep: ['path', 'glob'],
+}
+
+const DEPENDENCY_ROOTS: ReadonlySet<string> = new Set(['node_modules', 'vendor'])
+
+/**
+ * The part of a path or glob that has to exist for the checkout to hold what it names: up to its
+ * dependency folder (`node_modules`, `vendor`) when it has one, the folder alone when a glob comes
+ * before it, else the path up to its first glob segment.
+ */
+function heldPrefix(path: string): string {
+  const parts = path.split('/')
+  const globbed = parts.findIndex((part) => /[*?[\]{}]/.test(part))
+  const fixed = globbed === -1 ? parts : parts.slice(0, globbed)
+  const root = parts.findIndex((part) => DEPENDENCY_ROOTS.has(part))
+  if (root === -1) return fixed.join('/') || '.'
+  return root < fixed.length ? parts.slice(0, root + 1).join('/') : (parts[root] ?? '.')
+}
 
 /** Tool names for a capability set, in a stable order without duplicates. */
 export function toolsFor(capabilities: readonly AgentCapability[]): string[] {
@@ -134,13 +160,16 @@ function permissionGate(
         message: `Only these commands may run, with plain arguments: ${commands.join(', ')}`,
       }
     if (external && FILE_TOOLS.has(toolName)) {
-      const asked = [input['file_path'], input['path'], input['pattern'], input['glob']].filter(
-        (value): value is string => typeof value === 'string',
-      )
-      const missing = toolName !== 'Read' || !asked.some((path) => existsSync(resolve(dir, path)))
-      const hint = missing
-        ? asked.map((path) => external.hint(path)).find((text) => text !== undefined)
-        : undefined
+      const base = typeof input['path'] === 'string' ? input['path'] : ''
+      const hint = (FILE_TOOL_PATHS[toolName] ?? [])
+        .flatMap((key) => {
+          const value = input[key]
+          if (typeof value !== 'string') return []
+          return [key === 'path' || !base || isAbsolute(value) ? value : `${base}/${value}`]
+        })
+        .filter((path) => !existsSync(resolve(dir, heldPrefix(path))))
+        .map((path) => external.hint(path))
+        .find((text) => text !== undefined)
       if (hint) return { behavior: 'deny', message: hint }
     }
     for (const key of PATH_KEYS) {

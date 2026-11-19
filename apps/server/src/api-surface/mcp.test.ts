@@ -100,4 +100,88 @@ describe('serveToolsets', () => {
     })
     expect(recorded).toEqual([{ tool: 'ask', ok: false }])
   })
+
+  test('a client that goes away aborts the tool it was waiting for', async () => {
+    const recorded: { tool: string; ok: boolean }[] = []
+    const running = Promise.withResolvers<void>()
+    const aborted = Promise.withResolvers<boolean>()
+    const slow = {
+      name: 'slow',
+      tools: [
+        defineTool({
+          name: 'ask',
+          description: 'Waits until it is aborted.',
+          input: z.object({}),
+          run: (_input, ctx) =>
+            new Promise<string>((resolve) => {
+              ctx.signal.addEventListener('abort', () => {
+                aborted.resolve(true)
+                resolve('stopped')
+              })
+              running.resolve()
+            }),
+        }),
+      ],
+    }
+    const client = new AbortController()
+    const response = await serveToolsets(
+      new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: both },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 9,
+          method: 'tools/call',
+          params: { name: 'ask', arguments: {} },
+        }),
+        signal: client.signal,
+      }),
+      [slow],
+      {
+        principal,
+        usage: { record: (call) => void recorded.push({ tool: call.tool, ok: call.ok }) },
+        now: () => new Date('2026-01-07T10:00:00Z'),
+      },
+    )
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+    await running.promise
+    client.abort()
+    expect(await Promise.race([aborted.promise, Bun.sleep(500).then(() => false)])).toBe(true)
+  })
+
+  test('a request already aborted starts no tool', async () => {
+    let started = false
+    const recorded: string[] = []
+    const controller = new AbortController()
+    controller.abort()
+    const response = await serveToolsets(
+      new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: both },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'ask', arguments: { question: 'Where do widget sizes live?' } },
+        }),
+        signal: controller.signal,
+      }),
+      [
+        askToolset({
+          ask: async () => {
+            started = true
+            return 'never'
+          },
+        }),
+      ],
+      {
+        principal,
+        usage: { record: (call) => void recorded.push(call.tool) },
+        now: () => new Date('2026-01-07T10:00:00Z'),
+      },
+    )
+    expect(response.status).toBe(499)
+    expect(started).toBe(false)
+    expect(recorded).toEqual([])
+  })
 })

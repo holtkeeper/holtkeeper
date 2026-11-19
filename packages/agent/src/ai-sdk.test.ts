@@ -576,6 +576,34 @@ describe('createAiSdkAgent', () => {
     expect(lastToolOutput(model)).toContain('verdict')
   })
 
+  test('tool calls made before a rejected answer count, so no follow-up asks to open code', async () => {
+    const { languageModel, model } = scripted(
+      call('read_file', { path: 'src/a.ts' }),
+      {
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'c9',
+            toolName: 'final_answer',
+            input: '{"verdict":"maybe","notes":[]}',
+          },
+        ],
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage,
+        warnings: [],
+      },
+      say('{"verdict":"ok","notes":[]}'),
+    )
+    const result = await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'p',
+      output: z.object({ verdict: z.enum(['ok', 'bad']), notes: z.array(z.string()) }),
+      followUpWithoutTools: 'You answered without opening any code.',
+    })
+    expect(result.output).toEqual({ verdict: 'ok', notes: [] })
+    expect(model.doGenerateCalls).toHaveLength(3)
+  })
+
   test('the transcript keeps reasoning and calls of unknown tools as errors', async () => {
     const { languageModel } = scripted(
       {

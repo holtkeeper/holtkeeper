@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import { z } from 'zod'
 
 /** The agent's answer is not JSON or does not match the requested schema. */
 export class AgentOutputError extends Error {
@@ -80,7 +80,8 @@ const isObject = (value: unknown): value is Record<string, unknown> | unknown[] 
 /**
  * What a call of a tool that does not exist says about the answer of a task that wants `schema`:
  * `{ answer }` when the call's arguments, or one of their fields (given as a value or as JSON
- * text), match the schema; `{ problem }` naming the mismatches when they hold a JSON object or
+ * text), match the schema and look like an answer (an object sharing a field with an object
+ * schema; for other schemas a non-empty value under an answer-like tool name); `{ problem }` naming the mismatches when they hold a JSON object or
  * array that does not and the tool's name says it was meant for the answer (`ANSWER_NAME`);
  * `undefined` otherwise, so the call is an ordinary unknown-tool error.
  */
@@ -109,11 +110,18 @@ export function answerInToolCall(
   const found = [args, ...nested].filter(
     (value) => isObject(value) && (Array.isArray(value) || Object.keys(value).length > 0),
   )
-  for (const candidate of found)
+  const keys = schema instanceof z.ZodObject ? Object.keys(schema.shape) : undefined
+  const named = ANSWER_NAME.test(toolName)
+  const likely = found.filter((candidate) =>
+    keys
+      ? isObject(candidate) && !Array.isArray(candidate) && keys.some((key) => key in candidate)
+      : named && (!Array.isArray(candidate) || candidate.length > 0),
+  )
+  for (const candidate of likely)
     if (schema.safeParse(candidate).success) return { answer: candidate }
-  if (!found.length || !ANSWER_NAME.test(toolName)) return undefined
+  if (!likely.length || !named) return undefined
   const issuesOf = (value: unknown) => schema.safeParse(value).error?.issues.length ?? 0
-  const closest = found.toSorted((one, other) => issuesOf(one) - issuesOf(other))[0]
+  const closest = likely.toSorted((one, other) => issuesOf(one) - issuesOf(other))[0]
   try {
     validateAgentOutput(closest, schema)
   } catch (error) {

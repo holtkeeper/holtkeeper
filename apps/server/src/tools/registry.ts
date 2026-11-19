@@ -98,6 +98,20 @@ const TASK_TOOLSETS: Record<string, readonly string[]> = {
   translate: [],
 }
 
+/**
+ * Task kinds that work in a merge request checkout without installed dependencies: reviews,
+ * their parts and the rechecks of their findings and threads.
+ */
+const UNINSTALLED_CHECKOUT_KINDS: ReadonlySet<string> = new Set([
+  'review',
+  'review-verify',
+  'review-split',
+  'triage',
+])
+
+/** Whether tasks of `taskKind` run in a checkout whose dependencies are not installed. */
+export const dependenciesMissing = (taskKind: string) => UNINSTALLED_CHECKOUT_KINDS.has(taskKind)
+
 /** Names of the toolsets an internal task of `taskKind` mounts, in mount order. */
 export function taskToolsets(taskKind: string): readonly string[] {
   return TASK_TOOLSETS[taskKind] ?? BASE_TOOLSETS
@@ -138,7 +152,7 @@ export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>,
  * The toolsets the MCP endpoint serves to one caller, picked for developers at work in one
  * repository: `packages`, `knowledge` (reading one
  * rule in full by `id` with `rules`), `rules` (with any of `rules`, `commits`, `testIds`,
- * `releases`, `assets`; no `get_rule`), `assets` (with `assets`, `repo_assets` only), `reviews`
+ * `releases`, `assets`; `get_rule` only for a token without `knowledge`), `assets` (with `assets`, `repo_assets` only), `reviews`
  * (with `reviews`), `qa` (with `qa`), `ask` (with `ask`) and `security` (with `secretReports`),
  * every one limited by the caller's grants and, but `security`, to the token's `toolsets`. Stack,
  * fleet, operations and release tools stay with the web panel and chat. Tools that write are left out
@@ -146,7 +160,8 @@ export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>,
  */
 export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
   const { assets, reviews, secretReports, qa, ask, toolsets } = context
-  const rules = rulesToolset(context, { reader: false })
+  const knowledgeServed = !toolsets || toolsets.includes('knowledge')
+  const rules = rulesToolset(context, { reader: !knowledgeServed })
   const mounted = mountToolsets(
     [
       packagesToolset(context),

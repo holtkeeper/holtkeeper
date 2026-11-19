@@ -221,6 +221,24 @@ describe('mcpToolsets', () => {
     )
   })
 
+  test('a token without knowledge keeps get_rule, so on-demand rules stay readable', () => {
+    const context = {
+      ...base,
+      rules: { resolve: none, rule: none, learning: none, repoFile: none },
+    }
+    const rulesOf = (toolsets: ('packages' | 'rules' | 'knowledge')[]) =>
+      mcpToolsets({ ...context, toolsets }).find((toolset) => toolset.name === 'rules')
+    const alone = rulesOf(['packages', 'rules'])
+    expect(alone?.tools.map((tool) => tool.name)).toEqual(['repo_rules', 'get_rule'])
+    expect(alone?.instructions).toContain('get_rule')
+    const description = alone?.tools.find((tool) => tool.name === 'repo_rules')?.description
+    expect(description).toContain('on demand with get_rule')
+    expect(description).not.toContain('search_knowledge')
+    const served = rulesOf(['packages', 'rules', 'knowledge'])
+    expect(served?.tools.map((tool) => tool.name)).toEqual(['repo_rules'])
+    expect(served?.tools[0]?.description).toContain('search_knowledge (pass `id`)')
+  })
+
   test('without a rules reader search_knowledge takes no id', () => {
     const search = mcpToolsets(base)
       .find((toolset) => toolset.name === 'knowledge')
@@ -857,6 +875,74 @@ describe('rules toolset', () => {
     expect(
       (await client.callTool({ name: 'search_knowledge', arguments: { id: 'nope' } })).isError,
     ).toBe(true)
+  })
+
+  test('an on-demand panel rule is listed as rule:<id> and read by its bare id with repo', async () => {
+    const { store, client } = await setup({ reader: false })
+    await store.rules.put({
+      id: 'r-colors',
+      title: 'Color names',
+      description: 'When naming or adding colors',
+      body: 'Name colors after what they mark, never after their hue.',
+      scope: { teams: ['toys'] },
+      author: 'sam',
+      createdAt: '2026-10-31T08:00:00.000Z',
+      updatedAt: '2026-10-31T08:00:00.000Z',
+    })
+    const rules = textOf(
+      await client.callTool({ name: 'repo_rules', arguments: { repo: 'work:toys/kite' } }),
+    )
+    expect(rules).toContain('- `rule:r-colors` Color names')
+    expect(rules).toContain('- `.cursor/rules/colors.mdc`: How kite colors are named')
+    for (const id of ['r-colors', 'rule:r-colors'])
+      expect(
+        textOf(
+          await client.callTool({
+            name: 'search_knowledge',
+            arguments: { id, repo: 'work:toys/kite' },
+          }),
+        ),
+      ).toContain('# [rule:r-colors] Color names')
+    expect(
+      textOf(
+        await client.callTool({
+          name: 'search_knowledge',
+          arguments: { id: '.cursor/rules/colors.mdc', repo: 'work:toys/kite' },
+        }),
+      ),
+    ).toContain('Colors come from the palette module.')
+    const missing = await client.callTool({
+      name: 'search_knowledge',
+      arguments: { id: 'r-none', repo: 'work:toys/kite' },
+    })
+    expect(missing.isError).toBe(true)
+  })
+
+  test('a refused topic leaves the rules in place; nothing served at all is an error', async () => {
+    const { access } = await setup()
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const refused = rulesToolset({ ...access, testIds: { testIds: none } })?.tools.find(
+      (tool) => tool.name === 'repo_rules',
+    )
+    const text = await refused?.run({ repo: 'work:toys/kite', topics: ['test-ids', 'assets'] }, ctx)
+    expect(text).toStartWith('# Rules for `work:toys/kite`')
+    expect(text).toContain('# Test ids of `work:toys/kite`\n\nYou may not read the test ids of')
+    expect(text).toContain('# Asset policy of `work:toys/kite`\n\n# Asset policy of')
+
+    const nothing = rulesToolset({
+      ...access,
+      rules: { ...access.rules!, resolve: none },
+      testIds: { testIds: none },
+    })?.tools.find((tool) => tool.name === 'repo_rules')
+    const partly = await nothing?.run(
+      { repo: 'work:toys/kite', topics: ['test-ids', 'assets'] },
+      ctx,
+    )
+    expect(partly).toStartWith('You may not read the rules of `work:toys/kite`.')
+    expect(partly).toContain('# Asset policy of')
+    expect(
+      Promise.resolve(nothing?.run({ repo: 'work:toys/kite', topics: ['test-ids'] }, ctx)),
+    ).rejects.toThrow('No readable repository work:toys/kite')
   })
 
   test('the assets toolset keeps asset_policy unless told to leave it to repo_rules', async () => {

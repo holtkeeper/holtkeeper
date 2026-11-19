@@ -174,7 +174,7 @@ function capPatch(
     const named = cutFiles.slice(0, 5).join(', ')
     const more = cutFiles.length > 5 ? ` and ${cutFiles.length - 5} more` : ''
     out.push(
-      `… ${rest.length} more patch lines cut (${named}${more}); pass path to read one file's patch, or read the file with code.read`,
+      `… ${rest.length} more patch lines cut (${named}${more}); pass path to read one file's patch, or read the file`,
     )
   }
   return out.join('\n')

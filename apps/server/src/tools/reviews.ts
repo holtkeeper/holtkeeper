@@ -12,6 +12,12 @@ type ReviewRequest =
   | 'automatic'
   /** The repository is read-only for Holtkeeper. */
   | 'read-only'
+  /** The AI budget stopped the review of this head; it is not queued again. */
+  | 'blocked'
+  /** The review of this head failed again or was canceled; it is not queued again. */
+  | 'failed'
+  /** It could not tell whether the head was reviewed, so it queued nothing. */
+  | 'unknown'
 
 /** What the `reviews` toolset reads and asks for one caller. */
 export interface ReviewToolsAccess {
@@ -79,8 +85,23 @@ function nextSteps(status: MergeRequestReviewStatus, request?: ReviewRequest): s
     steps.push(
       'The repository is frozen for Holtkeeper, so no review was queued; a maintainer can lift the freeze in Settings.',
     )
+  else if (request === 'blocked')
+    steps.push(
+      'The AI budget stopped the review of this commit, so it was not queued again this week; call code_review again after the weekly budget resets, or ask someone with access to raise it in the panel.',
+    )
+  else if (request === 'failed')
+    steps.push(
+      `The review of this commit ${failed?.status === 'canceled' ? 'was canceled' : `failed${failed?.error ? ` (${failed.error})` : ''}`} and was not queued again; comment \`/holtkeeper review\` on the merge request to force one, or push a new commit.`,
+    )
+  else if (request === 'unknown')
+    steps.push(
+      'Holtkeeper could not tell whether this commit was reviewed already, so it queued nothing; comment `/holtkeeper review` on the merge request to ask for a review.',
+    )
   else if (active) steps.push(`A review is ${active.status} for ${short(active.ref)}; ${again}.`)
-  else if (!latest) steps.push('No review yet and none could be queued: the head is unknown.')
+  else if (!latest && !status.reviewedHead)
+    steps.push('No review yet and none could be queued: the head is unknown.')
+  else if (status.nothingNewSince && !active)
+    steps.push('The newest commits brought nothing new to review.')
   if (openThreads?.length)
     steps.push(
       'Fix the open threads or answer them on the merge request, push, and call code_review again: the next review re-checks them and resolves the fixed ones.',

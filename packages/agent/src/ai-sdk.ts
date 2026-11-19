@@ -791,6 +791,10 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         for (;;) {
           // oxlint-disable-next-line no-await-in-loop -- each request continues the same conversation
           let result = await step(messages)
+          toolCalls += result.steps.reduce(
+            (sum, s) => sum + s.toolCalls.filter((made) => tools.has(made.toolName)).length,
+            0,
+          )
           if (submitted) return finish(submitted.text, submitted.output)
           if (rejected !== undefined && turns < maxTurns && !capped()) {
             messages = [
@@ -802,7 +806,6 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             continue
           }
           rejected = undefined
-          toolCalls += result.steps.reduce((sum, s) => sum + s.toolCalls.length, 0)
           if (result.finishReason === 'tool-calls') {
             if (capped()) return useFallback(overBudget())
             const reason = repeating(result)
