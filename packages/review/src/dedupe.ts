@@ -1,6 +1,6 @@
 import type { Discussion } from '@holtkeeper/forge'
 
-import { type ReviewSeverity, severities } from './schema.ts'
+import { type ReviewCategory, type ReviewSeverity, categories, severities } from './schema.ts'
 import type { Candidate } from './validate.ts'
 
 /** Hidden marker every note Holtkeeper posts carries, so later runs recognize their own threads. */
@@ -16,7 +16,7 @@ export function markerOf(body: string): string | undefined {
   return match ? (match[1] ?? '') : undefined
 }
 
-/** An unresolved diff thread, as dedupe and re-checks see it. */
+/** A diff thread, as dedupe and re-checks see it. */
 export interface OpenThread {
   discussionId: string
   path: string
@@ -27,6 +27,8 @@ export interface OpenThread {
   ours: boolean
   /** Finding id from our marker. */
   findingId?: string
+  /** Category of our inline comment, read from its heading. */
+  category?: ReviewCategory
   /** The latest note when a person left it after ours in a thread we started: a reply waiting for an answer. */
   reply?: { noteId: number | string; author: string; text: string }
 }
@@ -37,18 +39,28 @@ export const isOurNote = (note: { author: string; body: string }, botUsername?: 
 
 const withoutComments = (body: string) => body.replace(/<!--[\s\S]*?-->/g, '').trim()
 
-/** Unresolved threads on diff lines; `ours` is decided by the marker or the bot's username. */
-export function openThreads(
+const categoryOf = (body: string) => {
+  const name = /^\*\*\w+\*\* · (\w+)/.exec(body.trimStart())?.[1]
+  return categories.find((category) => category === name)
+}
+
+function diffThreads(
   discussions: readonly Discussion[],
-  botUsername?: string,
+  botUsername: string | undefined,
+  resolved: boolean,
 ): OpenThread[] {
   return discussions.flatMap((discussion): OpenThread[] => {
     const first = discussion.notes.find((note) => !note.system)
-    if (!discussion.position || discussion.resolved || !first) return []
+    if (!discussion.position || discussion.resolved !== resolved || !first) return []
     const marker = markerOf(first.body)
     const ours = marker !== undefined || (botUsername !== undefined && first.author === botUsername)
+    if (resolved && !ours) return []
     const last = discussion.notes.findLast((note) => !note.system)
-    const reply = ours && last && last !== first && !isOurNote(last, botUsername) ? last : undefined
+    const reply =
+      !resolved && ours && last && last !== first && !isOurNote(last, botUsername)
+        ? last
+        : undefined
+    const category = ours ? categoryOf(first.body) : undefined
     return [
       {
         discussionId: discussion.id,
@@ -57,12 +69,32 @@ export function openThreads(
         text: first.body.replace(new RegExp(markerPattern.source, 'g'), '').trim(),
         ours,
         ...(marker ? { findingId: marker } : {}),
+        ...(category && { category }),
         ...(reply && {
           reply: { noteId: reply.id, author: reply.author, text: withoutComments(reply.body) },
         }),
       },
     ]
   })
+}
+
+/** Unresolved threads on diff lines; `ours` is decided by the marker or the bot's username. */
+export function openThreads(
+  discussions: readonly Discussion[],
+  botUsername?: string,
+): OpenThread[] {
+  return diffThreads(discussions, botUsername, false)
+}
+
+/**
+ * Our resolved threads on diff lines: findings fixed, withdrawn or left to the author. A later run
+ * must not raise them again.
+ */
+export function settledThreads(
+  discussions: readonly Discussion[],
+  botUsername?: string,
+): OpenThread[] {
+  return diffThreads(discussions, botUsername, true)
 }
 
 const tokensOf = (text: string) =>
@@ -155,28 +187,42 @@ export interface DedupeResult {
   repeats: { candidate: Candidate; thread: OpenThread }[]
   /** Candidates that repeat a deterministic finding or an earlier candidate. */
   duplicates: Candidate[]
+  /** Candidates that repeat one of our resolved threads. */
+  settled: { candidate: Candidate; thread: OpenThread }[]
 }
 
+const repeatsThread = (thread: OpenThread, candidate: Candidate, text: string) =>
+  (near(thread, candidate) &&
+    ((thread.line === candidate.line && thread.category === candidate.category) ||
+      similarity(thread.text, text) >= SIMILAR)) ||
+  nearSameCode(thread, candidate, thread.text, text)
+
 /**
- * Drops agent findings that repeat an open thread (same path, line within `LINE_TOLERANCE` and a
- * similar text, or within `CODE_LINE_TOLERANCE` and about the same code), a deterministic finding
- * or an earlier candidate (`sameFinding`). Deterministic findings are kept over agent ones.
+ * Drops agent findings that repeat an open thread or one of our resolved (`settled`) threads (same
+ * path and line within `LINE_TOLERANCE` with the same category on the same line or a similar
+ * text, or within `CODE_LINE_TOLERANCE` and about the same code), a deterministic finding or an
+ * earlier candidate (`sameFinding`). Deterministic findings are kept over agent ones.
  */
 export function dedupe(
   candidates: readonly Candidate[],
-  context: { threads: readonly OpenThread[]; deterministic: readonly Candidate[] },
+  context: {
+    threads: readonly OpenThread[]
+    settled?: readonly OpenThread[]
+    deterministic: readonly Candidate[]
+  },
 ): DedupeResult {
-  const result: DedupeResult = { kept: [], repeats: [], duplicates: [] }
+  const result: DedupeResult = { kept: [], repeats: [], duplicates: [], settled: [] }
   const accepted: Candidate[] = [...context.deterministic]
   for (const candidate of candidates) {
     const text = textOf(candidate)
-    const thread = context.threads.find(
-      (t) =>
-        (near(t, candidate) && similarity(t.text, text) >= SIMILAR) ||
-        nearSameCode(t, candidate, t.text, text),
-    )
+    const thread = context.threads.find((t) => repeatsThread(t, candidate, text))
     if (thread) {
       result.repeats.push({ candidate, thread })
+      continue
+    }
+    const settled = context.settled?.find((t) => repeatsThread(t, candidate, text))
+    if (settled) {
+      result.settled.push({ candidate, thread: settled })
       continue
     }
     const duplicate = accepted.some((other) => sameFinding(other, candidate))

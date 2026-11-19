@@ -74,6 +74,8 @@ export interface ReviewPromptInput {
   /** Deterministic findings to turn into comments with suggestions, in the project's style. */
   requests?: readonly { path: string; line: number; text: string; category: string }[]
   threads: readonly OpenThread[]
+  /** Our resolved threads: fixed, withdrawn or left to the author; the agent must not raise them again. */
+  settled?: readonly OpenThread[]
   maxComments: number
   /**
    * Set when this pass reviews one part of a split diff: its 1-based `index`, the `count` of
@@ -169,7 +171,8 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       '- A `suggestion.replacement` replaces exactly the full lines `startLine..line` (or just `line`): include their complete new text with indentation, and nothing from the lines around them. Suggest only when you are sure the replacement is correct.',
       `- At most ${input.maxComments} comments; when there are more, keep the most severe.`,
       `- Categories: ${listed.join(', ')}.${requestedTests ? ' Use `tests` only for the lines the checks flagged with it.' : ''}`,
-      '- Do not repeat open threads listed in the prompt.',
+      '- Do not repeat open threads listed in the prompt, and do not raise again the resolved threads listed there: they were fixed, withdrawn after discussion or left to the author.',
+      '- `summary`: what the change does and the problems you report in this answer. Do not restate open or resolved threads in it; the review counts earlier threads itself.',
       '- Ground findings in code you read. A claim about code outside the diff (a caller, a guard that does or does not exist, another method relying on a value, a test that is missing) should come from reading that code with the tools: list what you read in `evidence` (path, line, what it shows).',
       '- Do not drop a suspicion because you could not prove it. When something looks wrong but a premise is still open after you looked (you ran out of turns, the code path is too indirect), report it with `unverified: true`: a second reviewer checks every such finding against the code and posts it only when it holds, so a missed bug costs more than a suspicion that turns out wrong. Write its title and body as the problem it would be (what breaks, when), and say in `evidence` what you read; do not write that you did not check something. Leave `unverified` out for findings you confirmed.',
       '- Before calling a flag, field or return value wrong, find every place that reads and writes it (code.references) and make sure your fix would not break one of them.',
@@ -248,6 +251,9 @@ export function ticketBlock(tickets: readonly IssueDetails[] = []): string {
   ].join('\n\n')
 }
 
+const threadLine = (t: OpenThread) =>
+  `- ${t.path}:${t.line} ${t.text.replace(/\s+/g, ' ').slice(0, 160)}`
+
 /** The task prompt: the merge request, open threads and the numbered diff of the files in scope. */
 export function reviewPrompt(input: ReviewPromptInput): string {
   const description = input.mergeRequest.description.trim().slice(0, 3000)
@@ -264,9 +270,8 @@ export function reviewPrompt(input: ReviewPromptInput): string {
   const requests = (input.requests ?? []).map(
     (r) => `- ${r.path}:${r.line} (${r.category}): ${r.text.replace(/\s+/g, ' ').slice(0, 400)}`,
   )
-  const threads = input.threads.map(
-    (t) => `- ${t.path}:${t.line} ${t.text.replace(/\s+/g, ' ').slice(0, 160)}`,
-  )
+  const threads = input.threads.map(threadLine)
+  const settled = (input.settled ?? []).map(threadLine)
   return [
     `# ${input.mergeRequest.title}`,
     description ? `Description:\n\n${description}` : 'The merge request has no description.',
@@ -285,6 +290,9 @@ export function reviewPrompt(input: ReviewPromptInput): string {
       : '',
     input.crossPart ? crossPartBlock(input.crossPart) : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
+    settled.length
+      ? `Resolved threads (fixed, withdrawn or left to the author; do not raise them again):\n${settled.join('\n')}`
+      : '',
     input.dependencies?.trim() ?? '',
     input.apiChanges?.trim() ?? '',
     input.impact?.trim() ?? '',
@@ -579,6 +587,9 @@ function partInput(
     ...rest,
     files: second ? files.toReversed() : files,
     threads: input.threads.filter((thread) => paths.has(thread.path)),
+    ...(input.settled && {
+      settled: input.settled.filter((thread) => paths.has(thread.path)),
+    }),
     ...(pathInstructions.length ? { pathInstructions } : {}),
     ...(requests.length ? { requests } : {}),
     part: { index, count, files: input.files.map((file) => file.path) },

@@ -9,6 +9,7 @@ import {
   openThreads,
   rankAndCap,
   sameCode,
+  settledThreads,
   similarity,
 } from './dedupe.ts'
 import type { Candidate } from './validate.ts'
@@ -59,6 +60,16 @@ describe('markers and threads', () => {
       ['3', false, undefined],
     ])
     expect(threads[0]?.text).toBe('Bug here')
+  })
+
+  test('settledThreads keeps only our resolved diff threads, with the category of our heading', () => {
+    const ours = `**Major** · bug — **Cache entry is never evicted**\n\nIt grows forever.\n\n${findingMarker('f1')}`
+    const settled = settledThreads([
+      discussion('1', ours, { resolved: true }),
+      discussion('2', ours),
+      discussion('3', 'human note', { resolved: true }),
+    ])
+    expect(settled.map((t) => [t.discussionId, t.category])).toEqual([['1', 'bug']])
   })
 })
 
@@ -126,6 +137,42 @@ describe('dedupe', () => {
     const result = dedupe([first, second, elsewhere], { threads: [], deterministic: [] })
     expect(result.duplicates.map((c) => c.line)).toEqual([46])
     expect(result.kept.map((c) => c.line)).toEqual([40, 70])
+  })
+
+  test('drops a rephrased finding on the line of our open thread with the same category', () => {
+    const [thread] = openThreads([
+      discussion(
+        't',
+        `**Minor** · bug — **A crash in the widget handler is swallowed**\n\nNothing logs it.\n\n${findingMarker('f1')}`,
+        { position: { path: 'a.ts', line: 10, side: 'new', headSha: 'x' } },
+      ),
+    ])
+    const result = dedupe(
+      [
+        candidate({ title: 'Caller waits for a timeout', body: 'No response is sent then.' }),
+        candidate({ category: 'performance', title: 'Slow path', body: 'Allocates per call.' }),
+      ],
+      { threads: thread ? [thread] : [], deterministic: [] },
+    )
+    expect(result.repeats.map((r) => r.candidate.category)).toEqual(['bug'])
+    expect(result.kept.map((c) => c.category)).toEqual(['performance'])
+  })
+
+  test('drops findings that repeat our resolved threads', () => {
+    const settled = settledThreads([
+      discussion(
+        's',
+        `**Major** · bug — **Null check missing**\n\nThe user lookup may return undefined and the access crashes.\n\n${findingMarker('f1')}`,
+        { resolved: true },
+      ),
+    ])
+    const result = dedupe([candidate({}), candidate({ line: 80, title: 'Other', body: 'x' })], {
+      threads: [],
+      settled,
+      deterministic: [],
+    })
+    expect(result.settled.map((r) => r.thread.discussionId)).toEqual(['s'])
+    expect(result.kept.map((c) => c.line)).toEqual([80])
   })
 })
 

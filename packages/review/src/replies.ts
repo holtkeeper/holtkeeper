@@ -13,11 +13,14 @@ import type { ReviewMessages } from './messages.ts'
 import type { ReviewUsage } from './schema.ts'
 import {
   ANSWER_RULES,
+  MAX_THREAD_ANSWERS,
   type ThreadAnswer,
   answerSchema,
+  answersIn,
   codeAround,
   postThreadAnswer,
   replyToThread,
+  reviewThreadsState,
   threadConversation,
 } from './thread.ts'
 
@@ -180,6 +183,8 @@ export async function answerThreads(options: {
   workspace: ReplyWorkspace
   botUsername?: string
   language?: string
+  /** `reviewThreadsState` of the merge request, shown with general threads. */
+  reviewState?: string
   usage: ReviewUsage
   signal?: AbortSignal
 }): Promise<Map<string, ThreadAnswer>> {
@@ -204,6 +209,7 @@ export async function answerThreads(options: {
         return [
           `## Thread ${discussion.id}${position ? ` on ${position.path}:${position.line}` : ' (general)'}`,
           code ? `Code at the head:\n\`\`\`\n${code}\n\`\`\`` : '',
+          !position && options.reviewState ? options.reviewState : '',
           `Conversation:\n\n${threadConversation(
             discussion.notes.filter((note) => !note.system),
             options.botUsername,
@@ -284,7 +290,9 @@ export interface AnswerRepliesOptions {
  * resolving the thread when the problem is gone; everything else, and a claim the check could not
  * settle, gets an answer in words, several threads per agent call (`answerThreads`) with a call of
  * its own (`replyToThread`) for a thread the batch left out. A thread that got a newer note while
- * the agent worked is skipped: that note queues its own run. Answered notes lose the `seen` mark.
+ * the agent worked is skipped: that note queues its own run. A thread Holtkeeper already answered
+ * `MAX_THREAD_ANSWERS` times gets only the `done` mark. General threads are answered with the
+ * current state of our diff threads (`reviewThreadsState`). Answered notes lose the `seen` mark.
  */
 export async function answerReplies(options: AnswerRepliesOptions): Promise<ReplyOutcome[]> {
   const { forge, repo, mr, pending } = options
@@ -343,15 +351,34 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
     return pending.flatMap((item) => outcomes.get(item.discussion.id) ?? [])
   }
 
+  // Past the answer limit the decision is the author's: no more notes, only the done mark.
+  const capped = pending.filter(
+    (item) => answersIn(item.discussion.notes, options.botUsername) >= MAX_THREAD_ANSWERS,
+  )
+  for (const item of capped) {
+    // oxlint-disable-next-line no-await-in-loop -- sequential: forges rate-limit reactions
+    await forge.addNoteMark?.(repo.path, mr.id, item.reply.id, 'done').catch(() => undefined)
+    // oxlint-disable-next-line no-await-in-loop
+    await unmark(item)
+    record(item, {
+      action: 'skipped',
+      replied: false,
+      resolved: false,
+      reason: 'answer limit reached',
+    })
+  }
+  const open = pending.filter((item) => !capped.includes(item))
+  if (open.length === 0) return done()
+
   const kinds = await triageReplies({
     agent: options.agent,
-    pending,
+    pending: open,
     ...(options.botUsername ? { botUsername: options.botUsername } : {}),
     usage: side,
     ...(options.log ? { log: options.log } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   })
-  const of = (kind: ReplyKind) => pending.filter((item) => kinds.get(item.discussion.id) === kind)
+  const of = (kind: ReplyKind) => open.filter((item) => kinds.get(item.discussion.id) === kind)
 
   for (const item of of('ack')) {
     // oxlint-disable-next-line no-await-in-loop -- sequential: forges rate-limit reactions
@@ -445,6 +472,14 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
     }
   }
 
+  const general = [...inWords].some((item) => !item.discussion.position)
+  const reviewState = general
+    ? reviewThreadsState(
+        (await forge.listDiscussions?.(repo.path, mr.id).catch(() => undefined)) ?? [],
+        options.botUsername,
+      )
+    : ''
+
   const answerAlone = async (item: PendingReply) => {
     const result = await replyToThread({
       forge,
@@ -459,6 +494,7 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
       ...(options.language ? { language: options.language } : {}),
       usage: options.usage,
       ...(options.cite ? { cite: options.cite } : {}),
+      ...(reviewState && { reviewState }),
       stillPending: async () => (await latestNotes()).get(item.discussion.id) === item.reply.id,
       ...(options.signal ? { signal: options.signal } : {}),
     })
@@ -471,7 +507,7 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
     })
   }
 
-  const queue = pending.filter((item) => inWords.has(item))
+  const queue = open.filter((item) => inWords.has(item))
   for (let start = 0; start < queue.length; start += REPLY_BATCH) {
     const batch = queue.slice(start, start + REPLY_BATCH)
     const [only] = batch
@@ -489,6 +525,7 @@ export async function answerReplies(options: AnswerRepliesOptions): Promise<Repl
       workspace,
       ...(options.botUsername ? { botUsername: options.botUsername } : {}),
       ...(options.language ? { language: options.language } : {}),
+      ...(reviewState && { reviewState }),
       usage: options.usage,
       ...(options.signal ? { signal: options.signal } : {}),
     }).catch((error: unknown) => {

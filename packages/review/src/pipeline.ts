@@ -33,7 +33,14 @@ import {
   reviewCheckNames,
 } from './checks.ts'
 import type { CitationStyle } from './cite.ts'
-import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
+import {
+  type OpenThread,
+  dedupe,
+  openThreads,
+  rankAndCap,
+  settledThreads,
+  severityRank,
+} from './dedupe.ts'
 import { dependencySection } from './dependencies.ts'
 import { DEFAULT_REVIEW_DEPTH, type ReviewDepth, resolveReviewDepth } from './depth.ts'
 import { commentBody, isSummaryNote, summaryNote, threadNote } from './format.ts'
@@ -276,6 +283,8 @@ export interface LoadedReview {
   diff: MergeRequestDiff
   discussions: Discussion[]
   threads: OpenThread[]
+  /** Our resolved diff threads (`settledThreads`); findings that repeat them are dropped. */
+  settled?: OpenThread[]
   /** The latest earlier review of this merge request that reviewed something. */
   previous?: ReviewData
 }
@@ -414,7 +423,27 @@ const load: ReviewSteps['load'] = async (run) => {
     diff,
     discussions,
     threads: openThreads(discussions, run.botUsername),
+    settled: settledThreads(discussions, run.botUsername),
     ...(previous ? { previous } : {}),
+  }
+}
+
+/** `loaded` with the discussions read again; unchanged when the forge fails to list them. */
+export async function withFreshThreads(
+  run: Pick<ReviewRun, 'forge' | 'repo' | 'botUsername' | 'log'>,
+  loaded: LoadedReview,
+): Promise<LoadedReview> {
+  try {
+    const discussions = await run.forge.listDiscussions(run.repo.path, loaded.mr.id)
+    return {
+      ...loaded,
+      discussions,
+      threads: openThreads(discussions, run.botUsername),
+      settled: settledThreads(discussions, run.botUsername),
+    }
+  } catch (error) {
+    run.log?.(`reading threads again failed: ${errorText(error)}`)
+    return loaded
   }
 }
 
@@ -427,11 +456,22 @@ const plan: ReviewSteps['plan'] = async (run, loaded) => {
 
   let since: DiffFile[] | undefined
   if (run.options.mode !== 'full' && last && last !== head && run.forge.compareCommits) {
-    const linear = run.dir ? await isAncestor(run.runner, run.dir, last, head) : true
-    if (linear) since = await run.forge.compareCommits(run.repo.path, last, head)
-    else
+    const dir = run.dir
+    const linear = dir ? await isAncestor(run.runner, dir, last, head) : true
+    // An amended or force-pushed head on the same base: the tree diff from the last head is
+    // exactly what the author changed. A rebase moves the base, and the diff would carry the
+    // target branch's commits.
+    const rewritten =
+      !linear && dir ? await isAncestor(run.runner, dir, loaded.diff.refs.baseSha, last) : false
+    if (linear || rewritten) {
+      if (rewritten)
+        run.log?.(
+          `previous head ${last.slice(0, 8)} was rewritten on the same base; reviewing the changes since it`,
+        )
+      since = await run.forge.compareCommits(run.repo.path, last, head)
+    } else
       run.log?.(
-        `previous head ${last.slice(0, 8)} is not an ancestor of ${head.slice(0, 8)}; reviewing everything`,
+        `previous head ${last.slice(0, 8)} is not an ancestor of ${head.slice(0, 8)} and the base moved; reviewing everything`,
       )
   } else if (run.options.mode !== 'full' && last === head) since = []
 
@@ -638,6 +678,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
           }
         : {}),
       threads: loaded.threads,
+      ...(loaded.settled?.length ? { settled: loaded.settled } : {}),
       maxComments: run.options.maxComments,
       ...(run.options.language ? { language: run.options.language } : {}),
       ...(goGuidelines ? { goGuidelines } : {}),
@@ -1024,7 +1065,7 @@ async function reviewOnce(input: ReviewRun, started: number): Promise<ReviewData
   const steps = { ...defaultSteps, ...input.steps }
   const messages = input.messages ?? englishReviewMessages
   const usage: ReviewUsage = { turns: 0 }
-  const loaded = await steps.load(input)
+  let loaded = await steps.load(input)
   const run: ReviewRun = input.agent
     ? { ...input, agent: withPhase(input.agent, loaded.previous ? 'update' : 'initial') }
     : input
@@ -1109,17 +1150,26 @@ async function reviewOnce(input: ReviewRun, started: number): Promise<ReviewData
     ),
   ])
 
+  // The agent takes minutes, and replies resolve threads meanwhile.
+  if (agentOutcome) loaded = await withFreshThreads(run, loaded)
   const fixedDeterministic = dedupe(deterministicValid, {
     threads: loaded.threads,
+    settled: loaded.settled ?? [],
     deterministic: [],
   })
   const fromAgent = dedupe(agentValid, {
     threads: loaded.threads,
+    settled: loaded.settled ?? [],
     deterministic: fixedDeterministic.kept,
   })
   const repeats = [...fixedDeterministic.repeats, ...fromAgent.repeats]
+  const settledRepeats = fixedDeterministic.settled.length + fromAgent.settled.length
+  if (settledRepeats) run.log?.(`dropped ${settledRepeats} finding(s) repeating resolved threads`)
   stats.dropped.duplicates =
-    fixedDeterministic.duplicates.length + fromAgent.duplicates.length + repeats.length
+    fixedDeterministic.duplicates.length +
+    fromAgent.duplicates.length +
+    repeats.length +
+    settledRepeats
 
   const verdicts = await steps.recheck(run, loaded, planned, usage)
   const threads: ThreadAction[] = []

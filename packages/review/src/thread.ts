@@ -53,7 +53,30 @@ export interface ReplyToThreadOptions {
   stillPending?: () => Promise<boolean>
   /** Shows the rule citations of the answer before it is posted (`citationRenderer`). */
   cite?: (text: string) => Promise<string>
+  /** `reviewThreadsState` of the merge request, shown with a general thread. */
+  reviewState?: string
   signal?: AbortSignal
+}
+
+/**
+ * Our review threads on diff lines as the reply agent reads them: each with its state, location
+ * and title. Empty when there are none.
+ */
+export function reviewThreadsState(
+  discussions: readonly Discussion[],
+  botUsername?: string,
+): string {
+  const lines = discussions.flatMap((discussion) => {
+    const first = discussion.notes.find((note) => !note.system)
+    if (!discussion.position || !first || !isOurNote(first, botUsername)) return []
+    const body = first.body.replace(/<!--[\s\S]*?-->/g, '').trim()
+    const title = /— \*\*(.+?)\*\*/.exec(body)?.[1] ?? body.split('\n')[0]?.slice(0, 120) ?? ''
+    const state = discussion.resolved ? 'resolved' : 'open'
+    return [`- ${state}: ${discussion.position.path}:${discussion.position.line} ${title}`]
+  })
+  return lines.length
+    ? `Your review threads now (resolved ones are settled; this list is the current state):\n${lines.join('\n')}`
+    : ''
 }
 
 export interface ThreadReplyResult {
@@ -78,8 +101,26 @@ export const ANSWER_RULES = [
   '- `explain` when your comment stands: clarify it briefly with evidence from the code.',
   '- `concede` when the author is right; say so plainly and set resolve to true.',
   '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
+  '- When you already answered earlier in the thread and the author declines again without new code or a new argument, the decision is theirs: say in one or two sentences that you leave it to them, naming the remaining risk once, with `explain` and resolve true. Never argue the same point twice.',
+  '- A short dismissal ("not needed", "it is fine") gets a short answer: at most three sentences with the concrete risk and what would settle it. Do not restate the whole comment.',
+  '- In a general thread, take the state of your review threads from the list in the prompt: resolved threads are settled, never present them as open or blocking.',
   'Be short and concrete. Never be defensive.',
 ]
+
+/** Most answers Holtkeeper gives to people's replies in one thread; later replies get none. */
+export const MAX_THREAD_ANSWERS = 2
+
+/** How many of Holtkeeper's notes in the thread answer a person's note right before them. */
+export function answersIn(
+  notes: readonly { author: string; body: string; system?: boolean }[],
+  botUsername?: string,
+): number {
+  const visible = notes.filter((note) => !note.system)
+  return visible.filter((note, index) => {
+    const before = visible[index - 1]
+    return before !== undefined && isOurNote(note, botUsername) && !isOurNote(before, botUsername)
+  }).length
+}
 
 /** The thread's notes as the agent reads them: who said what, our notes named `reviewer (you)`. */
 export function threadConversation(
@@ -166,6 +207,7 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
       prompt: [
         position ? `Thread on ${position.path}:${position.line}.` : 'General thread.',
         code ? `Code at the head:\n\`\`\`\n${code}\n\`\`\`` : '',
+        !position && options.reviewState ? options.reviewState : '',
         `Conversation:\n\n${conversation}`,
       ]
         .filter(Boolean)

@@ -190,6 +190,20 @@ describe('reviewSystemPrompt', () => {
     expect(reviewPrompt(inputOf([fileOf('src/widget.ts', 3)]))).not.toContain('Dependency changes')
   })
 
+  test('lists our resolved threads so they are not raised again', () => {
+    const settled = {
+      discussionId: 'r',
+      path: 'src/widget.ts',
+      line: 2,
+      text: '**Major** · bug — **Gear count is never checked**',
+      ours: true,
+    }
+    const prompt = reviewPrompt(inputOf([fileOf('src/widget.ts', 3)], { settled: [settled] }))
+    expect(prompt).toContain('Resolved threads (fixed, withdrawn or left to the author')
+    expect(prompt).toContain('src/widget.ts:2 **Major** · bug — **Gear count is never checked**')
+    expect(reviewPrompt(inputOf([fileOf('src/widget.ts', 3)]))).not.toContain('Resolved threads')
+  })
+
   test('writes prose in the configured language and keeps code and terms in English', () => {
     const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)], { language: 'German' }))
     expect(prompt).toContain('the summary and the walkthrough in German')

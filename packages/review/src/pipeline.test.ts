@@ -950,6 +950,33 @@ describe('reviewMergeRequest', () => {
     expect(compared).toEqual([])
   })
 
+  test('reviews only the changes since an amended head on the same base', async () => {
+    const store = memoryStore()
+    await store.analyses.add({
+      repo,
+      kind: 'review',
+      ref: '!7',
+      createdAt: '2026-10-29T00:00:00Z',
+      data: {
+        ...(await reviewMergeRequest(
+          runOf({ forge: requireReviewForge(fakeForge({ files, discussions: [] }).forge) }),
+        )),
+        head: 'old',
+      },
+    })
+    const { forge, compared } = fakeForge({ files, discussions: [], compare: files })
+    // `old` is no ancestor of the head, but the merge request's base is an ancestor of `old`.
+    const runner = createFakeRunner((command) => ({
+      exitCode: command.at(-1) === 'old' ? 0 : 1,
+    })).runner
+    const data = await reviewMergeRequest(
+      runOf({ forge: requireReviewForge(forge), runner, analyses: store.analyses }),
+    )
+    expect(data.mode).toBe('incremental')
+    expect(data.previousHead).toBe('old')
+    expect(compared).toEqual([['old', HEAD]])
+  })
+
   test('merges media findings and appends the images summary', async () => {
     const svg = {
       oldPath: 'logo.svg',

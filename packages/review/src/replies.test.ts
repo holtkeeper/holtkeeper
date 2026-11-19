@@ -182,6 +182,51 @@ describe('answerReplies', () => {
     expect(tasks).toEqual([])
   })
 
+  test('stops answering a thread after the answer limit and marks the reply done', async () => {
+    const argued = thread('d1', [
+      ['bot', finding('Radius is never checked')],
+      ['ann', 'Not needed.'],
+      ['bot', replyBody('A negative radius gives a negative area.')],
+      ['ann', 'Still not needed.'],
+      ['bot', replyBody('Your call then.')],
+      ['ann', 'It is fine.'],
+    ])
+    const { forge, replies, marksOn } = fakeForge({ files: [], discussions: [argued] })
+    const { agent, tasks } = fakeAgent({})
+    const { outcomes } = await run(forge, agent)
+    expect(tasks).toEqual([])
+    expect(replies).toEqual([])
+    expect(outcomes.map((o) => [o.discussionId, o.action, o.reason])).toEqual([
+      ['d1', 'skipped', 'answer limit reached'],
+    ])
+    expect(marksOn(replyOf(argued))).toEqual(['done'])
+  })
+
+  test('answers a general thread with the current state of the review threads', async () => {
+    const summary: Discussion = {
+      ...thread('s', [
+        ['bot', 'Summary <!-- holtkeeper:review summary head=h -->'],
+        ['ann', 'All fine.'],
+      ]),
+      position: undefined,
+    }
+    const settled = {
+      ...thread('r', [['bot', finding('**Major** · bug — **Radius is never checked**')]]),
+      resolved: true,
+    }
+    const open = thread('o', [
+      ['bot', finding('**Minor** · tests — **No test for the zero area**')],
+    ])
+    const { forge } = fakeForge({ files: [], discussions: [summary, settled, open] })
+    const { agent, tasks } = fakeAgent({
+      triage: [{ threads: [{ id: 's', kind: 'discuss' }] }],
+      review: [{ action: 'explain', body: 'One open thread remains.', resolve: false }],
+    })
+    await run(forge, agent)
+    expect(tasks[1]?.prompt).toContain('- resolved: src/area.ts:2 Radius is never checked')
+    expect(tasks[1]?.prompt).toContain('- open: src/area.ts:2 No test for the zero area')
+  })
+
   test('checks a fixed claim against the code and resolves the thread', async () => {
     const fixed = thread('d1', [
       ['bot', finding('Radius is never checked')],
