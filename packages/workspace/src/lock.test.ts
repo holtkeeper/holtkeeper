@@ -77,12 +77,17 @@ describe('withMirrorLock', () => {
     const mirror = await mirrorIn()
     const lines: string[] = []
     const { promise: holding, resolve: release } = Promise.withResolvers<void>()
-    const hung = withMirrorLock(mirror, () => holding, {
-      refreshMs: 10,
-      maxHoldMs: 40,
-      log: (line) => lines.push(line),
-    })
-    const next = await withMirrorLock(mirror, async () => 'ran', { pollMs: 5, staleMs: 100 })
+    const { promise: held, resolve: entered } = Promise.withResolvers<void>()
+    const hung = withMirrorLock(
+      mirror,
+      () => {
+        entered()
+        return holding
+      },
+      { refreshMs: 10, maxHoldMs: 40, log: (line) => lines.push(line) },
+    )
+    await held
+    const next = await withMirrorLock(mirror, async () => 'ran', { pollMs: 5, staleMs: 250 })
     expect(next).toBe('ran')
     expect(lines.some((line) => line.includes('no longer refreshing'))).toBeTrue()
     release()
@@ -115,12 +120,12 @@ describe('withMirrorLock', () => {
     const refresh = setInterval(() => {
       const ahead = new Date(Date.now() + 3_600_000 + ++tick * 1000)
       void utimes(`${mirror}.lock`, ahead, ahead)
-    }, 20)
+    }, 10)
     const controller = new AbortController()
-    setTimeout(() => controller.abort(), 400)
+    setTimeout(() => controller.abort(), 600)
     const outcome = await withMirrorLock(mirror, async () => 'ran', {
       pollMs: 5,
-      staleMs: 100,
+      staleMs: 400,
       signal: controller.signal,
     }).catch(() => 'still waiting')
     clearInterval(refresh)
