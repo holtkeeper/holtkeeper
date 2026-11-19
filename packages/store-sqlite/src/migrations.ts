@@ -862,6 +862,36 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE ai_usage ADD COLUMN phase TEXT;
     `,
   },
+  {
+    version: 36,
+    sql: `
+      UPDATE ai_usage SET merge_request = COALESCE(
+        CASE WHEN json_extract(j.options, '$.mergeRequest') GLOB '[0-9]*'
+          AND json_extract(j.options, '$.mergeRequest') NOT GLOB '*[^0-9]*'
+          THEN CAST(json_extract(j.options, '$.mergeRequest') AS INTEGER) END,
+        CASE WHEN ai_usage.subject GLOB 'MR ![0-9]*' AND substr(ai_usage.subject, 5) NOT GLOB '*[^0-9]*'
+          THEN CAST(substr(ai_usage.subject, 5) AS INTEGER) END
+      )
+      FROM jobs j
+      WHERE j.id = ai_usage.job_id AND j.analyzer = 'review' AND ai_usage.merge_request IS NULL;
+
+      UPDATE ai_usage SET phase = CASE
+        WHEN json_extract(j.options, '$.replyTo') IS NOT NULL
+          OR json_extract(j.options, '$.replies') IS NOT NULL
+          OR json_extract(a.metrics, '$.mode') = 'reply' THEN 'reply'
+        WHEN ai_usage.merge_request IS NOT NULL AND EXISTS (
+          SELECT 1 FROM analyses p
+          WHERE p.kind = 'review' AND p.repo_forge = ai_usage.repo_forge
+            AND p.repo_path = ai_usage.repo_path AND p.ref = '!' || ai_usage.merge_request
+            AND p.created_at < ai_usage.at
+            AND COALESCE(json_extract(p.metrics, '$.mode'), '') <> 'reply'
+        ) THEN 'update'
+        ELSE 'initial'
+      END
+      FROM jobs j LEFT JOIN analyses a ON a.id = j.analysis_id
+      WHERE j.id = ai_usage.job_id AND j.analyzer = 'review' AND ai_usage.phase IS NULL;
+    `,
+  },
 ]
 
 /**

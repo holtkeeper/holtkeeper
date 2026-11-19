@@ -370,4 +370,67 @@ describe('migrate', () => {
     })
     expect((await rules.search('radius')).map((hit) => hit.rule.id)).toEqual(['r1'])
   })
+
+  test('v36 fills merge request and phase of earlier review spend', () => {
+    const db = new Database(':memory:')
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 35),
+    )
+    const job = (id: string, options: string, analysis: string | null, analyzer = 'review') =>
+      db.run(
+        `INSERT INTO jobs (id, analyzer, repo_forge, repo_path, options, trigger, status, attempts,
+           max_attempts, run_after, created_at, analysis_id)
+         VALUES (?, ?, 'work', 'shapes/a', ?, 'webhook', 'done', 1, 3, 'now', 'now', ?)`,
+        [id, analyzer, options, analysis],
+      )
+    const analysis = (id: string, ref: string, at: string, mode: string) =>
+      db.run(
+        `INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, created_at, data, metrics)
+         VALUES (?, 'work', 'shapes/a', 'review', ?, ?, '{}', ?)`,
+        [id, ref, at, JSON.stringify({ mode })],
+      )
+    const usage = (id: string, at: string, jobId: string, kind: string, subject: string | null) =>
+      db.run(
+        `INSERT INTO ai_usage (id, at, repo_forge, repo_path, teams, task_kind, job_id, actor,
+           interactive, subject, provider, model, input_tokens, output_tokens, cache_read_tokens,
+           cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome)
+         VALUES (?, ?, 'work', 'shapes/a', '[]', ?, ?, 'system', 0, ?, 'anthropic', 'm', 0, 0, 0, 0,
+           0.1, 'price', 0, 1, 'ok')`,
+        [id, at, kind, jobId, subject],
+      )
+    analysis('a1', '!7', '2026-11-12T10:05:00.000Z', 'full')
+    analysis('a2', '!7', '2026-11-13T10:05:00.000Z', 'incremental')
+    analysis('a3', '!7', '2026-11-13T12:05:00.000Z', 'reply')
+    job('j1', '{"mergeRequest":7}', 'a1')
+    job('j2', '{"mergeRequest":7}', 'a2')
+    job('j3', '{"replies":true,"mergeRequest":7}', 'a3')
+    job('j4', '{}', null)
+    job('j5', '{}', null, 'coverage')
+    usage('u1', '2026-11-12T10:00:00.000Z', 'j1', 'review', 'MR !7')
+    usage('u2', '2026-11-12T10:01:00.000Z', 'j1', 'review-verify', 'MR !7')
+    usage('u3', '2026-11-13T10:00:00.000Z', 'j2', 'review', 'MR !7')
+    usage('u4', '2026-11-13T12:00:00.000Z', 'j3', 'review', 'MR !7')
+    usage('u5', '2026-11-14T09:00:00.000Z', 'j4', 'review', 'MR !9')
+    usage('u6', '2026-11-14T09:00:00.000Z', 'j5', 'triage', null)
+    usage('u7', '2026-11-13T10:02:00.000Z', 'j2', 'triage', 'MR !7')
+    db.run(`UPDATE ai_usage SET phase = 'recheck', merge_request = 3 WHERE id = 'u7'`)
+    migrate(db)
+    expect(
+      db
+        .query<{ id: string; merge_request: number | null; phase: string | null }, []>(
+          'SELECT id, merge_request, phase FROM ai_usage ORDER BY id',
+        )
+        .all(),
+    ).toEqual([
+      { id: 'u1', merge_request: 7, phase: 'initial' },
+      { id: 'u2', merge_request: 7, phase: 'initial' },
+      { id: 'u3', merge_request: 7, phase: 'update' },
+      { id: 'u4', merge_request: 7, phase: 'reply' },
+      { id: 'u5', merge_request: 9, phase: 'initial' },
+      { id: 'u6', merge_request: null, phase: null },
+      { id: 'u7', merge_request: 3, phase: 'recheck' },
+    ])
+    db.close()
+  })
 })

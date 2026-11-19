@@ -837,6 +837,31 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE ai_usage ADD COLUMN phase text;
     `,
   },
+  {
+    version: 35,
+    sql: `
+      UPDATE ai_usage u SET merge_request = COALESCE(
+        CASE WHEN j.options->>'mergeRequest' ~ '^[0-9]+$' THEN (j.options->>'mergeRequest')::integer END,
+        CASE WHEN u.subject ~ '^MR ![0-9]+$' THEN substring(u.subject from '[0-9]+')::integer END
+      )
+      FROM jobs j
+      WHERE j.id = u.job_id AND j.analyzer = 'review' AND u.merge_request IS NULL;
+
+      UPDATE ai_usage u SET phase = CASE
+        WHEN j.options->>'replyTo' IS NOT NULL OR j.options->>'replies' IS NOT NULL
+          OR a.metrics->>'mode' = 'reply' THEN 'reply'
+        WHEN u.merge_request IS NOT NULL AND EXISTS (
+          SELECT 1 FROM analyses p
+          WHERE p.kind = 'review' AND p.repo_forge = u.repo_forge AND p.repo_path = u.repo_path
+            AND p.ref = '!' || u.merge_request AND p.created_at < u.at
+            AND COALESCE(p.metrics->>'mode', '') <> 'reply'
+        ) THEN 'update'
+        ELSE 'initial'
+      END
+      FROM jobs j LEFT JOIN analyses a ON a.id = j.analysis_id
+      WHERE j.id = u.job_id AND j.analyzer = 'review' AND u.phase IS NULL;
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

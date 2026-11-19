@@ -85,6 +85,60 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     expect(row.a).toBeNull()
   })
 
+  test('v35 fills merge request and phase of earlier review spend', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((m) => m.version <= 34),
+    )
+    await admin!.begin(async (tx) => {
+      await tx`SET LOCAL search_path TO ${tx(schema)}`
+      const job = (id: string, options: object, analysis: string | null, analyzer = 'review') =>
+        tx`INSERT INTO jobs (id, analyzer, repo_forge, repo_path, options, trigger, status, attempts,
+             max_attempts, run_after, created_at, analysis_id)
+           VALUES (${id}, ${analyzer}, 'work', 'shapes/a', ${options}, 'webhook', 'done', 1, 3,
+             now(), now(), ${analysis})`
+      const analysis = (id: string, ref: string, at: string, mode: string) =>
+        tx`INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, created_at, data, metrics)
+           VALUES (${id}, 'work', 'shapes/a', 'review', ${ref}, ${at}, '{}', ${{ mode }})`
+      const usage = (id: string, at: string, jobId: string, kind: string, subject: string | null) =>
+        tx`INSERT INTO ai_usage (id, at, repo_forge, repo_path, teams, task_kind, job_id, actor,
+             subject, provider, model, input_tokens, output_tokens, cache_read_tokens,
+             cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome)
+           VALUES (${id}, ${at}, 'work', 'shapes/a', '[]', ${kind}, ${jobId}, 'system', ${subject},
+             'anthropic', 'm', 0, 0, 0, 0, 0.1, 'price', 0, 1, 'ok')`
+      await analysis('a1', '!7', '2026-11-12T10:05:00.000Z', 'full')
+      await analysis('a2', '!7', '2026-11-13T10:05:00.000Z', 'incremental')
+      await analysis('a3', '!7', '2026-11-13T12:05:00.000Z', 'reply')
+      await job('j1', { mergeRequest: 7 }, 'a1')
+      await job('j2', { mergeRequest: 7 }, 'a2')
+      await job('j3', { replies: true, mergeRequest: 7 }, 'a3')
+      await job('j4', {}, null)
+      await job('j5', {}, null, 'coverage')
+      await usage('u1', '2026-11-12T10:00:00.000Z', 'j1', 'review', 'MR !7')
+      await usage('u2', '2026-11-12T10:01:00.000Z', 'j1', 'review-verify', 'MR !7')
+      await usage('u3', '2026-11-13T10:00:00.000Z', 'j2', 'review', 'MR !7')
+      await usage('u4', '2026-11-13T12:00:00.000Z', 'j3', 'review', 'MR !7')
+      await usage('u5', '2026-11-14T09:00:00.000Z', 'j4', 'review', 'MR !9')
+      await usage('u6', '2026-11-14T09:00:00.000Z', 'j5', 'triage', null)
+      await usage('u7', '2026-11-13T10:02:00.000Z', 'j2', 'triage', 'MR !7')
+      await tx`UPDATE ai_usage SET phase = 'recheck', merge_request = 3 WHERE id = 'u7'`
+    })
+    expect(await migrate(admin!, schema)).toEqual([35])
+    const rows = await admin!`SELECT id, merge_request, phase
+      FROM ${admin!(`${schema}.ai_usage`)} ORDER BY id`
+    expect([...rows]).toEqual([
+      { id: 'u1', merge_request: 7, phase: 'initial' },
+      { id: 'u2', merge_request: 7, phase: 'initial' },
+      { id: 'u3', merge_request: 7, phase: 'update' },
+      { id: 'u4', merge_request: 7, phase: 'reply' },
+      { id: 'u5', merge_request: 9, phase: 'initial' },
+      { id: 'u6', merge_request: null, phase: null },
+      { id: 'u7', merge_request: 3, phase: 'recheck' },
+    ])
+  })
+
   test('concurrent claims keep exclusive jobs alone and one job per analyzer', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema(), max: 8 })
     const analyzers = ['bundle', 'bundle', 'changelog', 'coverage']
