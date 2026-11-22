@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@holtkeeper/agent": "workspace:*",
-    "@holtkeeper/waibee-ai-provider": "^0.1.0"
+    "@holtkeeper/waibee-ai-provider": "^1.0.0"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.34"
