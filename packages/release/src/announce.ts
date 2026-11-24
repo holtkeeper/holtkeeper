@@ -32,6 +32,11 @@ export const releaseAnnounceSchema = z.object({
     .describe(
       'Glob patterns of tag names, e.g. @acme/*@*; default: version tags of the release flow',
     ),
+  ignore: z
+    .array(z.string().trim().min(1))
+    .max(50)
+    .default([])
+    .describe('Glob patterns of tag names or versions never announced, e.g. *-beta*'),
   groupWindowMinutes: z
     .number()
     .int()
@@ -70,6 +75,7 @@ export const releaseAnnounceDefinition = {
 
 - **channels**: Slack channel ids, e.g. \`C0123ABCD\` (channel details › About). Invite the app first; it needs the \`chat:write\` scope. No channels, no announcements.
 - **tags**: glob patterns of the tag names to announce, e.g. \`@acme/*@*\`. By default the version tags of the release flow (\`version.tagFormat\`) and package tags such as \`@acme/widgets@1.2.3\`.
+- **ignore**: glob patterns of tags that are never announced, matched against the tag name and its version, e.g. \`*-beta*\` skips every beta, \`*-*\` every prerelease. Ignored tags still count as the previous version of the next announced one.
 - **groupWindowMinutes** (default 10): tags found within this window make one message, e.g. every package a monorepo released at once.
 - **notes**: a short AI description with breaking changes and migration hints (one cheap call per message; left out when the AI budget is spent). **tasks**: tracker tasks with links. **impact**: which connected repositories an upgrade breaks, from the indexed public API and their usages.
 - **language**: of the AI text; default the review language (\`analyzers.review\` › language), else English.
@@ -99,16 +105,20 @@ function parseTag(
 }
 
 /**
- * Whether `releases.announce` covers a tag, and what it versions. With `tags` a tag must match one
- * of the globs and counts even when it names no version; without them only version tags of the
+ * Whether `releases.announce` covers a tag, and what it versions. A tag whose name or version
+ * matches an `ignore` glob is never covered. With `tags` a tag must match one of the globs and counts even when it names no version; without them only version tags of the
  * release flow and package tags count.
  */
 export function announcedTag(
   settings: ReleaseSettings,
-  announce: Pick<ReleaseAnnounceSettings, 'tags'>,
+  announce: Partial<Pick<ReleaseAnnounceSettings, 'tags' | 'ignore'>>,
   tag: { name: string; sha: string },
 ): AnnouncedTag | undefined {
   const parsed = parseTag(settings, tag.name)
+  const ignored = (announce.ignore ?? []).map((glob) => new Bun.Glob(glob))
+  if (ignored.some((glob) => glob.match(tag.name) || (parsed && glob.match(parsed.version)))) {
+    return undefined
+  }
   if (announce.tags?.length) {
     if (!announce.tags.some((glob) => new Bun.Glob(glob).match(tag.name))) return undefined
     return {

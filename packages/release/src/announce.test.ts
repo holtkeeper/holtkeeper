@@ -18,6 +18,7 @@ const tag = (name: string) => ({ name, sha: `sha-${name}` })
 test('releases.announce defaults announce nothing and tolerate bad values', () => {
   expect(releaseAnnounceSettings(undefined)).toEqual({
     channels: [],
+    ignore: [],
     groupWindowMinutes: 10,
     notes: true,
     tasks: true,
@@ -53,6 +54,18 @@ test('tag globs narrow what is announced', () => {
   expect(announcedTag(settings, only, tag('@acme/gadgets@2.0.0'))).toBeUndefined()
   expect(announcedTag(settings, only, tag('v2.0.0'))).toBeUndefined()
   expect(announcedTag(settings, { tags: ['build-*'] }, tag('build-42'))?.version).toBe('build-42')
+})
+
+test('ignore globs skip tags by name or version', () => {
+  const ignore = { ignore: ['*-beta*'] }
+  expect(announcedTag(settings, ignore, tag('v2.0.0-beta.1'))).toBeUndefined()
+  expect(announcedTag(settings, ignore, tag('@acme/widgets@2.0.0-beta.3'))).toBeUndefined()
+  expect(announcedTag(settings, ignore, tag('v2.0.0-rc.1'))?.version).toBe('2.0.0-rc.1')
+  expect(announcedTag(settings, ignore, tag('v2.0.0'))?.version).toBe('2.0.0')
+  expect(announcedTag(settings, { ignore: ['2.*'] }, tag('@acme/widgets@2.1.0'))).toBeUndefined()
+  const both = { tags: ['@acme/*@*'], ignore: ['*-*'] }
+  expect(announcedTag(settings, both, tag('@acme/widgets@3.0.0-alpha.0'))).toBeUndefined()
+  expect(announcedTag(settings, both, tag('@acme/widgets@3.0.0'))?.package).toBe('@acme/widgets')
 })
 
 test('the previous version is the highest lower one of the same package', () => {
