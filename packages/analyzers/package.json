@@ -30,6 +30,7 @@
     "@holtkeeper/stack": "workspace:*",
     "@holtkeeper/testids": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",
+    "@holtkeeper/upgrade-check": "workspace:*",
     "@holtkeeper/usages": "workspace:*",
     "@holtkeeper/vuln": "workspace:*",
     "@holtkeeper/vuln-go": "workspace:*",

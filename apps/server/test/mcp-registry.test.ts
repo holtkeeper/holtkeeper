@@ -384,7 +384,7 @@ describe('mcpToolsets', () => {
     ).toEqual(['packages'])
   })
 
-  test('offers no write tools besides learning proposals, and no fleet, ops or release state', () => {
+  test('offers no write tools besides learning proposals, read-only release tools, and no fleet or ops state', () => {
     const toolsets = mcpToolsets({
       ...base,
       rules: { resolve: none, rule: none, learning: none, repoFile: none },
@@ -406,12 +406,16 @@ describe('mcpToolsets', () => {
       'knowledge',
       'rules',
       'reviews',
+      'releases',
     ])
     const tools = toolsets.flatMap((toolset) => toolset.tools)
     expect(tools.filter((tool) => tool.readOnly === false).map((tool) => tool.name)).toEqual([
       'propose_learning',
       'code_review',
     ])
+    expect(
+      toolsets.find((toolset) => toolset.name === 'releases')?.tools.map((tool) => tool.name),
+    ).toEqual(['release_rules', 'release_status', 'release_changes'])
     const names = tools.map((tool) => tool.name)
     expect(names).not.toContain('repo_stack')
     expect(names).toContain('code_review')
@@ -421,15 +425,7 @@ describe('mcpToolsets', () => {
         ?.tools.find((tool) => tool.name === 'repo_rules')
         ?.input.safeParse({ repo: 'work:toys/kite', topics: ['releases'] }).success,
     ).toBe(true)
-    for (const name of [
-      'release_rules',
-      'get_rule',
-      'stack_usage',
-      'release_status',
-      'release_step',
-      'start_task',
-      'jobs',
-    ])
+    for (const name of ['get_rule', 'stack_usage', 'release_step', 'start_task', 'jobs'])
       expect(names).not.toContain(name)
   })
 
@@ -444,6 +440,8 @@ describe('mcpToolsets', () => {
     ])
     expect(taskToolsets('rule-miner')).toEqual([])
     expect(taskToolsets('release-notes')).toEqual([])
+    expect(taskToolsets('upgrade-plan')).toEqual([])
+    expect(taskToolsets('upgrade-check')).toEqual(['code', 'knowledge', 'packages', 'git'])
     expect(taskToolsets('library-digest')).toEqual([])
     expect(taskToolsets('chat')).toEqual([
       'knowledge',

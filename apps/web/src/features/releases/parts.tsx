@@ -5,7 +5,9 @@ import type {
   ReleaseLink,
   ReleaseLinkKind,
   ReleaseTask,
+  RepoRef,
 } from '@holtkeeper/api'
+import { useNavigate } from '@tanstack/react-router'
 import {
   CircleCheck,
   CircleDashed,
@@ -24,9 +26,11 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { useReleaseOverview } from '../../api/queries.ts'
 import { overviewTag } from '../../lib/release-overview.ts'
 import { bumpTones, entryGroups, issueTones, type PlanTask } from '../../lib/releases.ts'
-import { Tag } from '../../ui/index.ts'
+import { repoKey } from '../../lib/repo.ts'
+import { Select, Tag } from '../../ui/index.ts'
 
 export function StageTag({ row }: { row: ReleaseBoardRow }) {
   const tag = overviewTag(row)
@@ -162,5 +166,42 @@ export function ReleaseLinks({ links }: { links: readonly ReleaseLink[] }) {
         </a>
       ))}
     </nav>
+  )
+}
+
+/**
+ * A repository switch over the repositories on the release overview (plus `repo` when it is not
+ * there); picking one opens `to` for it with no other search.
+ */
+export function ReleaseRepoSwitch({
+  repo,
+  to,
+}: {
+  repo: RepoRef | undefined
+  to: '/releases/timeline' | '/releases/compare'
+}) {
+  const overview = useReleaseOverview()
+  const navigate = useNavigate()
+  const current = repo ? repoKey(repo) : undefined
+  const options = (overview.data?.cards ?? []).map((card) => ({
+    id: repoKey(card.repo),
+    label: <span className="mono">{card.repo.path}</span>,
+    text: card.repo.path,
+  }))
+  if (current && !options.some((option) => option.id === current) && repo)
+    options.unshift({
+      id: current,
+      label: <span className="mono">{repo.path}</span>,
+      text: repo.path,
+    })
+  return (
+    <Select
+      aria-label="Repository"
+      placeholder="Pick a repository"
+      className="w-72 max-w-full"
+      options={options}
+      value={current}
+      onChange={(key) => void navigate({ to, search: { repo: key } })}
+    />
   )
 }

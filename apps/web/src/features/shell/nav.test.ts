@@ -73,7 +73,10 @@ test('the rail holds the eight workspaces in order, with Settings at the bottom'
         '/quality/reviews',
       ],
     ],
-    ['releases', ['/releases', '/releases/timeline', '/releases/qa', '/releases/setup']],
+    [
+      'releases',
+      ['/releases', '/releases/timeline', '/releases/compare', '/releases/qa', '/releases/setup'],
+    ],
     ['knowledge', ['/knowledge/rules', '/knowledge/learnings']],
     ['ops', ['/ops/runs', '/ops/tasks', '/ops/automation', '/ops/spend', '/ops/reviews']],
     [
@@ -239,6 +242,7 @@ test('the active entry is the longest path prefix', () => {
   expect(activeNav('/releases')?.workspace).toBe('releases')
   expect(activeNav('/releases/timeline')?.label).toBe('Timeline')
   expect(activeNav('/releases/setup')?.label).toBe('Flow setup')
+  expect(activeNav('/releases/compare')?.label).toBe('Compare')
   expect(activeNav('/releases/qa/ABC-1')?.label).toBe('QA')
   expect(activeNav('/releases/setup')?.workspace).toBe('releases')
   expect(activeNav('/releases/timeline/')?.label).toBe('Timeline')

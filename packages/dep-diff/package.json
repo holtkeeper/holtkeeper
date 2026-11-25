@@ -1,0 +1,13 @@
+{
+  "name": "@holtkeeper/dep-diff",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/depgraph-js": "workspace:*",
+    "@holtkeeper/go-source": "workspace:*"
+  }
+}

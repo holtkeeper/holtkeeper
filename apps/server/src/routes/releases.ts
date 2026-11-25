@@ -1,5 +1,12 @@
 import type {
   ReleaseAcceptInput,
+  ReleaseCompareCheck,
+  ReleaseCompareCheckInput,
+  ReleaseCompareCheckStart,
+  ReleaseCompareRefs,
+  ReleaseCompareSummary,
+  ReleaseCompareSummaryInput,
+  ReleaseCompareView,
   ReleaseDeployInput,
   ReleaseDetectView,
   ReleaseDismissInput,
@@ -22,6 +29,7 @@ import {
   type ReleaseActor,
   releaseEditsSchema,
 } from '@holtkeeper/release'
+import { UPGRADE_CHECK_KIND } from '@holtkeeper/upgrade-check'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -40,6 +48,7 @@ import {
   repoKey,
 } from '../context.ts'
 import { releaseServiceFor } from '../releases.ts'
+import { startUpgradeCheck, upgradeCheckStatus } from '../upgrade-check.ts'
 
 const step = z.enum(['propose', 'version'])
 
@@ -49,6 +58,19 @@ const editsSchema = z.object({
   edits: releaseEditsSchema.omit({ updatedAt: true, updatedBy: true }).nullable(),
 })
 const summarySchema = z.object({ repo: z.string().min(1), step })
+const refArg = z.string().trim().min(1).max(255).optional()
+const compareSummarySchema = z.object({
+  repo: z.string().min(1),
+  from: refArg,
+  to: refArg,
+  code: z.boolean().optional(),
+})
+const compareCheckSchema = z.object({
+  repo: z.string().min(1),
+  from: refArg,
+  to: refArg,
+  force: z.boolean().optional(),
+})
 const stepSchema = z.object({
   repo: z.string().min(1),
   force: z.boolean().optional(),
@@ -77,6 +99,19 @@ const requireRepo = (value: string | undefined) => {
   return repo
 }
 
+/** The `from` and `to` query parameters of a comparison; 400 when one is malformed. */
+function rangeQuery(c: AppContext) {
+  const range = z.object({ from: refArg, to: refArg }).safeParse({
+    from: c.req.query('from') || undefined,
+    to: c.req.query('to') || undefined,
+  })
+  if (!range.success) throw new HTTPException(400, { message: 'from or to is invalid' })
+  return {
+    ...(range.data.from ? { from: range.data.from } : {}),
+    ...(range.data.to ? { to: range.data.to } : {}),
+  }
+}
+
 /**
  * Answers refused steps with 409 and their gates, writes to a read-only repository with a 403
  * `ForbiddenError` and other step failures with 409.
@@ -98,10 +133,12 @@ function stepError(c: AppContext, error: unknown, repo: RepoRef) {
 
 /**
  * The release assistant: the overview, each repository's version timeline and next-version plans,
- * the flow suggested for a repository (read on demand), and the steps that act on them. Reads need
- * `releases:read` on the repository, steps
- * `releases:run` and a repository Holtkeeper may write to. Dismissing a waiting release needs
- * `releases:run` only, since it writes nothing to the forge.
+ * the flow suggested for a repository (read on demand), comparisons of any two refs, and the steps
+ * that act on them. Reads need `releases:read` on the repository, steps `releases:run` and a
+ * repository Holtkeeper may write to. Dismissing a waiting release, describing a comparison
+ * with the AI agent and queueing its breaking-change check (`upgrade-check`) need `releases:run`
+ * only, since they write nothing to the forge; reading where that check stands needs
+ * `releases:read`.
  */
 export function releaseRoutes(deps: ServerDeps) {
   const { config } = deps
@@ -174,6 +211,100 @@ export function releaseRoutes(deps: ServerDeps) {
     if (!detail)
       throw new HTTPException(404, { message: `${tag} is not a version of ${repo.path}` })
     return c.json<ReleaseVersionDetailView>(detail)
+  })
+
+  app.get('/releases/refs', async (c) => {
+    const repo = requireRepo(c.req.query('repo'))
+    authorize(c, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) })
+    try {
+      return c.json<ReleaseCompareRefs>(await releases.refs(repo))
+    } catch (error) {
+      return stepError(c, error, repo)
+    }
+  })
+
+  app.get('/releases/compare', async (c) => {
+    const repo = requireRepo(c.req.query('repo'))
+    const principal = authorize(c, 'releases:read', {
+      kind: 'repo',
+      repo: repoTarget(config, repo),
+    })
+    const range = z.object({ from: refArg, to: refArg }).safeParse({
+      from: c.req.query('from') || undefined,
+      to: c.req.query('to') || undefined,
+    })
+    if (!range.success) throw new HTTPException(400, { message: 'from or to is invalid' })
+    try {
+      return c.json<ReleaseCompareView>(
+        await releases.compare(principal, repo, {
+          ...(range.data.from ? { from: range.data.from } : {}),
+          ...(range.data.to ? { to: range.data.to } : {}),
+        }),
+      )
+    } catch (error) {
+      return stepError(c, error, repo)
+    }
+  })
+
+  app.post('/releases/compare/summary', async (c) => {
+    const input: ReleaseCompareSummaryInput = await readBody(c, compareSummarySchema)
+    const repo = requireRepo(input.repo)
+    authorize(c, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) })
+    try {
+      return c.json<ReleaseCompareSummary>(
+        await releases.compareSummary(repo, {
+          ...(input.from ? { from: input.from } : {}),
+          ...(input.to ? { to: input.to } : {}),
+          ...(input.code ? { code: true } : {}),
+        }),
+      )
+    } catch (error) {
+      return stepError(c, error, repo)
+    }
+  })
+
+  app.get('/releases/compare/check', async (c) => {
+    const repo = requireRepo(c.req.query('repo'))
+    authorize(c, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) })
+    const range = rangeQuery(c)
+    try {
+      const { from, to } = await releases.compareRange(repo, range)
+      return c.json<ReleaseCompareCheck>(
+        await upgradeCheckStatus(deps.store, repo, from.sha, to.sha),
+      )
+    } catch (error) {
+      return stepError(c, error, repo)
+    }
+  })
+
+  app.post('/releases/compare/check', async (c) => {
+    const input: ReleaseCompareCheckInput = await readBody(c, compareCheckSchema)
+    const repo = requireRepo(input.repo)
+    const principal = authorize(c, 'releases:run', {
+      kind: 'repo',
+      repo: repoTarget(config, repo),
+    })
+    if (deps.analyzers && !deps.analyzers.some((analyzer) => analyzer.kind === UPGRADE_CHECK_KIND))
+      return c.json<ReleaseGateError>({ error: 'the breaking-change check is not available' }, 409)
+    try {
+      if (!(await deps.agentFor?.(repo)))
+        throw new Error('no AI agent is configured for this repository')
+      const { from, to } = await releases.compareRange(repo, {
+        ...(input.from ? { from: input.from } : {}),
+        ...(input.to ? { to: input.to } : {}),
+      })
+      return c.json<ReleaseCompareCheckStart>(
+        await startUpgradeCheck(deps, {
+          repo,
+          from,
+          to,
+          actor: principal.id,
+          ...(input.force ? { force: true } : {}),
+        }),
+      )
+    } catch (error) {
+      return stepError(c, error, repo)
+    }
   })
 
   app.get('/releases/repo', async (c) => {

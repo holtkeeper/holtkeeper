@@ -38,6 +38,7 @@ const areas: Readonly<Record<string, AnalyzerArea>> = {
   tracker: 'releases',
   propagate: 'releases',
   'write-task': 'releases',
+  'upgrade-check': 'releases',
 }
 
 /** The group an analyzer is listed under; analyzers the panel does not know go to Other. */

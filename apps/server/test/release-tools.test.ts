@@ -49,6 +49,9 @@ let store: Store
 let deps: ServerDeps
 let tracker: ReturnType<typeof fakeIssueTracker> | undefined
 
+const goMod = (version: string) =>
+  `module example.com/foo\n\ngo 1.24\n\nrequire example.com/bar ${version}\n`
+
 beforeEach(async () => {
   fake = new FakeForge()
   fake.commitTo('main', 'feat: [ABC-1] first widget')
@@ -115,6 +118,35 @@ async function connect(principal: Principal, steps = false) {
 }
 
 const repo = 'work:g/app'
+
+const apiPackage = (version: string, names: string[]) => ({
+  name: '@widgets/dial',
+  version,
+  private: false,
+  dir: '.',
+  entries: [
+    {
+      subpath: '.',
+      file: 'src/index.ts',
+      symbols: names.map((name) => ({
+        name,
+        kind: 'function' as const,
+        signature: `function ${name}(): void`,
+        file: 'src/index.ts',
+        line: 1,
+      })),
+    },
+  ],
+})
+
+const addApiSurface = (names: string[], version: string, createdAt: string, ref?: string) =>
+  store.analyses.add({
+    repo: { forge: 'work', path: 'g/app' },
+    kind: 'api-surface',
+    createdAt,
+    data: { packages: [apiPackage(version, names)] },
+    ...(ref ? { ref } : {}),
+  })
 
 describe('releases toolset over MCP', () => {
   test('lists the read tools, and release_step only with steps', async () => {
@@ -203,6 +235,34 @@ describe('releases toolset over MCP', () => {
     const first = await call('release_changes', { repo, to: '1.0.0' })
     expect(first.text).toContain('start → v1.0.0')
     expect(first.text).toContain('- ABC-1 first widget')
+  })
+
+  test('release_changes adds the dependency changes when the forge compares commits', async () => {
+    const { call } = await connect(reader)
+    expect((await call('release_changes', { repo })).text).toContain(
+      '## Dependencies\n\nNot read: the forge cannot compare commits.',
+    )
+    const head = fake.branches.get('main')!
+    fake.forge.compareCommits = async () => [
+      { oldPath: 'go.mod', newPath: 'go.mod', status: 'modified', diff: '' },
+    ]
+    fake.forge.readFile = async (_repo, file, ref) =>
+      file === 'go.mod' ? goMod(ref === head || ref === 'main' ? 'v1.3.0' : 'v1.2.0') : undefined
+    const { text } = await call('release_changes', { repo })
+    expect(text).toContain('## Dependencies')
+    expect(text).toContain('example.com/bar')
+    expect(text).toContain('v1.2.0 → v1.3.0')
+  })
+
+  test('release_changes adds how the public API of own packages changed when records exist', async () => {
+    const { call } = await connect(reader)
+    expect((await call('release_changes', { repo })).text).not.toContain('## Public API')
+    await addApiSurface(['spin', 'stop'], '1.0.0', '2026-10-01T00:00:00.000Z', 'v1.0.0')
+    await addApiSurface(['spin', 'turn'], '1.1.0', '2026-10-20T00:00:00.000Z')
+    const { text } = await call('release_changes', { repo })
+    expect(text).toContain(
+      '## Public API\n\n- @widgets/dial 1.0.0 → 1.1.0: 1 removed, 0 changed, 0 deprecated, 1 added (calls for major, bumped minor, breaking)',
+    )
   })
 
   test('release_changes finds version tags older than the newest hundred tags', async () => {

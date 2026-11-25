@@ -5,6 +5,8 @@ import {
   defineTool,
 } from '@holtkeeper/agent-tools'
 import type { ReleaseBoardRow, ReleaseRepoView, ReleaseStepResult } from '@holtkeeper/api'
+import { breaksCallers } from '@holtkeeper/api-surface'
+import { renderDependencyDiff } from '@holtkeeper/dep-diff'
 import type { RepoRef } from '@holtkeeper/forge'
 import type {
   EnvironmentSummary,
@@ -16,7 +18,7 @@ import type {
 import { z } from 'zod'
 
 import type { ReleaseStepPreview } from '../release-steps.ts'
-import type { ReleaseChanges } from '../releases.ts'
+import type { ReleaseChanges, ReleaseChangesWithDependencies } from '../releases.ts'
 
 /** Arguments of one release step. */
 export interface ReleaseStepInput {
@@ -39,7 +41,11 @@ export interface ReleaseToolsAccess {
   /** The repository's resolved rules for release notes; empty when none. */
   rules(repo: RepoRef): Promise<string>
   status(repo: RepoRef): Promise<ReleaseRepoView>
-  changes(repo: RepoRef, range: { from?: string; to?: string }): Promise<ReleaseChanges>
+  /** Changes of a range; with `dependencies` when the access reads them too. */
+  changes(
+    repo: RepoRef,
+    range: { from?: string; to?: string },
+  ): Promise<ReleaseChanges | ReleaseChangesWithDependencies>
   /** Say only how changes were accepted, never by whom (internal agents). */
   anonymous?: boolean
   /** `release_step`; absent when the caller may not run steps through tools. */
@@ -248,8 +254,56 @@ const taskLine = (task: ReleaseTask) => {
   return `- ${key} ${issue.title}${meta ? ` [${meta}]` : ''} (${task.commits} commits)`
 }
 
-/** Tasks and the grouped changelog of a range. */
-function renderReleaseChanges(repo: string, changes: ReleaseChanges): string {
+const dependencySection = (changes: ReleaseChanges | ReleaseChangesWithDependencies) => {
+  if (!('dependencies' in changes)) return []
+  if (!changes.dependencies)
+    return changes.dependenciesUnavailable
+      ? ['## Dependencies', `Not read: ${changes.dependenciesUnavailable}.`]
+      : []
+  const rendered = renderDependencyDiff(changes.dependencies).trim()
+  return ['## Dependencies', rendered || 'No dependency changes.']
+}
+
+const API_PACKAGES = 20
+
+const publicApiSection = (changes: ReleaseChanges | ReleaseChangesWithDependencies) => {
+  const api = 'publicApi' in changes ? changes.publicApi : undefined
+  if (!api?.recorded) return []
+  const lines = api.packages.slice(0, API_PACKAGES).map((pkg) => {
+    const diff = pkg.diff
+    const range = `${pkg.from ?? 'new'} → ${pkg.to ?? 'removed'}`
+    if (!diff) return `- ${pkg.name} ${range}`
+    const breaking = breaksCallers(diff) ? ', breaking' : ''
+    return `- ${pkg.name} ${range}: ${diff.removed} removed, ${diff.changed} changed, ${diff.deprecated} deprecated, ${diff.added} added (calls for ${diff.required}${diff.bumped ? `, bumped ${diff.bumped}` : ''}${breaking})`
+  })
+  const more = api.packages.length - lines.length
+  const missing = api.missing.length
+    ? [
+        `No api-surface record ${api.missing.some((item) => item.side === 'both') ? 'at either end' : `at the ${api.missing[0]?.side === 'to' ? 'end' : 'start'}`} for: ${api.missing.map((item) => item.name).join(', ')}.`,
+      ]
+    : []
+  if (!lines.length && !missing.length)
+    return ['## Public API', 'No export of the repository’s own packages changed.']
+  return [
+    '## Public API',
+    [
+      ...lines,
+      ...(more > 0 ? [`…and ${more} more packages.`] : []),
+      ...(lines.length
+        ? [
+            'Call package_changes with a package and both versions for the full diff and the uses it breaks.',
+          ]
+        : []),
+      ...missing,
+    ].join('\n'),
+  ]
+}
+
+/** Tasks, the grouped changelog and, when read, the dependency changes of a range. */
+function renderReleaseChanges(
+  repo: string,
+  changes: ReleaseChanges | ReleaseChangesWithDependencies,
+): string {
   return [
     `# Changes of \`${repo}\`: ${changes.from ?? 'start'} → ${changes.to}${changes.unreleased ? ' (next release)' : ''}`,
     `${changes.commitCount}${changes.capped ? '+' : ''} commits, bump ${changes.bump}.${changes.compareUrl ? ` Compare: ${changes.compareUrl}` : ''}`,
@@ -259,6 +313,8 @@ function renderReleaseChanges(repo: string, changes: ReleaseChanges): string {
       : 'No tracker keys in these commits.',
     '## Changelog',
     changes.changelog.trim() || 'No changes.',
+    ...publicApiSection(changes),
+    ...dependencySection(changes),
   ].join('\n\n')
 }
 
@@ -331,7 +387,7 @@ function readTools(access: ReleaseToolsAccess): RegistryTool[] {
     defineTool({
       name: 'release_changes',
       description:
-        'Tasks (tracker keys, with tracker titles and status when a tracker is connected) and the grouped changelog between two versions. Default range: the latest version → the target branch, which is the next release; with only `to`, the version before it → `to`.',
+        'Tasks (tracker keys, with tracker titles and status when a tracker is connected), the grouped changelog, how the public API of the repository’s own packages changed (from api-surface records, when there are any) and the npm and Go dependency changes (direct and transitive) between two versions. Default range: the latest version → the target branch, which is the next release; with only `to`, the version before it → `to`.',
       input: z.object({
         repo: repoArg,
         from: z

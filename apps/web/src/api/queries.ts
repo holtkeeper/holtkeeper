@@ -21,6 +21,8 @@ import type {
   ReleaseRepoView,
   ReleaseStepInput,
   ReleaseSummaryInput,
+  ReleaseCompareCheckInput,
+  ReleaseCompareSummaryInput,
   ApplyChangesInput,
   ClearStorageInput,
   DatabaseQuerySort,
@@ -132,6 +134,29 @@ export const keys = {
   releaseVersion: (repo: RepoRef, tag: string) =>
     ['releases', 'version', repoKey(repo), tag] as const,
   releaseRepo: (repo: RepoRef) => ['releases', 'repo', repoKey(repo)] as const,
+  releaseRefs: (repo: RepoRef) => ['releases', 'refs', repoKey(repo)] as const,
+  releaseCompare: (repo: RepoRef, from?: string, to?: string) =>
+    ['release-compare', repoKey(repo), from ?? '', to ?? ''] as const,
+  releaseCompareApi: (repo: RepoRef, from?: string, to?: string) =>
+    ['release-compare', 'api', repoKey(repo), from ?? '', to ?? ''] as const,
+  releaseComparePackage: (
+    repo: RepoRef,
+    name: string,
+    ecosystem?: string,
+    from?: string,
+    to?: string,
+  ) =>
+    [
+      'release-compare',
+      'package',
+      repoKey(repo),
+      name,
+      ecosystem ?? '',
+      from ?? '',
+      to ?? '',
+    ] as const,
+  releaseCompareCheck: (repo: RepoRef, from?: string, to?: string) =>
+    ['release-compare', 'check', repoKey(repo), from ?? '', to ?? ''] as const,
   releaseDetect: (repo: RepoRef) => ['release-detect', repoKey(repo)] as const,
   releaseDeploy: (repo: RepoRef, tag: string) =>
     ['releases', 'deploy', repoKey(repo), tag] as const,
@@ -1968,6 +1993,104 @@ export const useReleaseVersion = (repo: RepoRef, tag: string | undefined) =>
     enabled: tag !== undefined,
     staleTime: 5 * 60_000,
   })
+
+/** Version tags (newest first) and the target and source branches a comparison can name. */
+export const useReleaseRefs = (repo: RepoRef | undefined) =>
+  useQuery({
+    queryKey: repo ? keys.releaseRefs(repo) : ['releases', 'refs', 'none'],
+    queryFn: () => api.releaseRefs(repo!),
+    enabled: repo !== undefined,
+    staleTime: 5 * 60_000,
+  })
+
+/**
+ * Changes, tasks and dependency changes between `from` and `to` (server defaults when absent);
+ * off without `repo`. Release actions do not refetch it.
+ */
+export const useReleaseCompare = (
+  repo: RepoRef | undefined,
+  range: { from?: string; to?: string } = {},
+) =>
+  useQuery({
+    queryKey: repo ? keys.releaseCompare(repo, range.from, range.to) : ['release-compare', 'none'],
+    queryFn: () => api.releaseCompare(repo!, range),
+    enabled: repo !== undefined,
+    staleTime: 5 * 60_000,
+  })
+
+/**
+ * How the public API of the repository's own packages changed between `from` and `to`, from
+ * stored api-surface records, with the uses in other repositories each change touches; off
+ * without `repo`.
+ */
+export const useReleaseCompareApi = (
+  repo: RepoRef | undefined,
+  range: { from?: string; to?: string } = {},
+) =>
+  useQuery({
+    queryKey: repo
+      ? keys.releaseCompareApi(repo, range.from, range.to)
+      : ['release-compare', 'api', 'none'],
+    queryFn: () => api.releaseCompareApi(repo!, range),
+    enabled: repo !== undefined,
+    staleTime: 5 * 60_000,
+  })
+
+/**
+ * What changed in one dependency between two of its versions and the uses it breaks, as the
+ * `package_changes` tool answers it; loads only while `enabled` (a row is expanded).
+ */
+export const useReleaseComparePackage = (
+  repo: RepoRef | undefined,
+  input: { package: string; ecosystem?: 'npm' | 'Go'; from?: string; to?: string },
+  enabled: boolean,
+) =>
+  useQuery({
+    queryKey: repo
+      ? keys.releaseComparePackage(repo, input.package, input.ecosystem, input.from, input.to)
+      : ['release-compare', 'package', 'none'],
+    queryFn: () => api.releaseComparePackage(repo!, input),
+    enabled: enabled && repo !== undefined,
+    staleTime: 30 * 60_000,
+  })
+
+/** Has the AI agent describe a comparison; answers Markdown, cached on the server between versions. */
+export const useReleaseCompareSummary = () =>
+  useMutation({
+    mutationFn: (input: ReleaseCompareSummaryInput) => api.releaseCompareSummary(input),
+  })
+
+/**
+ * Where the AI breaking-change check of `from`..`to` stands; off without `repo`, polls every
+ * 3 seconds while the check is queued or running.
+ */
+export const useReleaseCompareCheck = (
+  repo: RepoRef | undefined,
+  range: { from?: string; to?: string } = {},
+) =>
+  useQuery({
+    queryKey: repo
+      ? keys.releaseCompareCheck(repo, range.from, range.to)
+      : ['release-compare', 'check', 'none'],
+    queryFn: () => api.releaseCompareCheck(repo!, range),
+    enabled: repo !== undefined,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'queued' || query.state.data?.status === 'running'
+        ? 3_000
+        : false,
+  })
+
+/**
+ * Queues the AI breaking-change check of a range (`force` runs it again over a finished one) and
+ * refetches that range's check status.
+ */
+export function useStartReleaseCompareCheck() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: ReleaseCompareCheckInput) => api.startReleaseCompareCheck(input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['release-compare', 'check'] }),
+  })
+}
 
 /** Release page data of one repository; polls while a deploy of the latest version runs. */
 export const useReleaseRepo = (repo: RepoRef | undefined) =>

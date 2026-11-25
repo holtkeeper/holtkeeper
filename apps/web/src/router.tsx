@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-router'
 
 import { LinkPage } from './features/auth/LinkPage.tsx'
+import { parseCompareSearch } from './features/releases/compare-range.ts'
 import { AuthGate } from './features/shell/AuthGate.tsx'
 import { NotFound } from './features/shell/NotFound.tsx'
 import { parseAnalysisSearch } from './lib/analyses.ts'
@@ -67,6 +68,10 @@ const ReleasesPage = lazyRouteComponent(
 const ReleaseTimelinePage = lazyRouteComponent(
   () => import('./features/releases/ReleaseTimelinePage.tsx'),
   'ReleaseTimelinePage',
+)
+const ComparePage = lazyRouteComponent(
+  () => import('./features/releases/ComparePage.tsx'),
+  'ComparePage',
 )
 const QaTasksPage = lazyRouteComponent(() => import('./features/qa/QaTasksPage.tsx'), 'QaTasksPage')
 const QaTaskPage = lazyRouteComponent(() => import('./features/qa/QaTaskPage.tsx'), 'QaTaskPage')
@@ -270,6 +275,13 @@ const releasesPage = <P extends string>(
       typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {},
   })
 
+const releaseCompareRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'releases/compare',
+  component: ComparePage,
+  validateSearch: parseCompareSearch,
+})
+
 const coverageRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'quality/coverage',
@@ -394,6 +406,7 @@ const routeTree = rootRoute.addChildren([
     page('releases', ReleasesPage),
     releasesPage('releases/timeline', ReleaseTimelinePage),
     releasesPage('releases/setup', SetupPage),
+    releaseCompareRoute,
     page('releases/qa', QaTasksPage),
     page('releases/qa/$key', QaTaskPage),
     knowledgePage('knowledge/rules'),

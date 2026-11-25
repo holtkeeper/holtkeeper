@@ -119,6 +119,15 @@ import type {
   ReleaseStepInput,
   ReleaseTimelineView,
   ReleaseVersionDetailView,
+  ReleaseCompareApi,
+  ReleaseCompareCheck,
+  ReleaseCompareCheckInput,
+  ReleaseCompareCheckStart,
+  ReleaseComparePackage,
+  ReleaseCompareRefs,
+  ReleaseCompareSummary,
+  ReleaseCompareSummaryInput,
+  ReleaseCompareView,
   ReleaseStepResult,
   ReleaseSummaryInput,
   DeployState,
@@ -610,6 +619,37 @@ export const api = {
     request<ReleaseVersionDetailView>('GET', '/api/releases/version', {
       query: { repo: repoKey(repo), tag },
     }),
+  releaseRefs: (repo: RepoRef) =>
+    request<ReleaseCompareRefs>('GET', '/api/releases/refs', { query: { repo: repoKey(repo) } }),
+  releaseCompare: (repo: RepoRef, range: { from?: string; to?: string } = {}) =>
+    request<ReleaseCompareView>('GET', '/api/releases/compare', {
+      query: { repo: repoKey(repo), from: range.from || undefined, to: range.to || undefined },
+    }),
+  releaseCompareApi: (repo: RepoRef, range: { from?: string; to?: string } = {}) =>
+    request<ReleaseCompareApi>('GET', '/api/releases/compare/api', {
+      query: { repo: repoKey(repo), from: range.from || undefined, to: range.to || undefined },
+    }),
+  releaseComparePackage: (
+    repo: RepoRef,
+    input: { package: string; ecosystem?: 'npm' | 'Go'; from?: string; to?: string },
+  ) =>
+    request<ReleaseComparePackage>('GET', '/api/releases/compare/package', {
+      query: {
+        repo: repoKey(repo),
+        package: input.package,
+        ecosystem: input.ecosystem,
+        from: input.from || undefined,
+        to: input.to || undefined,
+      },
+    }),
+  releaseCompareSummary: (input: ReleaseCompareSummaryInput) =>
+    request<ReleaseCompareSummary>('POST', '/api/releases/compare/summary', { body: input }),
+  releaseCompareCheck: (repo: RepoRef, range: { from?: string; to?: string } = {}) =>
+    request<ReleaseCompareCheck>('GET', '/api/releases/compare/check', {
+      query: { repo: repoKey(repo), from: range.from || undefined, to: range.to || undefined },
+    }),
+  startReleaseCompareCheck: (input: ReleaseCompareCheckInput) =>
+    request<ReleaseCompareCheckStart>('POST', '/api/releases/compare/check', { body: input }),
   releaseRepo: (repo: RepoRef) =>
     request<ReleaseRepoView>('GET', '/api/releases/repo', { query: { repo: repoKey(repo) } }),
   releaseDetect: (repo: RepoRef) =>

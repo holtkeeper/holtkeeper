@@ -44,6 +44,7 @@ Prepare one repository's next version, check its gates, accept and create it, de
       <Tag>!231 merged</Tag>
       <Tag>Compare</Tag>
       <Tag tone="ok">pipeline passed</Tag>
+      <Button ghost>Compare versions</Button>
     </Toolbar>
     <Toolbar title="v8.2.1 → v8.3.0">
       <Tag slot="start">minor</Tag>
@@ -77,7 +78,7 @@ The title holds a repository switch over the repositories on the [overview](/gui
   `settings:write` there.
 - <Ui>⋯</Ui> has <Ui>Read the forge again</Ui> and <Ui>Open repository</Ui>.
 
-Above the next release you may see a notice: a dry run (steps change nothing), a read-only repository, or releases turned off with <Ui>Set up its flow</Ui>. Then come the stage tag, in the same words as the overview, the flow in one line (mode, target branch, an example tag) and links to the current release merge request, compare view, tag and pipeline.
+Above the next release you may see a notice: a dry run (steps change nothing), a read-only repository, or releases turned off with <Ui>Set up its flow</Ui>. Then come the stage tag, in the same words as the overview, the flow in one line (mode, target branch, an example tag) and links to the current release merge request, compare view, tag and pipeline. <Ui>Compare versions</Ui> opens [Compare](/guide/releases/compare/) for the repository, where you pick any two versions.
 
 ## Prepare the next version
 
@@ -227,7 +228,10 @@ Newest first, with the bump, a count of changes, where each version stands per e
 <Screen title="Releases › Timeline › v8.2.0">
   <Sheet title="v8.2.0" position="3 of 41">
     <Tag slot="tags">acme/checkout-web</Tag>
-    <Button slot="actions">Compare</Button>
+    <Button slot="actions">Compare versions</Button>
+    <Button slot="actions" ghost>
+      Forge diff
+    </Button>
     <Meter value={50} tone="warn" label="Runs on staging" />
     <Tabs items={['Deploys', 'Changelog', 'Tasks:5', 'Notes']} />
     <Facts
@@ -242,7 +246,7 @@ Newest first, with the bump, a count of changes, where each version stands per e
   </Sheet>
 </Screen>
 
-The header has the tag, the repository, a progress bar with one segment per environment and <Ui>Compare</Ui> with the previous version.
+The header has the tag, the repository, a progress bar with one segment per environment, <Ui>Compare versions</Ui>, which opens [Compare](/guide/releases/compare/) from the previous version to this one, and <Ui>Forge diff</Ui>, the forge's own compare page against the previous version when the forge has one.
 
 | Tab       | What it shows                                                                                                                                                                                                                                                                                                                                                             |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

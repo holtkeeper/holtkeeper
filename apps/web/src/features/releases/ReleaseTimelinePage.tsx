@@ -1,6 +1,6 @@
 import type { ReleaseRepoView, RepoRef } from '@holtkeeper/api'
-import { Link, Navigate, useNavigate, useRouter, useSearch } from '@tanstack/react-router'
-import { FolderGit2, RefreshCw } from 'lucide-react'
+import { Link, Navigate, useRouter, useSearch } from '@tanstack/react-router'
+import { FolderGit2, GitCompare, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -11,15 +11,15 @@ import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
 import {
   EmptyState,
   ErrorState,
+  LinkButton,
   Notice,
   Page,
   Placeholder,
-  Select,
   notify,
 } from '../../ui/index.ts'
 import { EnvironmentsPanel } from './DeployStrip.tsx'
 import { NextCard } from './NextCard.tsx'
-import { ReleaseLinks, StageTag } from './parts.tsx'
+import { ReleaseLinks, ReleaseRepoSwitch, StageTag } from './parts.tsx'
 import { VersionList } from './VersionList.tsx'
 
 function Body({ repo, data, query }: { repo: RepoRef; data: ReleaseRepoView; query: string }) {
@@ -50,6 +50,15 @@ function Body({ repo, data, query }: { repo: RepoRef; data: ReleaseRepoView; que
         <span className="text-xs text-muted">{flowSummary(data)}</span>
         <span className="flex-1" />
         <ReleaseLinks links={data.links} />
+        <LinkButton
+          to="/releases/compare"
+          search={{ repo: repoKey(repo) }}
+          variant="ghost"
+          size="sm"
+        >
+          <GitCompare className="size-3.5" />
+          Compare versions
+        </LinkButton>
       </div>
       <NextCard repo={repo} view={data} />
       <EnvironmentsPanel repo={repo} view={data} />
@@ -83,33 +92,6 @@ export function ReleaseTimelineView({ repo, query = '' }: { repo: RepoRef; query
   )
 }
 
-function RepoSwitch({ repo }: { repo: RepoRef | undefined }) {
-  const overview = useReleaseOverview()
-  const navigate = useNavigate()
-  const current = repo ? repoKey(repo) : undefined
-  const options = (overview.data?.cards ?? []).map((card) => ({
-    id: repoKey(card.repo),
-    label: <span className="mono">{card.repo.path}</span>,
-    text: card.repo.path,
-  }))
-  if (current && !options.some((option) => option.id === current) && repo)
-    options.unshift({
-      id: current,
-      label: <span className="mono">{repo.path}</span>,
-      text: repo.path,
-    })
-  return (
-    <Select
-      aria-label="Repository"
-      placeholder="Pick a repository"
-      className="w-72 max-w-full"
-      options={options}
-      value={current}
-      onChange={(key) => void navigate({ to: '/releases/timeline', search: { repo: key } })}
-    />
-  )
-}
-
 /**
  * Releases › Timeline for the repository in `?repo=` (without one it opens the first repository of
  * the Overview, action first): a repository switch over the repositories with releases on, a
@@ -135,7 +117,7 @@ export function ReleaseTimelinePage() {
         { label: 'Timeline', link: { to: '/releases/timeline' } },
         ...(repo ? [{ label: repo.path }] : []),
       ]}
-      actions={<RepoSwitch repo={repo} />}
+      actions={<ReleaseRepoSwitch repo={repo} to="/releases/timeline" />}
       {...(repo
         ? {
             search: {

@@ -13,6 +13,7 @@ import {
   FlaskConical,
   FolderGit2,
   GitBranch,
+  GitCompare,
   HardDrive,
   History,
   Images,
@@ -105,6 +106,7 @@ export interface NavItem {
     | '/quality/reviews'
     | '/releases'
     | '/releases/timeline'
+    | '/releases/compare'
     | '/releases/qa'
     | '/releases/setup'
     | '/knowledge/rules'
@@ -270,6 +272,13 @@ const navItems: readonly NavItem[] = [
     to: '/releases/timeline',
     label: 'Timeline',
     icon: ListTree,
+    requires: 'releases:read',
+  },
+  {
+    workspace: 'releases',
+    to: '/releases/compare',
+    label: 'Compare',
+    icon: GitCompare,
     requires: 'releases:read',
   },
   {

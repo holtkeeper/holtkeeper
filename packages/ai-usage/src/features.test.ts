@@ -11,6 +11,8 @@ describe('featureOf', () => {
     expect(featureOf('learning')).toBe('knowledge')
     expect(featureOf('rule-miner')).toBe('knowledge')
     expect(featureOf('release-notes')).toBe('releases')
+    expect(featureOf('upgrade-check')).toBe('releases')
+    expect(featureOf('upgrade-plan')).toBe('releases')
     expect(featureOf('security-triage')).toBe('security')
     expect(featureOf('widget-digest')).toBe('other')
     expect(featureOf('')).toBe('other')

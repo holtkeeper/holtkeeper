@@ -300,7 +300,8 @@ const reportOnly = (options: unknown) =>
   isRecord(options) && (options.dryRun === true || options.mode === 'report')
 
 /**
- * The `skip` a schedule uses: `true` for an analyzer `repo.analyzers` turns off on the repository,
+ * The `skip` a schedule uses: `true` for analyzers in `RUN_ONLY_ANALYZERS`, for an analyzer
+ * `repo.analyzers` turns off on the repository,
  * for test analyzers on a repository with no tests by design (`repo.tests`) and for `exclusive`
  * ones of `analyzers` on a repository `repo.freeze` makes read-only, unless the
  * `analyzers.<kind>` setting keeps them from writing (`dryRun: true` or `mode: 'report'`) or they
@@ -313,6 +314,7 @@ export function automaticSkip(
 ) {
   const writing = new Set(analyzers.filter(writesWhenFrozen).map((each) => each.kind))
   return async (analyzer: string, repo: RepoRef): Promise<boolean> =>
+    RUN_ONLY_ANALYZERS.has(analyzer) ||
     (await analyzerOffFor(store, config, repo, analyzer)) !== undefined ||
     (TEST_ANALYZERS.has(analyzer) && !(await testsExpectedFor(store, () => config)(repo))) ||
     (writing.has(analyzer) &&

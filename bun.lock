@@ -56,12 +56,14 @@
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/chat": "workspace:*",
+        "@holtkeeper/chat-slack": "workspace:*",
         "@holtkeeper/ci-jobs": "workspace:*",
         "@holtkeeper/commit-conventions": "workspace:*",
         "@holtkeeper/confluence": "workspace:*",
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/credentials": "workspace:*",
+        "@holtkeeper/dep-diff": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
@@ -95,6 +97,7 @@
         "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
         "@holtkeeper/updates": "workspace:*",
+        "@holtkeeper/upgrade-check": "workspace:*",
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
@@ -293,6 +296,7 @@
         "@holtkeeper/stack": "workspace:*",
         "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
+        "@holtkeeper/upgrade-check": "workspace:*",
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
         "@holtkeeper/vuln-go": "workspace:*",
@@ -319,6 +323,7 @@
         "@holtkeeper/chat": "workspace:*",
         "@holtkeeper/ci-jobs": "workspace:*",
         "@holtkeeper/coverage": "workspace:*",
+        "@holtkeeper/dep-diff": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/issues": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
@@ -327,6 +332,7 @@
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/rules": "workspace:*",
         "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/upgrade-check": "workspace:*",
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
       },
@@ -530,6 +536,14 @@
         "@holtkeeper/access": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
+      },
+    },
+    "packages/dep-diff": {
+      "name": "@holtkeeper/dep-diff",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/depgraph-js": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
       },
     },
     "packages/depgraph": {
@@ -962,6 +976,20 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/upgrade-check": {
+      "name": "@holtkeeper/upgrade-check",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/release": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/usages": {
       "name": "@holtkeeper/usages",
       "version": "0.0.0",
@@ -1336,6 +1364,8 @@
 
     "@holtkeeper/credentials": ["@holtkeeper/credentials@workspace:packages/credentials"],
 
+    "@holtkeeper/dep-diff": ["@holtkeeper/dep-diff@workspace:packages/dep-diff"],
+
     "@holtkeeper/depgraph": ["@holtkeeper/depgraph@workspace:packages/depgraph"],
 
     "@holtkeeper/depgraph-go": ["@holtkeeper/depgraph-go@workspace:packages/depgraph-go"],
@@ -1427,6 +1457,8 @@
     "@holtkeeper/tracker": ["@holtkeeper/tracker@workspace:packages/tracker"],
 
     "@holtkeeper/updates": ["@holtkeeper/updates@workspace:packages/updates"],
+
+    "@holtkeeper/upgrade-check": ["@holtkeeper/upgrade-check@workspace:packages/upgrade-check"],
 
     "@holtkeeper/usages": ["@holtkeeper/usages@workspace:packages/usages"],
 

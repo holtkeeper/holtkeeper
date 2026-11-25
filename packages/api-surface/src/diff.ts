@@ -175,3 +175,10 @@ export function diffApi(
     .map((name) => diffPackage(old.get(name), next.get(name)))
     .filter((diff) => diff.changes.length > 0)
 }
+
+/**
+ * Whether an API diff breaks callers: something was removed or lost members (`required` is
+ * `major`). The one rule every view of a package diff tags and sorts "breaking" by.
+ */
+export const breaksCallers = (diff: Pick<PackageDiff, 'required'>): boolean =>
+  diff.required === 'major'

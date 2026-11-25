@@ -380,7 +380,7 @@ export function releaseToolsAccess(
     rules: async (repo) =>
       (await resolveRules({ repo: repoTarget(config, repo), agent: 'release' })).text.trim(),
     status: (repo) => releases.view(principal, repo),
-    changes: (repo, range) => releases.changes(repo, range),
+    changes: (repo, range) => releases.changesWithDependencies(repo, range, { publicApi: true }),
     ...(steps ? { steps } : {}),
   }
 }

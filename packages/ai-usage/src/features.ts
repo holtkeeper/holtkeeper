@@ -28,7 +28,14 @@ export const featureTaskKinds: Readonly<Record<FilterableFeature, readonly strin
   tasks: ['write-task', 'fix', 'port', 'propagate', 'upgrade', 'propagate-fix', 'tests'],
   chat: ['chat', 'chat-summary', 'ask'],
   knowledge: ['learning', 'library-digest', 'rule-miner'],
-  releases: ['release-notes', 'qa-notes'],
+  releases: [
+    'release-notes',
+    'qa-notes',
+    'upgrade-plan',
+    'upgrade-check',
+    'release-compare-parse',
+    'release-compare-summary',
+  ],
   security: ['security-triage'],
 }
 

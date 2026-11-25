@@ -17,6 +17,7 @@
     "@holtkeeper/chat": "workspace:*",
     "@holtkeeper/ci-jobs": "workspace:*",
     "@holtkeeper/coverage": "workspace:*",
+    "@holtkeeper/dep-diff": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/issues": "workspace:*",
     "@holtkeeper/jobs": "workspace:*",
@@ -25,6 +26,7 @@
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/rules": "workspace:*",
     "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/upgrade-check": "workspace:*",
     "@holtkeeper/usages": "workspace:*",
     "@holtkeeper/vuln": "workspace:*"
   }

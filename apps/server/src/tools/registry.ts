@@ -38,6 +38,7 @@ import { type AssetToolsAccess, assetsToolset } from './assets.ts'
 import { knowledgeToolset } from './knowledge.ts'
 import { type PackageToolsContext, packagesToolset } from './packages.ts'
 import { type QaToolsAccess, qaToolset } from './qa.ts'
+import { type ReleaseToolsAccess, releasesToolset } from './releases.ts'
 import type { SupplyToolsAccess } from './repos.ts'
 import { CODE_REVIEW_TOOL, type ReviewToolsAccess, reviewsToolset } from './reviews.ts'
 import { type RulesAccess, type TestIdsSnapshot, rulesToolset } from './rules.ts'
@@ -51,6 +52,7 @@ const MCP_TOOLSETS = [
   'assets',
   'reviews',
   'qa',
+  'releases',
   'ask',
   'security',
 ]
@@ -81,6 +83,10 @@ const BASE_TOOLSETS = ['code', 'docs', 'knowledge', 'packages']
  * checkout, so it skips the cross-repository `stack`. Both leave out `docs`: dependencies are not
  * installed in their checkouts, and `packages` answers for them.
  * `ask` answers one question of an MCP caller without a checkout, read-only.
+ * `upgrade-check` (one area of a breaking-change check) mounts read-only `git` to compare with the
+ * start commit and `packages` instead of `docs`, without `stack` or `assets`, and searches
+ * knowledge without proposing learnings (`knowledgeSearchOnly`). `upgrade-plan` (its plan and
+ * verdict calls) is one-shot and mounts none.
  */
 const TASK_TOOLSETS: Record<string, readonly string[]> = {
   review: ['code', 'knowledge', 'packages', 'git', 'stack', 'assets'],
@@ -91,7 +97,11 @@ const TASK_TOOLSETS: Record<string, readonly string[]> = {
   'chat-summary': [],
   learning: [],
   'release-notes': [],
+  'release-compare-parse': [],
+  'release-compare-summary': [],
   'qa-notes': [],
+  'upgrade-plan': [],
+  'upgrade-check': ['code', 'knowledge', 'packages', 'git'],
   'security-triage': [],
   'library-digest': [],
   'rule-miner': [],
@@ -112,13 +122,28 @@ const UNINSTALLED_CHECKOUT_KINDS: ReadonlySet<string> = new Set([
 /** Whether tasks of `taskKind` run in a checkout whose dependencies are not installed. */
 export const dependenciesMissing = (taskKind: string) => UNINSTALLED_CHECKOUT_KINDS.has(taskKind)
 
+/**
+ * Task kinds that read untrusted text (diffs, commit subjects) for a read-only answer and must not
+ * propose learned rules: their `knowledge` toolset offers only `search_knowledge`.
+ */
+const SEARCH_ONLY_KNOWLEDGE_KINDS: ReadonlySet<string> = new Set(['upgrade-check'])
+
+/** Whether tasks of `taskKind` only search knowledge, never propose learnings. */
+export const knowledgeSearchOnly = (taskKind: string) => SEARCH_ONLY_KNOWLEDGE_KINDS.has(taskKind)
+
 /** Names of the toolsets an internal task of `taskKind` mounts, in mount order. */
 export function taskToolsets(taskKind: string): readonly string[] {
   return TASK_TOOLSETS[taskKind] ?? BASE_TOOLSETS
 }
 
 /** What the MCP toolsets read for one caller. */
-export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>, RulesAccess {
+export interface McpToolsetsContext
+  extends Omit<PackageToolsContext, 'supply'>, Omit<RulesAccess, 'releases'> {
+  /**
+   * Release state the caller may read: the `releases` topic of `repo_rules` and the `releases`
+   * toolset (`release_step` never, it writes); without it neither is offered.
+   */
+  releases?: ReleaseToolsAccess
   /**
    * Asset policies and assets records; without it the `assets` toolset and the `assets` topic of
    * `repo_rules` are not offered.
@@ -159,13 +184,14 @@ export interface McpToolsetsContext extends Omit<PackageToolsContext, 'supply'>,
  * repository: `packages`, `knowledge` (reading one
  * rule in full by `id` with `rules`), `rules` (with any of `rules`, `commits`, `testIds`,
  * `releases`, `assets`; `get_rule` only for a token without `knowledge`), `assets` (with `assets`, `repo_assets` only), `reviews`
- * (with `reviews`), `qa` (with `qa`), `ask` (with `ask`) and `security` (with `secretReports`),
+ * (with `reviews`), `qa` (with `qa`), `releases` (with `releases`: `release_rules`,
+ * `release_status`, `release_changes`), `ask` (with `ask`) and `security` (with `secretReports`),
  * every one limited by the caller's grants and, but `security`, to the token's `toolsets`. Stack,
- * fleet, operations and release tools stay with the web panel and chat. Tools that write are left out
+ * fleet and operations tools stay with the web panel and chat. Tools that write are left out
  * unless `MCP_WRITE_TOOLS` names them; a toolset left without tools is not offered.
  */
 export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
-  const { assets, reviews, secretReports, qa, ask, toolsets } = context
+  const { assets, reviews, secretReports, qa, releases, ask, toolsets } = context
   const knowledgeServed = !toolsets || toolsets.includes('knowledge')
   const rules = rulesToolset(context, { reader: !knowledgeServed })
   const mounted = mountToolsets(
@@ -176,6 +202,7 @@ export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
       ...(assets ? [assetsToolset(assets, { policy: false })] : []),
       ...(reviews ? [reviewsToolset(reviews)] : []),
       ...(qa ? [qaToolset(qa)] : []),
+      ...(releases ? [releasesToolset(releases)] : []),
       ...(ask ? [askToolset(ask)] : []),
       ...(secretReports ? [secretReportsToolset(secretReports)] : []),
     ],

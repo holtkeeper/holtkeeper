@@ -747,7 +747,7 @@ describe('MCP endpoint', () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, bearer)).status).toBe(401)
   })
 
-  test('never offers release_step, even to tokens with the release scope', async () => {
+  test('never offers release_step, even to tokens with the release scope; read tools only with the releases toolset', async () => {
     const created = await app.request('/api/api-surface/mcp/tokens', {
       method: 'POST',
       headers: { ...asAdmin, 'content-type': 'application/json' },
@@ -756,7 +756,23 @@ describe('MCP endpoint', () => {
     const releaser = (await created.json()) as CreateMcpTokenResult
     const bearer = { authorization: `Bearer ${releaser.secret}` }
     expect(await releaseToolsOf(bearer)).toEqual([])
-    expect(await releaseToolsOf(asAdmin)).toEqual([])
+    const readTools = await releaseToolsOf(asAdmin)
+    expect(readTools.map((tool) => tool.name)).toEqual([
+      'release_rules',
+      'release_status',
+      'release_changes',
+    ])
+    expect(readTools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true)
+    const chosen = (await (
+      await app.request('/api/api-surface/mcp/tokens', {
+        method: 'POST',
+        headers: { ...asAdmin, 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'reader', scopes: ['release'], toolsets: ['releases'] }),
+      })
+    ).json()) as CreateMcpTokenResult
+    expect(
+      (await releaseToolsOf({ authorization: `Bearer ${chosen.secret}` })).map((tool) => tool.name),
+    ).toEqual(['release_rules', 'release_status', 'release_changes'])
     const rules = await callTool(
       'repo_rules',
       { repo: 'work:games/a', topics: ['releases'] },

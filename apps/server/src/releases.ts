@@ -2,6 +2,11 @@ import { can, type Principal } from '@holtkeeper/access'
 import type {
   ReleaseBoardRow,
   ReleaseCard,
+  ReleaseCompareApi,
+  ReleaseCompareRefs,
+  ReleaseCompareSummary,
+  ReleaseCompareVersion,
+  ReleaseCompareView,
   ReleaseDetectView,
   ReleaseOverview,
   ReleaseRepoView,
@@ -11,7 +16,8 @@ import type {
   ReleaseVersionView,
 } from '@holtkeeper/api'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
-import type { ForgeEvent, GitForge, RepoRef } from '@holtkeeper/forge'
+import { type DependencyDiff, diffDependencies, renderDependencyDiff } from '@holtkeeper/dep-diff'
+import type { DiffFile, ForgeEvent, GitForge, RepoRef } from '@holtkeeper/forge'
 import { type Issue, issuesByKey } from '@holtkeeper/issues'
 import {
   type Acceptance,
@@ -38,6 +44,7 @@ import {
   planRelease,
   proposeRelease,
   rangeChanges,
+  rangeCodeDiff,
   readDeployState,
   readStored,
   refreshProposal,
@@ -56,6 +63,7 @@ import {
   versionTimeline,
   withDeployActors,
   withIssues,
+  writeRangeSummary,
   writeSummary,
   forgeLinks,
   isValidVersion,
@@ -69,6 +77,12 @@ import { appendAudit } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { issueTrackerFor } from './issues.ts'
 import { knownRepos } from './new-repos.ts'
+import {
+  type ApiRangeEnd,
+  type PublicApiBetweenInput,
+  backfillRefs,
+  publicApiBetween,
+} from './release-api.ts'
 import { peopleOf } from './routes/avatars.ts'
 
 const HISTORY = 100
@@ -80,6 +94,8 @@ const TAG_PAGE = 100
 const TAG_MAX = 3200
 const TAGS_TTL_SECONDS = 30 * 60
 const TIMELINE_LIMIT = 30
+const COMPARE_FILE_CAP = 1000
+const COMPARE_CACHE_SECONDS = 30 * 24 * 3600
 
 const BOARD_INDEX = 'release:board:index'
 const BOARD_REFRESHING = 'release:board:refreshing'
@@ -98,7 +114,88 @@ export interface ReleaseChanges extends RangeChanges {
   compareUrl?: string
 }
 
+/**
+ * `ReleaseChanges` with the npm and Go dependency changes of the range, when they could be read,
+ * and, when asked for, how the public API of the repository's own packages changed.
+ */
+export type ReleaseChangesWithDependencies = ReleaseChanges &
+  Pick<ReleaseCompareView, 'dependencies' | 'dependenciesUnavailable'> & {
+    publicApi?: Omit<ReleaseCompareApi, 'backfill'>
+  }
+
 const repoKeyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
+
+const fixedSha = /^[0-9a-f]{40}$/u
+
+const fixedRange = (from: string | undefined, to: string): from is string =>
+  from !== undefined && fixedSha.test(from) && fixedSha.test(to)
+
+const apiEnd = (ref: string, sha: string | undefined): ApiRangeEnd => ({
+  ref,
+  ...(sha && fixedSha.test(sha) ? { sha } : {}),
+})
+
+const dependencySideSchema = z.object({
+  range: z.string().optional(),
+  version: z.string().optional(),
+})
+
+const changeKindSchema = z.enum(['added', 'removed', 'updated'])
+
+const dependencyDiffSchema: z.ZodType<DependencyDiff> = z.object({
+  roots: z.array(
+    z.object({
+      path: z.string(),
+      ecosystem: z.enum(['npm', 'go']),
+      manager: z.string().optional(),
+      lockfile: z.string().optional(),
+      direct: z.array(
+        z.object({
+          name: z.string(),
+          change: changeKindSchema,
+          field: z.enum(['prod', 'dev', 'optional', 'peer', 'require', 'indirect']),
+          workspace: z.string(),
+          from: dependencySideSchema.optional(),
+          to: dependencySideSchema.optional(),
+        }),
+      ),
+      transitive: z.array(
+        z.object({
+          name: z.string(),
+          change: changeKindSchema,
+          from: z.array(z.string()).optional(),
+          to: z.array(z.string()).optional(),
+        }),
+      ),
+      transitiveCapped: z.boolean().optional(),
+      counts: z.object({
+        added: z.number(),
+        removed: z.number(),
+        updated: z.number(),
+        transitiveAdded: z.number(),
+        transitiveRemoved: z.number(),
+        transitiveUpdated: z.number(),
+      }),
+      errors: z.array(z.string()),
+    }),
+  ),
+  skipped: z.number(),
+  partial: z.boolean(),
+})
+
+const storedSummarySchema = z.object({ markdown: z.string(), code: z.boolean().optional() })
+
+const compareFiles = async (forge: GitForge, repo: RepoRef, from: string, to: string) => {
+  if (!forge.compareCommits) throw new Error('the forge cannot compare commits')
+  return forge.compareCommits(repo.path, from, to)
+}
+
+const compareVersion = (tag: VersionTag): ReleaseCompareVersion => {
+  const version: ReleaseCompareVersion = { tag: tag.tag, version: tag.version, sha: tag.sha }
+  if (tag.date) version.date = tag.date
+  if (tag.version.includes('-')) version.prerelease = true
+  return version
+}
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -1050,6 +1147,7 @@ function createReleaseService(deps: ServerDeps) {
       complete: tags.complete,
       cache: kv,
       links: linksFor(forge, repository.webUrl, settings),
+      defaultBranch: repository.defaultBranch,
       history,
       deploys: deploysOf(history),
     }
@@ -1138,16 +1236,10 @@ function createReleaseService(deps: ServerDeps) {
   }
 
   /**
-   * Changes between two refs: `from` and `to` name version tags (or versions) or other refs.
-   * Without `to`, the target branch (the next release); without `from`, the version before `to`
-   * (the latest version for the target branch). Tasks carry tracker issues when one answers and
-   * the range ends at a version or the configured target or source branch, so an arbitrary branch
-   * cannot pull issue titles through the repository's tracker credential.
+   * The ends of a range as `changes` resolves them, without reading the changes: the labels shown
+   * (`from`, `to`), the commits or refs to read between (`fromRef`, `toRef`) and the matched tags.
    */
-  const changes = async (
-    repo: RepoRef,
-    range: { from?: string; to?: string } = {},
-  ): Promise<ReleaseChanges> => {
+  const resolveEnds = async (repo: RepoRef, range: { from?: string; to?: string } = {}) => {
     const source = await versionSource(repo, (settings, versions) => {
       const wanted = (ref: string | undefined) =>
         ref === undefined ||
@@ -1167,9 +1259,11 @@ function createReleaseService(deps: ServerDeps) {
     const find = (ref: string) =>
       source.versions.find((tag) => tag.tag === ref || tag.version === ref.replace(/^v/u, ''))
     const target = range.to ? find(range.to) : undefined
-    const branch = range.to
-      ? undefined
-      : (source.settings.flow.target ?? (await source.forge.getRepository(repo.path)).defaultBranch)
+    const targetBranch = source.settings.flow.target ?? source.defaultBranch
+    const branch =
+      range.to === undefined || (target === undefined && range.to === targetBranch)
+        ? targetBranch
+        : undefined
     const start = range.from
       ? find(range.from)
       : target
@@ -1180,6 +1274,24 @@ function createReleaseService(deps: ServerDeps) {
         : shown[0]
     const from = start?.tag ?? range.from
     const to = target?.tag ?? range.to ?? branch!
+    return {
+      source,
+      start,
+      target,
+      branch,
+      from,
+      to,
+      fromRef: start?.sha ?? range.from,
+      toRef: target?.sha ?? to,
+    }
+  }
+
+  /** `changes` with the forge and the commits or refs the range was read between. */
+  const resolvedChanges = async (repo: RepoRef, range: { from?: string; to?: string } = {}) => {
+    const { source, start, target, branch, from, to, fromRef, toRef } = await resolveEnds(
+      repo,
+      range,
+    )
     const found = await rangeChanges({
       forge: source.forge,
       repo,
@@ -1194,10 +1306,7 @@ function createReleaseService(deps: ServerDeps) {
       links: source.links,
     })
     const releaseRange =
-      target !== undefined ||
-      branch !== undefined ||
-      range.to === source.settings.flow.target ||
-      range.to === source.settings.flow.source
+      target !== undefined || branch !== undefined || range.to === source.settings.flow.source
     const issues = releaseRange
       ? await issuesOf(
           repo,
@@ -1205,7 +1314,7 @@ function createReleaseService(deps: ServerDeps) {
         )
       : {}
     const compareUrl = from ? source.links.compare(from, to) : undefined
-    return {
+    const changes: ReleaseChanges = {
       repo,
       ...found,
       tasks: withIssues(found.tasks, issues),
@@ -1214,6 +1323,239 @@ function createReleaseService(deps: ServerDeps) {
       unreleased: branch !== undefined,
       ...(compareUrl ? { compareUrl } : {}),
     }
+    return { changes, forge: source.forge, fromRef, toRef }
+  }
+
+  /**
+   * Changes between two refs: `from` and `to` name version tags (or versions) or other refs.
+   * Without `to`, the target branch (the next release); without `from`, the version before `to`
+   * (the latest version for the target branch). Tasks carry tracker issues when one answers and
+   * the range ends at a version or the configured target or source branch, so an arbitrary branch
+   * cannot pull issue titles through the repository's tracker credential.
+   */
+  const changes = async (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+  ): Promise<ReleaseChanges> => (await resolvedChanges(repo, range)).changes
+
+  /**
+   * Dependency changes between two refs, kept for `COMPARE_CACHE_SECONDS` (`final`) when both are
+   * fixed commits and every file read succeeded; `null` with the reason when there is no start, the forge cannot compare commits or
+   * the comparison failed. `files` saves a second comparison when the caller has one.
+   */
+  const dependenciesBetween = async (
+    forge: GitForge,
+    repo: RepoRef,
+    from: string | undefined,
+    to: string,
+    files?: readonly DiffFile[],
+  ): Promise<{ dependencies: DependencyDiff | null; reason?: string; final?: boolean }> => {
+    if (from === undefined)
+      return { dependencies: null, reason: 'the range starts at the first commit' }
+    if (!forge.compareCommits)
+      return { dependencies: null, reason: 'the forge cannot compare commits' }
+    const fixed = fixedRange(from, to)
+    const cacheKey = `release:dependencies:${repoKeyOf(repo)}:${from}:${to}`
+    if (fixed) {
+      const stored = readStored(dependencyDiffSchema, await kv.get(cacheKey).catch(() => undefined))
+      if (stored) return { dependencies: stored, final: true }
+    }
+    try {
+      const changed = files ?? (await compareFiles(forge, repo, from, to))
+      let readFailed = false
+      const dependencies = await diffDependencies({
+        files: changed,
+        read: (path, side) =>
+          forge.readFile(repo.path, path, side === 'from' ? from : to).catch((error: unknown) => {
+            readFailed = true
+            throw error
+          }),
+        partial: changed.length >= COMPARE_FILE_CAP,
+      })
+      const final = fixed && !readFailed
+      if (final) await kv.set(cacheKey, dependencies, COMPARE_CACHE_SECONDS).catch(() => {})
+      return { dependencies, final }
+    } catch (error) {
+      return { dependencies: null, reason: `comparing the commits failed: ${messageOf(error)}` }
+    }
+  }
+
+  const agentOf = async (repo: RepoRef) =>
+    deps.agentFor ? deps.agentFor(repo).catch(() => undefined) : undefined
+
+  /** The two ends of a resolved range as `publicApiBetween` reads them. */
+  const apiEnds = (resolved: Awaited<ReturnType<typeof resolvedChanges>>) => {
+    const { changes: found, fromRef, toRef } = resolved
+    return {
+      ...(found.from ? { from: apiEnd(found.from, fromRef) } : {}),
+      to: found.unreleased ? { ref: found.to, head: true } : apiEnd(found.to, toRef),
+    }
+  }
+
+  /**
+   * `changes` with the dependency changes of the range and, with `publicApi`, how the public API
+   * of the repository's own packages changed (left out when reading the records fails).
+   */
+  const changesWithDependencies = async (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+    options: { publicApi?: boolean } = {},
+  ): Promise<ReleaseChangesWithDependencies> => {
+    const resolved = await resolvedChanges(repo, range)
+    const [found, publicApi] = await Promise.all([
+      dependenciesBetween(resolved.forge, repo, resolved.fromRef, resolved.toRef),
+      options.publicApi
+        ? publicApiBetween({ analyses: store.analyses, repo, ...apiEnds(resolved) }).catch(
+            () => undefined,
+          )
+        : undefined,
+    ])
+    return {
+      ...resolved.changes,
+      dependencies: found.dependencies,
+      ...(found.reason ? { dependenciesUnavailable: found.reason } : {}),
+      ...(publicApi ? { publicApi } : {}),
+    }
+  }
+
+  /**
+   * How the public API of the repository's own packages changed between two refs, resolved as
+   * `changes`, from stored `api-surface` records (`ReleaseCompareApi` without `backfill`); with
+   * `impact`, each package carries the uses in other repositories its changes touch. `refs` are the
+   * ends to snapshot so the comparison can run (`backfillRefs`).
+   */
+  const compareApi = async (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+    impact?: PublicApiBetweenInput['impact'],
+  ): Promise<{ api: Omit<ReleaseCompareApi, 'backfill'>; refs: string[] }> => {
+    const ends = apiEnds(await resolvedChanges(repo, range))
+    const api = await publicApiBetween({
+      analyses: store.analyses,
+      repo,
+      ...ends,
+      ...(impact ? { impact } : {}),
+    })
+    return { api, refs: backfillRefs(ends, api) }
+  }
+
+  /**
+   * The commits two refs resolve to, as `changes` resolves them, with the label the comparison
+   * shows for each end (the version tag, the branch or the ref as given). A branch end is its head
+   * commit now. Reads no commits, entries or issues of the range, so it is cheap to poll. Rejects
+   * when the range has no start or an end cannot be found on the forge.
+   */
+  const compareRange = async (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+  ): Promise<{ from: CompareRangeEnd; to: CompareRangeEnd }> => {
+    const ends = await resolveEnds(repo, range)
+    const { forge } = ends.source
+    const { fromRef, toRef } = ends
+    if (!ends.from || fromRef === undefined) throw new Error('the range has no start to compare')
+    const shaOf = async (ref: string) => {
+      if (fixedSha.test(ref)) return ref
+      const [head] = forge.listCommits
+        ? await forge.listCommits(repo.path, { ref, limit: 1 }).catch(() => [])
+        : []
+      if (!head) throw new Error(`cannot find ${ref} in ${repo.path}`)
+      return head.sha
+    }
+    const [fromSha, toSha] = await Promise.all([shaOf(fromRef), shaOf(toRef)])
+    return {
+      from: { sha: fromSha, label: ends.from },
+      to: { sha: toSha, label: ends.to },
+    }
+  }
+
+  /**
+   * The comparison page of two refs, resolved as `changes`, with dependency changes and whether
+   * `principal` may have the AI agent describe them (`releases:run` and an agent for the
+   * repository).
+   */
+  const compare = async (
+    principal: Principal,
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+  ): Promise<ReleaseCompareView> => {
+    const runs = can(principal, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) })
+    const [found, agent] = await Promise.all([
+      changesWithDependencies(repo, range),
+      runs ? agentOf(repo) : undefined,
+    ])
+    return { ...found, summaryAvailable: agent !== undefined }
+  }
+
+  /**
+   * Every version tag newest first, the target branch and, in the merge request flow, the source
+   * branch: what a comparison can start or end at.
+   */
+  const refs = async (repo: RepoRef): Promise<ReleaseCompareRefs> => {
+    const source = await versionSource(repo, () => false)
+    const target = source.settings.flow.target ?? source.defaultBranch
+    const sourceBranch =
+      source.settings.flow.mode === 'merge-request' && source.settings.flow.source !== target
+        ? source.settings.flow.source
+        : undefined
+    return {
+      repo,
+      versions: source.versions.map(compareVersion),
+      branches: [
+        { name: target, role: 'target' as const },
+        ...(sourceBranch ? [{ name: sourceBranch, role: 'source' as const }] : []),
+      ],
+    }
+  }
+
+  /**
+   * Has the repository's AI agent describe the changes between two refs from their entries and
+   * dependency changes, plus the code diff with `code` when the forge can compare the commits and
+   * some code survives filtering (the answer's `code` says whether it did). Between two fixed
+   * commits whose dependency changes were read completely the description is kept per asked
+   * `code` flag for `COMPARE_CACHE_SECONDS`. Rejects without an agent.
+   */
+  const compareSummary = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string; code?: boolean },
+  ): Promise<ReleaseCompareSummary> => {
+    const agent = await deps.agentFor?.(repo)
+    if (!agent) throw new Error('no AI agent is configured for this repository')
+    const resolved = await resolvedChanges(repo, {
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.to ? { to: input.to } : {}),
+    })
+    const { fromRef, toRef, forge } = resolved
+    const fixed = fixedRange(fromRef, toRef)
+    const keyOf = (code: boolean) =>
+      `release:compare-summary:${repoKeyOf(repo)}:${fromRef}:${toRef}:${code ? 'code' : 'log'}`
+    const wantsCode = input.code === true && fromRef !== undefined
+    if (fixed) {
+      const stored = readStored(
+        storedSummarySchema,
+        await kv.get(keyOf(wantsCode)).catch(() => undefined),
+      )
+      if (stored) return { markdown: stored.markdown, code: stored.code ?? wantsCode, cached: true }
+    }
+    const files =
+      wantsCode && fromRef !== undefined
+        ? await compareFiles(forge, repo, fromRef, toRef).catch(() => undefined)
+        : undefined
+    const code = files ? rangeCodeDiff(files) : undefined
+    const withCode = code !== undefined && code.files.length > 0
+    const found = await dependenciesBetween(forge, repo, fromRef, toRef, files)
+    const dependencies = found.dependencies ? renderDependencyDiff(found.dependencies) : ''
+    const markdown = await writeRangeSummary(agent, {
+      entries: resolved.changes.entries,
+      ...(resolved.changes.from ? { from: resolved.changes.from } : {}),
+      to: resolved.changes.to,
+      ...(withCode ? { code } : {}),
+      ...(dependencies ? { dependencies } : {}),
+    })
+    if (found.final === true && (!wantsCode || files !== undefined))
+      await kv
+        .set(keyOf(wantsCode), { markdown, code: withCode }, COMPARE_CACHE_SECONDS)
+        .catch(() => {})
+    return { markdown, code: withCode, cached: false }
   }
 
   const view = async (principal: Principal, repo: RepoRef): Promise<ReleaseRepoView> => {
@@ -1228,7 +1570,7 @@ function createReleaseService(deps: ServerDeps) {
         : undefined,
       latestDeploy(forge, repo, settings, facts),
       historyOf(repo),
-      deps.agentFor ? deps.agentFor(repo).catch(() => undefined) : undefined,
+      agentOf(repo),
       isReadOnly(repo),
     ])
     const target = repoTarget(config, repo)
@@ -1386,6 +1728,12 @@ function createReleaseService(deps: ServerDeps) {
     timeline,
     versionOf,
     changes,
+    changesWithDependencies,
+    compare,
+    compareApi,
+    compareRange,
+    refs,
+    compareSummary,
     view,
     detect,
     deployOf,
@@ -1400,6 +1748,12 @@ function createReleaseService(deps: ServerDeps) {
     isReadOnly,
     subscribe,
   }
+}
+
+/** One end of a comparison: the commit it resolved to and the label the comparison shows. */
+export interface CompareRangeEnd {
+  sha: string
+  label: string
 }
 
 export type ReleaseService = ReturnType<typeof createReleaseService>

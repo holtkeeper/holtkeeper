@@ -124,3 +124,17 @@ export function budgetExceededFrom(error: unknown): BudgetExceededError | undefi
   }
   return undefined
 }
+
+/**
+ * Whether a spend limit stopped the run: an error named `BudgetExceededError` is the error or in
+ * its `cause` chain (a cyclic chain ends the search).
+ */
+export function isBudgetStop(error: unknown): boolean {
+  const seen = new Set<unknown>()
+  for (let current = error; current instanceof Error && !seen.has(current);) {
+    if (current.name === 'BudgetExceededError') return true
+    seen.add(current)
+    current = current.cause
+  }
+  return false
+}

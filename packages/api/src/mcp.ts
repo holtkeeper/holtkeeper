@@ -9,6 +9,7 @@ export const mcpToolsetNames = [
   'assets',
   'reviews',
   'qa',
+  'releases',
   'ask',
 ] as const
 
@@ -68,6 +69,13 @@ export const mcpToolsetCatalog: readonly McpToolsetInfo[] = [
     label: 'QA tasks',
     description:
       'Tasks of Releases › QA: their changes, test attribute changes and stored test notes.',
+    defaultOn: false,
+  },
+  {
+    name: 'releases',
+    label: 'Releases',
+    description:
+      'How a repository releases, where its release stands, and the tasks, changelog and dependency changes between two versions. Read-only.',
     defaultOn: false,
   },
   {

@@ -2,7 +2,7 @@
 
 Part of the web app's [Releases](README.md#releases) docs.
 
-**Flow setup** (`/releases/setup?repo=<forge:path>`, `features/releases/SetupPage.tsx`) is the third tab of the Releases workspace, after Overview (`/releases`) and Timeline (`/releases/timeline`). It edits one repository's `releases` setting. Nothing is tagged or deployed from here.
+**Flow setup** (`/releases/setup?repo=<forge:path>`, `features/releases/SetupPage.tsx`) is the last tab of the Releases workspace, after Overview (`/releases`), Timeline (`/releases/timeline`), Compare (`/releases/compare`) and QA (`/releases/qa`). It edits one repository's `releases` setting. Nothing is tagged or deployed from here.
 
 ## What the page shows
 

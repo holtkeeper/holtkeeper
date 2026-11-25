@@ -72,7 +72,7 @@ import { createRulesResolver, readForgeRuleFiles } from '../rules.ts'
 import { secretReportsFor } from '../secret-reports.ts'
 import { storedAssetTools } from '../tools/assets.ts'
 import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
-import type { LibraryIndex } from '../tools/packages.ts'
+import type { LibraryIndex, PackageToolsContext } from '../tools/packages.ts'
 import { repoRulesAccess, storedStackTools } from '../tools/registry.ts'
 import {
   type CommitConventionsAccess,
@@ -83,6 +83,7 @@ import {
 import { canSee, catalogReach } from '../visibility.ts'
 import { dependencyRoutes } from './dependencies.ts'
 import { homeTeamsOf } from './preferences.ts'
+import { releaseCompareRoutes } from './release-compare.ts'
 import { usageRoutes } from './usages.ts'
 
 const GLOBAL = { kind: 'global' } as const
@@ -294,8 +295,30 @@ export function createApiSurface(deps: ServerDeps) {
     },
   })
 
+  /** The `packages` tools context of one caller, as `/mcp` builds it, without the stack tools. */
+  const packageContext = async (principal: Principal): Promise<PackageToolsContext> => {
+    const scope = await reach(principal)
+    const library = libraryContext(principal, scope.catalog)
+    return {
+      catalog,
+      usages,
+      store,
+      knowledge: knowledgeContext(principal),
+      canRead: scope.catalog,
+      canReadSnippets: scope.snippets,
+      canReadAnalyses: analysesOf(principal),
+      canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),
+      auditOff: () => analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'audit'),
+      bundleOff: () => analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'bundle'),
+      ownerOf,
+      ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
+      ...(library ? { library } : {}),
+    }
+  }
+
   const routes = new Hono<Env>()
   routes.route('/', usageRoutes({ catalog, usages, reach, teamsOf }))
+  routes.route('/', releaseCompareRoutes(deps, { usages, reach, packageContext }))
   routes.route(
     '/',
     dependencyRoutes(deps, { catalog, usages, reach, libraryIndex: libraryContext, cache }),

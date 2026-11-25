@@ -6,9 +6,9 @@ Part of the web app's [Releases](README.md#releases) docs.
 
 ## Header
 
-The workspace tabs come from the shell. The title row holds a repository switch over the repositories on the overview (`GET /api/releases/overview`), a ghost **Configure** to `/releases/setup?repo=` for people with `settings:write` there, and the ⋯ menu with **Read the forge again** (a background read of every repository) and **Open repository**. The search field (`/`) narrows the versions table by tag, version, commit prefix or task key. Without `?repo=` the page opens the first repository of the overview, action first (`actionFirst`); it asks for one only when no repository has releases on.
+The workspace tabs come from the shell. The title row holds a repository switch over the repositories on the overview (`ReleaseRepoSwitch` in `parts.tsx`, shared with Compare; `GET /api/releases/overview`), a ghost **Configure** to `/releases/setup?repo=` for people with `settings:write` there, and the ⋯ menu with **Read the forge again** (a background read of every repository) and **Open repository**. The search field (`/`) narrows the versions table by tag, version, commit prefix or task key. Without `?repo=` the page opens the first repository of the overview, action first (`actionFirst`); it asks for one only when no repository has releases on.
 
-Above the next release: notices for a dry run, a read-only repository and releases turned off (with **Set up its flow** to the setup page), then the stage tag (`overviewTag`, the same words and tone as the Overview), the flow in a line (`flowSummary`: mode, target branch and an example tag) and the forge links of the current release (merge request, compare, tag, pipeline with its status).
+Above the next release: notices for a dry run, a read-only repository and releases turned off (with **Set up its flow** to the setup page), then the stage tag (`overviewTag`, the same words and tone as the Overview), the flow in a line (`flowSummary`: mode, target branch and an example tag), the forge links of the current release (merge request, compare, tag, pipeline with its status) and **Compare versions**, which opens [Compare](release-compare.md) for the repository.
 
 The stage tag reads a pending version as _Waiting for acceptance_ while `row.acceptanceRequired` is true and `row.acceptance` is absent (the target head is not accepted), otherwise _Ready to tag_; a forge error and a failed deploy come first (`overviewState`).
 
@@ -32,7 +32,7 @@ The stage tag reads a pending version as _Waiting for acceptance_ while `row.acc
 
 ## Version sheet
 
-`VersionSheet` opens a version in the `SideSheet`: the tag (copyable), the repository, a progress bar with one segment per environment (`versionTicks`, `deployProgress`) captioned with the environments that run it now (`liveOn`), and **Compare** with the previous version. Tabs:
+`VersionSheet` opens a version in the `SideSheet`: the tag (copyable), the repository, a progress bar with one segment per environment (`versionTicks`, `deployProgress`) captioned with the environments that run it now (`liveOn`), **Compare versions** (opens [Compare](release-compare.md) from the previous version to this one) and **Forge diff** (the forge's compare page against the previous version, when the forge gives one). Tabs:
 
 1. **Deploys** (`VersionDeploys`): per environment its status, every attempt newest first with its status, start time, who started it through Holtkeeper and why (`attemptLine` over `DeployAttempt.actor` and `reason`) and its duration, and the deploy action as on the panel. Then the version facts (tag on the target branch, bump, previous version and commit count, commit, release date) and **How it was cut** from `ReleaseVersionDetailView.provenance`: who accepted it, where and when, how (`acceptedVia`), their note and the accepted commit; who tagged it, whether failing checks were overridden (`force`), where the notes came from and whether the plan was edited (`versionNotesText`), the `CHANGELOG.md` commit and the release page. A version Holtkeeper did not create says so.
 2. **Changelog**: the version's changelog Markdown.

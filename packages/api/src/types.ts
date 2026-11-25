@@ -21,6 +21,7 @@ import type {
   CoverageTotals,
   FileCoverageData,
 } from '@holtkeeper/coverage'
+import type { DependencyDiff } from '@holtkeeper/dep-diff'
 import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
 import type { Issue } from '@holtkeeper/issues'
 import type { JobLogLine, JobLogPage, JobStep, JobWait, WaitReason } from '@holtkeeper/jobs'
@@ -29,6 +30,7 @@ import type {
   DeployState,
   FlowDetection,
   GateResult,
+  RangeChanges,
   ReleaseBoardRow,
   ReleaseEdits,
   ReleaseEvent,
@@ -91,6 +93,12 @@ import type {
   Timestamp,
   TriggerDocumentData,
 } from '@holtkeeper/store'
+import type {
+  UpgradeCheckData,
+  UpgradeFinding,
+  UpgradeSeverity,
+  UpgradeVerdict,
+} from '@holtkeeper/upgrade-check'
 import type {
   FleetExport,
   FoundSite,
@@ -2205,6 +2213,183 @@ export type ReleaseVersionDetailView = ReleaseVersionDetail & {
   provenance?: ReleaseProvenance
   /** Users among the provenance and deploy actors, by id. */
   people: Record<string, PersonView>
+}
+
+export type {
+  DependencyChangeKind,
+  DependencyDiff,
+  DependencyEcosystem,
+  DependencyRoot,
+  DependencySide,
+  DirectDependencyChange,
+  TransitiveDependencyChange,
+} from '@holtkeeper/dep-diff'
+
+/**
+ * `GET /api/releases/compare?repo=&from=&to=`: the changes between two refs of one repository.
+ * `from` and `to` name versions, tags or branches; without `to` the target branch (the next
+ * release), without `from` the version before `to`. Entries, changelog, tasks and bump as
+ * `release_changes` has them; tasks carry tracker issues only when the range ends at a version or
+ * the configured target or source branch. `dependencies` are the npm and Go dependency changes
+ * between the two ends, `null` with `dependenciesUnavailable` saying why when they could not be
+ * read (no start, a forge that cannot compare commits, a failed comparison). Results between two
+ * version tags are cached. `summaryAvailable` is true when the caller may ask for an AI
+ * description (`releases:run`) and an AI agent is configured for the repository.
+ */
+export type ReleaseCompareView = RangeChanges & {
+  repo: RepoRef
+  /** Exclusive start as resolved: a version tag or the ref given; absent for the whole history. */
+  from?: string
+  /** The end as resolved: a version tag, or the branch. */
+  to: string
+  /** `to` is the target branch: these changes wait for the next version. */
+  unreleased: boolean
+  compareUrl?: string
+  dependencies: DependencyDiff | null
+  dependenciesUnavailable?: string
+  summaryAvailable: boolean
+}
+
+/** One version a comparison can start or end at. */
+export interface ReleaseCompareVersion {
+  tag: string
+  version: string
+  sha: string
+  date?: string
+  /** The version has a prerelease part (`1.2.0-rc.1`). */
+  prerelease?: boolean
+}
+
+/**
+ * `GET /api/releases/refs?repo=`: what a comparison can name in one repository: every version tag
+ * newest first (release candidates included, marked `prerelease`) and the flow's target branch
+ * (the repository's default branch unless the `releases` setting names one) and, when set, its
+ * source branch. Needs `releases:read` on the repository.
+ */
+export interface ReleaseCompareRefs {
+  repo: RepoRef
+  versions: ReleaseCompareVersion[]
+  branches: { name: string; role: 'target' | 'source' }[]
+}
+
+/**
+ * `POST /api/releases/compare/summary`: has the repository's AI agent describe what changed
+ * between `from` and `to` (resolved as `GET /api/releases/compare`), from the commit entries and
+ * the dependency changes, plus the code diff when `code` is set (a heavier tier). Needs
+ * `releases:run` on the repository and an agent configured for it (409 otherwise); nothing is
+ * written to the forge.
+ */
+export interface ReleaseCompareSummaryInput {
+  repo: string
+  from?: string
+  to?: string
+  code?: boolean
+}
+
+/**
+ * Answer of `POST /api/releases/compare/summary`: Markdown. Between two fixed commits (version
+ * tags) a description is kept per `code` flag and answered again with `cached` true.
+ */
+export interface ReleaseCompareSummary {
+  markdown: string
+  /** The code diff was part of the input. */
+  code: boolean
+  cached: boolean
+}
+
+/** One of the repository's own packages whose public API differs between two compared refs. */
+export interface ReleaseCompareApiPackage {
+  name: string
+  /** `Go` for Go packages, else `npm`. */
+  ecosystem?: ApiEcosystem
+  /** The package's version at the start; absent when the package is new. */
+  from?: string
+  /** The package's version at the end; absent when the package was removed. */
+  to?: string
+  /** The API diff as `@holtkeeper/api-surface` computes it, plain JSON. */
+  diff?: PackageDiff
+  /** `diff` rendered as Markdown (`renderDiff`). */
+  markdown: string
+  /**
+   * Uses in other repositories of the organization that the removed, changed or deprecated
+   * exports touch, from their newest `usages` records and limited to the caller's snippet reach:
+   * `repos` affected, use counts at `breaking` and `check` level. Absent when nothing but
+   * additions changed or no repository's uses are affected.
+   */
+  impact?: { repos: number; breaking: number; check: number; markdown?: string }
+}
+
+/**
+ * `GET /api/releases/compare/api?repo=&from=&to=`: how the public API of the repository's own
+ * packages changed between two refs (resolved as `GET /api/releases/compare`), from stored
+ * `api-surface` records. A version end reads the record of that tag (or its commit), the target
+ * branch the newest default-branch record. `packages` lists only packages that changed (new and
+ * removed ones included); `missing` names packages with no record at one end (`both` when neither
+ * end has one, named from the newest record); `recorded` is false when the repository has no
+ * `api-surface` record with data at all. Nothing was compared when `packages` is empty and
+ * `missing` is not. `backfill` is set while something is missing or nothing is recorded and says
+ * whether the caller may queue `api-surface` for the repository (`POST /api/jobs` or
+ * `POST /api/analyses/backfill`); its `refs` are the tags or commits of the ends without a record,
+ * to queue `api-surface` at (a target branch end is recorded by its scheduled run).
+ * Needs `releases:read` on the repository and catalog reach to it (403 otherwise).
+ */
+export interface ReleaseCompareApi {
+  packages: ReleaseCompareApiPackage[]
+  missing: { name: string; side: 'from' | 'to' | 'both' }[]
+  recorded: boolean
+  backfill?: { allowed: boolean; refs?: string[] }
+}
+
+/**
+ * `GET /api/releases/compare/package?repo=&package=&ecosystem=&from=&to=`: what changed in one
+ * dependency between two of its versions, as the `package_changes` MCP tool answers it for the
+ * caller: the API diff, for third-party packages the changelog and migration notes, and the uses
+ * the upgrade affects, narrowed to `repo`. `found` is false when the package or one of the
+ * versions is not indexed; `markdown` then says what is known. Needs `releases:read` on the
+ * repository; everything read is limited to the caller's catalog and snippet reach.
+ */
+export interface ReleaseComparePackage {
+  markdown: string
+  found: boolean
+}
+
+export type { UpgradeCheckData, UpgradeFinding, UpgradeSeverity, UpgradeVerdict }
+
+/**
+ * `GET /api/releases/compare/check?repo=&from=&to=`: the AI breaking-change check of a range,
+ * resolved like `/releases/compare`. `none`: never run for these two commits; `queued` and
+ * `running` carry the job; `failed` the job's error (a budget stop included) and, when an earlier
+ * run of the same range finished, its result too; `done` the newest finished result. A check is
+ * kept per pair of commits, so a branch end that moved is a new range. Needs `releases:read`.
+ */
+export interface ReleaseCompareCheck {
+  status: 'none' | 'queued' | 'running' | 'failed' | 'done'
+  jobId?: string
+  analysisId?: string
+  data?: UpgradeCheckData
+  error?: string
+}
+
+/**
+ * Body of `POST /api/releases/compare/check`: the range as `/releases/compare` takes it; `force`
+ * runs again even when a finished check of the same commits exists.
+ */
+export interface ReleaseCompareCheckInput {
+  repo: string
+  from?: string
+  to?: string
+  force?: boolean
+}
+
+/**
+ * Answer of `POST /api/releases/compare/check`: `existing` is the finished check of the same
+ * commits that was returned instead of queueing one (without `force`), with the job that wrote it
+ * when it is still known; otherwise `jobId` is the queued job, or the queued or running one that
+ * already checks this range.
+ */
+export interface ReleaseCompareCheckStart {
+  jobId?: string
+  existing?: string
 }
 
 /**

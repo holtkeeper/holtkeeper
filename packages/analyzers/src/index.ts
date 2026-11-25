@@ -18,6 +18,7 @@ import { createRuleMinerAnalyzer } from '@holtkeeper/rule-miner'
 import { stackAnalyzer } from '@holtkeeper/stack'
 import { type TestIdOverrides, testIdsAnalyzer, testIdsCheck } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
+import { upgradeCheckAnalyzer } from '@holtkeeper/upgrade-check'
 import { usagesAnalyzer } from '@holtkeeper/usages'
 import { writeTaskAnalyzer } from '@holtkeeper/write-task'
 import { z } from 'zod'
@@ -89,4 +90,5 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   renovateAnalyzer,
   auditAnalyzer,
   writeTaskAnalyzer,
+  upgradeCheckAnalyzer,
 ]

@@ -51,6 +51,7 @@ import { noteMergeRequestChange, noteReviewJob } from './mr-status.ts'
 import { releaseAnnouncerFor } from './release-announce.ts'
 import { releaseServiceFor } from './releases.ts'
 import { analyzerOffFor } from './repo-analyzers.ts'
+import { RUN_ONLY_ANALYZERS } from './routes/jobs.ts'
 
 /** Every note Holtkeeper posts carries this marker. */
 const OWN_MARKER = 'holtkeeper:review'
@@ -178,8 +179,8 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * reply then queues no `review`), and those whose options stay invalid with the repository's
  * `analyzers.<kind>` setting (an analyzer not set up there), are left out rather than queued to
  * fail, and so is every job that would carry a ref for an analyzer that reads only the default
- * branch (`defaultBranchOnly`). Write tasks are never
- * queued from events, policies or note commands; only an approved task group queues them.
+ * branch (`defaultBranchOnly`). Write tasks and other `RUN_ONLY_ANALYZERS` are never
+ * queued from events, policies or note commands; only their own endpoint queues them.
  *
  * Tags, pushes, merge request changes and pipelines also go to the release assistant, in the background;
  * tags also to the release announcements (`releaseAnnouncerFor`).
@@ -208,7 +209,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
     const enqueued: string[] = []
     for (const request of requests) {
       if (deps.analyzers && !analyzers.has(request.analyzer)) continue
-      if (request.analyzer === WRITE_TASK_KIND) continue
+      if (request.analyzer === WRITE_TASK_KIND || RUN_ONLY_ANALYZERS.has(request.analyzer)) continue
       if (request.ref !== undefined && analyzers.get(request.analyzer)?.defaultBranchOnly) continue
       if (
         isReviewAnalyzer(config, request.analyzer) &&

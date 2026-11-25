@@ -6,27 +6,28 @@ The registry of analyzers Holtkeeper ships. The server's job engine runs them; e
 import { builtinAnalyzers } from '@holtkeeper/analyzers'
 ```
 
-| Kind          | Scope | What it produces                                                          |
-| ------------- | ----- | ------------------------------------------------------------------------- |
-| `bundle`      | repo  | app builds and published packages: size per entrypoint, asset, release    |
-| `depgraph`    | repo  | dependency graph (JavaScript, Go): cycles, duplicate versions, statistics |
-| `coverage`    | repo  | line, function and branch test coverage per source file                   |
-| `testids`     | repo  | test attributes frontend templates expose, per component                  |
-| `api-surface` | repo  | public API of every package per version, for agents and semver checks     |
-| `licenses`    | repo  | third-party licenses judged against allow and deny lists                  |
-| `stack`       | group | runtimes, images and tools with end of life, and the team's conventions   |
-| `assets`      | repo  | asset inventory checked against budgets, with smaller formats suggested   |
-| `branches`    | repo  | branches to clean up: merged, closed unmerged or stale, per author        |
-| `ci-jobs`     | repo  | CI job durations and failures over time                                   |
-| `i18n`        | repo  | translation gaps per locale                                               |
-| `propagate`   | group | package updates rolled out across a team, failures handed to fix tasks    |
-| `review`      | repo  | AI review of a merge request                                              |
-| `rule-miner`  | repo  | learnings mined from merged merge requests' review comments               |
-| `tracker`     | group | declared entities tracked across repositories and documents               |
-| `audit`       | repo  | vulnerability audit with osv-scanner (data is an `AuditReport`)           |
-| `write-task`  | repo  | a code change pushed as a branch with a merge request (write worker pool) |
+| Kind            | Scope | What it produces                                                          |
+| --------------- | ----- | ------------------------------------------------------------------------- |
+| `bundle`        | repo  | app builds and published packages: size per entrypoint, asset, release    |
+| `depgraph`      | repo  | dependency graph (JavaScript, Go): cycles, duplicate versions, statistics |
+| `coverage`      | repo  | line, function and branch test coverage per source file                   |
+| `testids`       | repo  | test attributes frontend templates expose, per component                  |
+| `api-surface`   | repo  | public API of every package per version, for agents and semver checks     |
+| `licenses`      | repo  | third-party licenses judged against allow and deny lists                  |
+| `stack`         | group | runtimes, images and tools with end of life, and the team's conventions   |
+| `assets`        | repo  | asset inventory checked against budgets, with smaller formats suggested   |
+| `branches`      | repo  | branches to clean up: merged, closed unmerged or stale, per author        |
+| `ci-jobs`       | repo  | CI job durations and failures over time                                   |
+| `i18n`          | repo  | translation gaps per locale                                               |
+| `propagate`     | group | package updates rolled out across a team, failures handed to fix tasks    |
+| `review`        | repo  | AI review of a merge request                                              |
+| `rule-miner`    | repo  | learnings mined from merged merge requests' review comments               |
+| `tracker`       | group | declared entities tracked across repositories and documents               |
+| `audit`         | repo  | vulnerability audit with osv-scanner (data is an `AuditReport`)           |
+| `write-task`    | repo  | a code change pushed as a branch with a merge request (write worker pool) |
+| `upgrade-check` | repo  | AI check of what breaks when upgrading from one version to another        |
 
-`rule-miner` ([@holtkeeper/rule-miner](../../rule-miner/docs/README.md), whose registry copy has no store), `review` and `write-task` ([@holtkeeper/write-task](../../write-task/docs/README.md), whose registry copy refuses every task) need server state; the server replaces these registry copies with ones built on its store.
+`rule-miner` ([@holtkeeper/rule-miner](../../rule-miner/docs/README.md), whose registry copy has no store), `review` and `write-task` ([@holtkeeper/write-task](../../write-task/docs/README.md), whose registry copy refuses every task) need server state; the server replaces these registry copies with ones built on its store. The server also replaces `upgrade-check` ([@holtkeeper/upgrade-check](../../upgrade-check/docs/README.md)) with a copy that hands the agents the range's public API and dependency changes; it is queued only by `POST /api/releases/compare/check`, never by schedules, triggers or freshness.
 
 `reviewChecks({ testids? })` returns the checks the review analyzer runs on changed lines: `secrets` and `testids`; `testids` takes the repository's `TestIdOverrides` from the `analyzers.testids` setting.
 

@@ -84,6 +84,7 @@ import {
   agentCatalogContext,
   agentRulesAccess,
   dependenciesMissing,
+  knowledgeSearchOnly,
   taskToolsets,
 } from './tools/registry.ts'
 import { type ReleaseToolsAccess, releasesToolset } from './tools/releases.ts'
@@ -107,6 +108,7 @@ function ruleAgentOf(taskKind: string): RuleAgent {
   if (taskKind === 'review' || taskKind.startsWith('review-')) return 'review'
   if (taskKind === 'chat' || taskKind.startsWith('chat-') || taskKind === 'ask') return 'chat'
   if (taskKind === 'release-notes' || taskKind.startsWith('release')) return 'release'
+  if (taskKind === 'upgrade-plan' || taskKind === 'upgrade-check') return 'release'
   return 'task'
 }
 
@@ -255,14 +257,13 @@ export function withServerDefaults(
   const rules = options.rules && rulesToolset(options.rules)
   const knowledgeOf = (taskKind: string): Toolset[] => {
     const knowledge = knowledgeTools({ access, repo, taskKind, actor: `agent:${taskKind}` })
-    if (!requester) return [knowledge]
+    const searchOnly = {
+      ...knowledge,
+      tools: knowledge.tools.filter((tool) => tool.name === SEARCH_KNOWLEDGE_TOOL),
+    }
+    if (!requester) return [knowledgeSearchOnly(taskKind) ? searchOnly : knowledge]
     if (!can(requester, 'knowledge:read', { kind: 'repo', repo })) return []
-    return [
-      {
-        ...knowledge,
-        tools: knowledge.tools.filter((tool) => tool.name === SEARCH_KNOWLEDGE_TOOL),
-      },
-    ]
+    return [searchOnly]
   }
 
   return {

@@ -1,0 +1,131 @@
+---
+title: Compare versions
+description: Pick any two versions of a repository, or a version and the target branch, and see the tasks, changelog, dependency and public API changes between them, and ask AI agents what could break on the upgrade.
+panel: Releases › Compare
+route: /releases/compare
+permission: releases:read
+sidebar:
+  order: 3
+---
+
+import { Button, Facts, Field, Fields, Rows, Row, Screen, Stack, Tabs, Tag, Toolbar, Ui } from '@ui'
+
+Pick any two versions of a repository, or a version and the target branch, and see what changed between them: the tasks, the grouped changelog, the npm and Go dependency changes, the public API of the repository's own packages and, on request, an AI description and an AI breaking-change check. Use it to answer _will something break if we upgrade from A to B_, for example before upgrading an environment that runs an old version.
+
+<Screen title="Releases › Compare" caption="v2.3.0 against the stable version before it.">
+  <Toolbar title="acme/widget-shop ▾" />
+  <Stack>
+    <Fields>
+      <Field label="From (older)" value="v2.2.0" mono />
+      <Field label="To (newer)" value="v2.3.0" mono />
+    </Fields>
+    <Toolbar title="v2.2.0 → v2.3.0">
+      <Tag slot="start">minor</Tag>
+      <Tag slot="start">12 commits</Tag>
+      <Tag slot="start">4 tasks</Tag>
+      <Tag slot="start">5 dependency changes</Tag>
+      <Button ghost>Compare on the forge</Button>
+    </Toolbar>
+    <Toolbar title="What changed">
+      <Tag slot="start">Include code changes</Tag>
+      <Button primary>Describe changes</Button>
+    </Toolbar>
+    <Toolbar title="Breaking-change check">
+      <Tag slot="start" tone="warn">
+        Review before upgrading
+      </Tag>
+      <Button>Run again</Button>
+    </Toolbar>
+    <Rows>
+      <Row title="Changed default timeout" sub="behavior · src/widget/client.ts:42">
+        <Tag tone="warn">risky</Tag>
+      </Row>
+    </Rows>
+    <Toolbar title="Public API · 1" />
+    <Rows>
+      <Row title="widget-kit" sub="2.2.0 → 2.3.0 · 1 removed, 2 added · 3 repositories affected">
+        <Tag tone="bad">breaking</Tag>
+      </Row>
+    </Rows>
+    <Tabs items={['Tasks:4', 'Changelog', 'Dependencies:5']} />
+    <Rows>
+      <Row title="some-lib" sub="prod · 1.4.0 → 1.6.2">
+        <Tag tone="acc">updated</Tag>
+      </Row>
+      <Row title="widget-kit" sub="prod · 2.0.1 (^2.0.0)">
+        <Tag tone="ok">added</Tag>
+      </Row>
+      <Row title="old-helper" sub="dev · 0.3.0">
+        <Tag tone="bad">removed</Tag>
+      </Row>
+    </Rows>
+  </Stack>
+</Screen>
+
+## Pick the two ends
+
+Open **Compare** from the Releases tabs, <Ui>Compare versions</Ui> on the [timeline](/guide/releases/timeline/) or in a version's sheet (from the previous version to that one). The title holds the same repository switch as the timeline.
+
+- <Ui>From (older)</Ui> lists every version tag, newest first; prereleases are marked.
+- <Ui>To (newer)</Ui> lists the target branch, captioned _target branch — unreleased_, then the same
+  tags. With the target branch the page shows what waits for the next version.
+- The swap button exchanges the ends. A warning appears when <Ui>From</Ui> is newer than <Ui>To</Ui>.
+
+Without a choice the page compares the latest stable version with the stable version before it. Picking another <Ui>To</Ui> moves <Ui>From</Ui> to the version before it (the latest version for the target branch); picking <Ui>From</Ui> keeps <Ui>To</Ui>. The two ends are always in the address, so a copied link shows the same range later.
+
+## Read the comparison
+
+<Facts
+  items={[
+    [
+      'Summary line',
+      'Both ends, Unreleased for the target branch, the bump, commits, tasks, dependency changes and a link to the forge’s own compare page.',
+    ],
+    [
+      'What changed',
+      'An AI description, written when you press Describe changes. Include code changes adds the code diff: slower and costlier, and skipped when the forge cannot compare the commits.',
+    ],
+    [
+      'Breaking-change check',
+      'AI agents read the code changes area by area and list what could break an installation that upgrades, with a verdict and how to check each finding. Runs only when you press the button.',
+    ],
+    [
+      'Public API',
+      'Exports of the repository’s own packages that differ between the ends, with the bump they call for, the bump the version got and the uses in other repositories they touch.',
+    ],
+    ['Tasks', 'Tracker keys from the commits, with the tracker’s title and status.'],
+    ['Changelog', 'The commits grouped by changelog section.'],
+    [
+      'Dependencies',
+      'Per lockfile root or Go module: direct changes in a table (package, field, from → to, added / updated / removed) and transitive changes folded below with their counts. What changed on an updated or added package opens its API diff, release notes and the uses it breaks here.',
+    ],
+  ]}
+/>
+
+**What changed** is there only when you have `releases:run` on the repository and an AI agent is configured for it. A description between two versions is kept, so asking again costs nothing.
+
+When dependencies cannot be read, for example because the forge cannot compare the two ends, a muted line says why. A lockfile that could not be read at one end shows as a warning above its root, and the rest of the comparison still appears.
+
+## Check what could break
+
+The <Ui>Breaking-change check</Ui> card answers whether an installation running <Ui>From</Ui> can move to <Ui>To</Ui> safely. Press <Ui>Check what could break</Ui>: Holtkeeper splits the changed files into up to eight areas, and one AI agent per area reads its diff together with the public API and dependency changes, looking for removed or changed APIs, configuration, data and migration changes, behavior changes and infrastructure changes. A last step merges the findings and writes a verdict.
+
+- The check runs as a background job and takes a few minutes; the card shows its progress and links to the run. It costs AI budget, so it never runs on its own.
+- The verdict is <Ui>Safe to upgrade</Ui>, <Ui>Review before upgrading</Ui> or <Ui>Breaks</Ui>. Findings are grouped by severity, each with the files involved, what it affects and how to check it.
+- A finished check is kept for those two commits and shown to everyone who opens the same range. <Ui>Run again</Ui> starts a fresh one; after a failed first run the button stays <Ui>Check what could break</Ui>. A target branch that got new commits is a new range.
+- An area whose agent gave no usable answer is listed as not checked, and the verdict is then at least <Ui>Review before upgrading</Ui>. <Ui>Breaks</Ui> always comes with at least one breaking finding.
+- Each check has a spend limit; an agent that reaches its share answers with what it found so far.
+- Lockfiles, generated, vendored and binary files are left out; the card says how many files no agent read.
+
+The button needs `releases:run` on the repository and an AI agent configured for it.
+
+## Public API and dependency details
+
+<Ui>Public API</Ui> compares the stored public API snapshots of the repository's own packages at
+both ends. A package whose exports lost something is marked <Ui>breaking</Ui>; a red <Ui>bumped</Ui>
+tag means the version number moved less than the changes call for. Open a package for the full diff
+and the uses in other repositories it touches.
+
+Snapshots exist only for releases the public API analyzer has seen. When one end has none, nothing is compared: the section says <Ui>Cannot compare</Ui> and names the packages. With `analyses:run`, <Ui>Snapshot</Ui> queues snapshots of exactly the missing versions; reload the page once they finish. Without access to the repository's API catalog the section shows an error instead.
+
+In <Ui>Dependencies</Ui>, <Ui>What changed</Ui> on an updated or added package shows what changed in it between the two versions: its API diff, for third-party packages the release notes and migration notes, and the uses in this repository the upgrade affects.

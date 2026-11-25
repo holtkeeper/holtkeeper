@@ -17,7 +17,7 @@ From top to bottom:
 
 ## Features
 
-`featureOf` from `@holtkeeper/ai-usage/features` maps task kinds to product features: Reviews (`review`, `review-plan`, `review-verify`, `review-split`, `triage`, `translate`), Agent tasks (`write-task`, `fix`, `port`, `propagate`, `upgrade`, `propagate-fix`, `tests`), Chat (`chat`, `chat-summary`), Guide and learnings (`guide`, `learning`, `library-digest`), Releases and QA (`release-notes`, `qa-notes`), Vulnerability triage (`security-triage`), Other (anything else, and runs without a kind). `featureBreakdown` in `lib/ai-features.ts` sums `AiBudgetOverview.byFeature` per feature with each share of the total, Other always last; `featureItems` does the same for usage buckets (Ops › AI spend, Runs).
+`featureOf` from `@holtkeeper/ai-usage/features` maps task kinds to product features: Reviews (`review`, `review-plan`, `review-verify`, `review-split`, `triage`, `translate`), Agent tasks (`write-task`, `fix`, `port`, `propagate`, `upgrade`, `propagate-fix`, `tests`), Chat (`chat`, `chat-summary`), Guide and learnings (`guide`, `learning`, `library-digest`), Releases and QA (`release-notes`, `qa-notes`, `upgrade-plan`, `upgrade-check`), Vulnerability triage (`security-triage`), Other (anything else, and runs without a kind). `featureBreakdown` in `lib/ai-features.ts` sums `AiBudgetOverview.byFeature` per feature with each share of the total, Other always last; `featureItems` does the same for usage buckets (Ops › AI spend, Runs).
 
 ## Budget warning in the Inbox
 

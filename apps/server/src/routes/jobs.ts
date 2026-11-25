@@ -112,12 +112,14 @@ function countParam(value: string | undefined, name: string): number | undefined
 /** Where jobs of each run-only analyzer are queued. */
 const RUN_ONLY_ENDPOINTS: Record<string, string> = {
   'write-task': 'POST /api/task-groups',
+  'upgrade-check': 'POST /api/releases/compare/check',
 }
 
 /**
  * Analyzers whose options only their own endpoint sets for one run (`write-task`:
- * `/api/task-groups`), so they get no `analyzers.<kind>` setting and `POST /api/jobs`
- * refuses them.
+ * `/api/task-groups`; `upgrade-check`: `/api/releases/compare/check`), so they get no
+ * `analyzers.<kind>` setting, `POST /api/jobs` refuses them and schedules, triggers and
+ * freshness never queue them.
  */
 export const RUN_ONLY_ANALYZERS: ReadonlySet<string> = new Set(Object.keys(RUN_ONLY_ENDPOINTS))
 

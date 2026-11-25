@@ -68,6 +68,7 @@ import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
 import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
 import { defaultPolling, pollingSetting } from '@holtkeeper/updates'
+import { createUpgradeCheckAnalyzer } from '@holtkeeper/upgrade-check'
 import { aesVault } from '@holtkeeper/vault'
 import { securityAlertsDefinition } from '@holtkeeper/vuln-triage'
 import { mirrorStorage } from '@holtkeeper/workspace'
@@ -138,6 +139,7 @@ import { knowledgeAccessOf } from './tools/knowledge.ts'
 import { type SupplyToolsAccess, supplyToolsAccess } from './tools/repos.ts'
 import { commitConventionsReader } from './tools/rules.ts'
 import { serverPoller } from './updates.ts'
+import { upgradeCheckInputs } from './upgrade-check.ts'
 import { vulnIndexDuty } from './vuln-index.ts'
 import { serveWeb } from './web.ts'
 import { checkWebhookHealth } from './webhook-health.ts'
@@ -463,6 +465,7 @@ export async function startServer(
   const browserslist = createBrowserslistAnalyzer({
     conventions: (repo) => conventionsOf(repoTarget(config, repo)),
   })
+  const upgradeCheck = createUpgradeCheckAnalyzer({ inputsFor: upgradeCheckInputs(() => deps) })
   const replacements: Record<string, AnyAnalyzer> = {
     review,
     propagate,
@@ -470,6 +473,7 @@ export async function startServer(
     'rule-miner': ruleMiner,
     browserslist,
     'write-task': writeTask,
+    'upgrade-check': upgradeCheck,
   }
   const analyzers =
     options.analyzers ?? builtinAnalyzers.map((analyzer) => replacements[analyzer.kind] ?? analyzer)

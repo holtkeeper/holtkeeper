@@ -1415,3 +1415,30 @@ export function packagesToolset(context: PackageToolsContext): RegistryToolset {
     ],
   }
 }
+
+/** What `packageChanges` compares; the `package_changes` arguments. */
+export interface PackageChangesInput {
+  package: string
+  /** The version upgraded from. */
+  from?: string
+  /** The version upgraded to. */
+  to?: string
+  ecosystem?: ApiEcosystem
+  /** `forge:path` of the repository upgrading: versions default to its own, uses narrow to it. */
+  repo?: string
+}
+
+/**
+ * Exactly what the `package_changes` tool answers for `input` in `context`, for callers outside
+ * the tool registry. Throws `ToolError` when the package or one of the versions is not indexed or
+ * the range is reversed.
+ */
+export async function packageChanges(
+  context: PackageToolsContext,
+  input: PackageChangesInput,
+  signal: AbortSignal = new AbortController().signal,
+): Promise<string> {
+  const tool = packagesToolset(context).tools.find((item) => item.name === 'package_changes')
+  if (!tool) throw new Error('package_changes is not part of the packages toolset')
+  return tool.run(tool.input.parse(input), { dir: process.cwd(), signal })
+}

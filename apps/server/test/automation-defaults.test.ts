@@ -19,7 +19,7 @@ test('default triggers only name analyzers the server ships', () => {
     )
 })
 
-test('every shipped analyzer declares freshness except review, i18n, audit and licenses (the vulnerability and license indexes) and those that write to repositories', () => {
+test('every shipped analyzer declares freshness except review, upgrade-check, i18n, audit and licenses (the vulnerability and license indexes) and those that write to repositories', () => {
   const manual = builtinAnalyzers.filter((analyzer) => !analyzer.refresh).map((a) => a.kind)
   expect(manual.toSorted()).toEqual([
     'audit',
@@ -28,6 +28,7 @@ test('every shipped analyzer declares freshness except review, i18n, audit and l
     'licenses',
     'propagate',
     'review',
+    'upgrade-check',
     'write-task',
   ])
   for (const analyzer of builtinAnalyzers) {

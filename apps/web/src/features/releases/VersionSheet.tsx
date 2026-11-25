@@ -6,7 +6,8 @@ import type {
   ReleaseVersionView,
   RepoRef,
 } from '@holtkeeper/api'
-import { ExternalLink } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
+import { ExternalLink, GitCompare } from 'lucide-react'
 import { useState } from 'react'
 
 import { useReleaseVersion } from '../../api/queries.ts'
@@ -19,6 +20,7 @@ import {
   versionTicks,
 } from '../../lib/release-timeline.ts'
 import { actorName, channelLabel, countLabel } from '../../lib/releases.ts'
+import { repoKey } from '../../lib/repo.ts'
 import {
   ErrorState,
   KeyValue,
@@ -27,6 +29,7 @@ import {
   Placeholder,
   SideSheet,
   Tag,
+  quietActionsOf,
 } from '../../ui/index.ts'
 import { VersionDeploys } from './DeployStrip.tsx'
 import { BumpTag, TaskList } from './parts.tsx'
@@ -216,6 +219,31 @@ export function VersionSheet({
   const live = liveOn(view.row.environments, version.tag)
   const compareUrl = detail.data?.compareUrl
   const data = detail.data
+  const navigate = useNavigate()
+  const quiet = quietActionsOf([
+    {
+      label: 'Compare versions',
+      icon: GitCompare,
+      onPress: () =>
+        void navigate({
+          to: '/releases/compare',
+          search: {
+            repo: repoKey(repo),
+            ...(version.previous ? { from: version.previous } : {}),
+            to: version.tag,
+          },
+        }),
+    },
+    ...(compareUrl
+      ? [
+          {
+            label: 'Forge diff',
+            icon: ExternalLink,
+            onPress: () => window.open(compareUrl, '_blank', 'noreferrer'),
+          },
+        ]
+      : []),
+  ])
   return (
     <SideSheet
       open
@@ -234,17 +262,7 @@ export function VersionSheet({
             },
           }
         : {})}
-      {...(compareUrl
-        ? {
-            quietActions: [
-              {
-                label: version.previous ? `Compare ${version.previous}` : 'Compare',
-                icon: ExternalLink,
-                onPress: () => window.open(compareUrl, '_blank', 'noreferrer'),
-              },
-            ] as const,
-          }
-        : {})}
+      {...(quiet ? { quietActions: quiet } : {})}
       tabs={{
         items: [
           { id: 'deploys', label: 'Deploys' },
