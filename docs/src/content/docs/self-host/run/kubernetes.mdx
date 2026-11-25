@@ -112,7 +112,7 @@ Without `existingSecret` the pods do not start: the chart's config reads `HOLTKE
         }
   ```
 
-  `claimDelay` makes a pool take only jobs nobody else claimed within that time, so pools without one fill first. `spread: true` keeps a pool's pods on different nodes.
+  `claimDelay` makes a pool take only jobs nobody else claimed within that time, so pools without one fill first. `spread: true` keeps a pool's pods on different nodes. A pool pinned to a node without room for a second pod needs `strategy: { rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }`, or its rollout waits forever for CPU the old pod holds.
 
 - **KEDA**: `keda.enabled` scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus, `keda.threshold` queued jobs per replica (default `2`).
 

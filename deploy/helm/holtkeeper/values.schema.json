@@ -317,6 +317,21 @@
         "affinity": {
           "type": "object"
         },
+        "strategy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["RollingUpdate", "Recreate"] },
+            "rollingUpdate": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "maxSurge": { "type": ["integer", "string"] },
+                "maxUnavailable": { "type": ["integer", "string"] }
+              }
+            }
+          }
+        },
         "topologySpreadConstraints": {
           "type": "array"
         },
@@ -375,6 +390,21 @@
               },
               "affinity": {
                 "type": "object"
+              },
+              "strategy": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "type": { "type": "string", "enum": ["RollingUpdate", "Recreate"] },
+                  "rollingUpdate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "maxSurge": { "type": ["integer", "string"] },
+                      "maxUnavailable": { "type": ["integer", "string"] }
+                    }
+                  }
+                }
               },
               "topologySpreadConstraints": {
                 "type": "array"

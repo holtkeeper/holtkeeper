@@ -15,6 +15,7 @@ worker:
       replicas: 1
       concurrency: 4
       nodeSelector: { kubernetes.io/hostname: core }
+      strategy: { rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
       tolerations: [{ key: dedicated, operator: Equal, value: nas, effect: NoSchedule }]
       resources:
         requests: { cpu: '1', memory: 2Gi }

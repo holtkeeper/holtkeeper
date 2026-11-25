@@ -129,6 +129,10 @@ worker:
   pdb:
     enabled: true
     maxUnavailable: 1
+  # Deployment update strategy; empty keeps Kubernetes' default (25% surge). A pool pinned to a node
+  # with no room for a second pod needs `{ rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }`,
+  # or the new pod waits for CPU the old one holds and the rollout never finishes.
+  strategy: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -140,7 +144,8 @@ worker:
   # the current ReplicaSet, so a rollout cannot stack them). Not with KEDA.
   #   pools:
   #     - { name: small, replicas: 3, concurrency: 2, spread: true, claimDelay: 15s }
-  #     - { name: big, replicas: 1, concurrency: 4, nodeSelector: { kubernetes.io/hostname: big } }
+  #     - { name: big, replicas: 1, concurrency: 4, nodeSelector: { kubernetes.io/hostname: big },
+  #         strategy: { rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } } }
   pools: []
 
 # Workers that alone run write tasks (`serve --pool write`): agents that change code, push a branch

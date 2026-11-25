@@ -34,6 +34,10 @@ spec:
   {{- if not $.Values.keda.enabled }}
   replicas: {{ $worker.replicas }}
   {{- end }}
+  {{- with $worker.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}

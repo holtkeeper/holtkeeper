@@ -42,6 +42,7 @@ worker:
 
 - `claimDelay` makes a pool take only jobs queued at least that long, so pools without a delay take new jobs first and this one gets the overflow. Keep it above the 5 s poll interval.
 - `spread: true` keeps a pool's pods on different nodes, counting only the current ReplicaSet.
+- `strategy` sets the pool's Deployment update strategy. A pool pinned to one node without room for a second pod needs `{ rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }`: the default surge pod would wait for the CPU the old pod holds.
 - Pools do not combine with KEDA.
 
 Outside Kubernetes, `--claim-delay` (or `HOLTKEEPER_CLAIM_DELAY`) does the same per process.
