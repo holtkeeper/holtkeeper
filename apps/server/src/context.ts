@@ -30,7 +30,6 @@ import type { MediaEngine } from './media/engine.ts'
 import type { MergeRequestStatusSink } from './mr-status.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 import type { SlackApi, SlackPoster } from './slack/client.ts'
-import type { SlackCompareBot } from './slack/compare-bot.ts'
 import type { SlackReviews } from './slack/service.ts'
 import type { SupplyToolsAccess } from './tools/repos.ts'
 
@@ -124,11 +123,6 @@ export interface ServerDeps {
    * instance as `mergeRequestStatus`. Default: one built from these deps.
    */
   slackReviews?: SlackReviews
-  /**
-   * The environment comparison bot the events route hands mentions, thread replies and button
-   * clicks to. Default: one built from these deps (`createSlackCompareBot`).
-   */
-  slackCompare?: SlackCompareBot
   /** The Slack Web API client for a bot token. Default: `slackWebApi` over `fetch`; tests pass a fake. */
   slackApi?: (botToken: string) => SlackApi
   /** The Slack client release announcements post with. Default: `slackWebPoster`; tests pass a fake. */

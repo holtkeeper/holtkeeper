@@ -19,7 +19,6 @@ const setup = (kv: Partial<KvStore> & Pick<KvStore, 'get' | 'set'> = memoryStore
     kv,
     now: () => clock,
     onBackground: (work) => void background.push(work),
-    pollMs: 1,
   })
   return {
     tasks,
@@ -140,12 +139,5 @@ describe('summaryTasks', () => {
     await settled()
     expect(deleted).toEqual(['k'])
     expect(await tasks.read('k')).toEqual({ status: 'none' })
-  })
-
-  test('settle waits for the run and answers its outcome', async () => {
-    const { tasks } = setup()
-    expect(
-      await tasks.settle('k', async () => ({ summary: summary('Waited.'), keepSeconds: 60 })),
-    ).toEqual({ status: 'done', ...summary('Waited.') })
   })
 })

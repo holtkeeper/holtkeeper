@@ -17,6 +17,7 @@ import {
   swapRange,
   targetBranch,
   transitiveCounts,
+  versionText,
 } from './compare-range.ts'
 
 const refs: Pick<ReleaseCompareRefs, 'versions' | 'branches'> = {
@@ -202,4 +203,13 @@ test('parseCompareSearch keeps non-empty strings only', () => {
     to: 'v1.2.0',
   })
   expect(parseCompareSearch({ from: 3 })).toEqual({})
+})
+
+describe('versionText', () => {
+  test('names the environments that run a version', () => {
+    expect(versionText({ tag: 'v1.2.0', environments: ['staging', 'prod'] })).toBe(
+      'v1.2.0 (staging, prod)',
+    )
+    expect(versionText({ tag: 'v1.1.0' })).toBe('v1.1.0')
+  })
 })

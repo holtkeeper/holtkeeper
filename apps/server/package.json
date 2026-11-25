@@ -25,7 +25,6 @@
     "@holtkeeper/bundles": "workspace:*",
     "@holtkeeper/changes": "workspace:*",
     "@holtkeeper/chat": "workspace:*",
-    "@holtkeeper/chat-slack": "workspace:*",
     "@holtkeeper/ci-jobs": "workspace:*",
     "@holtkeeper/commit-conventions": "workspace:*",
     "@holtkeeper/confluence": "workspace:*",

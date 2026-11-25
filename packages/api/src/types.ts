@@ -2258,6 +2258,8 @@ export interface ReleaseCompareVersion {
   date?: string
   /** The version has a prerelease part (`1.2.0-rc.1`). */
   prerelease?: boolean
+  /** Deploy environments that run this version now, in configured order; absent when none. */
+  environments?: string[]
 }
 
 /**

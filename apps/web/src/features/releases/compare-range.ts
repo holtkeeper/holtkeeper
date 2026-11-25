@@ -4,6 +4,7 @@ import type {
   DependencyRoot,
   DependencySide,
   ReleaseCompareRefs,
+  ReleaseCompareVersion,
 } from '@holtkeeper/api'
 
 import { searchEntry, searchText } from '../../lib/search-params.ts'
@@ -138,3 +139,7 @@ export const dependencyChangeCount = (diff: DependencyDiff): number =>
 export const hasWorkspaces = (root: DependencyRoot): boolean =>
   new Set(root.direct.map((change) => change.workspace)).size > 1 ||
   (root.ecosystem === 'npm' && root.direct.some((change) => change.workspace !== '.'))
+
+/** A version as the range selects name it: the tag, then the environments that run it. */
+export const versionText = (version: Pick<ReleaseCompareVersion, 'tag' | 'environments'>): string =>
+  version.environments?.length ? `${version.tag} (${version.environments.join(', ')})` : version.tag

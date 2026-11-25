@@ -244,15 +244,13 @@ const reportingChoice = /^\/api\/api-surface\/mcp\/tokens\/[^/]+$/
 
 /**
  * Whether a request is audited: mutating methods under `/api` and `/auth/<provider>/admin`,
- * except Slack event deliveries and button clicks (signed by Slack, with no Holtkeeper session),
- * which arrive for every message in the app's channels, and changes of a token's secret
- * reporting choice.
+ * except Slack event deliveries, which arrive for every message in the app's channels, and
+ * changes of a token's secret reporting choice.
  */
 function isAudited(method: string, path: string, provider: string) {
   return (
     mutating.has(method) &&
     path !== '/api/slack/events' &&
-    path !== '/api/slack/interactions' &&
     !(method === 'PATCH' && reportingChoice.test(path)) &&
     (path.startsWith('/api/') || path.startsWith(`/auth/${provider}/admin/`))
   )

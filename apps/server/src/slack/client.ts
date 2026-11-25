@@ -30,8 +30,6 @@ interface SlackPostResult extends SlackResult {
   channel?: string
   /** Set by `chat.getPermalink` only. */
   permalink?: string
-  /** Set by `auth.test` only. */
-  userId?: string
 }
 
 /**
@@ -48,8 +46,6 @@ export interface SlackPoster {
   update(input: { channel: string; ts: string } & SlackMessageBody): Promise<SlackPostResult>
   /** `chat.getPermalink`: a link that opens the message; `undefined` when Slack gave none. */
   permalink?(input: { channel: string; ts: string }): Promise<string | undefined>
-  /** `auth.test`: the bot's own Slack user id, to recognize mentions; `undefined` on failure. */
-  botUserId?(): Promise<string | undefined>
 }
 
 /** Options of `slackWebApi` and `slackWebPoster`. */
@@ -81,7 +77,6 @@ const answerSchema = z
     ts: z.string().optional().catch(undefined),
     channel: z.string().optional().catch(undefined),
     permalink: z.string().optional().catch(undefined),
-    user_id: z.string().optional().catch(undefined),
   })
   .catch({})
 
@@ -156,7 +151,6 @@ function slackCaller(options: SlackWebApiOptions) {
           ...(answer.ts !== undefined && { ts: answer.ts }),
           ...(answer.channel !== undefined && { channel: answer.channel }),
           ...(answer.permalink !== undefined && { permalink: answer.permalink }),
-          ...(answer.user_id !== undefined && { userId: answer.user_id }),
         }
       const error = answer.error ?? `HTTP ${response.status}`
       if (harmless.includes(error)) return { ok: true }
@@ -222,6 +216,5 @@ export function slackWebPoster(options: SlackWebApiOptions): SlackPoster {
       call('chat.update', { channel, ts, ...messageBody(message) }),
     permalink: async ({ channel, ts }) =>
       (await call('chat.getPermalink', { channel, message_ts: ts }, [], [], true)).permalink,
-    botUserId: async () => (await call('auth.test', {})).userId,
   }
 }

@@ -219,6 +219,15 @@ const gate = () => {
   return { hold: promise, open: () => resolve() }
 }
 
+const deployed = (environment: string, tag: string) => ({
+  kind: 'deploy-succeeded',
+  repo: { forge: 'work', path: 'g/app' },
+  at: '2026-10-20T00:00:00.000Z',
+  actor: 'jane',
+  tag,
+  environment,
+})
+
 describe('release comparison routes', () => {
   test('lists version tags newest first and the flow branches', async () => {
     fake.tag('v1.2.0-rc.1')
@@ -235,6 +244,36 @@ describe('release comparison routes', () => {
     ])
     expect((await call('GET', `/releases/refs?repo=${repo}`, undefined, asNobody)).status).toBe(403)
     expect((await call('GET', '/releases/refs')).status).toBe(400)
+  })
+
+  test('marks the versions deploy environments run', async () => {
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: {
+        enabled: true,
+        acceptance: 'manual',
+        deploy: {
+          environments: [
+            { name: 'staging', job: 'deploy-staging' },
+            { name: 'prod', job: 'deploy-prod' },
+          ],
+        },
+      },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    await store.kv!.set('release:history:work:g/app', [
+      deployed('staging', 'v1.1.0'),
+      deployed('prod', 'v1.0.0'),
+      deployed('staging', 'v1.0.0'),
+    ])
+    const refs = await getJson<ReleaseCompareRefs>(`/releases/refs?repo=${repo}`)
+    expect(refs.versions.map((version) => [version.tag, version.environments])).toEqual([
+      ['v1.1.0', ['staging']],
+      ['v1.0.0', ['prod']],
+    ])
   })
 
   test('compares two versions with tasks, changelog and dependency changes, cached between tags', async () => {

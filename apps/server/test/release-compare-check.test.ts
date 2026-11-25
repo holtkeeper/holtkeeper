@@ -18,7 +18,6 @@ import {
 import { aesVault } from '@holtkeeper/vault'
 
 import { createApp } from '../src/app.ts'
-import { releaseComparer } from '../src/env-compare.ts'
 import { automaticSkip } from '../src/jobs.ts'
 import { renderApiChanges, upgradeCheckInputs } from '../src/upgrade-check.ts'
 
@@ -309,44 +308,5 @@ describe('upgrade check inputs', () => {
     })
     expect(inputs.apiChanges).toBeUndefined()
     expect(inputs.dependencyChanges).toContain('widget-kit')
-  })
-})
-
-describe('environment comparer', () => {
-  const range = { from: 'v1.0.0', to: 'v1.1.0' }
-
-  test('queues the check, waits for it and reports its findings with dependency changes', async () => {
-    let polls = 0
-    const comparer = releaseComparer(deps, {
-      checkPollMs: 1,
-      checkWaitMs: 10,
-      wait: async () => {
-        polls++
-        const [job] = await store.jobs.list({ limit: 1 })
-        if (polls === 2 && job) await finish(job.id)
-      },
-    })
-    const found = await comparer.compare(repoRef, range)
-    expect(found.breaking).toEqual({
-      status: 'done',
-      items: ['risky: Dial default changes. Check: Turn a fresh dial and read its value.'],
-    })
-    expect(found.dependencies).toEqual([{ name: 'widget-kit', change: 'added', to: '^2.0.0' }])
-    expect(found.tasks.map((task) => task.key)).toEqual(['ABC-7'])
-  })
-
-  test('reports a check still running past the wait, and none without an agent', async () => {
-    const comparer = releaseComparer(deps, {
-      checkPollMs: 1,
-      checkWaitMs: 2,
-      wait: async () => {},
-    })
-    expect((await comparer.compare(repoRef, range)).breaking).toEqual({
-      status: 'running',
-      items: [],
-    })
-    expect(await store.jobs.list({})).toHaveLength(1)
-    deps.agentFor = async () => undefined
-    expect((await comparer.compare(repoRef, range)).breaking).toBeUndefined()
   })
 })

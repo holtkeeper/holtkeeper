@@ -8,7 +8,6 @@ const SUMMARY_RUNNING_SECONDS = 15 * 60
 const SUMMARY_BEAT_SECONDS = 5 * 60
 /** How long a failure is shown before the task reads as never run. */
 const SUMMARY_FAILED_SECONDS = 10 * 60
-const POLL_MS = 3_000
 
 const taskSchema = z.discriminatedUnion('status', [
   z.object({
@@ -48,11 +47,6 @@ export interface SummaryTasks {
    * storing the result fails, the marker is dropped instead of recording a failure.
    */
   start(key: string, run: () => Promise<SummaryTaskResult>): Promise<ReleaseCompareSummaryState>
-  /**
-   * `start`, then waits until the task of `key` is no longer running and answers its state: `done`,
-   * `failed`, or `none` when a run in another process died without an outcome.
-   */
-  settle(key: string, run: () => Promise<SummaryTaskResult>): Promise<ReleaseCompareSummaryState>
 }
 
 interface InFlight {
@@ -64,14 +58,12 @@ interface InFlight {
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /**
- * `SummaryTasks` over `kv`, with `now` as the clock, `onBackground` receiving each run and
- * `pollMs` the interval `settle` reads a task running in another process at.
+ * `SummaryTasks` over `kv`, with `now` as the clock and `onBackground` receiving each run.
  */
 export function summaryTasks(deps: {
   kv: Pick<KvStore, 'get' | 'set'> & Partial<Pick<KvStore, 'compareAndSet' | 'delete'>>
   now: () => Date
   onBackground?: (work: Promise<unknown>) => void
-  pollMs?: number
 }): SummaryTasks {
   const { kv, now } = deps
   const inFlight = new Map<string, InFlight>()
@@ -204,23 +196,5 @@ export function summaryTasks(deps: {
     return { status: 'running', startedAt }
   }
 
-  const settle = async (key: string, run: () => Promise<SummaryTaskResult>) => {
-    let state = await start(key, run)
-    let restarted = false
-    for (;;) {
-      if (state.status === 'running') {
-        const local = inFlight.get(key)
-        if (alive(local)) state = await local.outcome
-        else {
-          await Bun.sleep(deps.pollMs ?? POLL_MS)
-          state = await read(key)
-        }
-      } else if (state.status === 'none' && !restarted) {
-        restarted = true
-        state = await start(key, run)
-      } else return state
-    }
-  }
-
-  return { read, start, settle }
+  return { read, start }
 }

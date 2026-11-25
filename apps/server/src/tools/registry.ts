@@ -97,8 +97,6 @@ const TASK_TOOLSETS: Record<string, readonly string[]> = {
   'chat-summary': [],
   learning: [],
   'release-notes': [],
-  'release-compare-parse': [],
-  'release-compare-summary': [],
   'qa-notes': [],
   'upgrade-plan': [],
   'upgrade-check': ['code', 'knowledge', 'packages', 'git'],

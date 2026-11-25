@@ -46,6 +46,7 @@ import {
   proposeRelease,
   rangeChanges,
   rangeCodeDiff,
+  environmentSummaries,
   readDeployState,
   readStored,
   refreshProposal,
@@ -1566,6 +1567,37 @@ function createReleaseService(deps: ServerDeps) {
    * Every version tag newest first, the target branch and, in the merge request flow, the source
    * branch: what a comparison can start or end at.
    */
+  /**
+   * The deploy environments each version tag runs on, in configured order: what the forge reports
+   * deployed there (read through the newest version's pipeline), else the tag of the newest
+   * recorded successful deploy. Empty without environments; read failures leave a tag unmarked.
+   */
+  const deployedTags = async (
+    repo: RepoRef,
+    forge: GitForge,
+    settings: ReleaseSettings,
+    newest: string | undefined,
+  ): Promise<Map<string, string[]>> => {
+    const deployed = new Map<string, string[]>()
+    if (settings.deploy.environments.length === 0) return deployed
+    const [state, history] = await Promise.all([
+      newest ? readDeployState(forge, repo, settings, newest).catch(() => undefined) : undefined,
+      historyOf(repo).catch((): ReleaseEvent[] => []),
+    ])
+    for (const summary of environmentSummaries(settings, state)) {
+      const tag =
+        summary.tag ??
+        history.find(
+          (recorded) =>
+            recorded.kind === 'deploy-succeeded' &&
+            recorded.environment === summary.name &&
+            recorded.tag !== undefined,
+        )?.tag
+      if (tag) deployed.set(tag, [...(deployed.get(tag) ?? []), summary.name])
+    }
+    return deployed
+  }
+
   const refs = async (repo: RepoRef): Promise<ReleaseCompareRefs> => {
     const source = await versionSource(repo, () => false)
     const target = source.settings.flow.target ?? source.defaultBranch
@@ -1573,9 +1605,18 @@ function createReleaseService(deps: ServerDeps) {
       source.settings.flow.mode === 'merge-request' && source.settings.flow.source !== target
         ? source.settings.flow.source
         : undefined
+    const deployed = await deployedTags(
+      repo,
+      source.forge,
+      source.settings,
+      source.versions[0]?.tag,
+    )
     return {
       repo,
-      versions: source.versions.map(compareVersion),
+      versions: source.versions.map((tag) => {
+        const environments = deployed.get(tag.tag)
+        return { ...compareVersion(tag), ...(environments && { environments }) }
+      }),
       branches: [
         { name: target, role: 'target' as const },
         ...(sourceBranch ? [{ name: sourceBranch, role: 'source' as const }] : []),
@@ -1693,7 +1734,7 @@ function createReleaseService(deps: ServerDeps) {
     return withCode(await tasks.read(pointer.data))
   }
 
-  /** What `startCompareSummary` and `compareSummary` share: the task key and its run. */
+  /** The task key and run of the AI description of a range, as `startCompareSummary` starts it. */
   const summaryTask = async (
     repo: RepoRef,
     input: { from?: string; to?: string; code?: boolean },
@@ -1717,35 +1758,6 @@ function createReleaseService(deps: ServerDeps) {
         )
         .catch(() => {})
     return { code, taskKey, run, current, remember }
-  }
-
-  /**
-   * Has the repository's AI agent describe the changes between two refs from their entries and
-   * dependency changes, plus the code diff with `code` when the forge can compare the commits and
-   * some code survives filtering (the answer's `code` says whether it did), and waits for it.
-   * Between two fixed commits whose dependency changes were read completely the description is
-   * kept per asked `code` flag and AI language for `COMPARE_CACHE_SECONDS`. Prose is in the
-   * repository's AI language (`aiLanguageOf`). Shares the tasks of `startCompareSummary`: answers
-   * a finished one, waits for a running one, else runs one itself. Rejects without an agent or
-   * when the description fails.
-   */
-  const compareSummary = async (
-    repo: RepoRef,
-    input: { from?: string; to?: string; code?: boolean },
-  ): Promise<ReleaseCompareSummary> => {
-    const task = await summaryTask(repo, input)
-    const summaryOf = (state: ReleaseCompareSummaryState): ReleaseCompareSummary => {
-      if (state.status === 'done' && state.markdown !== undefined)
-        return {
-          markdown: state.markdown,
-          code: state.code ?? task.code,
-          cached: state.cached ?? false,
-        }
-      throw new Error(state.error ?? 'the description did not finish')
-    }
-    if (task.current.status === 'done') return summaryOf({ ...task.current, cached: true })
-    if (task.current.status !== 'running') await task.remember()
-    return summaryOf(await tasks.settle(task.taskKey, task.run))
   }
 
   /**
@@ -1775,7 +1787,7 @@ function createReleaseService(deps: ServerDeps) {
   }
 
   /**
-   * Starts the AI description of a range in the background (`compareSummary` without waiting) and
+   * Starts the AI description of a range in the background and
    * answers its state: `running`, or `done` (with `cached`) when one of the same commits, `code`
    * flag and AI language exists. Joins a description that is already running; starts a failed one
    * again. Non-final descriptions (dependencies partly read) are kept for an hour. Rejects without
@@ -1969,7 +1981,6 @@ function createReleaseService(deps: ServerDeps) {
     compareApi,
     compareRange,
     refs,
-    compareSummary,
     compareSummaryState,
     startCompareSummary,
     view,

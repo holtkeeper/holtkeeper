@@ -57,6 +57,7 @@ import {
   swapRange,
   targetBranch,
   transitiveCounts,
+  versionText,
 } from './compare-range.ts'
 import { BreakingCheckCard, PackageChanges, PublicApiSection } from './CompareImpact.tsx'
 import { BumpTag, ReleaseRepoSwitch, TaskList } from './parts.tsx'
@@ -74,9 +75,14 @@ function rangeOptions(refs: Refs, range: CompareRange) {
       <span className="flex items-center gap-2">
         <span className="mono">{version.tag}</span>
         {version.prerelease ? <span className="text-xs text-muted">prerelease</span> : null}
+        {version.environments?.map((environment) => (
+          <Tag key={environment} tone="info">
+            {environment}
+          </Tag>
+        ))}
       </span>
     ),
-    text: version.tag,
+    text: versionText(version),
   }))
   const target = targetBranch(refs)
   const to: Option[] = [
