@@ -847,6 +847,27 @@ describe('insight reads', () => {
     expect(server.calls.at(-1)?.url).toContain('order_by=id')
   })
 
+  test('lists environments and filters deployments by status', async () => {
+    const { server, forge } = setup()
+    const project = server.addProject('g/a')
+    server.addDeployment(project, { status: 'success', ref: 'v1.0.0' })
+    server.addDeployment(project, { status: 'failed', ref: 'v1.1.0' })
+    server.addDeployment(project, { status: 'success', environment: 'staging', ref: 'v1.1.0' })
+    expect(await forge.listEnvironments?.('g/a')).toEqual([
+      { name: 'production', state: 'available' },
+      { name: 'staging', state: 'available' },
+    ])
+    expect(server.calls.at(-1)?.url).toContain('states=available')
+    const [latest] =
+      (await forge.listDeployments?.('g/a', {
+        environment: 'production',
+        status: 'success',
+        limit: 1,
+      })) ?? []
+    expect(latest?.ref).toBe('v1.0.0')
+    expect(server.calls.at(-1)?.url).toContain('status=success')
+  })
+
   test('lists tags with commit dates', async () => {
     const { server, forge } = setup()
     const project = server.addProject('g/a')

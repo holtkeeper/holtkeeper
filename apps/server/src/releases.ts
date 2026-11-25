@@ -131,6 +131,15 @@ export type ReleaseChangesWithDependencies = ReleaseChanges &
 
 const repoKeyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
+/** Forge environments read for compare pickers when the release settings name none. */
+const DEPLOYED_ENVIRONMENTS = 60
+/** Environments whose newest deployment is read at once. */
+const DEPLOYED_CONCURRENCY = 8
+/** How long the environments read from the forge are kept. */
+const DEPLOYED_SECONDS = 5 * 60
+
+const deployedSchema = z.array(z.object({ environment: z.string(), ref: z.string() }))
+
 const fixedSha = /^[0-9a-f]{40}$/u
 
 const fixedRange = (from: string | undefined, to: string): from is string =>
@@ -1568,33 +1577,72 @@ function createReleaseService(deps: ServerDeps) {
    * branch: what a comparison can start or end at.
    */
   /**
-   * The deploy environments each version tag runs on, in configured order: what the forge reports
-   * deployed there (read through the newest version's pipeline), else the tag of the newest
-   * recorded successful deploy. Empty without environments; read failures leave a tag unmarked.
+   * The deploy environments each ref (a version tag or a branch) runs on now. With
+   * `releases.deploy.environments` in configured order: what the forge reports deployed there
+   * (read through the newest version's pipeline), else the tag of the newest recorded successful
+   * deploy. Without configured environments, every environment the forge lists that is not
+   * stopped (at most `DEPLOYED_ENVIRONMENTS`, by name) with the ref of its newest successful
+   * deployment; that answer is kept `DEPLOYED_SECONDS`. Read failures leave refs unmarked.
    */
-  const deployedTags = async (
+  const deployedRefs = async (
     repo: RepoRef,
     forge: GitForge,
     settings: ReleaseSettings,
     newest: string | undefined,
   ): Promise<Map<string, string[]>> => {
     const deployed = new Map<string, string[]>()
-    if (settings.deploy.environments.length === 0) return deployed
-    const [state, history] = await Promise.all([
-      newest ? readDeployState(forge, repo, settings, newest).catch(() => undefined) : undefined,
-      historyOf(repo).catch((): ReleaseEvent[] => []),
-    ])
-    for (const summary of environmentSummaries(settings, state)) {
-      const tag =
-        summary.tag ??
-        history.find(
-          (recorded) =>
-            recorded.kind === 'deploy-succeeded' &&
-            recorded.environment === summary.name &&
-            recorded.tag !== undefined,
-        )?.tag
-      if (tag) deployed.set(tag, [...(deployed.get(tag) ?? []), summary.name])
+    const mark = (ref: string, environment: string) =>
+      deployed.set(ref, [...(deployed.get(ref) ?? []), environment])
+    if (settings.deploy.environments.length > 0) {
+      const [state, history] = await Promise.all([
+        newest ? readDeployState(forge, repo, settings, newest).catch(() => undefined) : undefined,
+        historyOf(repo).catch((): ReleaseEvent[] => []),
+      ])
+      for (const summary of environmentSummaries(settings, state)) {
+        const tag =
+          summary.tag ??
+          history.find(
+            (recorded) =>
+              recorded.kind === 'deploy-succeeded' &&
+              recorded.environment === summary.name &&
+              recorded.tag !== undefined,
+          )?.tag
+        if (tag) mark(tag, summary.name)
+      }
+      return deployed
     }
+    const cacheKey = key('deployed', repo)
+    const cached = readStored(deployedSchema, await kv.get(cacheKey).catch(() => undefined))
+    const found =
+      cached ??
+      (await (async () => {
+        if (!forge.listEnvironments || !forge.listDeployments) return []
+        const environments = await forge
+          .listEnvironments(repo.path, { limit: DEPLOYED_ENVIRONMENTS })
+          .catch(() => [])
+        const names = environments
+          .filter((environment) => environment.state === 'available')
+          .map((environment) => environment.name)
+          .toSorted((a, b) => a.localeCompare(b))
+        const rows: { environment: string; ref: string }[] = []
+        for (let index = 0; index < names.length; index += DEPLOYED_CONCURRENCY) {
+          // oxlint-disable-next-line no-await-in-loop -- a few environments at a time
+          const batch = await Promise.all(
+            names.slice(index, index + DEPLOYED_CONCURRENCY).map(async (environment) => {
+              const [latest] = await forge.listDeployments!(repo.path, {
+                environment,
+                status: 'success',
+                limit: 1,
+              }).catch(() => [])
+              return latest ? { environment, ref: latest.ref } : undefined
+            }),
+          )
+          rows.push(...batch.filter((read) => read !== undefined))
+        }
+        await kv.set(cacheKey, rows, DEPLOYED_SECONDS).catch(() => {})
+        return rows
+      })())
+    for (const entry of found) mark(entry.ref, entry.environment)
     return deployed
   }
 
@@ -1605,7 +1653,7 @@ function createReleaseService(deps: ServerDeps) {
       source.settings.flow.mode === 'merge-request' && source.settings.flow.source !== target
         ? source.settings.flow.source
         : undefined
-    const deployed = await deployedTags(
+    const deployed = await deployedRefs(
       repo,
       source.forge,
       source.settings,
@@ -1620,7 +1668,10 @@ function createReleaseService(deps: ServerDeps) {
       branches: [
         { name: target, role: 'target' as const },
         ...(sourceBranch ? [{ name: sourceBranch, role: 'source' as const }] : []),
-      ],
+      ].map((branch) => {
+        const environments = deployed.get(branch.name)
+        return { ...branch, ...(environments && { environments }) }
+      }),
     }
   }
 

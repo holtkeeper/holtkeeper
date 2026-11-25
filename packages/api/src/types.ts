@@ -2271,7 +2271,8 @@ export interface ReleaseCompareVersion {
 export interface ReleaseCompareRefs {
   repo: RepoRef
   versions: ReleaseCompareVersion[]
-  branches: { name: string; role: 'target' | 'source' }[]
+  /** `environments`: deploy environments that run the branch now, as on versions. */
+  branches: { name: string; role: 'target' | 'source'; environments?: string[] }[]
 }
 
 /**

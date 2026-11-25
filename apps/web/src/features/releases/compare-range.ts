@@ -143,3 +143,12 @@ export const hasWorkspaces = (root: DependencyRoot): boolean =>
 /** A version as the range selects name it: the tag, then the environments that run it. */
 export const versionText = (version: Pick<ReleaseCompareVersion, 'tag' | 'environments'>): string =>
   version.environments?.length ? `${version.tag} (${version.environments.join(', ')})` : version.tag
+
+/** At most `max` environment names to show, and how many more there are. */
+export function shownEnvironments(
+  environments: readonly string[] | undefined,
+  max = 3,
+): { shown: string[]; more: number } {
+  const all = environments ?? []
+  return { shown: all.slice(0, max), more: Math.max(0, all.length - max) }
+}

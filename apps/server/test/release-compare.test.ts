@@ -276,6 +276,41 @@ describe('release comparison routes', () => {
     ])
   })
 
+  test('without configured environments, marks refs from the forge environments', async () => {
+    const asked: string[] = []
+    fake.forge.listEnvironments = async () => [
+      { name: 'prod', state: 'available' },
+      { name: 'cert', state: 'available' },
+      { name: 'perf', state: 'available' },
+      { name: 'old', state: 'stopped' },
+    ]
+    fake.forge.listDeployments = async (_repo, query) => {
+      asked.push(`${query?.environment}:${query?.status}`)
+      const ref = { prod: 'v1.1.0', cert: 'v1.0.0', perf: 'main' }[query?.environment ?? '']
+      return ref
+        ? [
+            {
+              id: 1,
+              environment: query!.environment!,
+              status: 'success',
+              sha: 'abc',
+              ref,
+              createdAt: '2026-10-01T00:00:00.000Z',
+            },
+          ]
+        : []
+    }
+    const refs = await getJson<ReleaseCompareRefs>(`/releases/refs?repo=${repo}`)
+    expect(refs.versions.map((version) => [version.tag, version.environments])).toEqual([
+      ['v1.1.0', ['prod']],
+      ['v1.0.0', ['cert']],
+    ])
+    expect(refs.branches[0]).toEqual({ name: 'main', role: 'target', environments: ['perf'] })
+    expect(asked.toSorted()).toEqual(['cert:success', 'perf:success', 'prod:success'])
+    await getJson<ReleaseCompareRefs>(`/releases/refs?repo=${repo}`)
+    expect(asked).toHaveLength(3)
+  })
+
   test('compares two versions with tasks, changelog and dependency changes, cached between tags', async () => {
     const view = await getJson<ReleaseCompareView>(
       `/releases/compare?repo=${repo}&from=v1.0.0&to=v1.1.0`,

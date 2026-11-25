@@ -778,6 +778,15 @@ export class FakeGitLab {
     }
     if (method === 'GET' && rest[0] === 'deployments' && rest.length === 1)
       return this.deployments(project, url)
+    if (method === 'GET' && rest[0] === 'environments' && rest.length === 1)
+      return this.page(
+        url,
+        [...new Set(project.deployments.map((d) => d.environment))].map((name, index) => ({
+          id: index + 1,
+          name,
+          state: 'available',
+        })),
+      )
     if (method === 'GET' && rest[0] === 'pipelines' && rest.length === 1) {
       const after = q.get('created_after')
       const list = project.pipelines.filter(
@@ -1253,6 +1262,7 @@ export class FakeGitLab {
       .filter(
         (d) =>
           (!q.has('environment') || d.environment === q.get('environment')) &&
+          (!q.has('status') || d.status === q.get('status')) &&
           (!updatedAfter || d.updated_at >= updatedAfter),
       )
       .toSorted((a, b) => {

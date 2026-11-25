@@ -222,6 +222,13 @@ export interface JobRunQuery {
   limit?: number
 }
 
+/** A deploy environment of a repository, as the forge lists it. */
+export interface ForgeEnvironment {
+  name: string
+  /** `available` while it can be deployed to; stopped environments are left out by the forge. */
+  state: 'available' | 'stopping' | 'stopped'
+}
+
 /** Deployment statuses normalized to one set. */
 export type DeploymentStatus =
   | 'pending'
@@ -251,6 +258,8 @@ export interface DeploymentQuery {
   after?: string
   /** At most this many, newest first; all matching when omitted. */
   limit?: number
+  /** Only deployments in this status. */
+  status?: DeploymentStatus
 }
 
 /** A tag with the date of the commit it points to. */
@@ -505,6 +514,8 @@ export interface GitForge {
    */
   listProjectJobRuns?(repo: string, query?: JobRunQuery): Promise<JobRun[]>
   listDeployments?(repo: string, query?: DeploymentQuery): Promise<Deployment[]>
+  /** The repository's deploy environments that are not stopped, at most `limit` (default 100). */
+  listEnvironments?(repo: string, query?: { limit?: number }): Promise<ForgeEnvironment[]>
   /**
    * Jobs of the latest pipeline of `query.ref` (latest attempts only, in pipeline order); empty when
    * the ref has no pipeline.

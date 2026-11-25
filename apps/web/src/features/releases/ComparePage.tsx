@@ -56,6 +56,7 @@ import {
   sideText,
   swapRange,
   targetBranch,
+  shownEnvironments,
   transitiveCounts,
   versionText,
 } from './compare-range.ts'
@@ -68,6 +69,21 @@ type Refs = Pick<ReleaseCompareRefs, 'versions' | 'branches'>
 
 const noRefs: Refs = { versions: [], branches: [] }
 
+function EnvironmentTags({ environments }: { environments: readonly string[] | undefined }) {
+  const { shown, more } = shownEnvironments(environments)
+  if (!shown.length) return null
+  return (
+    <span className="flex items-center gap-1" title={environments?.join(', ')}>
+      {shown.map((environment) => (
+        <Tag key={environment} tone="info">
+          {environment}
+        </Tag>
+      ))}
+      {more ? <span className="text-xs text-muted">+{more}</span> : null}
+    </span>
+  )
+}
+
 function rangeOptions(refs: Refs, range: CompareRange) {
   const versions: Option[] = refs.versions.map((version) => ({
     id: version.tag,
@@ -75,11 +91,7 @@ function rangeOptions(refs: Refs, range: CompareRange) {
       <span className="flex items-center gap-2">
         <span className="mono">{version.tag}</span>
         {version.prerelease ? <span className="text-xs text-muted">prerelease</span> : null}
-        {version.environments?.map((environment) => (
-          <Tag key={environment} tone="info">
-            {environment}
-          </Tag>
-        ))}
+        <EnvironmentTags environments={version.environments} />
       </span>
     ),
     text: versionText(version),
@@ -94,9 +106,17 @@ function rangeOptions(refs: Refs, range: CompareRange) {
               <span className="flex items-center gap-2">
                 <span className="mono">{target}</span>
                 <span className="text-xs text-muted">target branch — unreleased</span>
+                <EnvironmentTags
+                  environments={
+                    refs.branches.find((branch) => branch.name === target)?.environments
+                  }
+                />
               </span>
             ),
-            text: target,
+            text: versionText({
+              tag: target,
+              environments: refs.branches.find((branch) => branch.name === target)?.environments,
+            }),
           },
         ]
       : []),

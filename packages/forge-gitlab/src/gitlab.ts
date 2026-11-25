@@ -145,6 +145,8 @@ const deploymentSchema = z.object({
   deployable: z.object({ finished_at: time }).nullable().optional(),
 })
 
+const environmentSchema = z.object({ name: z.string(), state: z.string().optional() })
+
 const tagRecordSchema = z.object({
   name: z.string(),
   commit: z.object({ id: z.string(), committed_date: time, created_at: time }),
@@ -475,6 +477,16 @@ const toPipelineRun = (pipeline: z.infer<typeof pipelineRunSchema>): PipelineRun
 
 const DEPLOYMENT_STATUSES: Record<string, DeploymentStatus> = {
   created: 'pending',
+  running: 'running',
+  success: 'success',
+  failed: 'failed',
+  canceled: 'canceled',
+  skipped: 'skipped',
+  blocked: 'blocked',
+}
+
+const GITLAB_DEPLOYMENT_STATUS: Record<DeploymentStatus, string> = {
+  pending: 'created',
   running: 'running',
   success: 'success',
   failed: 'failed',
@@ -1068,6 +1080,7 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     async listDeployments(repo, query = {}) {
       const list = client.paginate(`${project(repo)}/deployments`, deploymentSchema, {
         environment: query.environment,
+        status: query.status ? GITLAB_DEPLOYMENT_STATUS[query.status] : undefined,
         // GitLab answers 400 when updated_after comes without order_by=updated_at.
         updated_after: query.after,
         order_by: query.after ? 'updated_at' : 'id',
@@ -1075,6 +1088,20 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         per_page: pageSize(query.limit),
       })
       return (await take(list, query.limit)).map(toDeployment)
+    },
+
+    async listEnvironments(repo, query = {}) {
+      const list = client.paginate(`${project(repo)}/environments`, environmentSchema, {
+        states: 'available',
+        per_page: pageSize(query.limit ?? 100),
+      })
+      return (await take(list, query.limit ?? 100)).map((environment) => ({
+        name: environment.name,
+        state:
+          environment.state === 'stopping' || environment.state === 'stopped'
+            ? environment.state
+            : 'available',
+      }))
     },
 
     async listPipelineJobs(repo, query = {}) {

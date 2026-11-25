@@ -17,6 +17,7 @@ import {
   swapRange,
   targetBranch,
   transitiveCounts,
+  shownEnvironments,
   versionText,
 } from './compare-range.ts'
 
@@ -211,5 +212,15 @@ describe('versionText', () => {
       'v1.2.0 (staging, prod)',
     )
     expect(versionText({ tag: 'v1.1.0' })).toBe('v1.1.0')
+  })
+})
+
+describe('shownEnvironments', () => {
+  test('shows the first few and counts the rest', () => {
+    expect(shownEnvironments(['a', 'b', 'c', 'd', 'e'])).toEqual({
+      shown: ['a', 'b', 'c'],
+      more: 2,
+    })
+    expect(shownEnvironments(undefined)).toEqual({ shown: [], more: 0 })
   })
 })
