@@ -5,6 +5,7 @@ import { compareSchemeVersions, type EnvironmentSummary } from '@holtkeeper/rele
 import { UPGRADE_CHECK_KIND, type UpgradeCheckData } from '@holtkeeper/upgrade-check'
 import { webUrl } from '@holtkeeper/web-paths'
 
+import { aiLanguageOf } from './ai-language.ts'
 import { type ServerDeps, repoKey } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
 import { startUpgradeCheck, upgradeCheckStatus } from './upgrade-check.ts'
@@ -255,10 +256,11 @@ export function releaseComparer(
     if (!checkable() || !(await deps.agentFor?.(repo).catch(() => undefined))) return undefined
     const releases = releaseServiceFor(deps)
     const ends = await releases.compareRange(repo, range)
-    const status = () => upgradeCheckStatus(deps.store, repo, ends.from.sha, ends.to.sha)
+    const language = await aiLanguageOf(deps, repo)
+    const status = () => upgradeCheckStatus(deps.store, repo, ends.from.sha, ends.to.sha, language)
     let current = await status()
     if (current.status === 'none' || (current.status === 'failed' && !current.data)) {
-      await startUpgradeCheck(deps, { ...ends, repo, actor: comparePrincipal.id })
+      await startUpgradeCheck(deps, { ...ends, repo, actor: comparePrincipal.id, language })
       current = await status()
     }
     for (

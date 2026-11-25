@@ -7,7 +7,34 @@ import { z } from 'zod'
 
 import type { ReleaseEntry } from './types.ts'
 
+/** Section headings of a summary, in the prose language; English ones fill any gap. */
+export const headingsSchema = z
+  .object({
+    highlights: z.string().optional(),
+    codeChanges: z.string().optional(),
+    dependencies: z.string().optional(),
+    check: z.string().optional(),
+  })
+  .optional()
+  .describe(
+    'Short headings in the prose language for the sections: highlights ("Highlights"), codeChanges ("Code changes"), dependencies ("Dependencies"), check ("What to check")',
+  )
+
+const defaultHeadings = {
+  highlights: 'Highlights',
+  codeChanges: 'Code changes',
+  dependencies: 'Dependencies',
+  check: 'What to check',
+} as const
+
+/** The heading of one summary section: the agent's translation, else the English default. */
+export const headingOf = (
+  headings: z.infer<typeof headingsSchema>,
+  key: keyof typeof defaultHeadings,
+): string => headings?.[key]?.trim() || defaultHeadings[key]
+
 const answerSchema = z.object({
+  headings: headingsSchema,
   overview: z.string().describe('One or two sentences about what this release changes'),
   highlights: z.array(z.string()).describe('The most important changes, one sentence each'),
   check: z
@@ -21,17 +48,22 @@ const bullets = (title: string, items: string[]) =>
 /** Task kind of release summaries, for model routing in `llm.models`. */
 export const releaseSummaryTaskKind = 'release-notes'
 
+/** The prompt line that asks for prose in `language` and leaves code and names unchanged. */
+export const proseLanguageRule = (language: string) =>
+  `Write the prose in ${language}. Keep code, identifiers, versions, package names, file paths and established technical terms unchanged.`
+
 /**
  * A short "what changed" for the included entries, written by the agent in one cheap call (task
- * kind `release-notes`, tier `fast`). Audience, language and style come from the team's rules:
- * the server's agent adds the repository's Guide (sections `releases` and `commits`) as context
- * to tasks of this kind. The agent reads nothing but the entries (it runs in an empty temporary
+ * kind `release-notes`, tier `fast`). Prose is in `language` (English by default); code,
+ * identifiers, versions, package names and file paths stay as they are. Audience and style come
+ * from the team's rules: the server's agent adds the repository's Guide (sections `releases` and
+ * `commits`) as context to tasks of this kind. The agent reads nothing but the entries (it runs in an empty temporary
  * directory). Rejects when the agent fails, so callers can fall back to the digest.
  */
 export async function writeSummary(
   agent: Agent,
   entries: readonly ReleaseEntry[],
-  options: { previous?: string; version?: string; signal?: AbortSignal } = {},
+  options: { previous?: string; version?: string; language?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
   const included = entries
     .filter((entry) => entry.included)
@@ -50,7 +82,8 @@ export async function writeSummary(
       dir: scratch,
       system: [
         'You write release notes for the people who test and ship the release: what changed in behavior and what to check.',
-        'Follow the team rules in the context for audience, language and style; they win over these defaults.',
+        'Follow the team rules in the context for audience and style; they win over these defaults.',
+        proseLanguageRule(options.language ?? 'English'),
         'Keep every item to one sentence, no commit hashes. Base everything on the changes given.',
       ].join('\n'),
       prompt: [
@@ -69,8 +102,8 @@ export async function writeSummary(
     if (!answer) throw new Error('the agent returned no structured answer')
     return [
       answer.overview.trim(),
-      bullets('Highlights', answer.highlights),
-      bullets('What to check', answer.check),
+      bullets(headingOf(answer.headings, 'highlights'), answer.highlights),
+      bullets(headingOf(answer.headings, 'check'), answer.check),
     ]
       .filter(Boolean)
       .join('\n\n')

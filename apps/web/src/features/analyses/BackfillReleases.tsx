@@ -22,12 +22,14 @@ const explanations = {
 /**
  * Queues `analyzer` for each of the newest releases of one repository (or of every repository)
  * it has not analyzed yet; the server lists tags in the background. `item` is an "Analyze past
- * releases" entry for a "⋯" menu that opens the dialog, `dialog` the dialog to render. Without
- * `analyses:run`, jobs or the analyzer there is no `item`.
+ * releases" entry for a "⋯" menu that opens the dialog, `dialog` the dialog to render. Once
+ * queued it opens Ops › Runs, or calls `onQueued` instead when given (the jobs show up a little
+ * later). Without `analyses:run`, jobs or the analyzer there is no `item`.
  */
 export function useBackfillReleases(
   analyzer: keyof typeof explanations,
   repo?: RepoRef,
+  onQueued?: () => void,
 ): { item?: MoreMenuItem; dialog: ReactNode } {
   const { can } = useSession()
   const analyzers = useJobAnalyzers()
@@ -44,6 +46,14 @@ export function useBackfillReleases(
       {
         onSuccess: () => {
           setOpen(false)
+          if (onQueued) {
+            notify.success(
+              'Looking for past releases',
+              'Jobs show up here and in Ops › Runs as the releases are listed.',
+            )
+            onQueued()
+            return
+          }
           notify.success(
             'Looking for past releases',
             'Jobs appear in Ops › Runs as each repository is listed; the outcome shows up in Settings › Audit log.',
@@ -96,12 +106,14 @@ export function BackfillReleasesButton({
   analyzer,
   repo,
   variant = 'secondary',
+  onQueued,
 }: {
   analyzer: keyof typeof explanations
   repo?: RepoRef | undefined
   variant?: ButtonVariant
+  onQueued?: () => void
 }) {
-  const { item, dialog } = useBackfillReleases(analyzer, repo)
+  const { item, dialog } = useBackfillReleases(analyzer, repo, onQueued)
   if (!item) return null
   return (
     <>

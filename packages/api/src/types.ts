@@ -2275,7 +2275,10 @@ export interface ReleaseCompareRefs {
 /**
  * `POST /api/releases/compare/summary`: has the repository's AI agent describe what changed
  * between `from` and `to` (resolved as `GET /api/releases/compare`), from the commit entries and
- * the dependency changes, plus the code diff when `code` is set (a heavier tier). Needs
+ * the dependency changes, plus the code diff when `code` is set (a heavier tier). The description
+ * runs in the background: the answer (`ReleaseCompareSummaryState`) is `running`, or `done` when a
+ * description of the same commits, `code` flag and AI language exists. A second request while one
+ * runs joins it instead of starting another; a `failed` one is started again. Needs
  * `releases:run` on the repository and an agent configured for it (409 otherwise); nothing is
  * written to the forge.
  */
@@ -2287,14 +2290,32 @@ export interface ReleaseCompareSummaryInput {
 }
 
 /**
- * Answer of `POST /api/releases/compare/summary`: Markdown. Between two fixed commits (version
- * tags) a description is kept per `code` flag and answered again with `cached` true.
+ * A finished description of a comparison. Between two fixed commits (version tags) one is kept per
+ * `code` flag and AI language and answered again with `cached` true.
  */
 export interface ReleaseCompareSummary {
   markdown: string
   /** The code diff was part of the input. */
   code: boolean
   cached: boolean
+}
+
+/**
+ * `GET /api/releases/compare/summary?repo=&from=&to=&code=`, also the answer of the `POST`: where
+ * the AI description of a range stands, kept per pair of commits the ends resolve to, `code` flag
+ * and AI language. `none`: never described (or the result expired); `running` since `startedAt`
+ * (a run whose process died reads as `none` after a while); `done` with the description;
+ * `failed` with the error, for a few minutes. Without `code` in the query the answer is the
+ * running description of either flag, else the finished one with code, else the one without;
+ * `code` then says which. The `GET` needs `releases:read` and never starts anything.
+ */
+export interface ReleaseCompareSummaryState {
+  status: 'none' | 'running' | 'done' | 'failed'
+  code?: boolean
+  markdown?: string
+  cached?: boolean
+  startedAt?: string
+  error?: string
 }
 
 /** One of the repository's own packages whose public API differs between two compared refs. */
@@ -2338,6 +2359,23 @@ export interface ReleaseCompareApi {
   missing: { name: string; side: 'from' | 'to' | 'both' }[]
   recorded: boolean
   backfill?: { allowed: boolean; refs?: string[] }
+  /**
+   * The `api-surface` jobs of the ends the comparison lacks: per ref of `backfill.refs`, and for a
+   * target branch end its default-branch jobs (listed under the branch name), the newest job while
+   * it is queued or running, or when it failed in the last day (`error` set). When nothing is
+   * recorded and no ref can be snapshotted, also the queued and running jobs of a releases
+   * backfill, which queues them in the background shortly after it is started. Only for callers
+   * who may read the repository's analyses; absent when there is none.
+   */
+  snapshots?: ReleaseCompareSnapshot[]
+}
+
+/** One `api-surface` job snapshotting a ref the comparison lacks, see `ReleaseCompareApi`. */
+export interface ReleaseCompareSnapshot {
+  ref: string
+  status: 'queued' | 'running' | 'failed'
+  jobId: string
+  error?: string
 }
 
 /**

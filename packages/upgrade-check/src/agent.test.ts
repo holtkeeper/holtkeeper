@@ -250,6 +250,37 @@ describe('runUpgradeCheck', () => {
     expect(data.capped).toBe(false)
   })
 
+  test('asks every call for summaries and findings in the configured language', async () => {
+    const files = [diffFile('src/a.ts', 30), diffFile('lib/b.ts', 30)]
+    const answers = {
+      plan: () => ({ areas: [] }),
+      area: () => ({ summary: 'S', findings: [] }),
+      verdict: () => ({ verdict: 'safe', summary: 'Fine.', duplicates: [] }),
+    }
+    const english = fakeAgent(answers)
+    await runUpgradeCheck({ ...run, agent: english.agent, source: diffFilesSource(files) })
+    expect(english.tasks.length).toBeGreaterThan(1)
+    expect(
+      english.tasks.every((task) =>
+        task.system?.includes('findings (title, detail, check, affects) in English.'),
+      ),
+    ).toBe(true)
+
+    const other = fakeAgent(answers)
+    await runUpgradeCheck({
+      ...run,
+      agent: other.agent,
+      source: diffFilesSource(files),
+      language: 'Esperanto',
+    })
+    expect(other.tasks.every((task) => task.system?.includes('in Esperanto.'))).toBe(true)
+    expect(
+      other.tasks.every((task) =>
+        task.system?.includes('give verdict, severity and category exactly'),
+      ),
+    ).toBe(true)
+  })
+
   test('applies duplicates the verdict call names', async () => {
     const files = Array.from({ length: 25 }, (_, i) => diffFile(`mod${i % 2}/f${i}.ts`, 40))
     let area = 0

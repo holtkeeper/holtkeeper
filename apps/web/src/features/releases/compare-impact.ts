@@ -4,6 +4,8 @@ import type {
   PackageDiff,
   ReleaseCompareApi,
   ReleaseCompareCheck,
+  ReleaseCompareSnapshot,
+  ReleaseCompareSummaryState,
   UpgradeFinding,
   UpgradeSeverity,
   UpgradeVerdict,
@@ -139,3 +141,51 @@ export const skippedLines = (skipped: readonly { files: number; reason: string }
   skipped
     .filter((entry) => entry.files > 0)
     .map((entry) => `${entry.files} ${entry.files === 1 ? 'file' : 'files'}: ${entry.reason}`)
+
+/** A snapshot job of a missing ref is queued or running, so the Public API section keeps polling. */
+export const snapshotsActive = (api: Pick<ReleaseCompareApi, 'snapshots'> | undefined): boolean =>
+  api?.snapshots?.some((item) => item.status === 'queued' || item.status === 'running') ?? false
+
+/** The refs a snapshot button may still queue: those without a queued or running job. */
+export const refsToSnapshot = (
+  refs: readonly string[],
+  snapshots: readonly ReleaseCompareSnapshot[] = [],
+): string[] =>
+  refs.filter(
+    (ref) =>
+      !snapshots.some(
+        (item) => item.ref === ref && (item.status === 'queued' || item.status === 'running'),
+      ),
+  )
+
+/** One snapshot job in words, e.g. `Snapshotting v1.2.0…` or `Waiting to snapshot v1.2.0…`. */
+export const snapshotLine = (snapshot: Pick<ReleaseCompareSnapshot, 'ref' | 'status'>): string =>
+  snapshot.status === 'queued'
+    ? `Waiting to snapshot ${snapshot.ref}…`
+    : snapshot.status === 'running'
+      ? `Snapshotting ${snapshot.ref}…`
+      : `Snapshot of ${snapshot.ref} failed`
+
+/** The AI description is being written, so the page keeps polling and the button waits. */
+export const summaryActive = (
+  state: Pick<ReleaseCompareSummaryState, 'status'> | undefined,
+): boolean => state?.status === 'running'
+
+/**
+ * The line under the "What changed" title: what a finished description was written from (and
+ * that it was kept from an earlier request), that one is being written, or what the card offers.
+ */
+export function summaryNote(
+  state: Pick<ReleaseCompareSummaryState, 'status' | 'code' | 'cached'> | undefined,
+): string {
+  if (state?.status === 'running')
+    return 'Describing… it keeps running if you leave or reload the page.'
+  if (state?.status === 'done')
+    return [
+      state.code ? 'From commits, dependencies and code' : 'From commits and dependencies',
+      state.cached ? 'kept from an earlier request' : undefined,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  return 'An AI description of the commits and dependency changes, optionally of the code diff too.'
+}

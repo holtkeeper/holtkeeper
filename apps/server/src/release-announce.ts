@@ -36,6 +36,7 @@ import { type Job, type KvStore, type SettingEntry, keepKv, updateKv } from '@ho
 import { webPaths, webUrl } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
+import { aiLanguageOf } from './ai-language.ts'
 import { type UsageIndex, createUsageIndex, impactOfChanges } from './api-surface/usages.ts'
 import { type ServerDeps, repoKey, repoTarget } from './context.ts'
 import { automaticJobReady } from './jobs.ts'
@@ -363,12 +364,7 @@ export function createReleaseAnnouncer(
     settingOf(releaseSettingsKey, repo, releaseSettings)
 
   const languageOf = async (repo: RepoRef, announce: ReleaseAnnounceSettings) =>
-    announce.language ??
-    (await settingOf('analyzers.review', repo, (value) => {
-      const language = z.object({ language: z.string().min(1) }).safeParse(value).data?.language
-      return language
-    })) ??
-    'English'
+    announce.language ?? aiLanguageOf(deps, repo)
 
   const forgeOf = (repo: RepoRef) => config.forges[repo.forge]?.create()
 

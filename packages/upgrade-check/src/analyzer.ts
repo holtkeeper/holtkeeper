@@ -135,13 +135,18 @@ export function createUpgradeCheckAnalyzer(deps: UpgradeCheckDeps = {}) {
           ...(apiChanges && { apiChanges }),
           ...(dependencyChanges && { dependencyChanges }),
           ...(rules && { context: rules }),
+          ...(options.language && { language: options.language }),
           ...(toolsets?.length && { toolsets }),
           ...(options.costLimitUsd !== undefined && { costLimitUsd: options.costLimitUsd }),
           ...(context.signal && { signal: context.signal }),
           ...(context.log && { log: context.log }),
         }),
       )
-      return { data, ref: upgradeCheckRef(fromSha, toSha), sha: toSha }
+      return {
+        data: options.language ? { ...data, language: options.language } : data,
+        ref: upgradeCheckRef(fromSha, toSha),
+        sha: toSha,
+      }
     },
   })
 }

@@ -16,6 +16,7 @@ An AI check of what breaks when a running installation upgrades from one version
 | `dependencyChanges` | markdown of the dependency changes, computed by caller                                  |
 | `commits`           | commit subjects of the range; read with `git log --no-merges from..to` when absent      |
 | `costLimitUsd`      | soft spend limit of the check in USD (default 6; 0 turns it off), see Areas below       |
+| `language`          | language of summaries and findings (default English); stored in the data as `language`  |
 
 `UpgradeCheckDeps` (all optional):
 
@@ -33,7 +34,7 @@ The run uses `context.step` for its `changes` and `check` steps when the task en
 
 ## Pipeline
 
-`runUpgradeCheck(run)` takes `{ agent, dir, from, to, source, commits?, apiChanges?, dependencyChanges?, context?, toolsets?, costLimitUsd?, signal?, log? }` and returns `UpgradeCheckData`:
+`runUpgradeCheck(run)` takes `{ agent, dir, from, to, source, commits?, apiChanges?, dependencyChanges?, context?, language?, toolsets?, costLimitUsd?, signal?, log? }` and returns `UpgradeCheckData`. Every call uses `upgradeSystemPrompt(language)`: the summary, area summaries and findings (`title`, `detail`, `check`, `affects`) are written in `language` (English by default), while code, identifiers, versions, package names, file paths and the verdict, severity and category values stay unchanged:
 
 1. **Select.** `selectFiles` skips binary files and the lockfiles and generated, vendored, built or minified files of `isRangeNoise` from [@holtkeeper/release](../../release/docs/README.md). At most `MAX_FILES` (600) files are kept: source before tests and docs, smaller changes first. The rest is skipped and the check is marked `capped`.
 2. **Group.** `groupAreas` keeps a change within `SINGLE_AREA_MAX_LINES` (600) changed lines and `SINGLE_AREA_MAX_FILES` (20) files in one area. Otherwise it groups files by `areaKeyOf`: the top-level directory, or two levels under `apps`, `packages`, `libs`, `services`, `modules`, `cmd`, `internal`, `pkg`, `src`, `plugins`, `components` and `deploy`. While there are fewer than `MAX_AREAS` (8) groups, the heaviest group over `AREA_SPLIT_LINES` (1 500) changed lines with more than one file is split by its next directory level, or into two contiguous halves (`<key> (part 1)`, `(part 2)`) when its files share one directory, so a large change under one directory still spreads over several passes. The heaviest groups then seed at most `MAX_AREAS` areas, and the remaining ones join the lightest area.
@@ -70,6 +71,7 @@ An area that fails or gives no structured answer is listed in `skipped` and name
   capped: boolean
   usage?: { turns: number; costUsd?: number; inputTokens?: number; outputTokens?: number }
   durationMs?: number
+  language?: string // language the texts were asked in; absent means English
 }
 ```
 
@@ -78,4 +80,4 @@ An area that fails or gives no structured answer is listed in `skipped` and name
 ## Host wiring
 
 - Task kinds: `upgrade-plan` (no toolsets) and `upgrade-check` (`code`, `knowledge` search only, `packages`, `git`). Both belong to the `release` rules agent and the `releases` AI usage feature.
-- Queue jobs with analyzer `upgrade-check`, `ref` set to the `to` sha, and options `{ from, to, fromLabel?, toLabel? }`, with both refs as shas.
+- Queue jobs with analyzer `upgrade-check`, `ref` set to the `to` sha, and options `{ from, to, fromLabel?, toLabel?, language? }`, with both refs as shas. A record written in another language than the one asked for should not be reused: compare its data's `language` (absent means English).

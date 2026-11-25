@@ -1,19 +1,22 @@
 import type {
   ReleaseCompareApiPackage,
   ReleaseCompareCheck,
+  ReleaseCompareSnapshot,
   RepoRef,
   UpgradeCheckData,
   UpgradeFinding,
 } from '@holtkeeper/api'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Camera, RotateCw, ShieldAlert } from 'lucide-react'
+import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
-  useJobMutations,
   useReleaseCompareApi,
   useReleaseCompareCheck,
   useReleaseComparePackage,
+  useSnapshotCompareRefs,
   useStartReleaseCompareCheck,
 } from '../../api/queries.ts'
 import { bumpTones } from '../../lib/releases.ts'
@@ -38,12 +41,17 @@ import {
   findingGroups,
   missingText,
   type PackageQuery,
+  refsToSnapshot,
   severityTags,
   skippedLines,
+  snapshotLine,
+  snapshotsActive,
   underBumped,
   verdictTags,
 } from './compare-impact.ts'
 import type { CompareRange } from './compare-range.ts'
+
+const BACKFILL_POLL_MS = 60_000
 
 function ApiPackage({ pkg }: { pkg: ReleaseCompareApiPackage }) {
   const diff = pkg.diff
@@ -99,28 +107,59 @@ function ApiPackage({ pkg }: { pkg: ReleaseCompareApiPackage }) {
   )
 }
 
-function SnapshotRefsButton({ repo, refs }: { repo: RepoRef; refs: readonly string[] }) {
-  const { create } = useJobMutations()
-  const queue = async () => {
-    try {
-      await Promise.all(
-        refs.map((ref) =>
-          create.mutateAsync({ analyzer: 'api-surface', repo: repoKey(repo), ref }),
-        ),
-      )
-      notify.success(
-        'Snapshots queued',
-        `The public API at ${refs.join(' and ')} is read in Ops › Runs; reload this page once they finish.`,
-      )
-    } catch (error) {
-      notify.error('Not queued', messageOf(error))
-    }
-  }
+function SnapshotRefsButton({
+  repo,
+  refs,
+  snapshots,
+}: {
+  repo: RepoRef
+  refs: readonly string[]
+  snapshots: readonly ReleaseCompareSnapshot[]
+}) {
+  const snapshot = useSnapshotCompareRefs()
+  const missing = refsToSnapshot(refs, snapshots)
+  const queue = () =>
+    snapshot.mutate(
+      { repo: repoKey(repo), refs: missing },
+      { onError: (error) => notify.error('Not queued', messageOf(error)) },
+    )
   return (
-    <Button size="sm" variant="tertiary" isPending={create.isPending} onPress={() => void queue()}>
+    <Button
+      size="sm"
+      variant="tertiary"
+      isPending={snapshot.isPending}
+      isDisabled={!missing.length}
+      onPress={queue}
+    >
       <Camera className="size-3.5" />
-      Snapshot {refs.join(' and ')}
+      {snapshots.some((item) => item.status === 'failed' && missing.includes(item.ref))
+        ? 'Retry snapshot'
+        : 'Snapshot'}{' '}
+      {(missing.length ? missing : refs).join(' and ')}
     </Button>
+  )
+}
+
+function SnapshotProgress({ snapshots }: { snapshots: readonly ReleaseCompareSnapshot[] }) {
+  if (!snapshots.length) return null
+  return (
+    <ul className="flex flex-col gap-1 text-sm">
+      {snapshots.map((item) => (
+        <li key={item.ref} className="flex flex-wrap items-baseline gap-x-2">
+          <span className={item.status === 'failed' ? 'text-danger' : 'text-muted'}>
+            {snapshotLine(item)}
+            {item.status === 'failed' && item.error ? `: ${item.error}` : ''}
+          </span>
+          <Link
+            to="/ops/runs/$jobId"
+            params={{ jobId: item.jobId }}
+            className="text-xs text-muted hover:underline"
+          >
+            Open the run
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -129,22 +168,39 @@ function SnapshotRefsButton({ repo, refs }: { repo: RepoRef; refs: readonly stri
  * between the two ends, in the server's order (breaking ones first), each folding out the API
  * diff and the uses in other repositories it touches. When an end has no snapshot nothing was
  * compared: a note says which, with a button that snapshots exactly the missing tags when the
- * server allows it, else the past-releases backfill.
+ * server allows it, else the past-releases backfill. Snapshot jobs of the missing tags, of a
+ * target branch end and of a backfill show per ref while they run (the section polls and shows
+ * the diff once they finish) and, after a failure, with its error; the button retries the failed
+ * tags while others still run. After a backfill the section polls for a minute, as its jobs are
+ * queued in the background.
  */
 export function PublicApiSection({ repo, range }: { repo: RepoRef; range: CompareRange }) {
-  const api = useReleaseCompareApi(repo, range)
+  const client = useQueryClient()
+  const [pollUntil, setPollUntil] = useState<number>()
+  const api = useReleaseCompareApi(repo, range, pollUntil)
+  const backfilled = () => {
+    setPollUntil(Date.now() + BACKFILL_POLL_MS)
+    void client.invalidateQueries({ queryKey: ['release-compare', 'api'] })
+  }
   const refs = api.data?.backfill?.refs ?? []
+  const snapshots = api.data?.snapshots ?? []
   const backfill =
     api.data?.backfill?.allowed === true ? (
       refs.length ? (
-        <SnapshotRefsButton repo={repo} refs={refs} />
+        <SnapshotRefsButton repo={repo} refs={refs} snapshots={snapshots} />
       ) : (
-        <BackfillReleasesButton analyzer="api-surface" repo={repo} variant="tertiary" />
+        <BackfillReleasesButton
+          analyzer="api-surface"
+          repo={repo}
+          variant="tertiary"
+          onQueued={backfilled}
+        />
       )
     ) : null
   const packages = api.data?.packages ?? []
   const missing = api.data ? missingText(api.data.missing) : ''
   const compared = !packages.length && !missing
+  const progress = snapshotsActive(api.data)
   return (
     <Panel
       variant="flush"
@@ -156,11 +212,16 @@ export function PublicApiSection({ repo, range }: { repo: RepoRef; range: Compar
       ) : api.isError ? (
         <ErrorState error={api.error} />
       ) : !api.data.recorded ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm text-muted">
-            No public API snapshot is recorded for this repository yet.
-          </p>
-          {backfill}
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-muted">
+              {progress
+                ? 'Reading the public API of this repository for the first time.'
+                : 'No public API snapshot is recorded for this repository yet.'}
+            </p>
+            {backfill}
+          </div>
+          <SnapshotProgress snapshots={snapshots} />
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -176,6 +237,7 @@ export function PublicApiSection({ repo, range }: { repo: RepoRef; range: Compar
               {backfill}
             </div>
           ) : null}
+          <SnapshotProgress snapshots={snapshots} />
         </div>
       )}
     </Panel>

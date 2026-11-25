@@ -11,7 +11,12 @@ import {
   findingGroups,
   missingText,
   packageQuery,
+  refsToSnapshot,
   skippedLines,
+  snapshotLine,
+  snapshotsActive,
+  summaryActive,
+  summaryNote,
   underBumped,
 } from './compare-impact.ts'
 
@@ -160,5 +165,47 @@ describe('skippedLines', () => {
         { files: 12, reason: 'lockfile or generated' },
       ]),
     ).toEqual(['1 file: binary', '12 files: lockfile or generated'])
+  })
+})
+
+describe('snapshot progress', () => {
+  const snapshots = [
+    { ref: 'v1.2.0', status: 'running' as const, jobId: 'j1' },
+    { ref: 'v1.1.0', status: 'failed' as const, jobId: 'j2', error: 'no lockfile' },
+  ]
+
+  test('polls only while a snapshot is queued or running', () => {
+    expect(snapshotsActive({ snapshots })).toBe(true)
+    expect(snapshotsActive({ snapshots: [snapshots[1]!] })).toBe(false)
+    expect(snapshotsActive({})).toBe(false)
+    expect(snapshotsActive(undefined)).toBe(false)
+  })
+
+  test('queues only refs without an active job, failed ones again', () => {
+    expect(refsToSnapshot(['v1.2.0', 'v1.1.0', 'v1.0.0'], snapshots)).toEqual(['v1.1.0', 'v1.0.0'])
+    expect(refsToSnapshot(['v1.0.0'])).toEqual(['v1.0.0'])
+  })
+
+  test('says what each job does', () => {
+    expect(snapshotLine({ ref: 'v1.2.0', status: 'running' })).toBe('Snapshotting v1.2.0…')
+    expect(snapshotLine({ ref: 'v1.2.0', status: 'queued' })).toBe('Waiting to snapshot v1.2.0…')
+    expect(snapshotLine({ ref: 'v1.2.0', status: 'failed' })).toBe('Snapshot of v1.2.0 failed')
+  })
+})
+
+describe('description progress', () => {
+  test('is active only while running', () => {
+    expect(summaryActive({ status: 'running' })).toBe(true)
+    expect(summaryActive({ status: 'done' })).toBe(false)
+    expect(summaryActive(undefined)).toBe(false)
+  })
+
+  test('describes the state under the title', () => {
+    expect(summaryNote({ status: 'running' })).toStartWith('Describing…')
+    expect(summaryNote({ status: 'done', code: true, cached: true })).toBe(
+      'From commits, dependencies and code · kept from an earlier request',
+    )
+    expect(summaryNote({ status: 'done', code: false })).toBe('From commits and dependencies')
+    expect(summaryNote({ status: 'none' })).toStartWith('An AI description')
   })
 })

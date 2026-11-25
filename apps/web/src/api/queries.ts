@@ -155,6 +155,15 @@ export const keys = {
       from ?? '',
       to ?? '',
     ] as const,
+  releaseCompareSummary: (repo: RepoRef, from?: string, to?: string, code?: boolean) =>
+    [
+      'release-compare',
+      'summary',
+      repoKey(repo),
+      from ?? '',
+      to ?? '',
+      code === undefined ? 'any' : String(code),
+    ] as const,
   releaseCompareCheck: (repo: RepoRef, from?: string, to?: string) =>
     ['release-compare', 'check', repoKey(repo), from ?? '', to ?? ''] as const,
   releaseDetect: (repo: RepoRef) => ['release-detect', repoKey(repo)] as const,
@@ -2020,12 +2029,14 @@ export const useReleaseCompare = (
 
 /**
  * How the public API of the repository's own packages changed between `from` and `to`, from
- * stored api-surface records, with the uses in other repositories each change touches; off
- * without `repo`.
+ * stored api-surface records, with the uses in other repositories each change touches and the
+ * snapshot jobs of the ends it lacks; off without `repo`, polls every 5 seconds while a snapshot
+ * job is queued or running, and until `pollUntil` (epoch ms), for jobs queued in the background.
  */
 export const useReleaseCompareApi = (
   repo: RepoRef | undefined,
   range: { from?: string; to?: string } = {},
+  pollUntil?: number,
 ) =>
   useQuery({
     queryKey: repo
@@ -2034,7 +2045,31 @@ export const useReleaseCompareApi = (
     queryFn: () => api.releaseCompareApi(repo!, range),
     enabled: repo !== undefined,
     staleTime: 5 * 60_000,
+    refetchInterval: (query) =>
+      query.state.data?.snapshots?.some(
+        (item) => item.status === 'queued' || item.status === 'running',
+      ) ||
+      (pollUntil !== undefined && Date.now() < pollUntil)
+        ? 5_000
+        : false,
   })
+
+/**
+ * Queues an api-surface snapshot at each of `refs` of a repository (one job per ref) and refetches
+ * the comparisons' public API so their progress shows.
+ */
+export function useSnapshotCompareRefs() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, refs }: { repo: string; refs: readonly string[] }) =>
+      Promise.all(refs.map((ref) => api.createJob({ analyzer: 'api-surface', repo, ref }))),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ['release-compare', 'api'] }),
+        client.invalidateQueries({ queryKey: keys.jobs }),
+      ]),
+  })
+}
 
 /**
  * What changed in one dependency between two of its versions and the uses it breaks, as the
@@ -2054,11 +2089,35 @@ export const useReleaseComparePackage = (
     staleTime: 30 * 60_000,
   })
 
-/** Has the AI agent describe a comparison; answers Markdown, cached on the server between versions. */
-export const useReleaseCompareSummary = () =>
-  useMutation({
-    mutationFn: (input: ReleaseCompareSummaryInput) => api.releaseCompareSummary(input),
+/**
+ * Where the AI description of `from`..`to` stands, for one `code` flag or, without one, the
+ * running or newest finished one; off without `repo`, polls every 3 seconds while it runs.
+ */
+export const useReleaseCompareSummary = (
+  repo: RepoRef | undefined,
+  range: { from?: string; to?: string } = {},
+  code?: boolean,
+) =>
+  useQuery({
+    queryKey: repo
+      ? keys.releaseCompareSummary(repo, range.from, range.to, code)
+      : ['release-compare', 'summary', 'none'],
+    queryFn: () => api.releaseCompareSummary(repo!, range, code),
+    enabled: repo !== undefined,
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 3_000 : false),
   })
+
+/**
+ * Starts the AI description of a comparison in the background, or joins the one already running,
+ * and refetches the description states.
+ */
+export function useStartReleaseCompareSummary() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: ReleaseCompareSummaryInput) => api.startReleaseCompareSummary(input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['release-compare', 'summary'] }),
+  })
+}
 
 /**
  * Where the AI breaking-change check of `from`..`to` stands; off without `repo`, polls every

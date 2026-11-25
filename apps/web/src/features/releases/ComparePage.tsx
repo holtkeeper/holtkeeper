@@ -5,16 +5,19 @@ import type {
   ReleaseCompareView,
   RepoRef,
 } from '@holtkeeper/api'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, useNavigate, useSearch } from '@tanstack/react-router'
 import { ArrowLeftRight, ChevronDown, ChevronRight, ExternalLink, Sparkles } from 'lucide-react'
 import { Fragment, type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
+  keys,
   useReleaseCompare,
   useReleaseCompareSummary,
   useReleaseOverview,
   useReleaseRefs,
+  useStartReleaseCompareSummary,
 } from '../../api/queries.ts'
 import { actionFirst } from '../../lib/release-overview.ts'
 import { countLabel } from '../../lib/releases.ts'
@@ -37,7 +40,7 @@ import {
   Th,
   Tr,
 } from '../../ui/index.ts'
-import { packageQuery } from './compare-impact.ts'
+import { packageQuery, summaryActive, summaryNote } from './compare-impact.ts'
 import {
   type CompareRange,
   changeTones,
@@ -188,55 +191,86 @@ function Stats({ view }: { view: ReleaseCompareView }) {
   )
 }
 
-function SummaryCard({ repo, range }: { repo: RepoRef; range: CompareRange }) {
-  const summary = useReleaseCompareSummary()
-  const [code, setCode] = useState(false)
+function SummaryCard({
+  repo,
+  range,
+  canRun,
+}: {
+  repo: RepoRef
+  range: CompareRange
+  canRun: boolean
+}) {
+  const client = useQueryClient()
+  const [selected, setSelected] = useState<boolean>()
+  const summary = useReleaseCompareSummary(repo, range, selected)
+  const start = useStartReleaseCompareSummary()
+  const state = summary.data
+  const code = selected ?? state?.code ?? false
+  const running = summaryActive(state)
+  if (!canRun && state?.status !== 'done' && state?.status !== 'running') return null
   const describe = () =>
-    summary.mutate({
-      repo: repoKey(repo),
-      ...(range.from !== undefined ? { from: range.from } : {}),
-      ...(range.to !== undefined ? { to: range.to } : {}),
-      code,
-    })
+    start.mutate(
+      {
+        repo: repoKey(repo),
+        ...(range.from !== undefined ? { from: range.from } : {}),
+        ...(range.to !== undefined ? { to: range.to } : {}),
+        code,
+      },
+      {
+        onSuccess: (answer) => {
+          client.setQueryData(keys.releaseCompareSummary(repo, range.from, range.to, code), answer)
+          setSelected(code)
+        },
+      },
+    )
   return (
     <Panel
       variant="flush"
       title="What changed"
-      description={
-        summary.data
-          ? [
-              summary.data.code
-                ? 'From commits, dependencies and code'
-                : 'From commits and dependencies',
-              summary.data.cached ? 'kept from an earlier request' : undefined,
-            ]
-              .filter(Boolean)
-              .join(' · ')
-          : 'An AI description of the commits and dependency changes, optionally of the code diff too.'
-      }
+      description={summaryNote(state)}
       actions={
-        <>
-          <Checkbox
-            label="Include code changes"
-            isSelected={code}
-            onChange={setCode}
-            isDisabled={summary.isPending}
-          />
-          <Button size="sm" isPending={summary.isPending} onPress={describe}>
-            <Sparkles className="size-3.5" />
-            {summary.data ? 'Describe again' : 'Describe changes'}
-          </Button>
-        </>
+        canRun ? (
+          <>
+            <Checkbox
+              label="Include code changes"
+              isSelected={code}
+              onChange={setSelected}
+              isDisabled={running || start.isPending}
+            />
+            {state?.status !== 'done' ? (
+              <Button
+                size="sm"
+                isPending={start.isPending}
+                isDisabled={running || summary.isPending}
+                onPress={describe}
+              >
+                <Sparkles className="size-3.5" />
+                {running
+                  ? 'Describing…'
+                  : state?.status === 'failed'
+                    ? 'Try again'
+                    : 'Describe changes'}
+              </Button>
+            ) : null}
+          </>
+        ) : null
       }
     >
-      {summary.isError ? (
-        <Notice tone="danger" title="Not described">
-          {messageOf(summary.error)}
+      {start.isError ? (
+        <Notice tone="danger" title="Not started">
+          {messageOf(start.error)}
         </Notice>
-      ) : summary.isPending ? (
+      ) : null}
+      {summary.isPending || running ? (
         <Placeholder className="h-24" />
-      ) : summary.data ? (
-        <Markdown text={summary.data.markdown} />
+      ) : summary.isError ? (
+        <ErrorState error={summary.error} />
+      ) : state?.status === 'failed' ? (
+        <Notice tone="danger" title="Not described">
+          {state.error ?? 'No reason given.'}
+        </Notice>
+      ) : state?.status === 'done' && state.markdown !== undefined ? (
+        <Markdown text={state.markdown} />
       ) : null}
     </Panel>
   )
@@ -452,13 +486,12 @@ function Body({
       ) : (
         <>
           <Stats view={view.data} />
-          {view.data.summaryAvailable ? (
-            <SummaryCard
-              key={`${repoKey(repo)}:${range.from ?? ''}:${range.to ?? ''}`}
-              repo={repo}
-              range={range}
-            />
-          ) : null}
+          <SummaryCard
+            key={`${repoKey(repo)}:${range.from ?? ''}:${range.to ?? ''}`}
+            repo={repo}
+            range={range}
+            canRun={view.data.summaryAvailable}
+          />
           <BreakingCheckCard
             key={`check:${repoKey(repo)}:${range.from ?? ''}:${range.to ?? ''}`}
             repo={repo}
@@ -495,7 +528,8 @@ function Body({
  * Releases › Compare for the repository in `?repo=` (without one it opens the first repository of
  * the Overview, action first): two ends picked from the version tags and the target branch
  * (`?from=&to=`, defaulting to the latest version and the one before it), then the commit count,
- * bump and forge link, an AI description on request, the AI breaking-change check, the public API
+ * bump and forge link, an AI description on request (it runs in the background, so a reload shows
+ * it running or finished), the AI breaking-change check, the public API
  * changes of the repository's own packages, the tasks, the changelog and the dependency changes of
  * every lockfile root, each updated or added direct dependency folding out what changed in it.
  */

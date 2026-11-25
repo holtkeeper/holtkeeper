@@ -15,7 +15,7 @@ import { aesVault } from '@holtkeeper/vault'
 import { z } from 'zod'
 
 import { createApp } from '../src/app.ts'
-import { diffSnapshots, recordsAt } from '../src/release-api.ts'
+import { diffSnapshots, recordsAt, snapshotJobs } from '../src/release-api.ts'
 
 const auth = headerAuth({
   roles: {
@@ -159,6 +159,9 @@ beforeEach(async () => {
   })
 })
 
+const job = (id: string, ref: string, status: string, createdAt: string, extra = {}) =>
+  ({ id, ref, status, createdAt, ...extra }) as never
+
 const get = (path: string, headers = asAdmin) => app.request(`/api${path}`, { headers })
 
 const getJson = async <T>(path: string, headers = asAdmin) => {
@@ -212,6 +215,38 @@ describe('release comparison of the public API', () => {
       asViewer,
     )
     expect(viewer.backfill).toEqual({ allowed: false, refs: ['v0.9.0'] })
+  })
+
+  test('lists the snapshot jobs of the missing refs while they run or after they failed', async () => {
+    fake.tag('v0.9.0', fake.branches.get('main'))
+    const appRepo = { forge: 'work', path: 'g/app' }
+    const path = `/releases/compare/api?repo=${repo}&from=v0.9.0&to=v1.1.0`
+    expect((await getJson<ReleaseCompareApi>(path)).snapshots).toBeUndefined()
+    const queued = await store.jobs.enqueue({
+      analyzer: 'api-surface',
+      repo: appRepo,
+      ref: 'v0.9.0',
+      options: {},
+      trigger: 'manual',
+      createdAt: '2026-11-01T08:59:00.000Z',
+    })
+    await store.jobs.enqueue({
+      analyzer: 'api-surface',
+      repo: appRepo,
+      ref: 'v1.1.0',
+      options: {},
+      trigger: 'manual',
+      createdAt: '2026-11-01T08:59:00.000Z',
+    })
+    expect((await getJson<ReleaseCompareApi>(path)).snapshots).toEqual([
+      { ref: 'v0.9.0', status: 'queued', jobId: queued.id },
+    ])
+    expect((await getJson<ReleaseCompareApi>(path, asViewer)).snapshots).toBeUndefined()
+    await store.jobs.claim('worker-1', '2026-11-01T08:59:30.000Z')
+    await store.jobs.fail(queued.id, { at: '2026-11-01T08:59:40.000Z', error: 'no lockfile' })
+    expect((await getJson<ReleaseCompareApi>(path)).snapshots).toEqual([
+      { ref: 'v0.9.0', status: 'failed', jobId: queued.id, error: 'no lockfile' },
+    ])
   })
 
   test('says when the repository has no records and checks access', async () => {
@@ -283,6 +318,49 @@ const head = (id: string, ref?: string, sha?: string): AnalysisHead => ({
 })
 
 describe('public API helpers', () => {
+  test('snapshotJobs keeps the newest job per ref and forgets old failures and successes', async () => {
+    const jobs = {
+      list: async () => [
+        job('j5', 'v2.0.0', 'canceled', '2026-11-01T08:00:00.000Z'),
+        job('j4', 'v2.0.0', 'running', '2026-11-01T07:00:00.000Z'),
+        job('j3', 'v1.0.0', 'succeeded', '2026-11-01T06:00:00.000Z'),
+        job('j2', 'v1.0.0', 'failed', '2026-10-31T06:00:00.000Z'),
+        job('j1', 'v0.1.0', 'failed', '2026-10-30T06:00:00.000Z', {
+          finishedAt: '2026-10-30T06:01:00.000Z',
+        }),
+      ],
+    }
+    const appRepo = { forge: 'work', path: 'g/app' }
+    const now = new Date('2026-11-01T09:00:00.000Z')
+    expect(
+      await snapshotJobs(jobs, appRepo, { refs: ['v2.0.0', 'v1.0.0', 'v0.1.0', 'v3.0.0'] }, now),
+    ).toEqual([{ ref: 'v2.0.0', status: 'running', jobId: 'j4' }])
+    expect(await snapshotJobs(jobs, appRepo, { refs: [] }, now)).toEqual([])
+  })
+
+  test('snapshotJobs reports default-branch jobs under the branch and, with any, a backfill', async () => {
+    const jobs = {
+      list: async () => [
+        job('j4', 'v3.0.0', 'queued', '2026-11-01T08:30:00.000Z'),
+        job('j3', 'v2.0.0', 'running', '2026-11-01T08:20:00.000Z'),
+        job('j2', 'v1.0.0', 'succeeded', '2026-11-01T08:10:00.000Z'),
+        { id: 'j1', status: 'queued', createdAt: '2026-11-01T08:00:00.000Z' } as never,
+      ],
+    }
+    const appRepo = { forge: 'work', path: 'g/app' }
+    const now = new Date('2026-11-01T09:00:00.000Z')
+    expect(await snapshotJobs(jobs, appRepo, { refs: [], branch: 'main' }, now)).toEqual([
+      { ref: 'main', status: 'queued', jobId: 'j1' },
+    ])
+    expect(await snapshotJobs(jobs, appRepo, { refs: [], branch: 'main', any: true }, now)).toEqual(
+      [
+        { ref: 'main', status: 'queued', jobId: 'j1' },
+        { ref: 'v3.0.0', status: 'queued', jobId: 'j4' },
+        { ref: 'v2.0.0', status: 'running', jobId: 'j3' },
+      ],
+    )
+  })
+
   test('recordsAt prefers the tag, then the commit, then default-branch runs at it', () => {
     const sha = 'a'.repeat(40)
     const heads = [head('1'), head('2', undefined, sha), head('3', sha), head('4', 'v2.0.0')]

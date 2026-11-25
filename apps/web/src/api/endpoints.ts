@@ -125,8 +125,8 @@ import type {
   ReleaseCompareCheckStart,
   ReleaseComparePackage,
   ReleaseCompareRefs,
-  ReleaseCompareSummary,
   ReleaseCompareSummaryInput,
+  ReleaseCompareSummaryState,
   ReleaseCompareView,
   ReleaseStepResult,
   ReleaseSummaryInput,
@@ -642,8 +642,21 @@ export const api = {
         to: input.to || undefined,
       },
     }),
-  releaseCompareSummary: (input: ReleaseCompareSummaryInput) =>
-    request<ReleaseCompareSummary>('POST', '/api/releases/compare/summary', { body: input }),
+  releaseCompareSummary: (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+    code?: boolean,
+  ) =>
+    request<ReleaseCompareSummaryState>('GET', '/api/releases/compare/summary', {
+      query: {
+        repo: repoKey(repo),
+        from: range.from || undefined,
+        to: range.to || undefined,
+        code: code === undefined ? undefined : String(code),
+      },
+    }),
+  startReleaseCompareSummary: (input: ReleaseCompareSummaryInput) =>
+    request<ReleaseCompareSummaryState>('POST', '/api/releases/compare/summary', { body: input }),
   releaseCompareCheck: (repo: RepoRef, range: { from?: string; to?: string } = {}) =>
     request<ReleaseCompareCheck>('GET', '/api/releases/compare/check', {
       query: { repo: repoKey(repo), from: range.from || undefined, to: range.to || undefined },

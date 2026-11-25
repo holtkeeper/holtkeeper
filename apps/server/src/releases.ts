@@ -5,6 +5,7 @@ import type {
   ReleaseCompareApi,
   ReleaseCompareRefs,
   ReleaseCompareSummary,
+  ReleaseCompareSummaryState,
   ReleaseCompareVersion,
   ReleaseCompareView,
   ReleaseDetectView,
@@ -70,9 +71,10 @@ import {
   versionOfTag,
 } from '@holtkeeper/release'
 import { resolveSetting } from '@holtkeeper/settings'
-import type { KvStore } from '@holtkeeper/store'
+import { type KvStore, canonicalJson } from '@holtkeeper/store'
 import { z } from 'zod'
 
+import { aiLanguageOf } from './ai-language.ts'
 import { appendAudit } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { issueTrackerFor } from './issues.ts'
@@ -84,6 +86,7 @@ import {
   publicApiBetween,
 } from './release-api.ts'
 import { peopleOf } from './routes/avatars.ts'
+import { summaryTasks } from './summary-tasks.ts'
 
 const HISTORY = 100
 const BOARD_CONCURRENCY = 4
@@ -96,6 +99,8 @@ const TAGS_TTL_SECONDS = 30 * 60
 const TIMELINE_LIMIT = 30
 const COMPARE_FILE_CAP = 1000
 const COMPARE_CACHE_SECONDS = 30 * 24 * 3600
+const PARTIAL_SUMMARY_SECONDS = 3600
+const HEAD_CACHE_MS = 20_000
 
 const BOARD_INDEX = 'release:board:index'
 const BOARD_REFRESHING = 'release:board:refreshing'
@@ -129,6 +134,32 @@ const fixedSha = /^[0-9a-f]{40}$/u
 
 const fixedRange = (from: string | undefined, to: string): from is string =>
   from !== undefined && fixedSha.test(from) && fixedSha.test(to)
+
+const compareSummaryKey = (
+  repo: string,
+  from: string | undefined,
+  to: string,
+  code: boolean,
+  language: string,
+) =>
+  `release:compare-summary:${repo}:${from}:${to}:${code ? 'code' : 'log'}:${language.toLowerCase()}`
+
+const summaryTaskKey = (
+  repo: string,
+  from: string | undefined,
+  to: string,
+  code: boolean,
+  language: string,
+) =>
+  `release:compare-summary-task:${repo}:${from ?? ''}:${to}:${code ? 'code' : 'log'}:${language.toLowerCase()}`
+
+const refTaskKey = (
+  repo: string,
+  input: { from?: string; to?: string },
+  code: boolean,
+  language: string,
+) =>
+  `release:compare-summary-ref:${repo}:${input.from ?? ''}:${input.to ?? ''}:${code ? 'code' : 'log'}:${language.toLowerCase()}`
 
 const apiEnd = (ref: string, sha: string | undefined): ApiRangeEnd => ({
   ref,
@@ -208,13 +239,33 @@ const edited = (edits: ReleaseEdits) =>
   Object.keys(edits.texts ?? {}).length > 0 ||
   edits.summary?.source === 'person'
 
-/** In-memory stand-in for `Store.kv` on servers without one; expiry is ignored. */
-function memoryKv(): Pick<KvStore, 'get' | 'set' | 'delete'> {
-  const values = new Map<string, unknown>()
+/** In-memory stand-in for `Store.kv` on servers without one, honoring TTLs. */
+function memoryKv(): Pick<KvStore, 'get' | 'set' | 'delete' | 'compareAndSet'> {
+  const values = new Map<string, { value: unknown; expiresAt?: number }>()
+  const live = (key: string) => {
+    const entry = values.get(key)
+    if (entry?.expiresAt !== undefined && entry.expiresAt <= Date.now()) values.delete(key)
+    return values.get(key)?.value
+  }
+  const put = (key: string, value: unknown, ttlSeconds?: number) =>
+    void values.set(key, {
+      value,
+      ...(ttlSeconds !== undefined ? { expiresAt: Date.now() + ttlSeconds * 1000 } : {}),
+    })
   return {
-    get: async (key) => values.get(key),
-    set: async (key, value) => void values.set(key, value),
+    get: async (key) => live(key),
+    set: async (key, value, ttlSeconds) => put(key, value, ttlSeconds),
     delete: async (key) => void values.delete(key),
+    compareAndSet: async (key, expected, value, ttlSeconds) => {
+      const current = live(key)
+      const same =
+        current === undefined
+          ? expected === undefined
+          : expected !== undefined && canonicalJson(current) === canonicalJson(expected)
+      if (!same) return false
+      put(key, value, ttlSeconds)
+      return true
+    },
   }
 }
 
@@ -1422,13 +1473,14 @@ function createReleaseService(deps: ServerDeps) {
    * How the public API of the repository's own packages changed between two refs, resolved as
    * `changes`, from stored `api-surface` records (`ReleaseCompareApi` without `backfill`); with
    * `impact`, each package carries the uses in other repositories its changes touch. `refs` are the
-   * ends to snapshot so the comparison can run (`backfillRefs`).
+   * ends to snapshot so the comparison can run (`backfillRefs`); `branch` is the target branch
+   * when it is an end that lacks a record (its default-branch run records it).
    */
   const compareApi = async (
     repo: RepoRef,
     range: { from?: string; to?: string } = {},
     impact?: PublicApiBetweenInput['impact'],
-  ): Promise<{ api: Omit<ReleaseCompareApi, 'backfill'>; refs: string[] }> => {
+  ): Promise<{ api: Omit<ReleaseCompareApi, 'backfill'>; refs: string[]; branch?: string }> => {
     const ends = apiEnds(await resolvedChanges(repo, range))
     const api = await publicApiBetween({
       analyses: store.analyses,
@@ -1436,7 +1488,42 @@ function createReleaseService(deps: ServerDeps) {
       ...ends,
       ...(impact ? { impact } : {}),
     })
-    return { api, refs: backfillRefs(ends, api) }
+    const branchLacks =
+      ends.to.head === true && (!api.recorded || api.missing.some((item) => item.side !== 'from'))
+    return { api, refs: backfillRefs(ends, api), ...(branchLacks ? { branch: ends.to.ref } : {}) }
+  }
+
+  const heads = new Map<string, { sha: string; at: number }>()
+
+  /**
+   * The ends of a range (`resolveEnds`) and the commits they resolve to; a branch end is its head
+   * now, or with `recent` its head read within the last `HEAD_CACHE_MS`.
+   */
+  const rangeShas = async (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+    options: { recent?: boolean } = {},
+  ) => {
+    const ends = await resolveEnds(repo, range)
+    const { forge } = ends.source
+    const shaOf = async (ref: string) => {
+      if (fixedSha.test(ref)) return ref
+      const cacheKey = `${repoKeyOf(repo)}:${ref}`
+      const cached = heads.get(cacheKey)
+      if (options.recent && cached && deps.now().getTime() - cached.at < HEAD_CACHE_MS)
+        return cached.sha
+      const [head] = forge.listCommits
+        ? await forge.listCommits(repo.path, { ref, limit: 1 }).catch(() => [])
+        : []
+      if (!head) throw new Error(`cannot find ${ref} in ${repo.path}`)
+      heads.set(cacheKey, { sha: head.sha, at: deps.now().getTime() })
+      return head.sha
+    }
+    const [fromSha, toSha] = await Promise.all([
+      ends.fromRef === undefined ? undefined : shaOf(ends.fromRef),
+      shaOf(ends.toRef),
+    ])
+    return { ends, fromSha, toSha }
   }
 
   /**
@@ -1449,19 +1536,8 @@ function createReleaseService(deps: ServerDeps) {
     repo: RepoRef,
     range: { from?: string; to?: string } = {},
   ): Promise<{ from: CompareRangeEnd; to: CompareRangeEnd }> => {
-    const ends = await resolveEnds(repo, range)
-    const { forge } = ends.source
-    const { fromRef, toRef } = ends
-    if (!ends.from || fromRef === undefined) throw new Error('the range has no start to compare')
-    const shaOf = async (ref: string) => {
-      if (fixedSha.test(ref)) return ref
-      const [head] = forge.listCommits
-        ? await forge.listCommits(repo.path, { ref, limit: 1 }).catch(() => [])
-        : []
-      if (!head) throw new Error(`cannot find ${ref} in ${repo.path}`)
-      return head.sha
-    }
-    const [fromSha, toSha] = await Promise.all([shaOf(fromRef), shaOf(toRef)])
+    const { ends, fromSha, toSha } = await rangeShas(repo, range)
+    if (!ends.from || fromSha === undefined) throw new Error('the range has no start to compare')
     return {
       from: { sha: fromSha, label: ends.from },
       to: { sha: toSha, label: ends.to },
@@ -1507,19 +1583,18 @@ function createReleaseService(deps: ServerDeps) {
     }
   }
 
-  /**
-   * Has the repository's AI agent describe the changes between two refs from their entries and
-   * dependency changes, plus the code diff with `code` when the forge can compare the commits and
-   * some code survives filtering (the answer's `code` says whether it did). Between two fixed
-   * commits whose dependency changes were read completely the description is kept per asked
-   * `code` flag for `COMPARE_CACHE_SECONDS`. Rejects without an agent.
-   */
-  const compareSummary = async (
-    repo: RepoRef,
-    input: { from?: string; to?: string; code?: boolean },
-  ): Promise<ReleaseCompareSummary> => {
+  const agentFor = async (repo: RepoRef) => {
     const agent = await deps.agentFor?.(repo)
     if (!agent) throw new Error('no AI agent is configured for this repository')
+    return agent
+  }
+
+  const describeRange = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string; code?: boolean },
+    agent: Awaited<ReturnType<typeof agentFor>>,
+    language: string,
+  ): Promise<{ summary: ReleaseCompareSummary; final: boolean }> => {
     const resolved = await resolvedChanges(repo, {
       ...(input.from ? { from: input.from } : {}),
       ...(input.to ? { to: input.to } : {}),
@@ -1527,14 +1602,18 @@ function createReleaseService(deps: ServerDeps) {
     const { fromRef, toRef, forge } = resolved
     const fixed = fixedRange(fromRef, toRef)
     const keyOf = (code: boolean) =>
-      `release:compare-summary:${repoKeyOf(repo)}:${fromRef}:${toRef}:${code ? 'code' : 'log'}`
+      compareSummaryKey(repoKeyOf(repo), fromRef, toRef, code, language)
     const wantsCode = input.code === true && fromRef !== undefined
     if (fixed) {
       const stored = readStored(
         storedSummarySchema,
         await kv.get(keyOf(wantsCode)).catch(() => undefined),
       )
-      if (stored) return { markdown: stored.markdown, code: stored.code ?? wantsCode, cached: true }
+      if (stored)
+        return {
+          summary: { markdown: stored.markdown, code: stored.code ?? wantsCode, cached: true },
+          final: true,
+        }
     }
     const files =
       wantsCode && fromRef !== undefined
@@ -1550,12 +1629,168 @@ function createReleaseService(deps: ServerDeps) {
       to: resolved.changes.to,
       ...(withCode ? { code } : {}),
       ...(dependencies ? { dependencies } : {}),
+      language,
     })
-    if (found.final === true && (!wantsCode || files !== undefined))
+    const final = found.final === true && (!wantsCode || files !== undefined)
+    if (final && fixed)
       await kv
         .set(keyOf(wantsCode), { markdown, code: withCode }, COMPARE_CACHE_SECONDS)
         .catch(() => {})
-    return { markdown, code: withCode, cached: false }
+    return { summary: { markdown, code: withCode, cached: false }, final }
+  }
+
+  const tasks = summaryTasks({
+    kv,
+    now: deps.now,
+    ...(deps.onBackground ? { onBackground: deps.onBackground } : {}),
+  })
+
+  type SummaryShas = { fromSha: string | undefined; toSha: string }
+
+  /**
+   * The task of one `code` flag: the one of the commits the ends resolve to, else the description
+   * kept between fixed commits, else with `follow` the task last started for the same refs (a
+   * branch end that moved since keeps showing it).
+   */
+  const summaryTaskState = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string },
+    shas: SummaryShas,
+    code: boolean,
+    language: string,
+    follow: boolean,
+  ): Promise<ReleaseCompareSummaryState> => {
+    const wantsCode = code && shas.fromSha !== undefined
+    const withCode = (state: ReleaseCompareSummaryState): ReleaseCompareSummaryState =>
+      state.status === 'done' || state.status === 'none' ? state : { ...state, code }
+    const taskKey = summaryTaskKey(repoKeyOf(repo), shas.fromSha, shas.toSha, wantsCode, language)
+    const state = await tasks.read(taskKey)
+    if (state.status === 'running' || state.status === 'done') return withCode(state)
+    if (fixedRange(shas.fromSha, shas.toSha)) {
+      const stored = readStored(
+        storedSummarySchema,
+        await kv
+          .get(compareSummaryKey(repoKeyOf(repo), shas.fromSha, shas.toSha, wantsCode, language))
+          .catch(() => undefined),
+      )
+      if (stored)
+        return {
+          status: 'done',
+          markdown: stored.markdown,
+          code: stored.code ?? wantsCode,
+          cached: true,
+        }
+    }
+    if (state.status === 'failed' || !follow) return withCode(state)
+    const pointer = z
+      .string()
+      .safeParse(
+        await kv
+          .get(refTaskKey(repoKeyOf(repo), input, wantsCode, language))
+          .catch(() => undefined),
+      )
+    if (!pointer.success || pointer.data === taskKey) return state
+    return withCode(await tasks.read(pointer.data))
+  }
+
+  /** What `startCompareSummary` and `compareSummary` share: the task key and its run. */
+  const summaryTask = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string; code?: boolean },
+  ) => {
+    const agent = await agentFor(repo)
+    const [shas, language] = await Promise.all([rangeShas(repo, input), aiLanguageOf(deps, repo)])
+    const code = input.code === true
+    const wantsCode = code && shas.fromSha !== undefined
+    const taskKey = summaryTaskKey(repoKeyOf(repo), shas.fromSha, shas.toSha, wantsCode, language)
+    const run = async () => {
+      const { summary, final } = await describeRange(repo, input, agent, language)
+      return { summary, keepSeconds: final ? COMPARE_CACHE_SECONDS : PARTIAL_SUMMARY_SECONDS }
+    }
+    const current = await summaryTaskState(repo, input, shas, code, language, false)
+    const remember = () =>
+      kv
+        .set(
+          refTaskKey(repoKeyOf(repo), input, wantsCode, language),
+          taskKey,
+          PARTIAL_SUMMARY_SECONDS,
+        )
+        .catch(() => {})
+    return { code, taskKey, run, current, remember }
+  }
+
+  /**
+   * Has the repository's AI agent describe the changes between two refs from their entries and
+   * dependency changes, plus the code diff with `code` when the forge can compare the commits and
+   * some code survives filtering (the answer's `code` says whether it did), and waits for it.
+   * Between two fixed commits whose dependency changes were read completely the description is
+   * kept per asked `code` flag and AI language for `COMPARE_CACHE_SECONDS`. Prose is in the
+   * repository's AI language (`aiLanguageOf`). Shares the tasks of `startCompareSummary`: answers
+   * a finished one, waits for a running one, else runs one itself. Rejects without an agent or
+   * when the description fails.
+   */
+  const compareSummary = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string; code?: boolean },
+  ): Promise<ReleaseCompareSummary> => {
+    const task = await summaryTask(repo, input)
+    const summaryOf = (state: ReleaseCompareSummaryState): ReleaseCompareSummary => {
+      if (state.status === 'done' && state.markdown !== undefined)
+        return {
+          markdown: state.markdown,
+          code: state.code ?? task.code,
+          cached: state.cached ?? false,
+        }
+      throw new Error(state.error ?? 'the description did not finish')
+    }
+    if (task.current.status === 'done') return summaryOf({ ...task.current, cached: true })
+    if (task.current.status !== 'running') await task.remember()
+    return summaryOf(await tasks.settle(task.taskKey, task.run))
+  }
+
+  /**
+   * Where the AI description of a range stands (`ReleaseCompareSummaryState`), per pair of commits
+   * the ends resolve to (a branch head read within the last `HEAD_CACHE_MS`), `code` flag and AI
+   * language; a task started for the same refs before a branch end moved still answers. Without
+   * `code` it is the running task of either flag, else the finished one with code, else the one
+   * without. Starts nothing.
+   */
+  const compareSummaryState = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string; code?: boolean },
+  ): Promise<ReleaseCompareSummaryState> => {
+    const [shas, language] = await Promise.all([
+      rangeShas(repo, input, { recent: true }),
+      aiLanguageOf(deps, repo),
+    ])
+    if (input.code !== undefined)
+      return summaryTaskState(repo, input, shas, input.code, language, true)
+    const states = await Promise.all([
+      summaryTaskState(repo, input, shas, true, language, true),
+      summaryTaskState(repo, input, shas, false, language, true),
+    ])
+    const first = (status: ReleaseCompareSummaryState['status']) =>
+      states.find((state) => state.status === status)
+    return first('running') ?? first('done') ?? first('failed') ?? { status: 'none' }
+  }
+
+  /**
+   * Starts the AI description of a range in the background (`compareSummary` without waiting) and
+   * answers its state: `running`, or `done` (with `cached`) when one of the same commits, `code`
+   * flag and AI language exists. Joins a description that is already running; starts a failed one
+   * again. Non-final descriptions (dependencies partly read) are kept for an hour. Rejects without
+   * an agent.
+   */
+  const startCompareSummary = async (
+    repo: RepoRef,
+    input: { from?: string; to?: string; code?: boolean },
+  ): Promise<ReleaseCompareSummaryState> => {
+    const task = await summaryTask(repo, input)
+    if (task.current.status === 'done') return { ...task.current, cached: true }
+    if (task.current.status === 'running') return task.current
+    const state = await tasks.start(task.taskKey, task.run)
+    if (state.status === 'running') await task.remember()
+    return state.status === 'done' ? { ...state, cached: true } : { ...state, code: task.code }
   }
 
   const view = async (principal: Principal, repo: RepoRef): Promise<ReleaseRepoView> => {
@@ -1649,6 +1884,7 @@ function createReleaseService(deps: ServerDeps) {
     const agent = await deps.agentFor?.(repo)
     if (!agent) throw new Error('no AI agent is configured for this repository')
     return writeSummary(agent, plan.entries, {
+      language: await aiLanguageOf(deps, repo),
       ...(plan.version ? { version: plan.version } : {}),
       ...(plan.current ? { previous: plan.current.version } : {}),
     })
@@ -1734,6 +1970,8 @@ function createReleaseService(deps: ServerDeps) {
     compareRange,
     refs,
     compareSummary,
+    compareSummaryState,
+    startCompareSummary,
     view,
     detect,
     deployOf,

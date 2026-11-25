@@ -70,13 +70,15 @@ export const upgradeCheckDataSchema = z.object({
     })
     .optional(),
   durationMs: z.number().min(0).optional(),
+  language: z.string().optional(),
 })
 
 /**
  * Result of a breaking-change check between two commits of one repository. `from` and `to` carry
  * the ref the check was asked for, the resolved commit and an optional display label. `findings`
  * are deduplicated across areas and sorted by severity; `skipped` counts changed files no agent
- * read, with why; `capped` is true when size limits left files or diff text out.
+ * read, with why; `capped` is true when size limits left files or diff text out. `language` is
+ * the language the texts were asked in; absent means English.
  */
 export type UpgradeCheckData = z.infer<typeof upgradeCheckDataSchema>
 
@@ -109,6 +111,12 @@ export const upgradeCheckOptionsSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Commit subjects of the range; read from git when absent'),
+  language: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Language of summaries and findings; English when absent'),
   costLimitUsd: z.coerce
     .number()
     .min(0)

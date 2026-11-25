@@ -5,7 +5,7 @@ import type {
 } from '@holtkeeper/api'
 import { renderDependencyDiff } from '@holtkeeper/dep-diff'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { Job, Store } from '@holtkeeper/store'
+import type { AnalysisRecord, Job, Store } from '@holtkeeper/store'
 import {
   UPGRADE_CHECK_KIND,
   type UpgradeCheckDeps,
@@ -13,7 +13,9 @@ import {
   upgradeCheckOptionsSchema,
   upgradeCheckRef,
 } from '@holtkeeper/upgrade-check'
+import { z } from 'zod'
 
+import { aiLanguageOf } from './ai-language.ts'
 import type { ServerDeps } from './context.ts'
 import { type CompareRangeEnd, releaseServiceFor } from './releases.ts'
 
@@ -68,42 +70,73 @@ export function upgradeCheckInputs(
   }
 }
 
-const covers = (job: Job, fromSha: string, toSha: string) =>
-  job.options.from === fromSha && job.options.to === toSha
+const DEFAULT_LANGUAGE = 'English'
+const writtenLanguage = z.object({ language: z.string().optional() })
+
+const sameLanguage = (a: string | undefined, b: string) =>
+  (a ?? DEFAULT_LANGUAGE).toLowerCase() === b.toLowerCase()
+
+const covers = (job: Job, fromSha: string, toSha: string, language: string) =>
+  job.options.from === fromSha &&
+  job.options.to === toSha &&
+  sameLanguage(
+    typeof job.options.language === 'string' ? job.options.language : undefined,
+    language,
+  )
 
 const isActive = (job: Job) => job.status === 'queued' || job.status === 'running'
 
-async function rangeJobs(store: Store, repo: RepoRef, fromSha: string, toSha: string) {
+async function rangeJobs(
+  store: Store,
+  repo: RepoRef,
+  fromSha: string,
+  toSha: string,
+  language: string,
+) {
   const jobs = await store.jobs.list({ repo, analyzer: UPGRADE_CHECK_KIND, limit: JOB_SCAN })
-  return jobs.filter((job) => covers(job, fromSha, toSha))
+  return jobs.filter((job) => covers(job, fromSha, toSha, language))
 }
 
-async function rangeRecord(store: Store, repo: RepoRef, fromSha: string, toSha: string) {
+async function rangeRecord(
+  store: Store,
+  repo: RepoRef,
+  fromSha: string,
+  toSha: string,
+  language: string,
+): Promise<AnalysisRecord | undefined> {
   const ref = upgradeCheckRef(fromSha, toSha)
   const heads = await store.analyses.heads({ repo, kind: UPGRADE_CHECK_KIND, limit: RECORD_SCAN })
-  return heads.find((head) => head.ref === ref)
+  for (const head of heads.filter((item) => item.ref === ref)) {
+    // oxlint-disable-next-line no-await-in-loop -- newest first, usually the first one matches
+    const record = await store.analyses.get(head.id)
+    const written = writtenLanguage.safeParse(record?.data).data?.language
+    if (record && sameLanguage(written, language)) return record
+  }
+  return undefined
 }
 
 /**
  * Where the breaking-change check of `fromSha..toSha` stands (`ReleaseCompareCheck`): a queued or
  * running job of the range wins; then a failed or budget-stopped job newer than the newest
  * finished record (`failed`, with that record when there is one); then the newest record
- * (`done`); else `none`. Canceled jobs are ignored.
+ * (`done`); else `none`. Canceled jobs are ignored. Only jobs and records written in `language`
+ * (default English; records without one count as English) are considered, so a check in another
+ * language reads as `none`.
  */
 export async function upgradeCheckStatus(
   store: Store,
   repo: RepoRef,
   fromSha: string,
   toSha: string,
+  language = DEFAULT_LANGUAGE,
 ): Promise<ReleaseCompareCheck> {
-  const [jobs, head] = await Promise.all([
-    rangeJobs(store, repo, fromSha, toSha),
-    rangeRecord(store, repo, fromSha, toSha),
+  const [jobs, record] = await Promise.all([
+    rangeJobs(store, repo, fromSha, toSha, language),
+    rangeRecord(store, repo, fromSha, toSha, language),
   ])
   const active = jobs.find(isActive)
   if (active)
     return { status: active.status === 'running' ? 'running' : 'queued', jobId: active.id }
-  const record = head ? await store.analyses.get(head.id) : undefined
   const parsed = record ? upgradeCheckDataSchema.safeParse(record.data) : undefined
   const done = record
     ? { analysisId: record.id, ...(parsed?.success && { data: parsed.data }) }
@@ -133,28 +166,32 @@ export interface UpgradeCheckRequest {
   actor: string
   /** Queue a new run even when a finished check of the same commits exists. */
   force?: boolean
+  /** Language of the check's texts; the repository's AI language (`aiLanguageOf`) when absent. */
+  language?: string
 }
 
 /**
  * Queues the breaking-change check of `from.sha..to.sha` (analyzer `upgrade-check`, `ref` the `to`
- * commit, trigger `manual`, one attempt) unless a finished record of the same commits exists
- * (returned as `existing` without `force`) or a queued or running job already checks them (its id
- * is returned). Jobs of the same `to` commit with another start are separate runs.
+ * commit, trigger `manual`, one attempt) in the request's language unless a finished record of the
+ * same commits in that language exists (returned as `existing` without `force`) or a queued or
+ * running job already checks them in it (its id is returned). Jobs of the same `to` commit with
+ * another start or language are separate runs.
  */
 export async function startUpgradeCheck(
-  deps: Pick<ServerDeps, 'store' | 'now'>,
+  deps: Pick<ServerDeps, 'store' | 'now' | 'config'>,
   request: UpgradeCheckRequest,
 ): Promise<ReleaseCompareCheckStart> {
   const { store } = deps
   const { repo, from, to } = request
+  const language = request.language ?? (await aiLanguageOf(deps, repo))
   if (!request.force) {
-    const head = await rangeRecord(store, repo, from.sha, to.sha)
-    if (head) {
-      const [producer] = await store.jobs.list({ analysisId: head.id, limit: 1 })
-      return { existing: head.id, ...(producer && { jobId: producer.id }) }
+    const record = await rangeRecord(store, repo, from.sha, to.sha, language)
+    if (record) {
+      const [producer] = await store.jobs.list({ analysisId: record.id, limit: 1 })
+      return { existing: record.id, ...(producer && { jobId: producer.id }) }
     }
   }
-  const active = (await rangeJobs(store, repo, from.sha, to.sha)).find(isActive)
+  const active = (await rangeJobs(store, repo, from.sha, to.sha, language)).find(isActive)
   if (active) return { jobId: active.id }
   const job = await store.jobs.enqueue({
     analyzer: UPGRADE_CHECK_KIND,
@@ -165,6 +202,7 @@ export async function startUpgradeCheck(
       to: to.sha,
       fromLabel: from.label,
       toLabel: to.label,
+      language,
     }),
     trigger: 'manual',
     maxAttempts: 1,

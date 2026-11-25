@@ -83,11 +83,11 @@ Without a choice the page compares the latest stable version with the stable ver
     ],
     [
       'What changed',
-      'An AI description, written when you press Describe changes. Include code changes adds the code diff: slower and costlier, and skipped when the forge cannot compare the commits.',
+      'An AI description, written when you press Describe changes. It runs in the background: reload or come back later and it shows as running or finished, and pressing again joins the running one instead of paying twice. Include code changes adds the code diff: slower and costlier, and skipped when the forge cannot compare the commits.',
     ],
     [
       'Breaking-change check',
-      'AI agents read the code changes area by area and list what could break an installation that upgrades, with a verdict and how to check each finding. Runs only when you press the button.',
+      'AI agents read the code changes area by area and list what could break an installation that upgrades, with a verdict and how to check each finding. Runs only when you press the button, as a background run that a reload keeps showing.',
     ],
     [
       'Public API',
@@ -102,7 +102,7 @@ Without a choice the page compares the latest stable version with the stable ver
   ]}
 />
 
-**What changed** is there only when you have `releases:run` on the repository and an AI agent is configured for it. A description between two versions is kept, so asking again costs nothing.
+Anyone who can read the repository's releases sees a running or finished description in **What changed**. <Ui>Describe changes</Ui> needs `releases:run` on the repository and an AI agent configured for it. A finished description is shown as it is, with no button to run it again; between two versions it is kept, so opening the comparison later costs nothing. When the range ends at the target branch and new commits land while a description runs, the page keeps showing that description for an hour. Descriptions and breaking-change checks are written in the **language** option of [AI reviews](/guide/quality/reviews/), English when none is set; code, versions and package names stay as they are. After you change that language, a kept description or check in the old language is not reused.
 
 When dependencies cannot be read, for example because the forge cannot compare the two ends, a muted line says why. A lockfile that could not be read at one end shows as a warning above its root, and the rest of the comparison still appears.
 
@@ -126,6 +126,6 @@ both ends. A package whose exports lost something is marked <Ui>breaking</Ui>; a
 tag means the version number moved less than the changes call for. Open a package for the full diff
 and the uses in other repositories it touches.
 
-Snapshots exist only for releases the public API analyzer has seen. When one end has none, nothing is compared: the section says <Ui>Cannot compare</Ui> and names the packages. With `analyses:run`, <Ui>Snapshot</Ui> queues snapshots of exactly the missing versions; reload the page once they finish. Without access to the repository's API catalog the section shows an error instead.
+Snapshots exist only for releases the public API analyzer has seen. When one end has none, nothing is compared: the section says <Ui>Cannot compare</Ui> and names the packages. With `analyses:run`, <Ui>Snapshot</Ui> queues snapshots of exactly the missing versions. The section shows each one as it waits and runs, and the comparison once they finish, with no reload needed. A failed snapshot shows its error, and the button retries it even while another version is still being snapshotted. When the target branch is the end without a snapshot, the section shows its default-branch run while it waits or runs. When nothing is recorded yet and the button is <Ui>Analyze past releases</Ui>, the section lists the snapshot jobs that backfill queues as they appear. Progress shows only to people who can read the repository's analyses. Without access to the repository's API catalog the section shows an error instead.
 
 In <Ui>Dependencies</Ui>, <Ui>What changed</Ui> on an updated or added package shows what changed in it between the two versions: its API diff, for third-party packages the release notes and migration notes, and the uses in this repository the upgrade affects.

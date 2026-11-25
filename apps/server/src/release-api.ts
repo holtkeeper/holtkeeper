@@ -1,4 +1,8 @@
-import type { ReleaseCompareApi, ReleaseCompareApiPackage } from '@holtkeeper/api'
+import type {
+  ReleaseCompareApi,
+  ReleaseCompareApiPackage,
+  ReleaseCompareSnapshot,
+} from '@holtkeeper/api'
 import {
   type ApiPackage,
   type ApiSurfaceData,
@@ -10,7 +14,7 @@ import {
   withoutFolderTwins,
 } from '@holtkeeper/api-surface'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { AnalysisHead, AnalysisStore } from '@holtkeeper/store'
+import type { AnalysisHead, AnalysisStore, Job, JobStore } from '@holtkeeper/store'
 import { narrowImpact, renderImpact } from '@holtkeeper/usages'
 
 import type { RepoFilter } from './api-surface/catalog.ts'
@@ -18,6 +22,9 @@ import { type UsageIndex, impactOfChanges } from './api-surface/usages.ts'
 
 const KIND = 'api-surface'
 const HEADS = 500
+const SNAPSHOT_JOBS = 200
+const SNAPSHOT_FAILED_MS = 24 * 3600_000
+const SNAPSHOT_ANY = 10
 
 /** One end of a compared range: the tag or branch it names and the commit when known. */
 export interface ApiRangeEnd {
@@ -201,4 +208,63 @@ export function backfillRefs(
     ...(ends.from && lacks('from') ? [ends.from.ref] : []),
     ...(!ends.to.head && lacks('to') ? [ends.to.ref] : []),
   ]
+}
+
+/** Which `api-surface` jobs `snapshotJobs` reports. */
+export interface SnapshotTargets {
+  /** Tags or commits the comparison lacks (`backfillRefs`). */
+  refs: readonly string[]
+  /** The target branch when it is an end that lacks a record: its default-branch jobs answer. */
+  branch?: string
+  /** Nothing is recorded and no ref can be snapshotted: every queued or running job answers. */
+  any?: boolean
+}
+
+/**
+ * The `api-surface` jobs of `repo` as `ReleaseCompareApi.snapshots` lists them: per ref of `refs`
+ * and for `branch` (default-branch jobs, listed under the branch name) the newest job that was not
+ * canceled, when it is queued or running, or failed or was blocked within the last day of `now`
+ * (with its error); a ref whose newest job succeeded is left out. With `any`, also the newest
+ * queued or running job of every other ref (at most `SNAPSHOT_ANY` refs), as a releases backfill
+ * queues them.
+ */
+export async function snapshotJobs(
+  jobs: Pick<JobStore, 'list'>,
+  repo: RepoRef,
+  targets: SnapshotTargets,
+  now: Date,
+): Promise<ReleaseCompareSnapshot[]> {
+  const { refs, branch, any } = targets
+  if (!refs.length && !branch && !any) return []
+  const found = await jobs.list({ repo, analyzer: KIND, limit: SNAPSHOT_JOBS })
+  const labelOf = (job: Job) => job.ref ?? branch
+  const reported = (ref: string, job: Job | undefined): ReleaseCompareSnapshot[] => {
+    if (!job) return []
+    if (job.status === 'queued' || job.status === 'running')
+      return [{ ref, status: job.status, jobId: job.id }]
+    if (job.status !== 'failed' && job.status !== 'blocked') return []
+    const at = Date.parse(job.finishedAt ?? job.createdAt)
+    if (now.getTime() - at > SNAPSHOT_FAILED_MS) return []
+    return [{ ref, status: 'failed', jobId: job.id, ...(job.error ? { error: job.error } : {}) }]
+  }
+  const live = found.filter((job) => job.status !== 'canceled')
+  const named = [...refs, ...(branch && !refs.includes(branch) ? [branch] : [])]
+  const listed = named.flatMap((ref) =>
+    reported(
+      ref,
+      live.find((job) => job.ref === ref || (ref === branch && job.ref === undefined)),
+    ),
+  )
+  if (!any) return listed
+  const seen = new Set(named)
+  const others: ReleaseCompareSnapshot[] = []
+  for (const job of live) {
+    if (others.length >= SNAPSHOT_ANY) break
+    const ref = labelOf(job) ?? 'default branch'
+    if (seen.has(ref)) continue
+    seen.add(ref)
+    if (job.status === 'queued' || job.status === 'running')
+      others.push({ ref, status: job.status, jobId: job.id })
+  }
+  return [...listed, ...others]
 }

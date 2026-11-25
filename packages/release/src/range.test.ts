@@ -4,6 +4,7 @@ import type { Agent, AgentTask } from '@holtkeeper/agent'
 import type { DiffFile } from '@holtkeeper/forge'
 
 import { isRangeNoise, rangeCodeDiff, writeRangeSummary } from './range.ts'
+import { writeSummary } from './summary.ts'
 import type { ReleaseEntry } from './types.ts'
 
 const file = (path: string, diff: string, extra: Partial<DiffFile> = {}): DiffFile => ({
@@ -138,6 +139,34 @@ describe('writeRangeSummary', () => {
     expect(task?.prompt).toContain('faster widgets')
     expect(task?.prompt).not.toContain('hidden')
     expect(task?.prompt).not.toContain('Code diff')
+    expect(task?.system).toContain('Write the prose in English.')
+  })
+
+  test('writes the prose in the asked language', async () => {
+    const { agent, tasks } = fakeAgent({ overview: 'O', highlights: [], check: [] })
+    await writeRangeSummary(agent, {
+      entries: [entry('dials')],
+      to: '1.1.0',
+      language: 'Esperanto',
+    })
+    expect(tasks[0]?.system).toContain('Write the prose in Esperanto.')
+    expect(tasks[0]?.system).toContain('package names, file paths')
+  })
+
+  test('uses the section headings the agent wrote in its language, English for any gap', async () => {
+    const { agent } = fakeAgent({
+      headings: { highlights: 'Saliento', check: '' },
+      overview: 'O',
+      highlights: ['Ciferdiskoj'],
+      check: ['Turnu ĝin'],
+    })
+    const markdown = await writeRangeSummary(agent, {
+      entries: [entry('dials')],
+      to: '1.1.0',
+      language: 'Esperanto',
+    })
+    expect(markdown).toContain('**Saliento**')
+    expect(markdown).toContain('**What to check**')
   })
 
   test('code and dependencies add sections and use the main tier', async () => {
@@ -175,5 +204,15 @@ describe('writeRangeSummary', () => {
       (caught: unknown) => caught,
     )
     expect(error).toBeInstanceOf(Error)
+  })
+})
+
+describe('writeSummary', () => {
+  test('writes the prose in the asked language, English by default', async () => {
+    const { agent, tasks } = fakeAgent({ overview: 'O', highlights: [], check: [] })
+    await writeSummary(agent, [entry('dials')], { version: '1.1.0' })
+    await writeSummary(agent, [entry('dials')], { version: '1.1.0', language: 'Esperanto' })
+    expect(tasks[0]?.system).toContain('Write the prose in English.')
+    expect(tasks[1]?.system).toContain('Write the prose in Esperanto.')
   })
 })

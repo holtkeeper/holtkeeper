@@ -39,15 +39,12 @@ import type { KvStore } from '@holtkeeper/store'
 import { defaultAttributes } from '@holtkeeper/testids'
 import { z } from 'zod'
 
+import { aiLanguageOf } from './ai-language.ts'
 import { type ServerDeps, repoKey, repoTarget } from './context.ts'
 import { issueTrackerFor } from './issues.ts'
 import type { QaToolsAccess } from './tools/qa.ts'
 import { listedRepos } from './updates.ts'
 import { canSee } from './visibility.ts'
-
-/** Setting whose `language` AI texts default to across the product. */
-const REVIEW_SETTING_KEY = 'analyzers.review'
-const reviewLanguageSchema = z.object({ language: z.string().trim().min(1) })
 
 /** The longest period the list offers; histories are read for it. */
 const QA_MAX_DAYS = 90
@@ -177,13 +174,7 @@ function createQaService(deps: ServerDeps): QaService {
   /** The language of test notes for `repo`: the `qa` setting's, else the review language, else English. */
   const languageOf = async (repo: RepoRef) => {
     const own = (await settingsOf(repo)).language
-    if (own) return own
-    const review = resolveSetting(
-      await store.settings.list(REVIEW_SETTING_KEY),
-      REVIEW_SETTING_KEY,
-      repoTarget(config, repo),
-    )?.value
-    return reviewLanguageSchema.safeParse(review).data?.language ?? 'English'
+    return own || aiLanguageOf(deps, repo)
   }
 
   /** The `qa` settings of every repository, read with one settings query. */

@@ -4,8 +4,8 @@ import type {
   ReleaseCompareCheckInput,
   ReleaseCompareCheckStart,
   ReleaseCompareRefs,
-  ReleaseCompareSummary,
   ReleaseCompareSummaryInput,
+  ReleaseCompareSummaryState,
   ReleaseCompareView,
   ReleaseDeployInput,
   ReleaseDetectView,
@@ -34,6 +34,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
+import { aiLanguageOf } from '../ai-language.ts'
 import { viaOf } from '../audit.ts'
 import {
   type AppContext,
@@ -246,13 +247,32 @@ export function releaseRoutes(deps: ServerDeps) {
     }
   })
 
+  app.get('/releases/compare/summary', async (c) => {
+    const repo = requireRepo(c.req.query('repo'))
+    authorize(c, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) })
+    const range = rangeQuery(c)
+    const code = c.req.query('code')
+    if (code !== undefined && code !== 'true' && code !== 'false')
+      throw new HTTPException(400, { message: 'code is true or false' })
+    try {
+      return c.json<ReleaseCompareSummaryState>(
+        await releases.compareSummaryState(repo, {
+          ...range,
+          ...(code !== undefined ? { code: code === 'true' } : {}),
+        }),
+      )
+    } catch (error) {
+      return stepError(c, error, repo)
+    }
+  })
+
   app.post('/releases/compare/summary', async (c) => {
     const input: ReleaseCompareSummaryInput = await readBody(c, compareSummarySchema)
     const repo = requireRepo(input.repo)
     authorize(c, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) })
     try {
-      return c.json<ReleaseCompareSummary>(
-        await releases.compareSummary(repo, {
+      return c.json<ReleaseCompareSummaryState>(
+        await releases.startCompareSummary(repo, {
           ...(input.from ? { from: input.from } : {}),
           ...(input.to ? { to: input.to } : {}),
           ...(input.code ? { code: true } : {}),
@@ -270,7 +290,13 @@ export function releaseRoutes(deps: ServerDeps) {
     try {
       const { from, to } = await releases.compareRange(repo, range)
       return c.json<ReleaseCompareCheck>(
-        await upgradeCheckStatus(deps.store, repo, from.sha, to.sha),
+        await upgradeCheckStatus(
+          deps.store,
+          repo,
+          from.sha,
+          to.sha,
+          await aiLanguageOf(deps, repo),
+        ),
       )
     } catch (error) {
       return stepError(c, error, repo)

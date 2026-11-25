@@ -16,6 +16,7 @@ import {
   repoKey,
   repoTarget,
 } from '../context.ts'
+import { snapshotJobs } from '../release-api.ts'
 import { releaseServiceFor } from '../releases.ts'
 import { type PackageToolsContext, packageChanges } from '../tools/packages.ts'
 import type { CatalogReach } from '../visibility.ts'
@@ -52,10 +53,12 @@ const failed = (c: AppContext, error: unknown) => {
 
 /**
  * The comparison page's "will the upgrade break something" reads: the public API diff of the
- * repository's own packages (`GET /releases/compare/api`) and what changed in one dependency
- * between two versions (`GET /releases/compare/package`). Both need `releases:read` on the
- * repository; what they read is limited to the caller's catalog and snippet reach, and the API
- * diff answers 403 without catalog reach to the repository.
+ * repository's own packages with the snapshot jobs of the ends it lacks
+ * (`GET /releases/compare/api`) and what changed in one dependency between two versions
+ * (`GET /releases/compare/package`). Both need `releases:read` on the repository; what they read
+ * is limited to the caller's catalog and snippet reach, and the API diff answers 403 without
+ * catalog reach to the repository. Snapshot jobs are listed only to callers who may read the
+ * repository's analyses.
  */
 export function releaseCompareRoutes(deps: ServerDeps, options: ReleaseCompareRoutesOptions) {
   const { config } = deps
@@ -85,7 +88,11 @@ export function releaseCompareRoutes(deps: ServerDeps, options: ReleaseCompareRo
         message: `you cannot read the API catalog of ${repo.path}`,
       })
     try {
-      const { api: found, refs } = await releases.compareApi(
+      const {
+        api: found,
+        refs,
+        branch,
+      } = await releases.compareApi(
         repo,
         {
           ...(range.data.from ? { from: range.data.from } : {}),
@@ -97,9 +104,23 @@ export function releaseCompareRoutes(deps: ServerDeps, options: ReleaseCompareRo
       const allowed =
         backfills &&
         can(principal, 'analyses:run', { kind: 'repo', repo: repoTarget(config, repo) })
+      const jobsVisible = can(principal, 'analyses:read', {
+        kind: 'repo',
+        repo: repoTarget(config, repo),
+      })
+      const snapshots =
+        lacking && jobsVisible
+          ? await snapshotJobs(
+              deps.store.jobs,
+              repo,
+              { refs, ...(branch ? { branch } : {}), any: !found.recorded && !refs.length },
+              deps.now(),
+            )
+          : []
       return c.json<ReleaseCompareApi>({
         ...found,
         ...(lacking ? { backfill: { allowed, ...(refs.length ? { refs } : {}) } } : {}),
+        ...(snapshots.length ? { snapshots } : {}),
       })
     } catch (error) {
       return failed(c, error)

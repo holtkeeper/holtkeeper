@@ -213,6 +213,34 @@ describe('breaking-change check routes', () => {
     expect(await status()).toEqual({ status: 'queued', jobId: forced.jobId! })
   })
 
+  test('queues the check in the AI language and does not reuse one written in another', async () => {
+    const { jobId } = await start()
+    expect((await store.jobs.get(jobId!))?.options.language).toBe('English')
+    const analysisId = await finish(jobId!)
+    await store.settings.put({
+      id: 'review',
+      key: 'analyzers.review',
+      scope: { all: true },
+      value: { language: 'Esperanto' },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    expect(await status()).toEqual({ status: 'none' })
+    const again = await start()
+    expect(again.existing).toBeUndefined()
+    expect((await store.jobs.get(again.jobId!))?.options.language).toBe('Esperanto')
+    expect(await status()).toEqual({ status: 'queued', jobId: again.jobId! })
+    await store.settings.put({
+      id: 'review',
+      key: 'analyzers.review',
+      scope: { all: true },
+      value: { language: 'english' },
+      secret: false,
+      updatedAt: '2026-10-03T00:00:00.000Z',
+    })
+    expect(await status()).toMatchObject({ status: 'done', analysisId })
+  })
+
   test('a failed run after a finished one reports the error with the earlier result', async () => {
     const earlier = await start()
     const analysisId = await finish(earlier.jobId!)

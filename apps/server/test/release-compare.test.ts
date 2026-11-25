@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { ReleaseCompareRefs, ReleaseCompareSummary, ReleaseCompareView } from '@holtkeeper/api'
+import type {
+  ReleaseCompareRefs,
+  ReleaseCompareSummaryState,
+  ReleaseCompareView,
+} from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -49,6 +53,8 @@ let second: string
 let filesAt: Map<string, Record<string, string>>
 let compared: [string, string][]
 let reads: string[]
+let background: Promise<unknown>[]
+let clock: Date
 
 const changedFiles: DiffFile[] = [
   { oldPath: 'package.json', newPath: 'package.json', status: 'modified', diff: '@@ -1 +1 @@' },
@@ -97,6 +103,8 @@ beforeEach(async () => {
   ])
   compared = []
   reads = []
+  background = []
+  clock = new Date('2026-11-01T09:00:00.000Z')
   fake.forge.readFile = async (_repo, file, ref) => {
     reads.push(`${ref}:${file}`)
     return ref ? filesAt.get(ref)?.[file] : undefined
@@ -117,10 +125,10 @@ beforeEach(async () => {
     credentials: createCredentialService({ credentials: store.credentials, vault }),
     settings: [...builtinSettings, releaseSettingsDefinition],
     analyses: [],
-    now: () => new Date('2026-11-01T09:00:00.000Z'),
+    now: () => clock,
     releasePollMs: 1,
     releaseRefreshDelayMs: 0,
-    onBackground: () => {},
+    onBackground: (work) => void background.push(work),
   }
   await store.settings.put({
     id: 'releases',
@@ -143,18 +151,47 @@ const call = (method: string, path: string, body?: unknown, headers = asAdmin) =
 const getJson = async <T>(path: string, headers = asAdmin) =>
   (await (await call('GET', path, undefined, headers)).json()) as T
 
-const summarize = async (body: unknown) => {
-  const response = await call('POST', '/releases/compare/summary', body)
-  expect(response.status).toBe(200)
-  return (await response.json()) as ReleaseCompareSummary
+const settle = async () => {
+  // oxlint-disable-next-line no-await-in-loop -- a finished run may leave more work behind
+  while (background.length) await Promise.all(background.splice(0))
 }
 
-const fakeAgent = () => {
-  const tasks: { tier?: string; taskKind?: string; prompt: string }[] = []
+type SummaryBody = { repo: string; from?: string; to?: string; code?: boolean }
+
+const summaryQuery = (body: SummaryBody, code: boolean | null = body.code === true) =>
+  `/releases/compare/summary?${new URLSearchParams({
+    repo: body.repo,
+    ...(body.from ? { from: body.from } : {}),
+    ...(body.to ? { to: body.to } : {}),
+    ...(code === null ? {} : { code: String(code) }),
+  }).toString()}`
+
+const startSummary = async (body: SummaryBody, headers = asAdmin) => {
+  const response = await call('POST', '/releases/compare/summary', body, headers)
+  expect(response.status).toBe(200)
+  return (await response.json()) as ReleaseCompareSummaryState
+}
+
+const summarize = async (body: SummaryBody) => {
+  const started = await startSummary(body)
+  await settle()
+  if (started.status === 'done') return started
+  return getJson<ReleaseCompareSummaryState>(summaryQuery(body))
+}
+
+const fakeAgent = (options: { hold?: Promise<void>; fail?: string } = {}) => {
+  const tasks: { tier?: string; taskKind?: string; prompt: string; system?: string }[] = []
   deps.agentFor = async () => ({
     name: 'fake',
     run: async (task) => {
-      tasks.push({ tier: task.tier, taskKind: task.taskKind, prompt: task.prompt })
+      tasks.push({
+        tier: task.tier,
+        taskKind: task.taskKind,
+        prompt: task.prompt,
+        system: task.system,
+      })
+      await options.hold
+      if (options.fail) throw new Error(options.fail)
       return {
         text: '',
         turns: 1,
@@ -170,6 +207,16 @@ const fakeAgent = () => {
   })
   app = createApp(deps)
   return tasks
+}
+
+const until = async (check: () => boolean) => {
+  // oxlint-disable-next-line no-await-in-loop -- polling until the background run gets there
+  for (let tries = 0; tries < 200 && !check(); tries++) await Bun.sleep(1)
+}
+
+const gate = () => {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  return { hold: promise, open: () => resolve() }
 }
 
 describe('release comparison routes', () => {
@@ -313,9 +360,34 @@ describe('release comparison routes', () => {
     expect(tasks[1]?.prompt).not.toContain('"lockfileVersion"')
 
     const unreleased = await summarize({ repo })
-    expect(unreleased.cached).toBe(false)
-    expect(await summarize({ repo })).toMatchObject({ cached: false })
+    expect(unreleased).toMatchObject({ status: 'done', cached: false })
+    expect(await summarize({ repo })).toMatchObject({ status: 'done', cached: true })
+    expect(tasks).toHaveLength(3)
+
+    fake.commitTo('main', 'feat: [ABC-11] dial colors')
+    expect(await summarize({ repo })).toMatchObject({ status: 'done', cached: false })
     expect(tasks).toHaveLength(4)
+  })
+
+  test('writes the description in the AI language and caches it per language', async () => {
+    const tasks = fakeAgent()
+    await summarize({ repo, from: 'v1.0.0', to: 'v1.1.0' })
+    expect(tasks[0]?.system).toContain('Write the prose in English.')
+
+    await store.settings.put({
+      id: 'review',
+      key: 'analyzers.review',
+      scope: { all: true },
+      value: { language: 'Esperanto' },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    expect(await summarize({ repo, from: 'v1.0.0', to: 'v1.1.0' })).toMatchObject({
+      cached: false,
+    })
+    expect(tasks[1]?.system).toContain('Write the prose in Esperanto.')
+    expect(await summarize({ repo, from: 'v1.0.0', to: 'v1.1.0' })).toMatchObject({ cached: true })
+    expect(tasks).toHaveLength(2)
   })
 
   test('describes without code when the forge cannot compare commits', async () => {
@@ -332,5 +404,119 @@ describe('release comparison routes', () => {
     expect(await response.json()).toEqual({
       error: 'no AI agent is configured for this repository',
     })
+  })
+})
+
+describe('tracked comparison descriptions', () => {
+  const range = { repo, from: 'v1.0.0', to: 'v1.1.0' }
+
+  test('runs in the background, joins a running description and survives a reload', async () => {
+    const { hold, open } = gate()
+    const tasks = fakeAgent({ hold })
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range, false))).toEqual({
+      status: 'none',
+    })
+
+    const started = await startSummary(range)
+    expect(started).toMatchObject({ status: 'running', code: false })
+    expect(started.startedAt).toBe('2026-11-01T09:00:00.000Z')
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range))).toMatchObject({
+      status: 'running',
+    })
+    expect(
+      await getJson<ReleaseCompareSummaryState>(summaryQuery(range, false), asViewer),
+    ).toMatchObject({ status: 'running' })
+    expect(await startSummary(range)).toMatchObject({ status: 'running' })
+    expect(background).toHaveLength(1)
+    await until(() => tasks.length > 0)
+    expect(tasks).toHaveLength(1)
+
+    open()
+    await settle()
+    const done = await getJson<ReleaseCompareSummaryState>(summaryQuery(range, false), asViewer)
+    expect(done).toMatchObject({ status: 'done', code: false, cached: false })
+    expect(done.markdown).toContain('Dials arrive.')
+    expect(await startSummary(range)).toMatchObject({ status: 'done', cached: true })
+    expect(tasks).toHaveLength(1)
+  })
+
+  test('keeps a failure for a while and starts again on the next request', async () => {
+    fakeAgent({ fail: 'model overloaded' })
+    expect(await summarize(range)).toEqual({
+      status: 'failed',
+      code: false,
+      error: 'model overloaded',
+    })
+    const tasks = fakeAgent()
+    expect(await startSummary(range)).toMatchObject({ status: 'running' })
+    await settle()
+    expect(tasks).toHaveLength(1)
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range, false))).toMatchObject({
+      status: 'done',
+    })
+  })
+
+  test('a running marker whose run died expires and the next request starts over', async () => {
+    const tasks = fakeAgent({ hold: new Promise(() => {}) })
+    expect(await startSummary(range)).toMatchObject({ status: 'running' })
+    clock = new Date('2026-11-01T09:10:00.000Z')
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range, false))).toMatchObject({
+      status: 'running',
+    })
+    clock = new Date('2026-11-01T09:16:00.000Z')
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range, false))).toEqual({
+      status: 'none',
+    })
+    expect(await startSummary(range)).toMatchObject({
+      status: 'running',
+      startedAt: '2026-11-01T09:16:00.000Z',
+    })
+    await until(() => tasks.length > 1)
+    expect(tasks).toHaveLength(2)
+  })
+
+  test('without a code flag answers the running one, else the one with code', async () => {
+    const { hold, open } = gate()
+    fakeAgent({ hold })
+    await startSummary({ ...range, code: true })
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range, null))).toMatchObject({
+      status: 'running',
+      code: true,
+    })
+    open()
+    await settle()
+    fakeAgent()
+    await summarize(range)
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(range, null))).toMatchObject({
+      status: 'done',
+      code: true,
+    })
+  })
+
+  test('reading needs releases:read and never starts a description', async () => {
+    const tasks = fakeAgent()
+    expect((await call('GET', summaryQuery(range, false), undefined, asNobody)).status).toBe(403)
+    expect((await call('GET', `${summaryQuery(range, null)}&code=maybe`)).status).toBe(400)
+    await getJson(summaryQuery(range, null))
+    await settle()
+    expect(tasks).toHaveLength(0)
+  })
+
+  test('a description of a branch end keeps showing after the branch moved', async () => {
+    const { hold, open } = gate()
+    const tasks = fakeAgent({ hold })
+    const unreleased = { repo }
+    expect(await startSummary(unreleased)).toMatchObject({ status: 'running' })
+    fake.commitTo('main', 'feat: [ABC-12] dial sizes')
+    clock = new Date(clock.getTime() + 60_000)
+    expect(await getJson<ReleaseCompareSummaryState>(summaryQuery(unreleased, null))).toMatchObject(
+      { status: 'running', code: false },
+    )
+    open()
+    await settle()
+    expect(
+      await getJson<ReleaseCompareSummaryState>(summaryQuery(unreleased, false)),
+    ).toMatchObject({ status: 'done', cached: false })
+    expect(tasks).toHaveLength(1)
   })
 })
