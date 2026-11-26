@@ -571,6 +571,8 @@ export interface GitForge {
   /** Diff between two commits of the repository, e.g. what changed since the last review. */
   compareCommits?(repo: string, from: string, to: string): Promise<DiffFile[]>
   listDiscussions?(repo: string, id: number): Promise<Discussion[]>
+  /** Usernames of the accounts that approved the merge request now; empty when nobody did. */
+  listApprovals?(repo: string, id: number): Promise<string[]>
   /** Emoji reactions on one note of a merge request; forges without reactions leave it out. */
   listNoteReactions?(repo: string, id: number, noteId: number | string): Promise<NoteReaction[]>
   /** The marks the token's own account left on a note; forges without reactions leave it out. */

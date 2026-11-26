@@ -24,7 +24,7 @@ interface FakeMergeRequest {
   versions: FakeVersion[]
   drafts: FakeDraft[]
   discussions: FakeDiscussion[]
-  approvals: { sha: unknown }[]
+  approvals: { sha: unknown; user?: string }[]
   /** Answer for the next approve call instead of approving. */
   approveError?: { status: number; message: string }
   reviewerStates: unknown[]
@@ -1049,6 +1049,12 @@ export class FakeGitLab {
     }
     if (method === 'GET' && path === 'diffs')
       return this.page(url, this.latestVersion(mr)?.diffs ?? [])
+    if (method === 'GET' && path === 'approvals')
+      return json(200, {
+        approved_by: mr.approvals.map((approval) => ({
+          user: { username: approval.user ?? FAKE_USERNAME },
+        })),
+      })
     if (method === 'POST' && path === 'approve') {
       if (mr.approveError) {
         const { status, message } = mr.approveError

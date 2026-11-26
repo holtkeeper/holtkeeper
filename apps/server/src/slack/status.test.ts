@@ -117,7 +117,12 @@ test('the status list has one line per merge request with emoji, English name an
     statusListText(
       [
         { status: 'changes', url: `${url}7`, label: 'widget!7 Fix <gizmo> & | sprocket' },
-        { status: 'minor', url: `${url}8`, label: 'widget!8 Add shape' },
+        {
+          status: 'minor',
+          url: `${url}8`,
+          label: 'widget!8 Add shape',
+          marks: ['comment', 'white_check_mark'],
+        },
         { url: `${url}9`, label: 'widget!9' },
         { status: 'reviewing', url: `${url}10`, label: 'widget!10 Tidy' },
       ],
@@ -126,7 +131,7 @@ test('the status list has one line per merge request with emoji, English name an
   ).toBe(
     [
       `:red_circle: Needs changes — <${url}7|widget!7 Fix &lt;gizmo&gt; &amp; ¦ sprocket>`,
-      `:large_orange_circle: Minor findings — <${url}8|widget!8 Add shape>`,
+      `:large_orange_circle: Minor findings — <${url}8|widget!8 Add shape> :comment: :white_check_mark:`,
       `Not reviewed — <${url}9|widget!9>`,
       `:thumbsup::skin-tone-2: Reviewing — <${url}10|widget!10 Tidy>`,
     ].join('\n'),

@@ -118,22 +118,25 @@ export interface StatusListEntry {
   url: string
   /** Link text, e.g. `shapes/widget!7`. */
   label: string
+  /** Emoji names of the merge request's marks, shown after the link in this order. */
+  marks?: readonly string[]
 }
 
 /**
  * The mrkdwn text of a status reply: one line per entry, in order, with the status emoji from
  * `emoji`, the English status name and the link. An entry without a status has no emoji and
- * reads `Not reviewed`. The label shows as plain text.
+ * reads `Not reviewed`. The label shows as plain text; the entry's mark emoji follow it.
  */
 export function statusListText(
   entries: readonly StatusListEntry[],
   emoji: Readonly<Record<SlackReviewStatus, string>>,
 ): string {
   return entries
-    .map(({ status, url, label }) => {
+    .map(({ status, url, label, marks = [] }) => {
       const name = statusNames[status ?? 'skipped']
       const prefix = status ? `:${emoji[status]}: ` : ''
-      return `${prefix}${name} — ${mrkdwnLink(url, label)}`
+      const suffix = marks.map((mark) => ` :${mark}:`).join('')
+      return `${prefix}${name} — ${mrkdwnLink(url, label)}${suffix}`
     })
     .join('\n')
 }

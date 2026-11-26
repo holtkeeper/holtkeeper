@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
 
-import type { Discussion, RepoRef } from '@holtkeeper/forge'
-import type { SlackMessageLink, SlackMessageStore, SlackReviewStatus } from '@holtkeeper/store'
+import type { Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
+import type {
+  SlackMergeRequestMark,
+  SlackMessageLink,
+  SlackMessageStore,
+  SlackReviewStatus,
+} from '@holtkeeper/store'
 
 import { type ServerDeps, repoKey, repoTarget } from '../context.ts'
 import { commentsOffFor } from '../mr-comments.ts'
@@ -14,6 +19,14 @@ import { type SlackApi, type SlackPoster, slackWebApi, slackWebPoster } from './
 import { type SlackConnection, slackConnection } from './connection.ts'
 import { type SlackEmojiChoice, slackEmojiCatalog } from './emoji.ts'
 import { type MergeRequestLink, mergeRequestLinks } from './links.ts'
+import {
+  type SlackMarksSettings,
+  marksOnIn,
+  mergeRequestMarks,
+  messageMarks,
+  slackMarksSettingKey,
+  slackMarksSettings,
+} from './marks.ts'
 import { latestReview, mergeRequestStatusOf, statusListText, worstStatus } from './status.ts'
 
 /** How long a Slack message keeps following its merge requests. */
@@ -82,15 +95,27 @@ interface MergeRequestState {
   head?: string
 }
 
-const withState = (link: SlackMessageLink, state: MergeRequestState, at: string) => {
-  const { status: _status, head: _head, ...rest } = link
+/** `link` with `state`, and with `marks` when given (none otherwise). */
+const withState = (
+  link: SlackMessageLink,
+  state: MergeRequestState,
+  at: string,
+  marks?: SlackMergeRequestMark[],
+) => {
+  const { status: _status, head: _head, marks: _marks, ...rest } = link
   return {
     ...rest,
     ...(state.status && { status: state.status }),
     ...(state.head && { head: state.head }),
+    ...(marks && { marks }),
     updatedAt: at,
   } satisfies SlackMessageLink
 }
+
+type MarkEmoji = SlackMarksSettings['emoji']
+
+const sameNames = (a: readonly string[] | undefined, b: readonly string[]) =>
+  (a ?? []).join(' ') === b.join(' ')
 
 /** The `forge` and `path` of a stored `forge:path` key. */
 const repoOfKey = (key: string): RepoRef => {
@@ -144,12 +169,19 @@ export function createSlackReviews(
 
   const catalog = slackEmojiCatalog(deps)
   const invalidLogged = new Set<string>()
-  const noteInvalidOverride = (name: string) => {
+  const noteInvalidEmoji = (name: string, where: string) => {
     if (invalidLogged.has(name)) return
     invalidLogged.add(name)
-    log(
-      `slack reviews: the workspace has no emoji ${name}; fix the override under Settings › Integrations › Slack`,
+    log(`slack reviews: the workspace has no emoji ${name}; fix ${where}`)
+  }
+  const noteInvalidOverride = (name: string) =>
+    noteInvalidEmoji(name, 'the override under Settings › Integrations › Slack')
+
+  const marksSettings = async (): Promise<SlackMarksSettings> => {
+    const entry = (await store.settings.list(slackMarksSettingKey)).find(
+      (candidate) => candidate.scope.all === true && !candidate.secret,
     )
+    return slackMarksSettings(entry?.value)
   }
 
   let scopeLogged = false
@@ -192,14 +224,67 @@ export function createSlackReviews(
     }
   }
 
+  /** One merge request whose threads are listed at most once, for its status and its marks. */
+  const lookupOf = (repo: RepoRef, mergeRequest: number) => {
+    let threads: ReturnType<typeof threadsOf> | undefined
+    return { repo, mergeRequest, threads: () => (threads ??= threadsOf(repo, mergeRequest)) }
+  }
+  type Lookup = ReturnType<typeof lookupOf>
+
+  const selves = new Map<string, Promise<string | undefined>>()
+  /** Username of Holtkeeper's account on a forge, asked once per process; `undefined` when unknown. */
+  const selfOf = (name: string, forge: GitForge) => {
+    let self = selves.get(name)
+    if (!self) {
+      self = (forge.getCurrentUser?.() ?? Promise.resolve(undefined)).then(
+        (user) => user?.username,
+        () => {
+          selves.delete(name)
+          return undefined
+        },
+      )
+      selves.set(name, self)
+    }
+    return self
+  }
+
+  /**
+   * `mergeRequestMarks` of a merge request now. When the forge fails to answer, `previous` is
+   * kept (logged).
+   */
+  const marksOf = async (
+    { repo, mergeRequest, threads }: Lookup,
+    previous?: SlackMergeRequestMark[],
+  ): Promise<SlackMergeRequestMark[] | undefined> => {
+    const forge = config.forges[repo.forge]?.create()
+    if (!forge) return previous
+    try {
+      const [current, approvedBy, listed, self] = await Promise.all([
+        forge.getMergeRequest?.(repo.path, mergeRequest),
+        forge.listApprovals?.(repo.path, mergeRequest) ?? [],
+        threads(),
+        selfOf(repo.forge, forge),
+      ])
+      if (listed.failed) return previous
+      return mergeRequestMarks({
+        ...(current && { state: current.state }),
+        approvedBy,
+        discussions: listed.discussions ?? [],
+        ...(self && { self }),
+      })
+    } catch (error) {
+      log(`slack reviews: marks of ${repoKey(repo)}!${mergeRequest}: ${messageOf(error)}`)
+      return previous
+    }
+  }
+
   /**
    * The status of a merge request now: reviewing while a review job is queued or running, else
    * `mergeRequestStatusOf` its newest review and open threads. When the forge fails to list the
    * threads, a settled `previous` status is kept rather than guessed from the run alone.
    */
   const stateOf = async (
-    repo: RepoRef,
-    mergeRequest: number,
+    { repo, mergeRequest, threads: threadsNow }: Lookup,
     previous?: SlackReviewStatus,
   ): Promise<MergeRequestState> => {
     const active = await store.jobs.list({ status: ['queued', 'running'], repo, limit: 500 })
@@ -211,7 +296,7 @@ export function createSlackReviews(
     if (!review) return {}
     if (review.mode === 'skipped' || review.verdict === 'skipped')
       return { status: mergeRequestStatusOf(review, undefined), head: review.head }
-    const threads = await threadsOf(repo, mergeRequest)
+    const threads = await threadsNow()
     if (threads.failed && previous && previous !== 'reviewing')
       return { status: previous, head: review.head }
     return { status: mergeRequestStatusOf(review, threads.discussions), head: review.head }
@@ -232,6 +317,7 @@ export function createSlackReviews(
     messages: SlackMessageStore,
     poster: SlackPoster,
     emoji: Readonly<Record<SlackReviewStatus, string>>,
+    markEmoji: MarkEmoji | undefined,
     channel: string,
     ts: string,
     links: readonly SlackMessageLink[],
@@ -243,6 +329,7 @@ export function createSlackReviews(
         ...(link.status && { status: link.status }),
         url: mergeRequestUrl(link),
         label: `${repoOfLink(link).path}!${link.mergeRequest}`,
+        ...(markEmoji && link.marks && { marks: link.marks.map((mark) => markEmoji[mark]) }),
       })),
       emoji,
     )
@@ -333,17 +420,55 @@ export function createSlackReviews(
   }
 
   /**
-   * Applies `change` to a message's links and makes its reaction and status reply match them,
-   * under the message's lock. A failed remove keeps the old emoji tracked and adds nothing, so
-   * the next update retries the swap; a message Slack no longer has is forgotten. The emoji
-   * tracked is the one actually added; a fallback already shown is kept while the workspace is
-   * not known to have the custom emoji.
+   * Makes the mark emoji on a message `wanted`, given those `tracked` on it: removes the others,
+   * then adds the missing ones. Resolves with the mark emoji on the message afterwards (a failed
+   * remove keeps its emoji, a failed add is not tracked so the next update retries it), or `gone`
+   * for a message Slack no longer has. `beforeAdd` records the emoji about to be added first, so
+   * an add that was never confirmed is still removed later.
+   */
+  const syncMarkReactions = async (
+    api: SlackApi,
+    channel: string,
+    ts: string,
+    tracked: readonly string[],
+    wanted: readonly string[],
+    beforeAdd: (names: string[]) => Promise<void>,
+  ): Promise<{ gone: true } | { names: string[] }> => {
+    const names = [...tracked]
+    for (const name of tracked.filter((candidate) => !wanted.includes(candidate))) {
+      // oxlint-disable-next-line no-await-in-loop -- at most three marks, one call each
+      const removed = await api.removeReaction({ channel, ts, name })
+      if (removed.error && goneErrors.has(removed.error)) return { gone: true }
+      if (removed.ok) names.splice(names.indexOf(name), 1)
+    }
+    const missing = wanted.filter((name) => !names.includes(name))
+    if (missing.length === 0) return { names }
+    await beforeAdd([...names, ...missing])
+    for (const name of missing) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const added = await api.addReaction({ channel, ts, name })
+      if (added.error && goneErrors.has(added.error)) return { gone: true }
+      if (added.ok) names.push(name)
+      else if (added.error === 'invalid_name')
+        noteInvalidEmoji(name, `${slackMarksSettingKey} under Settings › Integrations`)
+    }
+    return { names }
+  }
+
+  /**
+   * Applies `change` to a message's links and makes its reaction, its mark emoji and its status
+   * reply match them, under the message's lock. A failed remove keeps the old emoji tracked and
+   * adds nothing, so the next update retries the swap; a message Slack no longer has is
+   * forgotten. The emoji tracked is the one actually added; a fallback already shown is kept while
+   * the workspace is not known to have the custom emoji. Without `markEmoji` (marks off for the
+   * channel) mark emoji are taken off and the reply shows none.
    */
   const settle = (
     { api, poster }: SlackClients,
     connection: SlackConnection,
     channel: string,
     ts: string,
+    markEmoji: MarkEmoji | undefined,
     change: (links: SlackMessageLink[]) => Promise<void>,
   ) =>
     locked(channel, ts, async () => {
@@ -351,8 +476,14 @@ export function createSlackReviews(
       if (!messages) return
       const before = await messages.ofMessage(channel, ts)
       const current = before.find((link) => link.reaction)?.reaction
+      const currentMarks = before.find((link) => link.markReactions)?.markReactions ?? []
       await change(before)
-      const links = await messages.ofMessage(channel, ts)
+      const stored = await messages.ofMessage(channel, ts)
+      const links = stored.map(({ reaction: _reaction, markReactions: _marks, ...link }) => ({
+        ...link,
+        ...(current && { reaction: current }),
+        ...(currentMarks.length > 0 && { markReactions: currentMarks }),
+      }))
       const worst = worstStatus(links.map((link) => link.status))
       const choice = worst ? await catalog.choose(connection, worst) : undefined
       const keptFallback =
@@ -383,14 +514,36 @@ export function createSlackReviews(
           shown = added.name ?? intended
         }
       }
+      const statusNames = trackedNames(shown)
+      const wanted = markEmoji
+        ? messageMarks(links)
+            .map((mark) => markEmoji[mark])
+            .filter((name) => !statusNames.includes(name))
+        : []
+      const withReactions = (link: SlackMessageLink, marks: readonly string[]) => {
+        const { reaction: _reaction, markReactions: _marks, ...rest } = link
+        return {
+          ...rest,
+          ...(shown && { reaction: shown }),
+          ...(marks.length > 0 && { markReactions: [...marks] }),
+        }
+      }
+      const marked = await syncMarkReactions(api, channel, ts, currentMarks, wanted, (names) =>
+        Promise.all(links.map((link) => messages.put(withReactions(link, names)))).then(
+          () => undefined,
+        ),
+      )
+      if ('gone' in marked) {
+        await messages.delete(channel, ts)
+        return
+      }
       const emoji = await catalog.textEmoji(connection)
-      await syncReply(messages, poster, emoji, channel, ts, links)
+      await syncReply(messages, poster, emoji, markEmoji, channel, ts, links)
+      const latest = await messages.ofMessage(channel, ts)
       await Promise.all(
-        links
-          .filter((link) => link.reaction !== shown)
-          .map(({ reaction: _reaction, ...link }) =>
-            messages.put({ ...link, ...(shown && { reaction: shown }) }),
-          ),
+        latest
+          .filter((link) => link.reaction !== shown || !sameNames(link.markReactions, marked.names))
+          .map((link) => messages.put(withReactions(link, marked.names))),
       )
     })
 
@@ -419,11 +572,14 @@ export function createSlackReviews(
           if (await followed(repo)) targets.push({ repo, mergeRequest: link.mergeRequest })
         }
         if (targets.length === 0) return
+        const settings = await marksSettings()
+        const markEmoji = marksOnIn(settings, message.channel) ? settings.emoji : undefined
         await settle(
           clientsFor(connection),
           connection,
           message.channel,
           message.ts,
+          markEmoji,
           async (existing) => {
             const at = deps.now().toISOString()
             for (const { repo, mergeRequest } of targets) {
@@ -431,8 +587,12 @@ export function createSlackReviews(
               const before = existing.find(
                 (entry) => entry.repo === key && entry.mergeRequest === mergeRequest,
               )
+              const lookup = lookupOf(repo, mergeRequest)
               // oxlint-disable-next-line no-await-in-loop -- see above
-              const state = await stateOf(repo, mergeRequest, before?.status)
+              const [state, marks] = await Promise.all([
+                stateOf(lookup, before?.status),
+                markEmoji ? marksOf(lookup, before?.marks) : undefined,
+              ])
               // oxlint-disable-next-line no-await-in-loop -- see above
               await messages.put(
                 withState(
@@ -448,6 +608,7 @@ export function createSlackReviews(
                   },
                   state,
                   at,
+                  marks,
                 ),
               )
             }
@@ -478,11 +639,15 @@ export function createSlackReviews(
         if (!connection) return
         const stillFollowed = await followed(target.repo)
         const clients = clientsFor(connection)
-        // Read once for all messages linking it: the state includes a forge call.
+        const settings = await marksSettings()
+        // Read once for all messages linking it: state and marks include forge calls.
+        const lookup = lookupOf(target.repo, mergeRequest)
         let state: Promise<MergeRequestState> | undefined
+        let marks: Promise<SlackMergeRequestMark[] | undefined> | undefined
         for (const { channel, ts } of tracked) {
+          const markEmoji = marksOnIn(settings, channel) ? settings.emoji : undefined
           // oxlint-disable-next-line no-await-in-loop -- one message at a time keeps reactions in order
-          await settle(clients, connection, channel, ts, async (links) => {
+          await settle(clients, connection, channel, ts, markEmoji, async (links) => {
             const link = links.find(
               (entry) => entry.repo === key && entry.mergeRequest === mergeRequest,
             )
@@ -491,9 +656,15 @@ export function createSlackReviews(
               await messages.delete(channel, ts, { repo: key, mergeRequest })
               return
             }
-            state ??= stateOf(target.repo, mergeRequest, link.status)
+            state ??= stateOf(lookup, link.status)
+            if (markEmoji) marks ??= marksOf(lookup, link.marks)
             await messages.put(
-              withState({ ...link, path: target.repo.path }, await state, deps.now().toISOString()),
+              withState(
+                { ...link, path: target.repo.path },
+                await state,
+                deps.now().toISOString(),
+                markEmoji ? await marks : undefined,
+              ),
             )
           })
         }

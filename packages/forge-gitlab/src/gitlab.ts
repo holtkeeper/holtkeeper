@@ -290,6 +290,9 @@ const awardSchema = z.object({
   user: z.object({ username: z.string() }).nullish(),
 })
 const noteIdSchema = z.object({ id: z.number() })
+const approvalsSchema = z.object({
+  approved_by: z.array(z.object({ user: z.object({ username: z.string() }).nullish() })).nullish(),
+})
 
 const NOTE_MARKS: readonly NoteMark[] = ['seen', 'done']
 const MARK_EMOJI: Record<NoteMark, string> = { seen: 'eyes', done: 'white_check_mark' }
@@ -1315,6 +1318,13 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     async listDiscussions(repo, id) {
       const list = client.paginate(`${mrPath(repo, id)}/discussions`, discussionSchema)
       return (await take(list, undefined)).map(toDiscussion)
+    },
+
+    async listApprovals(repo, id) {
+      const approvals = await client.json('GET', `${mrPath(repo, id)}/approvals`, approvalsSchema)
+      return (approvals.approved_by ?? []).flatMap((entry) =>
+        entry.user ? [entry.user.username] : [],
+      )
     },
 
     async listNoteReactions(repo, id, noteId) {

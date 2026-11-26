@@ -129,6 +129,15 @@ describe('merge request and diff', () => {
   })
 })
 
+describe('approvals', () => {
+  test('lists who approved the merge request', async () => {
+    const { forge, mr } = setup()
+    expect(await forge.listApprovals('g/a', 1)).toEqual([])
+    mr.approvals.push({ sha: undefined, user: 'dev' }, { sha: undefined })
+    expect(await forge.listApprovals('g/a', 1)).toEqual(['dev', 'fake-bot'])
+  })
+})
+
 describe('discussions', () => {
   test('lists all pages and maps positions and resolution', async () => {
     const { server, forge, mr } = setup({ perPage: 1 })

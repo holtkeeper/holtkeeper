@@ -29,14 +29,20 @@ const OTHER = 'C0456OTHER'
 let forgeCalls: string[]
 /** The merge request's threads; without them the forge cannot list discussions. */
 let threads: Discussion[] | Error | undefined
+/** Who approved each merge request, by number. */
+let approvals: Record<number, string[]>
+/** Numbers of the merged merge requests. */
+let merged: Set<number>
 
 /** The status reply never asks the forge for anything: it shows no titles. */
 const forge = {
   kind: 'gitlab',
   getMergeRequest: async (path: string, iid: number) => {
     forgeCalls.push(`${path}!${iid}`)
-    return structuredClone(mr)
+    return { ...structuredClone(mr), id: iid, state: merged.has(iid) ? 'merged' : mr.state }
   },
+  listApprovals: async (_path: string, iid: number) => [...(approvals[iid] ?? [])],
+  getCurrentUser: async () => ({ username: 'holtkeeper', name: 'Holtkeeper' }),
   get listDiscussions() {
     if (threads === undefined) return undefined
     return async () => {
@@ -80,7 +86,7 @@ const fakeSlack: SlackApi = {
     if (slowMs) await Bun.sleep(slowMs)
     attempts.push(name)
     if (failing.add) return { ok: false, error: failing.add }
-    if (name.startsWith('hk-') && !workspaceEmoji.has(name))
+    if ((name.startsWith('hk-') && !workspaceEmoji.has(name)) || name === 'no-such-emoji')
       return { ok: false, error: 'invalid_name' }
     reactions.push(`+${name} ${channel}/${ts}`)
     return { ok: true }
@@ -361,6 +367,8 @@ beforeEach(async () => {
   attempts = []
   forgeCalls = []
   threads = undefined
+  approvals = {}
+  merged = new Set()
   mr = {
     id: 7,
     title: 'Add widget',
@@ -1038,5 +1046,140 @@ describe('slack custom emoji', () => {
         `:red_circle: Needs changes — <${MR_URL}/8|shapes/widget!8>`,
       ].join('\n'),
     ])
+  })
+})
+
+const marksOn = (value: Record<string, unknown> = {}) =>
+  setting('marks', 'slack.mergeRequestMarks', { all: true }, { enabled: true, ...value })
+const thread = (author: string, resolved = false, body = 'Why this name?'): Discussion => ({
+  id: `thread-${author}-${body}`,
+  resolvable: true,
+  resolved,
+  notes: [{ id: 2, author, body, createdAt: '', system: false }],
+})
+
+describe('slack merge request marks', () => {
+  const ts = '1700000000.000100'
+  test('off by default: only the status emoji', async () => {
+    approvals = { 7: ['jane'] }
+    merged = new Set([7])
+    threads = [thread('jane')]
+    await storeReview(review())
+    await message(link())
+    expect(reactions).toEqual([`+large_green_circle ${BOUND}/${ts}`])
+  })
+
+  test('open threads of people, an approval and the merge each add their emoji', async () => {
+    await marksOn()
+    approvals = { 7: ['jane'] }
+    merged = new Set([7])
+    threads = [thread('jane')]
+    await storeReview(review())
+    await message(link())
+    expect(reactions).toEqual([
+      `+large_green_circle ${BOUND}/${ts}`,
+      `+speech_balloon ${BOUND}/${ts}`,
+      `+white_check_mark ${BOUND}/${ts}`,
+      `+twisted_rightwards_arrows ${BOUND}/${ts}`,
+    ])
+    expect(await store.slackMessages?.ofMessage(BOUND, ts)).toMatchObject([
+      {
+        marks: ['comments', 'approved', 'merged'],
+        markReactions: ['speech_balloon', 'white_check_mark', 'twisted_rightwards_arrows'],
+      },
+    ])
+  })
+
+  test("Holtkeeper's own approval, threads and findings are not marks", async () => {
+    await marksOn()
+    approvals = { 7: ['holtkeeper'] }
+    threads = [
+      thread('holtkeeper'),
+      findingThread(majorFinding),
+      thread('jane', true),
+      { ...thread('jane'), resolvable: false },
+    ]
+    await storeReview(review({ comments: [majorFinding] }))
+    await message(link())
+    expect(shownOn()).toEqual({ [`${BOUND}/${ts}`]: ['red_circle'] })
+  })
+
+  test('marks follow merge request events: approved, then unapproved and resolved', async () => {
+    await marksOn()
+    threads = [thread('jane')]
+    await storeReview(review())
+    await message(link())
+    approvals = { 7: ['jane'] }
+    await threadsResolved()
+    await settle()
+    expect(shownOn()[`${BOUND}/${ts}`]).toEqual([
+      'large_green_circle',
+      'speech_balloon',
+      'white_check_mark',
+    ])
+    approvals = {}
+    threads = [thread('jane', true)]
+    await threadsResolved()
+    await settle()
+    expect(shownOn()[`${BOUND}/${ts}`]).toEqual(['large_green_circle'])
+    expect(await store.slackMessages?.ofMessage(BOUND, ts)).toMatchObject([{ marks: [] }])
+  })
+
+  test('only the listed channels show marks, and a channel taken off loses them', async () => {
+    await marksOn({ channels: [BOUND] })
+    approvals = { 7: ['jane'] }
+    threads = []
+    await storeReview(review())
+    await message(link())
+    await message(link(), { channel: OTHER, ts: '1700000000.000200' })
+    expect(shownOn()).toEqual({
+      [`${BOUND}/${ts}`]: ['large_green_circle', 'white_check_mark'],
+      [`${OTHER}/1700000000.000200`]: ['large_green_circle'],
+    })
+    await marksOn({ channels: [OTHER] })
+    await threadsResolved()
+    await settle()
+    expect(shownOn()).toEqual({
+      [`${BOUND}/${ts}`]: ['large_green_circle'],
+      [`${OTHER}/1700000000.000200`]: ['large_green_circle', 'white_check_mark'],
+    })
+  })
+
+  test('several merge requests: approved and merged only when all are, comments when any is', async () => {
+    await marksOn({ emoji: { comments: ':comment:', merged: 'merged' } })
+    approvals = { 7: ['jane'], 8: [] }
+    merged = new Set([7, 8])
+    threads = [thread('jane')]
+    await storeReview(review())
+    await storeSecond()
+    await message(`${link('shapes/widget', 7)} and ${link('shapes/widget', 8)}`)
+    expect(shownOn()[`${BOUND}/${ts}`]).toEqual(['large_green_circle', 'comment', 'merged'])
+    expect(posts.map((post) => post.text)).toEqual([
+      [
+        `:large_green_circle: Clean — <${MR_URL}/7|shapes/widget!7> :comment: :white_check_mark: :merged:`,
+        `:large_green_circle: Clean — <${MR_URL}/8|shapes/widget!8> :comment: :merged:`,
+      ].join('\n'),
+    ])
+    approvals = { 7: ['jane'], 8: ['alex'] }
+    await deps.mergeRequestStatus?.reviewChanged({ repo: widget, mergeRequest: 8 })
+    expect(shownOn()[`${BOUND}/${ts}`]).toEqual([
+      'large_green_circle',
+      'comment',
+      'merged',
+      'white_check_mark',
+    ])
+  })
+
+  test('a mark emoji the workspace lacks is logged once and tried again later', async () => {
+    await marksOn({ emoji: { approved: 'no-such-emoji' } })
+    approvals = { 7: ['jane'] }
+    threads = []
+    await storeReview(review())
+    await message(link())
+    await threadsResolved()
+    await settle()
+    expect(attempts.filter((name) => name === 'no-such-emoji')).toHaveLength(2)
+    expect(logs.filter((line) => line.includes('no-such-emoji'))).toHaveLength(1)
+    expect(shownOn()[`${BOUND}/${ts}`]).toEqual(['large_green_circle'])
   })
 })

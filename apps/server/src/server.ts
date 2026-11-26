@@ -124,6 +124,7 @@ import { type Role, roleDuties } from './roles.ts'
 import { createRulesResolver, learningPolicyFor, settleLearnings } from './rules.ts'
 import { secretReportsEnabled } from './secret-reports.ts'
 import { createSecurityAlerts } from './security-alerts.ts'
+import { slackMarksDefinition } from './slack/marks.ts'
 import { createSlackReviews } from './slack/service.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { startStorageReports } from './storage-reports.ts'
@@ -537,6 +538,7 @@ export async function startServer(
       releaseNotifyDefinition,
       releaseAnnounceDefinition,
       securityAlertsDefinition,
+      slackMarksDefinition,
       ...(secretReportsEnabled(config) ? [secretReportsDefinition] : []),
       commitConventionsSetting,
       assetsPolicySetting,

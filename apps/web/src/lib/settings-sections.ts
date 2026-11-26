@@ -46,6 +46,7 @@ export const settingsSections: Readonly<
       'releases.announce',
       'security.alerts',
       'security.secretReports',
+      'slack.mergeRequestMarks',
     ],
   },
   analyzers: {

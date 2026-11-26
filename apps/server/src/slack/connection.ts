@@ -39,7 +39,7 @@ export const fallbackSlackEmoji: Readonly<Record<SlackReviewStatus, string>> = {
  * A Slack emoji name without colons (`:eyes:` is accepted and stored as `eyes`), optionally with
  * a skin tone (`thumbsup::skin-tone-2`).
  */
-const slackEmojiSchema = z
+export const slackEmojiSchema = z
   .string()
   .trim()
   .transform((name) => name.replace(/^:+|:+$/g, ''))

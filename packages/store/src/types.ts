@@ -696,6 +696,12 @@ export interface ReactionTotals {
 export type SlackReviewStatus = 'reviewing' | 'clean' | 'minor' | 'changes' | 'skipped'
 
 /**
+ * A fact about a merge request a Slack message can show beside its review status: open threads of
+ * people, an approval, the merge.
+ */
+export type SlackMergeRequestMark = 'comments' | 'approved' | 'merged'
+
+/**
  * A Slack message that links a merge request Holtkeeper follows: one per message and merge
  * request, so a message linking two merge requests has two.
  */
@@ -715,6 +721,10 @@ export interface SlackMessageLink {
   head?: string
   /** Emoji name currently on the message, shared by every link of the message. */
   reaction?: string
+  /** Marks last known for this merge request; absent where marks are off or before they are read. */
+  marks?: SlackMergeRequestMark[]
+  /** Mark emoji currently on the message, shared by every link of the message. */
+  markReactions?: string[]
   createdAt: Timestamp
   updatedAt: Timestamp
 }
